@@ -19,7 +19,7 @@
 | Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. |
 | AI Agents | **4x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action, Evaluator agents. |
 | Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. |
-| Grid system | **60×60 overlay + coordinate mapping** | Reliable cross-application interaction interface. |
+| Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (initially 60×60, refined as needed). |
 | Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. |
 | Packaging | `setuptools` + `pyproject.toml` | Simple `pip` distribution. |
 | Logs / metrics | JSONL + PNG + [`rich`](https://github.com/Textualize/rich) console | Human-readable and machine-parsable. |
@@ -50,8 +50,9 @@ autonomous-ai-testing-agent/
 │   │   └─ controller.py   # High-level browser operations
 │   ├─ grid/
 │   │   ├─ __init__.py
-│   │   ├─ overlay.py      # 60 × 60 grid overlay utilities
-│   │   ├─ coordinator.py  # Grid coordinate mapping
+│   │   ├─ overlay.py      # Adaptive grid overlay utilities with refinement
+│   │   ├─ coordinator.py  # Grid coordinate mapping and adaptive refinement
+│   │   ├─ refinement.py   # Zoom-in and sub-grid analysis logic
 │   │   └─ utils.py
 │   ├─ models/
 │   │   ├─ __init__.py
@@ -106,8 +107,9 @@ class TestRunnerAgent(BaseAgent):
     def evaluate_step_result(self, step_result: StepResult) -> TestState: pass
 
 class ActionAgent(BaseAgent):
-    """Screenshot + instruction → Grid coordinates"""
+    """Screenshot + instruction → Adaptive grid coordinates with refinement"""
     def determine_action(self, screenshot: bytes, instruction: str) -> GridAction: pass
+    def refine_coordinates(self, cropped_region: bytes, initial_coords: GridCoords) -> RefinedGridAction: pass
 
 class EvaluatorAgent(BaseAgent):
     """Screenshot + expectation → Success/failure assessment"""
@@ -136,9 +138,9 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 
 ### **4.3 System Prompts & Agent Specialization**
 - **Test Planner**: Understands business requirements, creates comprehensive test plans
-- **Test Runner**: Maintains test context, coordinates execution, handles branching logic
-- **Action Agent**: Grid-aware, UI interaction specialist, handles dynamic content
-- **Evaluator**: Result validation, UI state assessment, error detection
+- **Test Runner**: Maintains test context, coordinates execution, handles branching logic, manages scripted automation fallbacks
+- **Action Agent**: Adaptive grid specialist, visual refinement expert, confidence-based precision targeting
+- **Evaluator**: Result validation, UI state assessment, error detection, confidence scoring
 
 ### **4.4 Error Handling & Recovery**
 - **Agent-level error handling**: Each agent validates its own outputs
@@ -166,29 +168,227 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 
 ---
 
-## 5  Development Phases
+## 5  Grid-Based Interaction and Adaptive Refinement
+
+### **5.1 DOM-Free Interaction Approach**
+
+**Core Philosophy**: The system explicitly avoids DOM-based interaction methods (XPath, CSS selectors, element IDs) at all stages of development, including the MVP and future roadmap.
+
+**Rationale**:
+- **Brittleness Elimination**: DOM-based selectors introduce maintenance overhead and break easily with UI changes
+- **No-Code Accessibility**: Enables users without technical expertise to use the system effectively
+- **Platform Extensibility**: Visual-only approach enables future expansion to mobile apps, desktop applications, and platforms without reliable DOM access
+- **Reliability**: Visual interaction patterns are more stable across different frameworks and implementations
+
+### **5.2 Adaptive Grid System**
+
+**Initial Grid Configuration**:
+- Base grid: 60×60 overlay (tentative, subject to optimization through testing)
+- Grid cells numbered/lettered for easy reference (A1-Z60, AA1-AZ60, etc.)
+- Visual overlay with semi-transparent grid lines for debugging/development
+
+**Adaptive Refinement Strategy**:
+When initial grid selection yields uncertain or borderline results:
+
+1. **Automatic Zoom-In**: Agent crops the selected cell and its 8 neighboring cells
+2. **Sub-Grid Analysis**: AI re-analyzes the cropped 3×3 region with higher granularity
+3. **Precision Targeting**: Agent pinpoints exact coordinates or corners within the refined area
+4. **Confidence Validation**: Higher precision improves confidence scores significantly beyond initial grid limitations
+
+### **5.3 Example Adaptive Refinement Workflow**
+
+```
+Step 1: Initial Analysis
+- AI receives full screenshot with 60×60 grid overlay
+- Action Agent analyzes: "Click the 'Add to Cart' button"
+- Initial selection: Grid cell M23 (confidence: 70%)
+
+Step 2: Refinement Trigger
+- Confidence below threshold (80%) triggers refinement
+- System crops 3×3 region: L22, L23, L24, M22, M23, M24, N22, N23, N24
+- Cropped region analyzed at higher resolution
+
+Step 3: Precision Targeting
+- AI re-analyzes cropped region: "Button clearly visible in center-right of M23"
+- Refined coordinates: M23 + offset (0.7, 0.4) relative to cell
+- New confidence: 95%
+
+Step 4: Action Execution
+- Click executed at refined coordinates
+- Action logged with both initial and refined coordinate details
+```
+
+### **5.4 Grid System Implementation Details**
+
+**Coordinate Mapping**:
+- Grid cells mapped to absolute pixel coordinates
+- Support for fractional coordinates within cells (e.g., A1.5.7 = 50% right, 70% down in cell A1)
+- Adaptive scaling based on viewport dimensions
+
+**Visual Feedback**:
+- Development mode: Grid overlay visible with cell labels
+- Production mode: Grid overlay hidden, coordinates calculated transparently
+- Screenshot capture includes grid reference for debugging
+
+---
+
+## 6  Detailed Execution Journaling
+
+### **6.1 Structured Natural Language Logging**
+
+Each test execution step must generate comprehensive, human-readable logs with the following structure:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:45.123Z",
+  "test_scenario": "E-commerce Checkout Flow",
+  "step_reference": "Step 3: Add product to cart",
+  "action_taken": "Clicked 'Add to Cart' button using adaptive grid refinement",
+  "grid_coordinates": {
+    "initial_selection": "M23",
+    "initial_confidence": 0.70,
+    "refinement_applied": true,
+    "refined_coordinates": "M23+offset(0.7,0.4)",
+    "final_confidence": 0.95
+  },
+  "expected_result": "Product added to cart, cart counter increments",
+  "actual_result": "Cart counter changed from 0 to 1, success notification appeared",
+  "agent_confidence": 0.95,
+  "screenshot_before": "screenshots/step_3_before.png",
+  "screenshot_after": "screenshots/step_3_after.png",
+  "execution_time_ms": 1247,
+  "success": true
+}
+```
+
+### **6.2 Caching and Reuse Strategy**
+
+**Action Pattern Recognition**:
+- Successful actions stored as reusable patterns
+- Pattern matching for similar UI elements across different test runs
+- Adaptive pattern library builds over time
+
+**Execution Journal Benefits**:
+- Human-readable test execution history
+- Debugging aid for failed test scenarios
+- Pattern recognition for UI consistency
+- Performance optimization through action caching
+
+---
+
+## 7  Just-In-Time Scripted Automation
+
+### **7.1 Dual-Mode Execution Strategy**
+
+**Primary Mode: Scripted Replay**
+- Each successful AI action recorded as explicit WebDriver (Playwright) API calls
+- Subsequent test executions attempt direct WebDriver command replay first
+- Significantly faster execution for stable UI elements
+
+**Fallback Mode: Visual AI Interaction**
+- When scripted commands fail (UI changes, element not found, etc.)
+- System seamlessly reverts to visual-grid AI interaction
+- Updated action recorded for future use
+
+### **7.2 Action Recording Format**
+
+```python
+# Example recorded action
+{
+  "action_type": "click",
+  "playwright_command": "page.click('button[data-testid=\"add-to-cart\"]')",
+  "visual_backup": {
+    "grid_coordinates": "M23+offset(0.7,0.4)",
+    "screenshot_reference": "add_to_cart_button_reference.png",
+    "confidence_threshold": 0.85
+  },
+  "success_criteria": "Cart counter increments",
+  "timestamp": "2024-01-15T10:30:45.123Z"
+}
+```
+
+### **7.3 Hybrid Execution Flow**
+
+```
+1. Load Test Scenario
+2. Check for existing scripted actions
+3. Attempt scripted replay (WebDriver commands)
+4. IF scripted action fails:
+   a. Capture current screenshot
+   b. Invoke visual AI interaction
+   c. Record new action for future use
+5. Continue with next step
+```
+
+---
+
+## 8  Hierarchical Agent Validation Strategy
+
+### **8.1 Layered Validation Architecture**
+
+**Bottom-Up Validation**:
+- Action-level agents return results with confidence scores
+- Each agent validates its own output before passing upstream
+- Confidence thresholds trigger retry or escalation
+
+**Top-Down Confirmation**:
+- Higher-level agents (Test Runner, Planner) verify lower-level outputs
+- Contextual consistency checks across agent decisions
+- Cross-agent validation prevents cascading errors
+
+### **8.2 Confidence Threshold System**
+
+| Confidence Level | Action Taken | Escalation |
+|------------------|--------------|------------|
+| 95-100% | Execute immediately | None |
+| 80-94% | Execute with monitoring | Log for review |
+| 60-79% | Trigger adaptive refinement | Retry with refinement |
+| 40-59% | Request human guidance | Pause for intervention |
+| 0-39% | Fail gracefully | Escalate to human |
+
+### **8.3 Hallucination Mitigation**
+
+**Cross-Agent Verification**:
+- Action Agent decisions validated by Evaluator Agent
+- Test Runner Agent maintains execution context consistency
+- Planner Agent validates step sequence logical flow
+
+**Confidence Scoring**:
+- Multi-factor confidence calculation (visual clarity, context match, historical success)
+- Confidence degradation triggers additional validation layers
+- Human-in-the-loop triggers for persistent low confidence
+
+**Validation Checkpoints**:
+- Pre-action validation: "Is this action appropriate for current context?"
+- Post-action validation: "Did the action achieve expected outcome?"
+- Sequence validation: "Does current state align with test plan progression?"
+
+---
+
+## 9  Development Phases
 
 | Phase | Tasks | ETA |
 |-------|-------|-----|
 | **0 — Prep** | Repo scaffold, `pre-commit`, multi-agent project structure. | 1 day |
 | **1 — Core foundation** | Base agent class, OpenAI client, data models (TestPlan, TestStep, etc.). | 2 days |
-| **2 — Browser & Grid system** | Playwright wrapper, 60×60 grid overlay, coordinate mapping. | 2-3 days |
+| **2 — Browser & Grid system** | Playwright wrapper, adaptive grid overlay, coordinate mapping with refinement. | 2-3 days |
 | **3 — Test Planner Agent** | Requirements analysis, test plan generation, system prompts. | 2-3 days |
-| **4 — Action Agent** | Screenshot analysis, grid-based action determination, UI understanding. | 2-3 days |
+| **4 — Action Agent** | Screenshot analysis, adaptive grid refinement, precision coordinate determination. | 2-3 days |
 | **5 — Evaluator Agent** | Result assessment, success/failure detection, UI state validation. | 2 days |
 | **6 — Test Runner Agent** | Test orchestration, step coordination, execution flow management. | 3 days |
 | **7 — Agent Coordination** | Inter-agent communication, state management, workflow orchestration. | 2-3 days |
-| **8 — Error Handling & Recovery** | Agent-level error handling, retry logic, fallback strategies. | 2 days |
-| **9 — Security & Monitoring** | Rate limiting, logging, analytics, execution reporting. | 2 days |
-| **10 — End-to-end Integration** | Complete multi-agent workflow testing and debugging. | 3 days |
-| **11 — Test Scenarios** | Create 5 comprehensive test scenarios, measure success rates. | 2-3 days |
-| **12 — Packaging & docs** | CLI interface, documentation, release v0.1.0. | 1-2 days |
+| **8 — Execution Journaling & Scripted Automation** | Detailed logging, action recording, just-in-time script generation. | 2-3 days |
+| **9 — Error Handling & Recovery** | Agent-level error handling, retry logic, fallback strategies. | 2 days |
+| **10 — Security & Monitoring** | Rate limiting, logging, analytics, execution reporting. | 2 days |
+| **11 — End-to-end Integration** | Complete multi-agent workflow testing and debugging. | 3 days |
+| **12 — Test Scenarios** | Create 5 comprehensive test scenarios, measure success rates. | 2-3 days |
+| **13 — Packaging & docs** | CLI interface, documentation, release v0.1.0. | 1-2 days |
 
-_Total: roughly **25–32 working days**._
+_Total: roughly **28–36 working days**._
 
 ---
 
-## 6  Design Principles
+## 10  Design Principles
 
 1. **Agent specialization** – Each AI agent has a focused role and expertise domain.  
 2. **Coordinated intelligence** – Agents collaborate but maintain independent decision-making.  
@@ -200,7 +400,7 @@ _Total: roughly **25–32 working days**._
 
 ---
 
-## 7  Post-MVP Roadmap
+## 11  Post-MVP Roadmap
 
 | Milestone | Description |
 |-----------|-------------|
@@ -208,11 +408,11 @@ _Total: roughly **25–32 working days**._
 | **v0.3** | Specialized agents: API testing agent, mobile testing agent, accessibility testing agent. |
 | **v0.4** | Learning & adaptation: Agent fine-tuning based on execution history and failure analysis. |
 | **v0.5** | REST API for remote test execution, CI/CD integration, collaborative test planning. |
-| **v0.6** | Hybrid interaction modes: DOM selectors + grid system, visual regression testing. |
+| **v0.6** | Mobile and desktop application testing, visual regression testing, cross-platform grid adaptation. |
 
 ---
 
-## 8  Known Risks & Mitigations
+## 12  Known Risks & Mitigations
 
 | Risk | Mitigation |
 |------|-----------|
@@ -225,7 +425,7 @@ _Total: roughly **25–32 working days**._
 
 ---
 
-## 9  Immediate Next Steps
+## 13  Immediate Next Steps
 
 1. Add this `PLAN.md` to `docs/`.  
 2. Create `conda`/`venv` with Python 3.10.  
