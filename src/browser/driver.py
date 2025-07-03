@@ -1,0 +1,231 @@
+"""
+Playwright browser driver implementation.
+"""
+
+import asyncio
+from pathlib import Path
+from typing import Optional, Tuple
+
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+
+from src.config.settings import get_settings
+from src.core.interfaces import BrowserDriver
+from src.monitoring.logger import get_logger, log_performance_metric
+
+
+class PlaywrightDriver(BrowserDriver):
+    """Playwright-based browser automation driver."""
+
+    def __init__(
+        self,
+        headless: Optional[bool] = None,
+        viewport_width: Optional[int] = None,
+        viewport_height: Optional[int] = None,
+        timeout: Optional[int] = None,
+    ) -> None:
+        """
+        Initialize the Playwright driver.
+
+        Args:
+            headless: Run browser in headless mode
+            viewport_width: Browser viewport width
+            viewport_height: Browser viewport height
+            timeout: Default timeout in milliseconds
+        """
+        settings = get_settings()
+        self.headless = headless if headless is not None else settings.browser_headless
+        self.viewport_width = viewport_width or settings.browser_viewport_width
+        self.viewport_height = viewport_height or settings.browser_viewport_height
+        self.timeout = timeout or settings.browser_timeout
+
+        self.logger = get_logger("browser.driver")
+        self._playwright = None
+        self._browser: Optional[Browser] = None
+        self._context: Optional[BrowserContext] = None
+        self._page: Optional[Page] = None
+
+    async def start(self) -> None:
+        """Start the browser and create a page."""
+        if self._playwright is None:
+            self._playwright = await async_playwright().start()
+
+        if self._browser is None:
+            self.logger.info(
+                f"Starting browser",
+                extra={
+                    "headless": self.headless,
+                    "viewport": f"{self.viewport_width}x{self.viewport_height}",
+                },
+            )
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.headless,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+
+        if self._context is None:
+            self._context = await self._browser.new_context(
+                viewport={
+                    "width": self.viewport_width,
+                    "height": self.viewport_height,
+                },
+                screen={
+                    "width": self.viewport_width,
+                    "height": self.viewport_height,
+                },
+            )
+            self._context.set_default_timeout(self.timeout)
+
+        if self._page is None:
+            self._page = await self._context.new_page()
+
+    async def stop(self) -> None:
+        """Stop the browser and cleanup resources."""
+        if self._page:
+            await self._page.close()
+            self._page = None
+
+        if self._context:
+            await self._context.close()
+            self._context = None
+
+        if self._browser:
+            await self._browser.close()
+            self._browser = None
+
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
+
+        self.logger.info("Browser stopped")
+
+    async def navigate(self, url: str) -> None:
+        """Navigate to a URL."""
+        if not self._page:
+            await self.start()
+
+        self.logger.info(f"Navigating to URL", extra={"url": url})
+        start_time = asyncio.get_event_loop().time()
+
+        await self._page.goto(url, wait_until="networkidle")
+
+        elapsed_ms = (asyncio.get_event_loop().time() - start_time) * 1000
+        log_performance_metric("page_navigation", elapsed_ms, context={"url": url})
+
+    async def click(self, x: int, y: int) -> None:
+        """Click at absolute coordinates."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        self.logger.debug(f"Clicking at coordinates", extra={"x": x, "y": y})
+        await self._page.mouse.click(x, y)
+
+    async def type_text(self, text: str) -> None:
+        """Type text at current focus."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        self.logger.debug(f"Typing text", extra={"length": len(text)})
+        await self._page.keyboard.type(text)
+
+    async def scroll(self, direction: str, amount: int) -> None:
+        """Scroll in given direction."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        if direction not in ["up", "down", "left", "right"]:
+            raise ValueError(f"Invalid scroll direction: {direction}")
+
+        self.logger.debug(
+            f"Scrolling", extra={"direction": direction, "amount": amount}
+        )
+
+        # Calculate scroll delta based on direction
+        delta_x = 0
+        delta_y = 0
+        if direction == "up":
+            delta_y = -amount
+        elif direction == "down":
+            delta_y = amount
+        elif direction == "left":
+            delta_x = -amount
+        elif direction == "right":
+            delta_x = amount
+
+        # Get current viewport center
+        viewport_width = self._page.viewport_size["width"]
+        viewport_height = self._page.viewport_size["height"]
+        center_x = viewport_width // 2
+        center_y = viewport_height // 2
+
+        # Perform scroll
+        await self._page.mouse.wheel(delta_x, delta_y)
+
+    async def screenshot(self) -> bytes:
+        """Take a screenshot and return as bytes."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        self.logger.debug("Taking screenshot")
+        screenshot_bytes = await self._page.screenshot(type="png", full_page=False)
+        return screenshot_bytes
+
+    async def wait(self, milliseconds: int) -> None:
+        """Wait for specified duration."""
+        self.logger.debug(f"Waiting", extra={"milliseconds": milliseconds})
+        await self._page.wait_for_timeout(milliseconds)
+
+    async def get_viewport_size(self) -> Tuple[int, int]:
+        """Get current viewport dimensions."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        viewport = self._page.viewport_size
+        return viewport["width"], viewport["height"]
+
+    async def save_screenshot(self, path: Path) -> None:
+        """
+        Save a screenshot to file.
+
+        Args:
+            path: Path to save the screenshot
+        """
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        self.logger.info(f"Saving screenshot", extra={"path": str(path)})
+        await self._page.screenshot(path=str(path), type="png", full_page=False)
+
+    async def get_page_title(self) -> str:
+        """Get the current page title."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        return await self._page.title()
+
+    async def get_page_url(self) -> str:
+        """Get the current page URL."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        return self._page.url
+
+    async def wait_for_load_state(self, state: str = "networkidle") -> None:
+        """
+        Wait for a specific load state.
+
+        Args:
+            state: Load state to wait for (load, domcontentloaded, networkidle)
+        """
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        await self._page.wait_for_load_state(state)
+
+    async def __aenter__(self) -> "PlaywrightDriver":
+        """Async context manager entry."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit."""
+        await self.stop()
