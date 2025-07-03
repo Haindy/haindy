@@ -26,9 +26,9 @@ class TestBrowserIntegration:
         assert state["initialized"] is True
 
         # Navigate to a page
-        await controller.navigate("https://example.com")
+        await controller.navigate("https://www.wikipedia.org")
         state = await controller.get_current_state()
-        assert "example.com" in state["url"]
+        assert "wikipedia.org" in state["url"]
         assert state["viewport"]["width"] > 0
         assert state["viewport"]["height"] > 0
 
@@ -41,7 +41,7 @@ class TestBrowserIntegration:
     async def test_context_manager(self):
         """Test using browser controller as context manager."""
         async with BrowserController(headless=True) as controller:
-            await controller.navigate("https://example.com")
+            await controller.navigate("https://www.wikipedia.org")
             state = await controller.get_current_state()
             assert state["initialized"] is True
 
@@ -53,7 +53,7 @@ class TestBrowserIntegration:
     async def test_screenshot_with_grid(self, tmp_path):
         """Test taking screenshot with grid overlay."""
         async with BrowserController(headless=True) as controller:
-            await controller.navigate("https://example.com")
+            await controller.navigate("https://www.wikipedia.org")
 
             # Take screenshot without grid
             screenshot = await controller.screenshot_with_grid(show_overlay=False)
@@ -79,7 +79,7 @@ class TestBrowserIntegration:
     async def test_grid_click(self):
         """Test clicking at grid coordinates."""
         async with BrowserController(headless=True) as controller:
-            await controller.navigate("https://example.com")
+            await controller.navigate("https://www.wikipedia.org")
 
             # Click at a grid coordinate
             coord = GridCoordinate(
@@ -97,7 +97,7 @@ class TestBrowserIntegration:
     async def test_refinement_region_screenshot(self, tmp_path):
         """Test taking screenshot of refinement region."""
         async with BrowserController(headless=True) as controller:
-            await controller.navigate("https://example.com")
+            await controller.navigate("https://www.wikipedia.org")
 
             # Take refinement region screenshot
             save_path = tmp_path / "refinement_C3.png"
@@ -130,7 +130,7 @@ class TestBrowserIntegration:
     async def test_multiple_navigation(self):
         """Test navigating to multiple pages."""
         urls = [
-            "https://example.com",
+            "https://www.wikipedia.org",
             "https://httpbin.org",
             "https://www.google.com",
         ]
