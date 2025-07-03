@@ -1,0 +1,138 @@
+# HAINDY - Autonomous AI Testing Agent
+
+## Important Rules
+
+1. **No co-author claims**: You are just a tool, not an author. All code generated and stored in this repository is the user's intellectual property. Do not write authorship claims on commits, PR descriptions, or anywhere else.
+2. **No emojis**: Do not use emojis in comments, PR descriptions, commit messages, or any other content.
+
+## Project Overview
+
+HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs four specialized AI agents coordinating together to plan, execute, and evaluate tests.
+
+## Commands
+
+### Building
+```bash
+# Project setup (planned tech stack)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -e .  # Will use pyproject.toml once created
+```
+
+### Dependencies Installation
+```bash
+# Core dependencies (as per plan)
+pip install playwright openai rich
+playwright install chromium
+```
+
+### Testing
+```bash
+# Unit tests (once implemented)
+pytest tests/
+
+# Integration tests
+pytest tests/integration/
+
+# Run specific test scenarios
+python -m src.main --scenario test_scenarios/checkout_flow.json
+```
+
+### Linting and Code Quality
+```bash
+# Pre-commit hooks (to be configured)
+pre-commit install
+pre-commit run --all-files
+
+# Code formatting
+black src/ tests/
+isort src/ tests/
+
+# Type checking
+mypy src/
+```
+
+### Development Commands
+```bash
+# Run in development mode with verbose logging
+python -m src.main --debug --verbose
+
+# Generate test execution report
+python -m src.monitoring.reporter --input data/test_run_123.jsonl --output reports/
+```
+
+## High-Level Architecture
+
+### Core Components
+
+1. **Multi-Agent System**
+   - **Test Planner Agent**: Analyzes requirements/PRDs and creates structured test plans
+   - **Test Runner Agent**: Orchestrates test execution and decides next steps
+   - **Action Agent**: Converts screenshots and instructions to grid-based coordinates
+   - **Evaluator Agent**: Assesses screenshot results against expected outcomes
+
+2. **Browser Automation Layer**
+   - Playwright-Python wrapper for Chromium
+   - 60×60 grid overlay system for reliable cross-application interaction
+   - WebSocket/CDP communication for native browser control
+
+3. **Orchestration Framework**
+   - Agent coordination and communication
+   - State management for test execution
+   - Workflow orchestration between agents
+
+4. **Core Infrastructure**
+   - Error handling and recovery mechanisms
+   - Security layer (rate limiting, sensitive data protection)
+   - Monitoring and reporting system
+   - Configuration management
+
+### Architecture Flow
+
+```
+Human Input (Requirements/PRD)
+    ↓
+Test Planner Agent
+    ↓
+Test Runner Agent ←→ [Coordination Loop]
+    ↓                      ↑
+Action Agent              |
+    ↓                      |
+Browser Driver            |
+    ↓                      |
+Evaluator Agent ----------
+    ↓
+Test Report Generation
+```
+
+### Key Design Principles
+
+1. **Agent Specialization**: Each AI agent has a focused role and expertise domain
+2. **Coordinated Intelligence**: Agents collaborate while maintaining independent decision-making
+3. **Fail-Fast with Recovery**: Agent-level validation with cross-agent verification
+4. **Observable by Default**: Every agent communication and decision is traceable
+5. **Human-Interpretable**: All outputs (plans, actions, results) are understandable
+6. **Modular & Extensible**: Easy to add new agent types or replace existing ones
+
+### Technology Stack
+
+- **Language**: Python 3.10+
+- **Browser Automation**: Playwright-Python (Chromium)
+- **AI Models**: OpenAI GPT-4o mini (4 instances for multi-agent system)
+- **Grid System**: Custom 60×60 overlay with coordinate mapping
+- **Logging**: JSONL format with rich console output
+- **Packaging**: setuptools with pyproject.toml
+
+### Project Status
+
+Currently in planning phase. The implementation will follow these phases:
+1. Core foundation (base classes, data models)
+2. Browser & Grid system
+3. Individual agent implementations
+4. Agent coordination system
+5. Error handling & recovery
+6. Security & monitoring
+7. End-to-end integration
+8. Test scenarios and packaging
+
+Estimated timeline: 25-32 working days for MVP (v0.1.0)
