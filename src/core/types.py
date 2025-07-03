@@ -2,7 +2,7 @@
 Core data models and types for the HAINDY testing framework.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -97,7 +97,7 @@ class ActionResult(BaseModel):
     execution_time_ms: int
     error_message: Optional[str] = None
     confidence: float = Field(..., ge=0.0, le=1.0)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TestStep(BaseModel):
@@ -122,7 +122,7 @@ class TestPlan(BaseModel):
     description: str
     requirements: str = Field(..., description="Original requirements text")
     steps: List[TestStep]
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     estimated_duration_seconds: Optional[int] = None
     tags: List[str] = Field(default_factory=list)
 
@@ -164,7 +164,7 @@ class EvaluationResult(BaseModel):
 class ExecutionJournal(BaseModel):
     """Detailed journal entry for test execution."""
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     test_scenario: str
     step_reference: str
     action_taken: str
@@ -191,7 +191,7 @@ class AgentMessage(BaseModel):
     to_agent: str
     message_type: str
     content: Dict[str, Any]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requires_response: bool = False
     correlation_id: Optional[UUID] = Field(
         None, description="ID to correlate related messages"

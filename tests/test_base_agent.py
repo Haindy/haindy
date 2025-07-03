@@ -148,17 +148,19 @@ class TestBaseAgent:
         mock_client = AsyncMock()
         mock_client.call.return_value = {"result": "test"}
         
-        with patch.object(agent, "client", mock_client):
-            messages = [{"role": "user", "content": "Hello"}]
-            result = await agent.call_openai(messages)
-            
-            assert result == {"result": "test"}
-            mock_client.call.assert_called_once_with(
-                messages=messages,
-                temperature=0.8,
-                system_prompt=agent.system_prompt,
-                response_format=None,
-            )
+        # Mock the _client attribute directly
+        agent._client = mock_client
+        
+        messages = [{"role": "user", "content": "Hello"}]
+        result = await agent.call_openai(messages)
+        
+        assert result == {"result": "test"}
+        mock_client.call.assert_called_once_with(
+            messages=messages,
+            temperature=0.8,
+            system_prompt=agent.system_prompt,
+            response_format=None,
+        )
 
     @pytest.mark.asyncio
     async def test_call_openai_with_overrides(self):
@@ -168,23 +170,25 @@ class TestBaseAgent:
         mock_client = AsyncMock()
         mock_client.call.return_value = {"result": "test"}
         
-        with patch.object(agent, "client", mock_client):
-            messages = [{"role": "user", "content": "Hello"}]
-            response_format = {"type": "json_object"}
-            
-            result = await agent.call_openai(
-                messages,
-                temperature=0.3,
-                response_format=response_format,
-            )
-            
-            assert result == {"result": "test"}
-            mock_client.call.assert_called_once_with(
-                messages=messages,
-                temperature=0.3,  # Override temperature
-                system_prompt=agent.system_prompt,
-                response_format=response_format,
-            )
+        # Mock the _client attribute directly
+        agent._client = mock_client
+        
+        messages = [{"role": "user", "content": "Hello"}]
+        response_format = {"type": "json_object"}
+        
+        result = await agent.call_openai(
+            messages,
+            temperature=0.3,
+            response_format=response_format,
+        )
+        
+        assert result == {"result": "test"}
+        mock_client.call.assert_called_once_with(
+            messages=messages,
+            temperature=0.3,  # Override temperature
+            system_prompt=agent.system_prompt,
+            response_format=response_format,
+        )
 
     def test_build_messages_simple(self):
         """Test building simple message list."""

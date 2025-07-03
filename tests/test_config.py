@@ -4,7 +4,7 @@ Unit tests for configuration management.
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -183,23 +183,25 @@ class TestGetSettings:
     """Tests for get_settings function."""
 
     @patch("src.config.settings.load_dotenv")
-    def test_get_settings_loads_env(self, mock_load_dotenv, tmp_path):
+    @patch("src.config.settings.Path")
+    def test_get_settings_loads_env(self, mock_path_class, mock_load_dotenv, tmp_path):
         """Test that get_settings loads .env file."""
         # Create a temporary .env file
         env_file = tmp_path / ".env"
         env_file.write_text("OPENAI_API_KEY=test-key\n")
         
-        with patch("src.config.settings.Path") as mock_path:
-            mock_path.return_value = env_file
-            mock_path.return_value.exists.return_value = True
-            
-            # Clear the cache
-            get_settings.cache_clear()
-            
-            settings = get_settings()
-            
-            # Verify load_dotenv was called
-            mock_load_dotenv.assert_called_once()
+        # Mock Path instance
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = True
+        mock_path_class.return_value = mock_path_instance
+        
+        # Clear the cache
+        get_settings.cache_clear()
+        
+        settings = get_settings()
+        
+        # Verify load_dotenv was called
+        mock_load_dotenv.assert_called_once()
 
     def test_get_settings_cached(self):
         """Test that get_settings returns cached instance."""

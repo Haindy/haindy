@@ -2,7 +2,7 @@
 Unit tests for core data types.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 import pytest
@@ -217,7 +217,7 @@ class TestTestState:
             status=TestStatus.IN_PROGRESS,
             completed_steps=[step_id],
             error_count=1,
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
         )
 
         assert state.status == TestStatus.IN_PROGRESS
