@@ -151,6 +151,8 @@ data/*.jpg
 data/*.jsonl
 reports/*.html
 reports/*.pdf
+reports/*.json
+reports/*.md
 screenshots/
 *.log
 examples/demo_output/

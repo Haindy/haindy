@@ -13,13 +13,23 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from src.config.settings import get_settings
+from src.security.sanitizer import DataSanitizer
 
 
 class JSONFormatter(logging.Formatter):
-    """JSON log formatter."""
+    """JSON log formatter with optional sanitization."""
+
+    def __init__(self, *args, sanitize: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sanitize = sanitize
+        self.sanitizer = DataSanitizer() if sanitize else None
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
+        # Sanitize record if enabled
+        if self.sanitize and self.sanitizer:
+            record = self.sanitizer.sanitize_log_record(record)
+        
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
@@ -42,7 +52,31 @@ class JSONFormatter(logging.Formatter):
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
 
+        # Sanitize the entire log data if enabled
+        if self.sanitize and self.sanitizer:
+            log_data = self.sanitizer.sanitize_dict(log_data)
+
         return json.dumps(log_data)
+
+
+class SanitizingHandler(logging.Handler):
+    """Log handler that sanitizes messages before passing to wrapped handler."""
+    
+    def __init__(self, handler: logging.Handler, sanitizer: Optional[DataSanitizer] = None):
+        super().__init__()
+        self.handler = handler
+        self.sanitizer = sanitizer or DataSanitizer()
+        self.setLevel(handler.level)
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit sanitized record to wrapped handler."""
+        try:
+            # Sanitize the record
+            sanitized_record = self.sanitizer.sanitize_log_record(record)
+            # Pass to wrapped handler
+            self.handler.emit(sanitized_record)
+        except Exception:
+            self.handleError(record)
 
 
 class AgentLogAdapter(logging.LoggerAdapter):
@@ -62,7 +96,8 @@ def setup_logging(
     log_level: Optional[str] = None,
     log_format: Optional[str] = None,
     log_file: Optional[str] = None,
-) -> None:
+    sanitize_logs: bool = True,
+) -> logging.Logger:
     """
     Set up logging configuration.
 
@@ -70,6 +105,10 @@ def setup_logging(
         log_level: Logging level (defaults to settings)
         log_format: Log format 'json' or 'text' (defaults to settings)
         log_file: Optional log file path (defaults to settings)
+        sanitize_logs: Whether to sanitize sensitive data in logs
+        
+    Returns:
+        Root logger instance
     """
     settings = get_settings()
 
@@ -89,7 +128,7 @@ def setup_logging(
     # Configure console handler
     if format_type == "json":
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(JSONFormatter())
+        console_handler.setFormatter(JSONFormatter(sanitize=sanitize_logs))
     else:
         # Use Rich handler for pretty text output
         console = Console(stderr=True)
@@ -100,6 +139,11 @@ def setup_logging(
         )
 
     console_handler.setLevel(numeric_level)
+    
+    # Wrap with sanitizing handler if needed
+    if sanitize_logs and format_type != "json":  # JSON formatter already sanitizes
+        console_handler = SanitizingHandler(console_handler)
+    
     root_logger.addHandler(console_handler)
 
     # Configure file handler if specified
@@ -134,8 +178,11 @@ def setup_logging(
             "log_level": level,
             "log_format": format_type,
             "log_file": file_path,
+            "sanitize_logs": sanitize_logs,
         },
     )
+    
+    return root_logger
 
 
 def get_logger(name: str, **context: Any) -> logging.Logger:

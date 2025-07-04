@@ -4,7 +4,7 @@ Journal manager for recording and managing test execution journals.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -333,7 +333,7 @@ class JournalManager:
             element_text=result.element_text,
             success_count=1,
             avg_execution_time_ms=float(entry.execution_time_ms),
-            last_used=datetime.utcnow()
+            last_used=datetime.now(timezone.utc)
         )
         
         logger.debug(f"Created action pattern: {pattern.pattern_type}")
@@ -387,7 +387,7 @@ class JournalManager:
                     pattern.model_dump()
                     for pattern in self._pattern_library.values()
                 ],
-                "updated_at": datetime.utcnow().isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             with open(pattern_file, "w") as f:

@@ -4,7 +4,7 @@ Unit tests for error recovery and retry logic.
 
 import asyncio
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, AsyncMock, patch
 
 from src.error_handling.recovery import (
@@ -43,7 +43,7 @@ class TestRecoveryContext:
         )
         
         # Mock start time to be 1 second ago
-        context.start_time = datetime.utcnow() - timedelta(seconds=1)
+        context.start_time = datetime.now(timezone.utc) - timedelta(seconds=1)
         elapsed = context.elapsed_time
         
         assert elapsed.total_seconds() >= 1.0

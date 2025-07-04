@@ -6,7 +6,7 @@ retry logic, and recovery strategies.
 """
 
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class HAINDYError(Exception):
@@ -24,7 +24,7 @@ class HAINDYError(Exception):
         self.error_code = error_code or self.__class__.__name__
         self.details = details or {}
         self.cause = cause
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert exception to dictionary for logging/serialization."""

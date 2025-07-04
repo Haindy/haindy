@@ -4,7 +4,7 @@ Unit tests for error aggregation and reporting.
 
 import json
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -95,8 +95,8 @@ class TestErrorReport:
         report = ErrorReport(
             test_id="test123",
             test_name="Test Run",
-            start_time=datetime.utcnow(),
-            end_time=datetime.utcnow() + timedelta(minutes=5),
+            start_time=datetime.now(timezone.utc),
+            end_time=datetime.now(timezone.utc) + timedelta(minutes=5),
             total_errors=10,
             errors_by_category={ErrorCategory.AGENT: 5, ErrorCategory.BROWSER: 5},
             errors_by_type=metrics,
@@ -113,7 +113,7 @@ class TestErrorReport:
     
     def test_report_to_dict(self):
         """Test report serialization."""
-        start = datetime.utcnow()
+        start = datetime.now(timezone.utc)
         end = start + timedelta(minutes=10)
         
         report = ErrorReport(
@@ -140,8 +140,8 @@ class TestErrorReport:
         report = ErrorReport(
             test_id="test123",
             test_name="Test",
-            start_time=datetime.utcnow(),
-            end_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
+            end_time=datetime.now(timezone.utc),
             total_errors=0,
             errors_by_category={},
             errors_by_type={},

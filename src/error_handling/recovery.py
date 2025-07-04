@@ -10,7 +10,7 @@ import logging
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from typing import (
     Any, Callable, Dict, List, Optional, Type, TypeVar, Union,
@@ -42,14 +42,14 @@ class RecoveryContext:
     error: Exception
     operation_name: str
     attempt_number: int = 1
-    start_time: datetime = field(default_factory=datetime.utcnow)
+    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     previous_errors: List[Exception] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def elapsed_time(self) -> timedelta:
         """Get elapsed time since operation started."""
-        return datetime.utcnow() - self.start_time
+        return datetime.now(timezone.utc) - self.start_time
     
     @property
     def is_retryable(self) -> bool:
