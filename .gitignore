@@ -153,6 +153,7 @@ reports/*.html
 reports/*.pdf
 screenshots/
 *.log
+examples/demo_output/
 
 # Playwright
 playwright-report/
