@@ -40,7 +40,7 @@ def print_test_plan(test_plan):
         print(f"    Action: {action.action_type.value} - {action.target}")
         if action.value:
             print(f"    Value: {action.value}")
-        print(f"    Expected: {action.expected_result}")
+        print(f"    Expected: {action.expected_outcome}")
         if step.dependencies:
             print(f"    Dependencies: {len(step.dependencies)} step(s)")
         print(f"    Optional: {'Yes' if step.optional else 'No'}")
@@ -60,6 +60,13 @@ def main():
     # Initialize the agent
     print("\n1. Initializing Test Planner Agent...")
     agent = TestPlannerAgent()
+    
+    # Initialize the OpenAI client for the demo
+    import openai
+    from openai import OpenAI
+    openai_client = OpenAI(api_key=settings.openai_api_key)
+    agent._client = openai_client
+    
     print("   ✓ Agent initialized")
     
     # Example 1: E-commerce checkout flow
