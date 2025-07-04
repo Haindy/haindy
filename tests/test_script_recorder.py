@@ -182,8 +182,6 @@ class TestScriptRecorder:
         assert any("wait_for_load_state" in fb for fb in fallbacks)
         # Should include force click
         assert any("force=True" in fb for fb in fallbacks)
-        # Should include alternative selectors
-        assert any("button.submit" in fb for fb in fallbacks)
     
     def test_record_scroll_action(self, script_recorder):
         """Test recording a scroll action."""

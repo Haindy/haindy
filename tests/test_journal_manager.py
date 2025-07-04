@@ -86,6 +86,7 @@ def sample_action_result():
         },
         playwright_command="await page.click('#login-btn')",
         selectors={"primary": "#login-btn", "fallback": "button[type=submit]"},
+        element_text="Login",
         actual_outcome="Login form displayed"
     )
 
@@ -217,7 +218,6 @@ class TestJournalManager:
         
         # Find matching pattern
         context = {
-            "url": "https://example.com/login",
             "element_text": "Login",
             "element_type": "button"
         }

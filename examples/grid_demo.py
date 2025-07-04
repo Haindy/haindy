@@ -31,10 +31,11 @@ async def main():
     output_dir = Path("demo_output")
     output_dir.mkdir(exist_ok=True)
 
-    async with BrowserController(headless=False) as controller:
+    async with BrowserController(headless=True) as controller:
         # Navigate to example page
-        print("1. Navigating to example.com...")
-        await controller.navigate("https://example.com")
+        print("1. Navigating to test page...")
+        test_page = Path(__file__).parent / "test_page.html"
+        await controller.navigate(f"file://{test_page.absolute()}")
         await asyncio.sleep(1)
 
         # Get current state

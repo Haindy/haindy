@@ -347,7 +347,8 @@ class ScriptRecorder:
         """Replace selector in a command."""
         # Find the selector in the command (between quotes)
         # Handle both 'selector' and "selector" formats
-        pattern = r"(page\.\w+\()['\"]([^'\"]+)['\"](.*)$"
+        # Also handle await prefix
+        pattern = r"(.*page\.\w+\()['\"]([^'\"]+)['\"](.*)$"
         match = re.match(pattern, command)
         
         if match:

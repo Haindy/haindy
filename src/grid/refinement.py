@@ -11,7 +11,6 @@ from PIL import Image
 from src.config.settings import get_settings
 from src.core.types import GridCoordinate
 from src.grid.overlay import GridOverlay
-from src.monitoring.logger import get_logger
 
 
 class GridRefinement:
@@ -25,6 +24,8 @@ class GridRefinement:
             base_grid: Base grid overlay instance
         """
         self.base_grid = base_grid
+        # Lazy import to avoid circular dependency
+        from src.monitoring.logger import get_logger
         self.logger = get_logger("grid.refinement")
         self.settings = get_settings()
 
