@@ -10,7 +10,6 @@ from src.config.settings import get_settings
 from src.core.types import GridCoordinate
 from src.grid.overlay import GridOverlay
 from src.grid.refinement import GridRefinement
-from src.monitoring.logger import get_logger
 
 
 class BrowserController:
@@ -29,6 +28,8 @@ class BrowserController:
             grid_size: Grid size (defaults to config)
         """
         self.settings = get_settings()
+        # Lazy import to avoid circular dependency
+        from src.monitoring.logger import get_logger
         self.logger = get_logger("browser.controller")
 
         # Initialize components

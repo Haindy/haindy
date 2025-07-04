@@ -59,7 +59,7 @@ class RecoveryContext:
     def add_attempt(self, error: Exception) -> None:
         """Add a new attempt with its error."""
         self.attempt_number += 1
-        self.previous_errors.append(error)
+        self.previous_errors.append(self.error)
         self.error = error
 
 

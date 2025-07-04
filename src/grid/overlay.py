@@ -11,7 +11,6 @@ from PIL import Image, ImageDraw, ImageFont
 from src.config.settings import get_settings
 from src.core.interfaces import GridSystem
 from src.core.types import GridCoordinate
-from src.monitoring.logger import get_logger
 
 
 class GridOverlay(GridSystem):
@@ -26,6 +25,9 @@ class GridOverlay(GridSystem):
         """
         settings = get_settings()
         self.grid_size = grid_size or settings.grid_size
+        
+        # Lazy import to avoid circular dependency
+        from src.monitoring.logger import get_logger
         self.logger = get_logger("grid.overlay")
 
         # Grid dimensions (will be set by initialize)
