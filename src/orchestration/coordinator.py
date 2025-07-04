@@ -45,7 +45,8 @@ class WorkflowCoordinator:
         self,
         message_bus: Optional[MessageBus] = None,
         state_manager: Optional[StateManager] = None,
-        browser_driver: Optional[BrowserDriver] = None
+        browser_driver: Optional[BrowserDriver] = None,
+        max_steps: int = 50
     ):
         """
         Initialize the workflow coordinator.
@@ -70,6 +71,7 @@ class WorkflowCoordinator:
         # Configuration
         self._max_concurrent_tests = 5
         self._agent_timeout = 300  # 5 minutes
+        self.max_steps = max_steps
         
         logger.info("Workflow coordinator initialized")
     
@@ -401,6 +403,33 @@ class WorkflowCoordinator:
             "agents": list(self._agents.keys()),
             "message_stats": self.message_bus.get_statistics()
         }
+    
+    async def generate_test_plan(self, requirements: str) -> TestPlan:
+        """
+        Generate a test plan from requirements without executing.
+        
+        Args:
+            requirements: Natural language test requirements
+            
+        Returns:
+            Generated test plan
+        """
+        logger.info("Generating test plan from requirements")
+        self._state = CoordinatorState.PLANNING
+        
+        try:
+            # Generate test plan using the planner agent
+            test_plan = await self._generate_test_plan(requirements)
+            self._state = CoordinatorState.IDLE
+            return test_plan
+        except Exception as e:
+            self._state = CoordinatorState.ERROR
+            logger.error(f"Failed to generate test plan: {e}")
+            raise
+    
+    async def cleanup(self) -> None:
+        """Alias for shutdown for compatibility."""
+        await self.shutdown()
     
     async def shutdown(self) -> None:
         """Shutdown the coordinator and cleanup resources."""
