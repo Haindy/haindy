@@ -1,0 +1,487 @@
+"""
+Test execution reporting for HAINDY.
+
+Generates comprehensive reports in various formats (HTML, JSON, Markdown)
+with execution details, metrics, and insights.
+"""
+
+import json
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+from uuid import UUID
+
+from jinja2 import Environment, Template
+
+from src.error_handling.aggregator import ErrorReport
+from src.journal.models import ExecutionJournal
+from .analytics import MetricsCollector, TestMetrics, TestOutcome
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ReportConfig:
+    """Configuration for report generation."""
+    
+    include_screenshots: bool = True
+    include_detailed_steps: bool = True
+    include_error_details: bool = True
+    include_performance_metrics: bool = True
+    include_journal_entries: bool = False
+    sanitize_sensitive_data: bool = True
+    max_screenshot_size_kb: int = 500
+
+
+class TestExecutionReport:
+    """Comprehensive test execution report."""
+    
+    def __init__(
+        self,
+        test_metrics: TestMetrics,
+        error_report: Optional[ErrorReport] = None,
+        journal: Optional[ExecutionJournal] = None,
+        config: Optional[ReportConfig] = None
+    ):
+        self.test_metrics = test_metrics
+        self.error_report = error_report
+        self.journal = journal
+        self.config = config or ReportConfig()
+        self.generated_at = datetime.utcnow()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert report to dictionary."""
+        report = {
+            "metadata": {
+                "report_version": "1.0",
+                "generated_at": self.generated_at.isoformat(),
+                "test_id": str(self.test_metrics.test_id),
+                "test_name": self.test_metrics.test_name
+            },
+            "summary": {
+                "outcome": self.test_metrics.outcome.value if self.test_metrics.outcome else "unknown",
+                "duration_seconds": self.test_metrics.duration_seconds,
+                "start_time": self.test_metrics.start_time.isoformat(),
+                "end_time": self.test_metrics.end_time.isoformat() if self.test_metrics.end_time else None,
+                "success_rate": self.test_metrics.success_rate
+            },
+            "steps": {
+                "total": self.test_metrics.steps_total,
+                "passed": self.test_metrics.steps_passed,
+                "failed": self.test_metrics.steps_failed,
+                "skipped": self.test_metrics.steps_skipped
+            },
+            "resources": {
+                "api_calls": self.test_metrics.api_calls,
+                "browser_actions": self.test_metrics.browser_actions,
+                "screenshots": self.test_metrics.screenshots_taken
+            }
+        }
+        
+        # Add performance metrics
+        if self.config.include_performance_metrics:
+            report["performance"] = self.test_metrics.performance_metrics
+        
+        # Add error details
+        if self.config.include_error_details and self.error_report:
+            report["errors"] = {
+                "total": self.error_report.total_errors,
+                "by_category": {
+                    cat.name: count 
+                    for cat, count in self.error_report.errors_by_category.items()
+                },
+                "critical": self.error_report.critical_errors,
+                "recovery_summary": self.error_report.recovery_summary,
+                "recommendations": self.error_report.recommendations
+            }
+        
+        # Add journal entries
+        if self.config.include_journal_entries and self.journal:
+            report["execution_journal"] = {
+                "entries": len(self.journal.entries),
+                "summary": self.journal.get_summary() if hasattr(self.journal, 'get_summary') else {}
+            }
+        
+        return report
+    
+    def to_json(self, indent: int = 2) -> str:
+        """Convert report to JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
+    
+    def to_html(self) -> str:
+        """Generate HTML report."""
+        template = Template(HTML_REPORT_TEMPLATE)
+        return template.render(report=self.to_dict())
+    
+    def to_markdown(self) -> str:
+        """Generate Markdown report."""
+        data = self.to_dict()
+        
+        md = f"# Test Execution Report: {data['metadata']['test_name']}\n\n"
+        md += f"**Generated:** {data['metadata']['generated_at']}\n"
+        md += f"**Test ID:** {data['metadata']['test_id']}\n\n"
+        
+        # Summary
+        md += "## Summary\n\n"
+        summary = data['summary']
+        md += f"- **Outcome:** {summary['outcome'].upper()}\n"
+        md += f"- **Duration:** {summary['duration_seconds']:.2f}s\n"
+        md += f"- **Success Rate:** {summary['success_rate']*100:.1f}%\n\n"
+        
+        # Steps
+        md += "## Test Steps\n\n"
+        steps = data['steps']
+        md += f"- Total: {steps['total']}\n"
+        md += f"- Passed: {steps['passed']} ✓\n"
+        md += f"- Failed: {steps['failed']} ✗\n"
+        md += f"- Skipped: {steps['skipped']} ⚠\n\n"
+        
+        # Resources
+        md += "## Resource Usage\n\n"
+        resources = data['resources']
+        md += f"- API Calls: {resources['api_calls']}\n"
+        md += f"- Browser Actions: {resources['browser_actions']}\n"
+        md += f"- Screenshots: {resources['screenshots']}\n\n"
+        
+        # Errors
+        if 'errors' in data:
+            md += "## Errors and Recovery\n\n"
+            errors = data['errors']
+            md += f"Total errors: {errors['total']}\n\n"
+            
+            if errors['critical']:
+                md += "### Critical Errors\n\n"
+                for error in errors['critical']:
+                    md += f"- **{error['error_type']}**: {error['count']} occurrences\n"
+                md += "\n"
+            
+            if errors['recommendations']:
+                md += "### Recommendations\n\n"
+                for rec in errors['recommendations']:
+                    md += f"- {rec}\n"
+                md += "\n"
+        
+        return md
+    
+    def save(self, output_dir: Path, formats: List[str] = ["json", "html", "markdown"]) -> Dict[str, Path]:
+        """
+        Save report in multiple formats.
+        
+        Args:
+            output_dir: Directory to save reports
+            formats: List of formats to generate
+            
+        Returns:
+            Dict mapping format to file path
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = self.generated_at.strftime("%Y%m%d_%H%M%S")
+        base_name = f"test_report_{self.test_metrics.test_name}_{timestamp}"
+        
+        saved_files = {}
+        
+        if "json" in formats:
+            json_path = output_dir / f"{base_name}.json"
+            with open(json_path, 'w') as f:
+                f.write(self.to_json())
+            saved_files["json"] = json_path
+        
+        if "html" in formats:
+            html_path = output_dir / f"{base_name}.html"
+            with open(html_path, 'w') as f:
+                f.write(self.to_html())
+            saved_files["html"] = html_path
+        
+        if "markdown" in formats:
+            md_path = output_dir / f"{base_name}.md"
+            with open(md_path, 'w') as f:
+                f.write(self.to_markdown())
+            saved_files["markdown"] = md_path
+        
+        logger.info(f"Saved test report to {output_dir} in formats: {list(saved_files.keys())}")
+        
+        return saved_files
+
+
+class ReportGenerator:
+    """Generates various types of reports."""
+    
+    def __init__(
+        self,
+        analytics: MetricsCollector,
+        output_dir: Path = Path("reports"),
+        config: Optional[ReportConfig] = None
+    ):
+        self.analytics = analytics
+        self.output_dir = Path(output_dir)
+        self.config = config or ReportConfig()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    def generate_test_report(
+        self,
+        test_id: UUID,
+        error_report: Optional[ErrorReport] = None,
+        journal: Optional[ExecutionJournal] = None
+    ) -> Optional[TestExecutionReport]:
+        """Generate report for a specific test."""
+        if test_id not in self.analytics.test_metrics:
+            logger.warning(f"No metrics found for test {test_id}")
+            return None
+        
+        test_metrics = self.analytics.test_metrics[test_id]
+        report = TestExecutionReport(
+            test_metrics=test_metrics,
+            error_report=error_report,
+            journal=journal,
+            config=self.config
+        )
+        
+        return report
+    
+    def generate_summary_report(self) -> Dict[str, Any]:
+        """Generate summary report for all tests."""
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "test_summary": self.analytics.get_test_summary(),
+            "performance_summary": self.analytics.get_performance_summary(),
+            "tests": [
+                {
+                    "test_id": str(metrics.test_id),
+                    "test_name": metrics.test_name,
+                    "outcome": metrics.outcome.value if metrics.outcome else "active",
+                    "duration": metrics.duration_seconds,
+                    "success_rate": metrics.success_rate,
+                    "errors": len(metrics.errors)
+                }
+                for metrics in self.analytics.test_metrics.values()
+            ]
+        }
+    
+    def generate_performance_report(self) -> Dict[str, Any]:
+        """Generate detailed performance report."""
+        perf_data = self.analytics.get_performance_summary()
+        
+        # Add trends
+        perf_data["trends"] = {
+            "api_call_rate_trend": self._calculate_trend("api.calls"),
+            "browser_action_trend": self._calculate_trend("browser.actions"),
+            "error_rate_trend": self._calculate_trend("tests.failed")
+        }
+        
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "performance_metrics": perf_data,
+            "recommendations": self._generate_performance_recommendations(perf_data)
+        }
+    
+    def _calculate_trend(self, metric_name: str, windows: List[int] = [5, 15, 60]) -> Dict[str, float]:
+        """Calculate metric trends over different time windows."""
+        trends = {}
+        for window in windows:
+            rate = self.analytics.get_rate(metric_name, window)
+            trends[f"{window}min"] = rate
+        return trends
+    
+    def _generate_performance_recommendations(self, perf_data: Dict[str, Any]) -> List[str]:
+        """Generate performance recommendations based on metrics."""
+        recommendations = []
+        
+        # Check API call rate
+        api_rate = perf_data["api_calls"]["rate_per_minute"]
+        if api_rate > 100:
+            recommendations.append(
+                f"High API call rate ({api_rate:.1f}/min). Consider implementing caching or batching."
+            )
+        
+        # Check step duration
+        step_duration = perf_data["steps"]["duration"]
+        if step_duration.get("p95", 0) > 5.0:
+            recommendations.append(
+                f"Slow step execution (p95: {step_duration['p95']:.1f}s). Review slow steps for optimization."
+            )
+        
+        # Check success rate
+        success_rate = perf_data["steps"]["success_rate"]
+        if success_rate < 0.9:
+            recommendations.append(
+                f"Low step success rate ({success_rate*100:.1f}%). Review failing steps and improve reliability."
+            )
+        
+        return recommendations
+    
+    def save_all_reports(self) -> Dict[str, Path]:
+        """Generate and save all report types."""
+        saved_files = {}
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        
+        # Summary report
+        summary = self.generate_summary_report()
+        summary_path = self.output_dir / f"summary_report_{timestamp}.json"
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2)
+        saved_files["summary"] = summary_path
+        
+        # Performance report
+        perf = self.generate_performance_report()
+        perf_path = self.output_dir / f"performance_report_{timestamp}.json"
+        with open(perf_path, 'w') as f:
+            json.dump(perf, f, indent=2)
+        saved_files["performance"] = perf_path
+        
+        # Individual test reports
+        test_dir = self.output_dir / f"tests_{timestamp}"
+        test_dir.mkdir(exist_ok=True)
+        
+        for test_id, metrics in self.analytics.test_metrics.items():
+            if metrics.outcome:  # Only completed tests
+                report = self.generate_test_report(test_id)
+                if report:
+                    test_files = report.save(test_dir)
+                    saved_files[f"test_{test_id}"] = test_files
+        
+        logger.info(f"Generated {len(saved_files)} reports in {self.output_dir}")
+        
+        return saved_files
+
+
+# HTML template for reports
+HTML_REPORT_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Report: {{ report.metadata.test_name }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .passed { color: #4caf50; }
+        .failed { color: #f44336; }
+        .skipped { color: #ff9800; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        .recommendation {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Execution Report</h1>
+        <h2>{{ report.metadata.test_name }}</h2>
+        
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value {% if report.summary.outcome == 'passed' %}passed{% else %}failed{% endif %}">
+                    {{ report.summary.outcome|upper }}
+                </div>
+                <div class="metric-label">Test Outcome</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{{ "%.2f"|format(report.summary.duration_seconds) }}s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{{ "%.1f"|format(report.summary.success_rate * 100) }}%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+        </div>
+        
+        <h2>Test Steps</h2>
+        <table>
+            <tr>
+                <th>Status</th>
+                <th>Count</th>
+                <th>Percentage</th>
+            </tr>
+            <tr>
+                <td class="passed">Passed</td>
+                <td>{{ report.steps.passed }}</td>
+                <td>{{ "%.1f"|format((report.steps.passed / report.steps.total * 100) if report.steps.total else 0) }}%</td>
+            </tr>
+            <tr>
+                <td class="failed">Failed</td>
+                <td>{{ report.steps.failed }}</td>
+                <td>{{ "%.1f"|format((report.steps.failed / report.steps.total * 100) if report.steps.total else 0) }}%</td>
+            </tr>
+            <tr>
+                <td class="skipped">Skipped</td>
+                <td>{{ report.steps.skipped }}</td>
+                <td>{{ "%.1f"|format((report.steps.skipped / report.steps.total * 100) if report.steps.total else 0) }}%</td>
+            </tr>
+        </table>
+        
+        {% if report.errors %}
+        <h2>Errors and Recommendations</h2>
+        <p>Total errors encountered: {{ report.errors.total }}</p>
+        
+        {% if report.errors.recommendations %}
+        <h3>Recommendations</h3>
+        {% for rec in report.errors.recommendations %}
+        <div class="recommendation">{{ rec }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endif %}
+        
+        <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #666;">
+            Generated at {{ report.metadata.generated_at }} | HAINDY Test Report v{{ report.metadata.report_version }}
+        </footer>
+    </div>
+</body>
+</html>
+"""
