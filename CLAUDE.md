@@ -9,6 +9,15 @@
 
 HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs four specialized AI agents coordinating together to plan, execute, and evaluate tests.
 
+## Development Runbook
+
+**Important**: Before running tests or demos, refer to the comprehensive runbook at `docs/RUNBOOK.md` for detailed instructions on:
+- Environment setup
+- Running tests for specific phases
+- Executing demo scripts
+- Code quality checks
+- Troubleshooting common issues
+
 ## Commands
 
 ### Building

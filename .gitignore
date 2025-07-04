@@ -154,6 +154,7 @@ reports/*.pdf
 screenshots/
 *.log
 examples/demo_output/
+demo_journals/
 
 # Playwright
 playwright-report/
