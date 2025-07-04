@@ -4,7 +4,7 @@ Unit tests for analytics and metrics collection.
 
 import asyncio
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from unittest.mock import Mock, patch
 
@@ -29,7 +29,7 @@ class TestTestMetrics:
         metrics = TestMetrics(
             test_id=test_id,
             test_name="test_example",
-            start_time=datetime.utcnow()
+            start_time=datetime.now(timezone.utc)
         )
         
         assert metrics.test_id == test_id
@@ -39,7 +39,7 @@ class TestTestMetrics:
     
     def test_duration_calculation(self):
         """Test duration calculation."""
-        start = datetime.utcnow()
+        start = datetime.now(timezone.utc)
         end = start + timedelta(seconds=10)
         
         metrics = TestMetrics(
@@ -56,7 +56,7 @@ class TestTestMetrics:
         metrics = TestMetrics(
             test_id=uuid4(),
             test_name="test",
-            start_time=datetime.utcnow()
+            start_time=datetime.now(timezone.utc)
         )
         
         # No steps
@@ -74,7 +74,7 @@ class TestTestMetrics:
         metrics = TestMetrics(
             test_id=uuid4(),
             test_name="test",
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
             steps_total=5,
             steps_passed=4,
             steps_failed=1,

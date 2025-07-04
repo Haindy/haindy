@@ -2,12 +2,12 @@
 Data models for execution journaling and scripted automation.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 # Import ActionType from core
 from src.core.types import ActionType
@@ -50,7 +50,7 @@ class JournalEntry(BaseModel):
     """A single test execution journal entry."""
     
     entry_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     test_scenario: str
     step_reference: str
     action_taken: str
@@ -94,11 +94,15 @@ class JournalEntry(BaseModel):
         description="ID of matched pattern if reused"
     )
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
-        }
+    model_config = ConfigDict()
+    
+    @field_serializer('timestamp')
+    def serialize_timestamp(self, timestamp: datetime) -> str:
+        return timestamp.isoformat()
+    
+    @field_serializer('entry_id', 'pattern_id')
+    def serialize_uuid(self, value: Optional[UUID]) -> Optional[str]:
+        return str(value) if value else None
 
 
 class ActionRecord(BaseModel):
@@ -132,11 +136,15 @@ class ActionRecord(BaseModel):
     avg_execution_time_ms: float = 0.0
     last_used: Optional[datetime] = None
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
-        }
+    model_config = ConfigDict()
+    
+    @field_serializer('last_used')
+    def serialize_last_used(self, last_used: Optional[datetime]) -> Optional[str]:
+        return last_used.isoformat() if last_used else None
+    
+    @field_serializer('record_id')
+    def serialize_record_id(self, record_id: UUID) -> str:
+        return str(record_id)
 
 
 class PatternMatch(BaseModel):
@@ -180,7 +188,7 @@ class ExecutionJournal(BaseModel):
     test_name: str
     
     # Execution timeline
-    start_time: datetime = Field(default_factory=datetime.utcnow)
+    start_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
     
     # Entries
@@ -201,11 +209,19 @@ class ExecutionJournal(BaseModel):
     total_execution_time_ms: int = 0
     avg_step_time_ms: float = 0.0
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
-        }
+    model_config = ConfigDict()
+    
+    @field_serializer('start_time', 'end_time')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        return dt.isoformat() if dt else None
+    
+    @field_serializer('journal_id', 'test_plan_id')
+    def serialize_uuid(self, value: UUID) -> str:
+        return str(value)
+    
+    @field_serializer('reused_patterns')
+    def serialize_uuid_list(self, patterns: List[UUID]) -> List[str]:
+        return [str(uuid) for uuid in patterns]
     
     def add_entry(self, entry: JournalEntry) -> None:
         """Add an entry to the journal."""
@@ -228,7 +244,7 @@ class ExecutionJournal(BaseModel):
     
     def finalize(self) -> None:
         """Finalize the journal at test completion."""
-        self.end_time = datetime.utcnow()
+        self.end_time = datetime.now(timezone.utc)
     
     def get_summary(self) -> Dict[str, Any]:
         """Get a summary of the journal."""

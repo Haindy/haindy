@@ -8,7 +8,7 @@ with execution details, metrics, and insights.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
@@ -49,7 +49,7 @@ class TestExecutionReport:
         self.error_report = error_report
         self.journal = journal
         self.config = config or ReportConfig()
-        self.generated_at = datetime.utcnow()
+        self.generated_at = datetime.now(timezone.utc)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert report to dictionary."""
@@ -245,7 +245,7 @@ class ReportGenerator:
     def generate_summary_report(self) -> Dict[str, Any]:
         """Generate summary report for all tests."""
         return {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "test_summary": self.analytics.get_test_summary(),
             "performance_summary": self.analytics.get_performance_summary(),
             "tests": [
@@ -273,7 +273,7 @@ class ReportGenerator:
         }
         
         return {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "performance_metrics": perf_data,
             "recommendations": self._generate_performance_recommendations(perf_data)
         }
@@ -316,7 +316,7 @@ class ReportGenerator:
     def save_all_reports(self) -> Dict[str, Path]:
         """Generate and save all report types."""
         saved_files = {}
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         
         # Summary report
         summary = self.generate_summary_report()

@@ -11,7 +11,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Deque, Set, Tuple
@@ -43,7 +43,7 @@ class TestOutcome(Enum):
 class MetricValue:
     """A single metric value with metadata."""
     value: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     tags: Dict[str, str] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -140,7 +140,7 @@ class MetricsCollector:
             metrics = TestMetrics(
                 test_id=test_id,
                 test_name=test_name,
-                start_time=datetime.utcnow()
+                start_time=datetime.now(timezone.utc)
             )
             self.test_metrics[test_id] = metrics
             self.active_tests.add(test_id)
@@ -161,7 +161,7 @@ class MetricsCollector:
                 return
             
             metrics = self.test_metrics[test_id]
-            metrics.end_time = datetime.utcnow()
+            metrics.end_time = datetime.now(timezone.utc)
             metrics.outcome = outcome
             
             if error_message:
@@ -331,7 +331,7 @@ class MetricsCollector:
     def get_rate(self, metric_name: str, window_minutes: Optional[int] = None) -> float:
         """Calculate rate per minute for a counter."""
         window = timedelta(minutes=window_minutes) if window_minutes else self.window_size
-        cutoff = datetime.utcnow() - window
+        cutoff = datetime.now(timezone.utc) - window
         
         values = self.metrics.get(f"counter.{metric_name}", [])
         recent_values = [m for m in values if m.timestamp > cutoff]
@@ -409,7 +409,7 @@ class MetricsCollector:
     def export_metrics(self, filepath: Path) -> None:
         """Export all metrics to JSON file."""
         data = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "test_summary": self.get_test_summary(),
             "performance_summary": self.get_performance_summary(),
             "test_details": [

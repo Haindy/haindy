@@ -8,7 +8,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -48,7 +48,7 @@ class ErrorMetrics:
     ) -> None:
         """Update metrics with new error occurrence."""
         self.count += 1
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         if self.first_seen is None:
             self.first_seen = now
@@ -132,7 +132,7 @@ class ErrorAggregator:
     def __init__(self, test_id: str, test_name: str):
         self.test_id = test_id
         self.test_name = test_name
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
         self.errors: List[HAINDYError] = []
         self.error_metrics: Dict[str, ErrorMetrics] = defaultdict(ErrorMetrics)
         self.category_counts: Dict[ErrorCategory, int] = defaultdict(int)
@@ -271,7 +271,7 @@ class ErrorAggregator:
     
     def generate_report(self) -> ErrorReport:
         """Generate comprehensive error report."""
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         
         return ErrorReport(
             test_id=self.test_id,

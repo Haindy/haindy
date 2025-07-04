@@ -276,5 +276,5 @@ class PatternMatcher:
                 / total_uses
             )
         
-        from datetime import datetime
-        pattern.last_used = datetime.utcnow()
+        from datetime import datetime, timezone
+        pattern.last_used = datetime.now(timezone.utc)
