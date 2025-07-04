@@ -380,6 +380,7 @@ Each test execution step must generate comprehensive, human-readable logs with t
 | **8 — Execution Journaling & Scripted Automation** | Detailed logging, action recording, just-in-time script generation. | 2-3 days |
 | **9 — Error Handling & Recovery** | Agent-level error handling, retry logic, fallback strategies. | 2 days |
 | **10 — Security & Monitoring** | Rate limiting, logging, analytics, execution reporting. | 2 days |
+| **10b — Test Suite Cleanup** | Fix all failing tests, ensure 100% pass rate before Phase 11. | 0.5 days |
 | **11 — End-to-end Integration** | Complete multi-agent workflow testing and debugging. | 3 days |
 | **12 — Test Scenarios** | Create 5 comprehensive test scenarios, measure success rates. | 2-3 days |
 | **13 — Packaging & docs** | CLI interface, documentation, release v0.1.0. | 1-2 days |
@@ -433,4 +434,44 @@ _Total: roughly **28–36 working days**._
 4. Build minimal browser wrapper; verify grid overlay and coordinate mapping.  
 5. Implement first Test Planner Agent with basic requirements → test plan functionality.
 6. Create initial system prompts for each agent type.
-7. Test single-agent workflows before building inter-agent coordination. 
+7. Test single-agent workflows before building inter-agent coordination.
+
+---
+
+## 14  Progress Tracking
+
+### Completed Phases
+
+| Phase | Status | PR | Notes |
+|-------|--------|----|----|
+| **0 — Prep** | ✅ Complete | - | Repository setup, structure, initial plan |
+| **1 — Core foundation** | ✅ Complete | #1 | Base classes, OpenAI client, core types |
+| **2 — Browser & Grid system** | ✅ Complete | #2 | Playwright wrapper, grid overlay system |
+| **3 — Test Planner Agent** | ✅ Complete | #3 | Requirements analysis, test plan generation |
+| **4 — Action Agent** | ✅ Complete | #4 | Visual analysis, coordinate determination |
+| **5 — Evaluator Agent** | ✅ Complete | #5 | Result assessment, state validation |
+| **6 — Test Runner Agent** | ✅ Complete | #6 | Test orchestration, flow management |
+| **7 — Agent Coordination** | ✅ Complete | #7 | Message bus, state management |
+| **8 — Execution Journaling** | ✅ Complete | #8 | Journal models, pattern matching |
+| **9 — Error Handling** | ✅ Complete | #9 | Recovery strategies, validation |
+| **10 — Security & Monitoring** | ✅ Complete | #10 | Rate limiting, sanitization, analytics |
+
+### In Progress
+
+| Phase | Status | Target | Description |
+|-------|--------|--------|-------------|
+| **10b — Test Suite Cleanup** | 🔄 Next | Immediate | Fix test_error_recovery.py failure, ensure 100% pass rate |
+
+### Upcoming
+
+| Phase | Status | Target | Description |
+|-------|--------|--------|-------------|
+| **11 — End-to-end Integration** | 📅 Planned | After 10b | Complete workflow integration |
+| **12 — Test Scenarios** | 📅 Planned | After 11 | Real-world test cases |
+| **13 — Packaging & docs** | 📅 Planned | After 12 | CLI, documentation, v0.1.0 |
+
+### Key Achievements
+- **Test Coverage**: 81% overall (exceeds 60% requirement)
+- **Code Quality**: Zero deprecation warnings, modern Python patterns
+- **Documentation**: Comprehensive runbook created (docs/RUNBOOK.md)
+- **Security**: Rate limiting, data sanitization, and monitoring in place 
