@@ -1,0 +1,14 @@
+{
+    "name": "Login Flow Test",
+    "description": "Test the login functionality of the HAINDY demo application",
+    "url": "file:///home/fkeegan/src/haindy/examples/test_page.html",
+    "requirements": "Test the login flow:\n1. Navigate to the login page\n2. Enter username 'testuser' in the username field\n3. Enter password 'password123' in the password field\n4. Click the login button\n5. Verify that we see a success message or are redirected to the dashboard",
+    "expected_outcomes": [
+        "Login form is visible and accessible",
+        "Username and password can be entered",
+        "Login button is clickable",
+        "Successful login shows appropriate feedback"
+    ],
+    "tags": ["authentication", "login", "critical"],
+    "timeout": 60
+}

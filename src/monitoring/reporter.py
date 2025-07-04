@@ -15,6 +15,7 @@ from uuid import UUID
 
 from jinja2 import Environment, Template
 
+from src.core.types import TestState, TestStep, ActionResult
 from src.error_handling.aggregator import ErrorReport
 from src.journal.models import ExecutionJournal
 from .analytics import MetricsCollector, TestMetrics, TestOutcome
@@ -485,3 +486,135 @@ HTML_REPORT_TEMPLATE = """
 </body>
 </html>
 """
+
+
+class TestReporter:
+    """
+    High-level test reporter that integrates with the workflow coordinator.
+    
+    Converts TestState objects into comprehensive reports.
+    """
+    
+    def __init__(self, config: Optional[ReportConfig] = None):
+        """Initialize the test reporter."""
+        self.config = config or ReportConfig()
+        self.metrics_collector = MetricsCollector()
+        self.report_generator = ReportGenerator(self.config)
+    
+    async def generate_report(
+        self,
+        test_state: TestState,
+        output_dir: Path,
+        format: str = "html"
+    ) -> Path:
+        """
+        Generate a test report from TestState.
+        
+        Args:
+            test_state: The test state containing execution results
+            output_dir: Directory to save the report
+            format: Report format (html, json, markdown)
+            
+        Returns:
+            Path to the generated report
+        """
+        # Convert TestState to TestMetrics
+        test_metrics = self._convert_to_metrics(test_state)
+        
+        # Create test execution report
+        test_report = TestExecutionReport(
+            test_metrics=test_metrics,
+            error_report=self._extract_error_report(test_state),
+            journal=None,  # TODO: Extract journal if available
+            config=self.config
+        )
+        
+        # Generate the report
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"test_report_{test_state.test_id}_{timestamp}.{format}"
+        output_path = output_dir / filename
+        
+        if format == "html":
+            report_data = self.report_generator.generate_html(test_report)
+        elif format == "json":
+            report_data = self.report_generator.generate_json(test_report)
+        elif format == "markdown":
+            report_data = self.report_generator.generate_markdown(test_report)
+        else:
+            raise ValueError(f"Unsupported report format: {format}")
+        
+        # Save the report
+        output_path.write_text(report_data)
+        logger.info(f"Generated {format} report: {output_path}")
+        
+        return output_path
+    
+    def _convert_to_metrics(self, test_state: TestState) -> TestMetrics:
+        """Convert TestState to TestMetrics."""
+        # Calculate metrics from test state
+        total_steps = len(test_state.step_results)
+        passed_steps = sum(1 for r in test_state.step_results.values() if r.success)
+        failed_steps = total_steps - passed_steps
+        
+        # Determine overall outcome
+        if test_state.status == "completed" and failed_steps == 0:
+            outcome = TestOutcome.PASSED
+        elif test_state.status == "failed" or failed_steps > 0:
+            outcome = TestOutcome.FAILED
+        elif test_state.status == "error":
+            outcome = TestOutcome.ERROR
+        else:
+            outcome = TestOutcome.PASSED  # Default
+        
+        # Calculate duration
+        now = datetime.now(timezone.utc)
+        start_time = now
+        end_time = now
+        
+        # If we have step results, calculate actual times
+        if test_state.step_results:
+            # Use execution time to estimate duration
+            total_exec_time_ms = sum(r.execution_time_ms for r in test_state.step_results.values())
+            duration = total_exec_time_ms / 1000.0
+        else:
+            duration = 0.0
+        
+        return TestMetrics(
+            test_id=str(test_state.test_id),
+            test_name=f"Test {test_state.test_id}",
+            outcome=outcome,
+            duration_seconds=duration,
+            start_time=start_time,
+            end_time=end_time,
+            total_steps=total_steps,
+            passed_steps=passed_steps,
+            failed_steps=failed_steps,
+            skipped_steps=0,
+            error_count=len(test_state.errors) if test_state.errors else 0,
+            retry_count=0,  # TODO: Track retries
+            confidence_scores=[],  # TODO: Extract confidence scores
+            performance_metrics={},
+            tags=["automated", "multi-agent"],
+            metadata={
+                "test_id": str(test_state.test_id),
+                "status": test_state.status,
+                "plan_id": str(test_state.plan_id) if test_state.plan_id else None,
+            }
+        )
+    
+    def _extract_error_report(self, test_state: TestState) -> Optional[ErrorReport]:
+        """Extract error report from test state."""
+        if not test_state.errors:
+            return None
+        
+        # Create a basic error report
+        # TODO: Integrate with ErrorAggregator for better error analysis
+        return ErrorReport(
+            total_errors=len(test_state.errors),
+            error_types={},
+            error_frequency={},
+            error_timeline=[],
+            recommendations=[],
+            recovery_success_rate=0.0,
+            common_patterns=[]
+        )
