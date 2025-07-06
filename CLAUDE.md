@@ -9,6 +9,15 @@
 
 HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs four specialized AI agents coordinating together to plan, execute, and evaluate tests.
 
+## Implementation Plan
+
+**Important**: The comprehensive implementation plan with phase tracking and technical details is at `docs/HAINDY_PLAN.md`. This includes:
+- MVP goals and success criteria
+- Detailed tech stack decisions
+- Multi-agent architecture design
+- Implementation phases with progress tracking
+- Post-MVP roadmap
+
 ## Development Runbook
 
 **Important**: Before running tests or demos, refer to the comprehensive runbook at `docs/RUNBOOK.md` for detailed instructions on:
@@ -82,7 +91,7 @@ python -m src.monitoring.reporter --input data/test_run_123.jsonl --output repor
 
 2. **Browser Automation Layer**
    - Playwright-Python wrapper for Chromium
-   - 60×60 grid overlay system for reliable cross-application interaction
+   - Adaptive grid overlay system (initially 60×60 with refinement) for reliable cross-application interaction
    - WebSocket/CDP communication for native browser control
 
 3. **Orchestration Framework**
@@ -128,20 +137,7 @@ Test Report Generation
 - **Language**: Python 3.10+
 - **Browser Automation**: Playwright-Python (Chromium)
 - **AI Models**: OpenAI GPT-4o mini (4 instances for multi-agent system)
-- **Grid System**: Custom 60×60 overlay with coordinate mapping
+- **Grid System**: Adaptive grid overlay with coordinate mapping and refinement
 - **Logging**: JSONL format with rich console output
 - **Packaging**: setuptools with pyproject.toml
 
-### Project Status
-
-Currently in planning phase. The implementation will follow these phases:
-1. Core foundation (base classes, data models)
-2. Browser & Grid system
-3. Individual agent implementations
-4. Agent coordination system
-5. Error handling & recovery
-6. Security & monitoring
-7. End-to-end integration
-8. Test scenarios and packaging
-
-Estimated timeline: 25-32 working days for MVP (v0.1.0)
