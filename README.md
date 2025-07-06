@@ -57,6 +57,39 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=your_api_key_here
 ```
 
+## Usage
+
+### Interactive Mode
+```bash
+python -m src.main --requirements
+```
+Opens an interactive prompt where you can paste or type multi-line test requirements.
+
+### File-based Testing
+```bash
+python -m src.main --plan requirements.md
+```
+Pass any document file (PRD, design doc, etc.) directly to the AI to extract test requirements.
+
+### Run Existing Test
+```bash
+python -m src.main --json-test-plan test_scenarios/login_test.json
+```
+Run a pre-defined test scenario from a JSON file.
+
+### Berserk Mode
+```bash
+python -m src.main --berserk --plan requirements.pdf
+```
+Fully autonomous mode - attempts to complete all tests without human intervention.
+
+### Utility Commands
+```bash
+python -m src.main --test-api    # Test OpenAI API connection
+python -m src.main --version     # Show version (0.1.0)
+python -m src.main --help        # Display help with examples
+```
+
 ### Development
 
 Run tests:
