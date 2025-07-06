@@ -383,7 +383,8 @@ The current CLI requires typing test requirements as command-line arguments, whi
    ```bash
    python -m src.main --plan <file>
    ```
-   - Accepts any readable file format: .txt, .md, .docx, .odt, .pdf, etc.
+   - Passes file directly to the AI model (OpenAI can read most formats)
+   - Model extracts requirements from any document type
    - Automatically generates a JSON test scenario file for reuse
    - Outputs: `test_scenarios/generated_<timestamp>.json`
 
@@ -411,7 +412,7 @@ The current CLI requires typing test requirements as command-line arguments, whi
 
 **Implementation Details**:
 - Use `click` or enhance argparse for better CLI UX
-- Add file readers for common document formats
+- Pass files directly to OpenAI API (let the model handle format parsing)
 - Implement interactive prompt with multi-line support
 - Auto-generate descriptive JSON filenames
 - Add proper version management
