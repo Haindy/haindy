@@ -365,6 +365,60 @@ Each test execution step must generate comprehensive, human-readable logs with t
 
 ---
 
+## 8.5  Phase 11b: CLI Improvements
+
+### **Redesigned CLI Interface**
+
+The current CLI requires typing test requirements as command-line arguments, which is impractical for real-world usage. Phase 11b redesigns the interface to match how QA engineers actually work.
+
+**New CLI Commands**:
+
+1. **Interactive Requirements Mode**:
+   ```bash
+   python -m src.main --requirements
+   ```
+   Opens an interactive prompt where users can paste or type multi-line test requirements
+
+2. **File-based Plan Input**:
+   ```bash
+   python -m src.main --plan <file>
+   ```
+   - Passes file directly to the AI model (OpenAI can read most formats)
+   - Model extracts requirements from any document type
+   - Automatically generates a JSON test scenario file for reuse
+   - Outputs: `test_scenarios/generated_<timestamp>.json`
+
+3. **Direct JSON Execution**:
+   ```bash
+   python -m src.main --json-test-plan <json-file>
+   ```
+   Points to an existing JSON test scenario file
+
+4. **Utility Commands**:
+   ```bash
+   python -m src.main --test-api    # Tests OpenAI API key configuration
+   python -m src.main --version     # Shows version (0.1.0)
+   python -m src.main --help        # Comprehensive help with examples
+   ```
+
+5. **Berserk Mode**:
+   ```bash
+   python -m src.main --berserk --plan requirements.md
+   ```
+   - Attempts to complete all tests without human intervention
+   - Aggressive retry strategies
+   - Auto-recovery from errors
+   - Skips confirmations and warnings
+
+**Implementation Details**:
+- Use `click` or enhance argparse for better CLI UX
+- Pass files directly to OpenAI API (let the model handle format parsing)
+- Implement interactive prompt with multi-line support
+- Auto-generate descriptive JSON filenames
+- Add proper version management
+
+---
+
 ## 9  Development Phases
 
 | Phase | Tasks | ETA |
@@ -382,6 +436,7 @@ Each test execution step must generate comprehensive, human-readable logs with t
 | **10 — Security & Monitoring** | Rate limiting, logging, analytics, execution reporting. | 2 days |
 | **10b — Test Suite Cleanup** | Fix all failing tests, ensure 100% pass rate before Phase 11. | 0.5 days |
 | **11 — End-to-end Integration** | Complete multi-agent workflow testing and debugging. | 3 days |
+| **11b — CLI Improvements** | Redesign CLI for real-world usage: interactive prompts, file input support, JSON generation. | 1-2 days |
 | **12 — Test Scenarios** | Create 5 comprehensive test scenarios, measure success rates. | 2-3 days |
 | **13 — Packaging & docs** | CLI interface, documentation, release v0.1.0. | 1-2 days |
 
@@ -455,19 +510,20 @@ _Total: roughly **28–36 working days**._
 | **8 — Execution Journaling** | ✅ Complete | #8 | Journal models, pattern matching |
 | **9 — Error Handling** | ✅ Complete | #9 | Recovery strategies, validation |
 | **10 — Security & Monitoring** | ✅ Complete | #10 | Rate limiting, sanitization, analytics |
+| **10b — Test Suite Cleanup** | ✅ Complete | - | Fixed test_error_recovery.py failure, 100% pass rate |
+| **11 — End-to-end Integration** | ✅ Complete | #13 | Complete workflow integration |
 
 ### In Progress
 
 | Phase | Status | Target | Description |
 |-------|--------|--------|-------------|
-| **10b — Test Suite Cleanup** | 🔄 Next | Immediate | Fix test_error_recovery.py failure, ensure 100% pass rate |
+| **11b — CLI Improvements** | 🔄 Next | Immediate | Improve CLI UX for real-world usage |
 
 ### Upcoming
 
 | Phase | Status | Target | Description |
 |-------|--------|--------|-------------|
-| **11 — End-to-end Integration** | 📅 Planned | After 10b | Complete workflow integration |
-| **12 — Test Scenarios** | 📅 Planned | After 11 | Real-world test cases |
+| **12 — Test Scenarios** | 📅 Planned | After 11b | Real-world test cases |
 | **13 — Packaging & docs** | 📅 Planned | After 12 | CLI, documentation, v0.1.0 |
 
 ### Key Achievements

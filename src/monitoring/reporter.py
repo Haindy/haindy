@@ -499,7 +499,10 @@ class TestReporter:
         """Initialize the test reporter."""
         self.config = config or ReportConfig()
         self.metrics_collector = MetricsCollector()
-        self.report_generator = ReportGenerator(self.config)
+        self.report_generator = ReportGenerator(
+            analytics=self.metrics_collector,
+            config=self.config
+        )
     
     async def generate_report(
         self,
@@ -535,11 +538,11 @@ class TestReporter:
         output_path = output_dir / filename
         
         if format == "html":
-            report_data = self.report_generator.generate_html(test_report)
+            report_data = test_report.to_html()
         elif format == "json":
-            report_data = self.report_generator.generate_json(test_report)
+            report_data = test_report.to_json()
         elif format == "markdown":
-            report_data = self.report_generator.generate_markdown(test_report)
+            report_data = test_report.to_markdown()
         else:
             raise ValueError(f"Unsupported report format: {format}")
         
@@ -580,26 +583,20 @@ class TestReporter:
             duration = 0.0
         
         return TestMetrics(
-            test_id=str(test_state.test_id),
+            test_id=UUID(str(test_state.test_id)),
             test_name=f"Test {test_state.test_id}",
-            outcome=outcome,
-            duration_seconds=duration,
             start_time=start_time,
             end_time=end_time,
-            total_steps=total_steps,
-            passed_steps=passed_steps,
-            failed_steps=failed_steps,
-            skipped_steps=0,
-            error_count=len(test_state.errors) if test_state.errors else 0,
-            retry_count=0,  # TODO: Track retries
-            confidence_scores=[],  # TODO: Extract confidence scores
-            performance_metrics={},
-            tags=["automated", "multi-agent"],
-            metadata={
-                "test_id": str(test_state.test_id),
-                "status": test_state.status,
-                "plan_id": str(test_state.plan_id) if test_state.plan_id else None,
-            }
+            outcome=outcome,
+            steps_total=total_steps,
+            steps_passed=passed_steps,
+            steps_failed=failed_steps,
+            steps_skipped=0,
+            api_calls=0,  # TODO: Track API calls
+            browser_actions=0,  # TODO: Track browser actions
+            screenshots_taken=0,  # TODO: Track screenshots
+            errors=test_state.errors if test_state.errors else [],
+            performance_metrics={}
         )
     
     def _extract_error_report(self, test_state: TestState) -> Optional[ErrorReport]:
