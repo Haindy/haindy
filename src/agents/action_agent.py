@@ -23,6 +23,10 @@ from src.browser.driver import BrowserDriver
 from src.config.agent_prompts import ACTION_AGENT_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.types import ActionInstruction, GridAction, GridCoordinate, TestStep
+from src.core.enhanced_types import (
+    EnhancedActionResult, ValidationResult, CoordinateResult,
+    ExecutionResult, BrowserState, AIAnalysis
+)
 from src.grid.overlay import GridOverlay
 from src.grid.refinement import GridRefinement
 from src.monitoring.logger import get_logger
@@ -76,7 +80,7 @@ class ActionAgent(BaseAgent):
         test_step: TestStep,
         test_context: Dict[str, Any],
         screenshot: Optional[bytes] = None
-    ) -> Dict[str, Any]:
+    ) -> EnhancedActionResult:
         """
         Execute a complete action with validation, coordination, and execution.
         
@@ -96,44 +100,32 @@ class ActionAgent(BaseAgent):
             "description": test_step.description
         })
         
-        # Initialize result structure
-        result = {
-            "action_type": test_step.action_instruction.action_type.value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "validation_passed": False,
-            "validation_reasoning": "Not yet validated",
-            "validation_confidence": 0.0,
-            "grid_cell": "",
-            "grid_coordinates": (0, 0),
-            "offset_x": 0.5,
-            "offset_y": 0.5,
-            "coordinate_confidence": 0.0,
-            "coordinate_reasoning": "",
-            "execution_success": False,
-            "execution_time_ms": 0.0,
-            "execution_error": None,
-            "url_before": "",
-            "url_after": "",
-            "page_title_before": "",
-            "page_title_after": "",
-            "screenshot_before": None,
-            "screenshot_after": None,
-            "grid_screenshot_before": None,
-            "grid_screenshot_highlighted": None,
-            "test_context": test_context,
-            "ai_analysis": {}
-        }
+        # Initialize result
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            validation=ValidationResult(
+                valid=False,
+                confidence=0.0,
+                reasoning="Not yet validated"
+            )
+        )
         
         try:
             # Capture initial browser state
             if self.browser_driver:
-                result["url_before"] = await self.browser_driver.get_page_url()
-                result["page_title_before"] = await self.browser_driver.get_page_title()
+                viewport_size = await self.browser_driver.get_viewport_size()
+                result.browser_state_before = BrowserState(
+                    url=await self.browser_driver.get_page_url(),
+                    title=await self.browser_driver.get_page_title(),
+                    viewport_size=viewport_size,
+                    screenshot=screenshot or await self.browser_driver.screenshot()
+                )
                 
-                # Get screenshot if not provided
+                # Use provided screenshot or capture new one
                 if not screenshot:
-                    screenshot = await self.browser_driver.screenshot()
-                result["screenshot_before"] = screenshot
+                    screenshot = result.browser_state_before.screenshot
             
             # Phase 1: Validation
             validation_result = await self._validate_action(
@@ -141,48 +133,45 @@ class ActionAgent(BaseAgent):
                 screenshot,
                 test_context
             )
+            result.validation = validation_result
             
-            result["validation_passed"] = validation_result["valid"]
-            result["validation_reasoning"] = validation_result["reasoning"]
-            result["validation_confidence"] = validation_result["confidence"]
-            
-            if not result["validation_passed"]:
+            if not result.validation.valid:
                 logger.warning("Action validation failed", extra={
-                    "reasoning": result["validation_reasoning"],
-                    "confidence": result["validation_confidence"]
+                    "reasoning": result.validation.reasoning,
+                    "confidence": result.validation.confidence
                 })
+                result.failure_phase = "validation"
+                result.timestamp_end = datetime.now(timezone.utc)
                 return result
             
-            # Phase 2: Coordinate Determination (use existing method)
+            # Phase 2: Coordinate Determination
             grid_action = await self.determine_action(screenshot, test_step.action_instruction)
             
-            result["grid_cell"] = grid_action.coordinate.cell
-            result["offset_x"] = grid_action.coordinate.offset_x
-            result["offset_y"] = grid_action.coordinate.offset_y
-            result["coordinate_confidence"] = grid_action.coordinate.confidence
-            result["coordinate_reasoning"] = getattr(grid_action.coordinate, 'reasoning', '')
+            # Convert GridAction to CoordinateResult
+            self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
+            x, y = self.grid_overlay.coordinate_to_pixels(grid_action.coordinate)
+            result.coordinates = CoordinateResult(
+                grid_cell=grid_action.coordinate.cell,
+                grid_coordinates=(x, y),
+                offset_x=grid_action.coordinate.offset_x,
+                offset_y=grid_action.coordinate.offset_y,
+                confidence=grid_action.coordinate.confidence,
+                reasoning=getattr(grid_action.coordinate, 'reasoning', ''),
+                refined=grid_action.coordinate.refined
+            )
             
-            # Create grid overlay screenshot
-            result["grid_screenshot_before"] = self.grid_overlay.create_overlay_image(screenshot)
-            
-            # Create highlighted screenshot
-            result["grid_screenshot_highlighted"] = self._create_highlighted_screenshot(
+            # Create grid overlay screenshots
+            result.grid_screenshot_before = self.grid_overlay.create_overlay_image(screenshot)
+            result.grid_screenshot_highlighted = self._create_highlighted_screenshot(
                 screenshot,
-                result["grid_cell"]
+                result.coordinates.grid_cell
             )
             
             # Phase 3: Action Execution
-            if self.browser_driver and result["coordinate_confidence"] >= 0.7:
+            if self.browser_driver and result.coordinates.confidence >= 0.7:
                 execution_start = asyncio.get_event_loop().time()
                 
                 try:
-                    # Convert grid coordinates to pixels
-                    viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
-                    self.grid_overlay.initialize(viewport_width, viewport_height)
-                    
-                    x, y = self.grid_overlay.coordinate_to_pixels(grid_action.coordinate)
-                    result["grid_coordinates"] = (x, y)
-                    
                     # Execute the action
                     if test_step.action_instruction.action_type.value == "click":
                         await self.browser_driver.click(x, y)
@@ -199,29 +188,56 @@ class ActionAgent(BaseAgent):
                     await self.browser_driver.wait(1000)
                     
                     # Capture post-action state
-                    result["screenshot_after"] = await self.browser_driver.screenshot()
-                    result["url_after"] = await self.browser_driver.get_page_url()
-                    result["page_title_after"] = await self.browser_driver.get_page_title()
+                    result.browser_state_after = BrowserState(
+                        url=await self.browser_driver.get_page_url(),
+                        title=await self.browser_driver.get_page_title(),
+                        viewport_size=viewport_size,
+                        screenshot=await self.browser_driver.screenshot()
+                    )
                     
-                    result["execution_success"] = True
-                    result["execution_time_ms"] = (asyncio.get_event_loop().time() - execution_start) * 1000
+                    result.execution = ExecutionResult(
+                        success=True,
+                        execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000
+                    )
                     
                 except Exception as e:
-                    result["execution_success"] = False
-                    result["execution_error"] = str(e)
+                    result.execution = ExecutionResult(
+                        success=False,
+                        execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000,
+                        error_message=str(e),
+                        error_traceback=traceback.format_exc()
+                    )
+                    result.failure_phase = "execution"
                     logger.error("Action execution failed", extra={
                         "error": str(e),
                         "traceback": traceback.format_exc()
                     })
+            else:
+                # Low confidence, skip execution
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message=f"Coordinate confidence too low: {result.coordinates.confidence}"
+                )
+                result.failure_phase = "coordinates"
             
             # Phase 4: Result Analysis
-            if result["execution_success"] and result["screenshot_after"]:
+            if result.execution and result.execution.success and result.browser_state_after:
                 analysis = await self._analyze_result(
                     test_step.action_instruction,
                     result
                 )
-                result["ai_analysis"] = analysis
+                result.ai_analysis = analysis
             
+            # Set overall success
+            result.overall_success = (
+                result.validation.valid and
+                result.coordinates is not None and
+                result.execution is not None and
+                result.execution.success
+            )
+            
+            result.timestamp_end = datetime.now(timezone.utc)
             return result
             
         except Exception as e:
@@ -229,7 +245,15 @@ class ActionAgent(BaseAgent):
                 "error": str(e),
                 "traceback": traceback.format_exc()
             })
-            result["execution_error"] = str(e)
+            if not result.execution:
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message=str(e),
+                    error_traceback=traceback.format_exc()
+                )
+            result.failure_phase = "unknown"
+            result.timestamp_end = datetime.now(timezone.utc)
             return result
     
     async def determine_action(
@@ -403,6 +427,11 @@ Guidelines:
     def _parse_coordinate_response(self, response: Dict) -> GridCoordinate:
         """Parse AI response into GridCoordinate."""
         try:
+            # Check if response is actually a coroutine (testing issue)
+            if asyncio.iscoroutine(response):
+                logger.error("Response is a coroutine, not a dict - likely test mock issue")
+                raise ValueError("Response is a coroutine")
+                
             content = response.get("content", {})
             
             # Handle string content (JSON)
@@ -416,14 +445,15 @@ Guidelines:
             confidence = float(content.get("confidence", 0.5))
             
             # Log reasoning if provided
-            if reasoning := content.get("reasoning"):
+            reasoning = content.get("reasoning", "")
+            if reasoning:
                 logger.debug("AI reasoning for coordinate selection", extra={
                     "reasoning": reasoning,
                     "cell": cell,
                     "confidence": confidence
                 })
             
-            return GridCoordinate(
+            coord = GridCoordinate(
                 cell=cell,
                 offset_x=max(0.0, min(1.0, offset_x)),  # Clamp to valid range
                 offset_y=max(0.0, min(1.0, offset_y)),
@@ -431,10 +461,16 @@ Guidelines:
                 refined=False
             )
             
+            # Store reasoning for later use
+            setattr(coord, 'reasoning', reasoning)
+            
+            return coord
+            
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to parse coordinate response", extra={
                 "error": str(e),
-                "response": response
+                "response": response,
+                "error_type": type(e).__name__
             })
             # Return default coordinate with low confidence
             return GridCoordinate(
@@ -563,7 +599,7 @@ Provide the refined position in JSON format:
         instruction: ActionInstruction,
         screenshot: bytes,
         context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    ) -> ValidationResult:
         """
         Validate if the action makes sense in current context.
         
@@ -634,22 +670,22 @@ Consider:
             if isinstance(content, str):
                 content = json.loads(content)
             
-            return {
-                "valid": content.get("valid", False),
-                "confidence": float(content.get("confidence", 0.0)),
-                "reasoning": content.get("reasoning", "No reasoning provided"),
-                "concerns": content.get("concerns", []),
-                "suggestions": content.get("suggestions", [])
-            }
+            return ValidationResult(
+                valid=content.get("valid", False),
+                confidence=float(content.get("confidence", 0.0)),
+                reasoning=content.get("reasoning", "No reasoning provided"),
+                concerns=content.get("concerns", []),
+                suggestions=content.get("suggestions", [])
+            )
         except Exception as e:
             logger.error("Failed to parse validation response", extra={"error": str(e)})
-            return {
-                "valid": False,
-                "confidence": 0.0,
-                "reasoning": f"Failed to validate: {str(e)}",
-                "concerns": ["Validation parsing failed"],
-                "suggestions": []
-            }
+            return ValidationResult(
+                valid=False,
+                confidence=0.0,
+                reasoning=f"Failed to validate: {str(e)}",
+                concerns=["Validation parsing failed"],
+                suggestions=[]
+            )
     
     def _create_highlighted_screenshot(
         self,
@@ -706,8 +742,8 @@ Consider:
     async def _analyze_result(
         self,
         instruction: ActionInstruction,
-        result: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        result: EnhancedActionResult
+    ) -> AIAnalysis:
         """
         Analyze the result of the action execution.
         
@@ -726,9 +762,9 @@ Action Performed:
 - Expected: {instruction.expected_outcome}
 
 Execution Details:
-- Grid Cell: {result['grid_cell']}
-- Execution Time: {result['execution_time_ms']}ms
-- URL Change: {result['url_before']} → {result['url_after']}
+- Grid Cell: {result.coordinates.grid_cell}
+- Execution Time: {result.execution.execution_time_ms}ms
+- URL Change: {result.browser_state_before.url} → {result.browser_state_after.url}
 
 Compare the before and after screenshots and provide analysis in JSON format:
 {{
@@ -737,11 +773,12 @@ Compare the before and after screenshots and provide analysis in JSON format:
     "actual_outcome": "What actually happened",
     "matches_expected": true/false,
     "ui_changes": ["List of observed UI changes"],
-    "recommendations": ["Any recommendations for next steps"]
+    "recommendations": ["Any recommendations for next steps"],
+    "anomalies": ["Any unexpected behaviors detected"]
 }}"""
 
         # Create comparison with before and after screenshots
-        if result.get("screenshot_before") and result.get("screenshot_after"):
+        if result.browser_state_before.screenshot and result.browser_state_after.screenshot:
             messages = [
                 {
                     "role": "user",
@@ -750,14 +787,14 @@ Compare the before and after screenshots and provide analysis in JSON format:
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(result['screenshot_before']).decode('utf-8')}",
+                                "url": f"data:image/png;base64,{base64.b64encode(result.browser_state_before.screenshot).decode('utf-8')}",
                                 "detail": "high"
                             }
                         },
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(result['screenshot_after']).decode('utf-8')}",
+                                "url": f"data:image/png;base64,{base64.b64encode(result.browser_state_after.screenshot).decode('utf-8')}",
                                 "detail": "high"
                             }
                         }
@@ -775,23 +812,25 @@ Compare the before and after screenshots and provide analysis in JSON format:
                 content = response.get("content", {})
                 if isinstance(content, str):
                     content = json.loads(content)
-                return content
+                
+                return AIAnalysis(
+                    success=content.get("success", False),
+                    confidence=float(content.get("confidence", 0.0)),
+                    actual_outcome=content.get("actual_outcome", "Unknown"),
+                    matches_expected=content.get("matches_expected", False),
+                    ui_changes=content.get("ui_changes", []),
+                    recommendations=content.get("recommendations", []),
+                    anomalies=content.get("anomalies", [])
+                )
             except Exception as e:
                 logger.error("Failed to parse analysis response", extra={"error": str(e)})
-                return {
-                    "success": False,
-                    "confidence": 0.0,
-                    "actual_outcome": "Failed to analyze",
-                    "matches_expected": False,
-                    "ui_changes": [],
-                    "recommendations": []
-                }
         
-        return {
-            "success": result["execution_success"],
-            "confidence": 0.5,
-            "actual_outcome": "No screenshot comparison available",
-            "matches_expected": False,
-            "ui_changes": [],
-            "recommendations": []
-        }
+        return AIAnalysis(
+            success=result.execution.success,
+            confidence=0.5,
+            actual_outcome="No screenshot comparison available",
+            matches_expected=False,
+            ui_changes=[],
+            recommendations=[],
+            anomalies=[]
+        )

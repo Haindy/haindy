@@ -1,212 +1,223 @@
 """
-Enhanced data models for improved error reporting and debugging.
+Enhanced data models for comprehensive action execution tracking.
 
-This module contains enhanced versions of core types that provide
-comprehensive debugging information for test execution.
+These models provide detailed information for debugging and error reporting,
+capturing the full lifecycle of action execution from validation through result analysis.
 """
 
 from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from src.core.types import ActionInstruction, GridCoordinate, TestStep
 
-class ValidationStatus(str, Enum):
-    """Status of action validation."""
+
+class ValidationResult(BaseModel):
+    """Result of action validation phase."""
     
-    VALID = "valid"
-    INVALID = "invalid"
-    WARNING = "warning"
-    SKIPPED = "skipped"
+    valid: bool = Field(..., description="Whether the action is valid to execute")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Validation confidence score")
+    reasoning: str = Field(..., description="Detailed explanation of validation decision")
+    concerns: List[str] = Field(default_factory=list, description="List of validation concerns")
+    suggestions: List[str] = Field(
+        default_factory=list, 
+        description="Alternative approaches if validation failed"
+    )
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class CoordinateResult(BaseModel):
+    """Result of coordinate determination phase."""
+    
+    grid_cell: str = Field(..., description="Grid cell identifier (e.g., 'M23')")
+    grid_coordinates: tuple[int, int] = Field(..., description="Pixel coordinates (x, y)")
+    offset_x: float = Field(..., ge=0.0, le=1.0, description="X offset within cell")
+    offset_y: float = Field(..., ge=0.0, le=1.0, description="Y offset within cell")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Coordinate confidence score")
+    reasoning: str = Field("", description="Explanation of coordinate selection")
+    refined: bool = Field(False, description="Whether adaptive refinement was applied")
+    refinement_details: Optional[Dict[str, Any]] = Field(
+        None, 
+        description="Details about refinement process if applied"
+    )
+
+
+class ExecutionResult(BaseModel):
+    """Result of action execution phase."""
+    
+    success: bool = Field(..., description="Whether the action executed successfully")
+    execution_time_ms: float = Field(..., description="Execution duration in milliseconds")
+    error_message: Optional[str] = Field(None, description="Error message if execution failed")
+    error_traceback: Optional[str] = Field(None, description="Full error traceback if available")
+    browser_logs: List[str] = Field(default_factory=list, description="Browser console logs")
+    network_activity: List[Dict[str, Any]] = Field(
+        default_factory=list, 
+        description="Network requests during execution"
+    )
+
+
+class AIAnalysis(BaseModel):
+    """AI analysis of action results."""
+    
+    success: bool = Field(..., description="AI assessment of action success")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Analysis confidence score")
+    actual_outcome: str = Field(..., description="Description of what actually happened")
+    matches_expected: bool = Field(..., description="Whether outcome matches expectations")
+    ui_changes: List[str] = Field(
+        default_factory=list, 
+        description="List of observed UI changes"
+    )
+    recommendations: List[str] = Field(
+        default_factory=list, 
+        description="AI recommendations for next steps"
+    )
+    anomalies: List[str] = Field(
+        default_factory=list, 
+        description="Unexpected behaviors or UI states detected"
+    )
+
+
+class BrowserState(BaseModel):
+    """Browser state at a point in time."""
+    
+    url: str = Field(..., description="Current page URL")
+    title: str = Field(..., description="Page title")
+    viewport_size: tuple[int, int] = Field(..., description="Viewport dimensions (width, height)")
+    screenshot: Optional[bytes] = Field(None, description="Screenshot data")
+    screenshot_path: Optional[str] = Field(None, description="Path to saved screenshot")
+    dom_ready_state: Optional[str] = Field(None, description="Document ready state")
+    active_element: Optional[str] = Field(None, description="Currently focused element")
 
 
 class EnhancedActionResult(BaseModel):
     """
-    Enhanced action result with comprehensive debugging information.
+    Comprehensive result of action execution with full debugging information.
     
-    This replaces the simple ActionResult with detailed information needed
-    for debugging failed actions and generating bug reports.
+    This model captures the complete lifecycle of an action from validation
+    through execution and analysis, providing rich context for debugging
+    and error reporting.
     """
     
-    # Basic info
+    # Identifiers
     action_id: UUID = Field(default_factory=uuid4)
-    action_type: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    test_step_id: UUID = Field(..., description="ID of the test step being executed")
+    
+    # Timestamps
+    timestamp_start: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp_end: Optional[datetime] = Field(None)
+    
+    # Original request
+    test_step: TestStep = Field(..., description="Original test step")
+    test_context: Dict[str, Any] = Field(..., description="Test execution context")
     
     # Validation phase
-    validation_passed: bool
-    validation_status: ValidationStatus
-    validation_reasoning: str
-    validation_confidence: float = Field(0.0, ge=0.0, le=1.0)
+    validation: ValidationResult = Field(..., description="Validation phase results")
     
-    # Grid selection phase
-    grid_cell: str
-    grid_coordinates: Tuple[int, int]
-    offset_x: float = Field(0.5, ge=0.0, le=1.0)
-    offset_y: float = Field(0.5, ge=0.0, le=1.0)
-    coordinate_confidence: float = Field(0.0, ge=0.0, le=1.0)
-    coordinate_reasoning: str
-    
-    # Screenshots and visual evidence
-    screenshot_before: Optional[bytes] = None
-    screenshot_after: Optional[bytes] = None
-    grid_screenshot_before: Optional[bytes] = None  # With grid overlay
-    grid_screenshot_highlighted: Optional[bytes] = None  # With selected cell highlighted
-    
-    # Browser state
-    url_before: str
-    url_after: str
-    page_title_before: str
-    page_title_after: str
-    
-    # Execution details
-    execution_success: bool
-    execution_time_ms: float
-    execution_error: Optional[str] = None
-    execution_error_type: Optional[str] = None
-    execution_traceback: Optional[str] = None
-    
-    # AI reasoning and context
-    test_context: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Context about the test plan and current step"
-    )
-    ai_analysis: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="AI's analysis of the result"
+    # Coordinate determination
+    coordinates: Optional[CoordinateResult] = Field(
+        None, 
+        description="Coordinate determination results"
     )
     
-    # Retry information
-    attempt_number: int = 1
-    max_attempts: int = 3
-    retry_reason: Optional[str] = None
+    # Browser states
+    browser_state_before: Optional[BrowserState] = Field(
+        None, 
+        description="Browser state before action"
+    )
+    browser_state_after: Optional[BrowserState] = Field(
+        None, 
+        description="Browser state after action"
+    )
     
-    class Config:
-        """Pydantic config."""
-        arbitrary_types_allowed = True
+    # Grid screenshots
+    grid_screenshot_before: Optional[bytes] = Field(
+        None, 
+        description="Screenshot with grid overlay before action"
+    )
+    grid_screenshot_highlighted: Optional[bytes] = Field(
+        None, 
+        description="Screenshot with selected cell highlighted"
+    )
+    
+    # Execution
+    execution: Optional[ExecutionResult] = Field(
+        None, 
+        description="Execution phase results"
+    )
+    
+    # AI Analysis
+    ai_analysis: Optional[AIAnalysis] = Field(
+        None, 
+        description="AI analysis of results"
+    )
+    
+    # Overall status
+    overall_success: bool = Field(
+        False, 
+        description="Whether the entire action completed successfully"
+    )
+    failure_phase: Optional[str] = Field(
+        None, 
+        description="Which phase failed: validation|coordinates|execution|analysis"
+    )
+    
+    def dict_for_compatibility(self) -> Dict[str, Any]:
+        """
+        Convert to dictionary format compatible with existing code.
+        
+        This method provides backward compatibility while we transition
+        to the new model structure.
+        """
+        return {
+            "action_type": self.test_step.action_instruction.action_type.value,
+            "timestamp": self.timestamp_start.isoformat(),
+            "validation_passed": self.validation.valid,
+            "validation_reasoning": self.validation.reasoning,
+            "validation_confidence": self.validation.confidence,
+            "grid_cell": self.coordinates.grid_cell if self.coordinates else "",
+            "grid_coordinates": self.coordinates.grid_coordinates if self.coordinates else (0, 0),
+            "offset_x": self.coordinates.offset_x if self.coordinates else 0.5,
+            "offset_y": self.coordinates.offset_y if self.coordinates else 0.5,
+            "coordinate_confidence": self.coordinates.confidence if self.coordinates else 0.0,
+            "coordinate_reasoning": self.coordinates.reasoning if self.coordinates else "",
+            "execution_success": self.execution.success if self.execution else False,
+            "execution_time_ms": self.execution.execution_time_ms if self.execution else 0.0,
+            "execution_error": self.execution.error_message if self.execution else None,
+            "url_before": self.browser_state_before.url if self.browser_state_before else "",
+            "url_after": self.browser_state_after.url if self.browser_state_after else "",
+            "page_title_before": self.browser_state_before.title if self.browser_state_before else "",
+            "page_title_after": self.browser_state_after.title if self.browser_state_after else "",
+            "screenshot_before": self.browser_state_before.screenshot if self.browser_state_before else None,
+            "screenshot_after": self.browser_state_after.screenshot if self.browser_state_after else None,
+            "grid_screenshot_before": self.grid_screenshot_before,
+            "grid_screenshot_highlighted": self.grid_screenshot_highlighted,
+            "test_context": self.test_context,
+            "ai_analysis": self.ai_analysis.model_dump() if self.ai_analysis else {}
+        }
 
 
-class BugReport(BaseModel):
+class ActionPattern(BaseModel):
     """
-    Comprehensive bug report for a failed test step.
+    Reusable pattern for successful actions.
     
-    Generated when an action fails to provide detailed debugging information.
-    """
-    
-    report_id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
-    # Test information
-    test_plan_id: UUID
-    test_plan_name: str
-    step_number: int
-    step_description: str
-    
-    # What was attempted
-    action_attempted: str
-    expected_outcome: str
-    actual_outcome: str
-    
-    # Visual evidence
-    screenshots: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Paths to saved screenshots"
-    )
-    
-    # AI reasoning
-    ai_reasoning: Dict[str, str] = Field(
-        default_factory=dict,
-        description="AI's reasoning at each phase"
-    )
-    
-    # Error details
-    error_type: str
-    error_message: str
-    error_traceback: Optional[str] = None
-    
-    # Browser state
-    browser_state: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Browser state at time of failure"
-    )
-    
-    # Recommendations
-    failure_analysis: str
-    recommended_fixes: List[str] = Field(default_factory=list)
-    
-    # Categorization
-    severity: str = "medium"  # low, medium, high, critical
-    category: str = "unknown"  # ui_change, timing, network, validation, etc.
-    
-    
-class EnhancedTestState(BaseModel):
-    """
-    Enhanced test state with detailed error tracking.
-    
-    Extends the basic TestState with comprehensive error information.
+    Used for caching and optimizing repeated actions.
     """
     
-    # Import base types to avoid circular imports
-    from src.core.types import TestPlan, TestStep, TestStatus
-    
-    # Base state info
-    test_plan: TestPlan
-    current_step: Optional[TestStep] = None
-    completed_steps: List[UUID] = Field(default_factory=list)
-    failed_steps: List[UUID] = Field(default_factory=list)
-    skipped_steps: List[UUID] = Field(default_factory=list)
-    status: TestStatus = TestStatus.PENDING
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    
-    # Enhanced error tracking
-    error_count: int = 0
-    warning_count: int = 0
-    errors: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Detailed error information"
+    pattern_id: UUID = Field(default_factory=uuid4)
+    action_type: str = Field(..., description="Type of action")
+    target_description: str = Field(..., description="Description of target element")
+    grid_coordinates: CoordinateResult = Field(..., description="Successful coordinates")
+    playwright_command: Optional[str] = Field(
+        None, 
+        description="Recorded Playwright command for direct replay"
     )
-    warnings: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Warning information"
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Pattern confidence")
+    success_count: int = Field(0, description="Number of successful uses")
+    failure_count: int = Field(0, description="Number of failed attempts")
+    last_used: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    screenshot_hash: Optional[str] = Field(
+        None, 
+        description="Hash of screenshot for visual similarity matching"
     )
-    
-    # Bug reports
-    bug_reports: List[BugReport] = Field(
-        default_factory=list,
-        description="Generated bug reports for failures"
-    )
-    
-    # Execution history with enhanced results
-    execution_history: List[EnhancedActionResult] = Field(
-        default_factory=list,
-        description="Detailed history of all actions"
-    )
-    
-    # Context and metadata
-    context: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    
-    # Performance metrics
-    total_api_calls: int = 0
-    total_browser_actions: int = 0
-    total_screenshots: int = 0
-    
-    
-class EnhancedTestStepResult(BaseModel):
-    """Enhanced result of executing a single test step."""
-    
-    from src.core.types import TestStep, EvaluationResult
-    
-    step: TestStep
-    success: bool
-    action_result: Optional[EnhancedActionResult] = None
-    evaluation: Optional[EvaluationResult] = None
-    execution_mode: str = "visual"
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
-    # Additional debugging info
-    debug_info: Dict[str, Any] = Field(default_factory=dict)
-    performance_metrics: Dict[str, float] = Field(default_factory=dict)
