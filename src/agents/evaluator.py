@@ -105,7 +105,7 @@ class EvaluatorAgent(BaseAgent):
         ]
         
         # Call AI for analysis
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for consistent evaluation
@@ -265,7 +265,7 @@ Provide response in JSON format:
         ]
         
         # Get AI analysis
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3
@@ -341,7 +341,7 @@ Provide response in JSON format:
             }
         ]
         
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.2  # Very low temperature for error detection

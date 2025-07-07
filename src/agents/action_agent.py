@@ -171,7 +171,7 @@ class ActionAgent(BaseAgent):
         ]
         
         # Call AI for analysis
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for precision
@@ -326,7 +326,7 @@ Provide the refined position in JSON format:
             }
         ]
         
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.2  # Even lower temperature for refinement

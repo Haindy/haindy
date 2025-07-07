@@ -281,11 +281,12 @@ class TestRunnerAgent(BaseAgent):
             
         except Exception as e:
             import traceback
+            tb = traceback.format_exc()
             logger.error("Step execution failed", extra={
                 "step_number": step.step_number,
                 "error": str(e),
                 "error_type": type(e).__name__,
-                "traceback": traceback.format_exc()
+                "traceback": tb
             })
             
             return TestStepResult(
@@ -309,9 +310,21 @@ class TestRunnerAgent(BaseAgent):
         screenshot = await self.browser_driver.screenshot()
         
         # Get action coordinates from Action Agent
-        action_result = await self.action_agent.determine_action(
-            screenshot, step.description
+        grid_action = await self.action_agent.determine_action(
+            screenshot, step.action_instruction
         )
+        
+        # Convert GridAction to ActionResult
+        action_result = None
+        if grid_action and grid_action.coordinate:
+            action_result = ActionResult(
+                action_type=grid_action.instruction.action_type.value,
+                grid_cell=grid_action.coordinate.cell,
+                offset_x=grid_action.coordinate.offset_x,
+                offset_y=grid_action.coordinate.offset_y,
+                confidence=grid_action.coordinate.confidence,
+                requires_refinement=False
+            )
         
         if action_result and action_result.confidence >= 0.8:
             # Execute the action
@@ -319,6 +332,11 @@ class TestRunnerAgent(BaseAgent):
             
             # Record successful action for future use
             self._record_action(step, action_result)
+        else:
+            logger.warning("Action confidence too low or no result", extra={
+                "confidence": action_result.confidence if action_result else None,
+                "action_result": action_result
+            })
         
         return action_result
     
