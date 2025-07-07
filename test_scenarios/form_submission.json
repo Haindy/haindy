@@ -1,0 +1,31 @@
+{
+  "name": "Form Submission Test",
+  "description": "Test various form controls and validation on a demo form - demonstrates form interaction capabilities",
+  "url": "https://formy-project.herokuapp.com/form",
+  "requirements": "Test comprehensive form submission with various input types:\n1. Navigate to the Formy demo form page\n2. Fill in text fields (First Name: John, Last Name: Doe)\n3. Enter job title: QA Engineer\n4. Select education level: College\n5. Select gender via radio button: Male\n6. Select years of experience: 5-9\n7. Enter date: 01/15/2024\n8. Check the checkbox to agree to terms\n9. Submit the form\n10. Verify success message appears",
+  "expected_outcomes": [
+    "Form page loads with all input fields visible",
+    "Text fields accept typed input",
+    "Dropdown menus show options when clicked",
+    "Radio buttons are selectable (only one at a time)",
+    "Checkbox can be checked and unchecked",
+    "Date picker allows date selection or manual entry",
+    "Submit button is clickable",
+    "After submission, success message displays",
+    "Form validates required fields if left empty"
+  ],
+  "tags": ["forms", "input-validation", "ui-controls", "demo-site"],
+  "timeout": 180,
+  "max_steps": 20,
+  "complexity": "medium",
+  "test_data": {
+    "first_name": "John",
+    "last_name": "Doe",
+    "job_title": "QA Engineer",
+    "education": "College",
+    "gender": "Male",
+    "experience": "5-9",
+    "date": "01/15/2024"
+  },
+  "notes": "Formy is a public demo site for testing form automation. Form may have various input types including text, radio, checkbox, select, and date fields."
+}

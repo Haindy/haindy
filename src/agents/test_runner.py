@@ -4,6 +4,7 @@ Test Runner Agent implementation.
 Orchestrates test execution by coordinating other agents and managing test state.
 """
 
+import asyncio
 import json
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -22,42 +23,16 @@ from src.core.types import (
     GridAction,
     GridCoordinate,
     ActionInstruction,
+    TestPlan,
+    TestStep,
+    TestState,
+    TestStatus,
 )
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-# Custom types for Test Runner
-class TestStep(BaseModel):
-    """Simplified test step for test runner."""
-    id: UUID = Field(default_factory=uuid4)
-    step_number: int
-    action: str
-    expected_result: str
-    depends_on: List[int] = Field(default_factory=list)
-    is_critical: bool = True
-
-
-class TestPlan(BaseModel):
-    """Simplified test plan for test runner."""
-    test_id: UUID = Field(default_factory=uuid4)
-    name: str
-    description: str
-    prerequisites: List[str] = Field(default_factory=list)
-    steps: List[TestStep]
-    success_criteria: List[str] = Field(default_factory=list)
-    edge_cases: List[str] = Field(default_factory=list)
-
-
-class TestState(BaseModel):
-    """Test execution state."""
-    test_id: UUID
-    current_step: int
-    completed_steps: List[int]
-    remaining_steps: List[int]
-    test_status: str = "pending"
-    context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ActionResult(BaseModel):
@@ -145,7 +120,7 @@ class TestRunnerAgent(BaseAgent):
             Final test state after execution
         """
         logger.info("Starting test plan execution", extra={
-            "test_plan_id": str(test_plan.test_id),
+            "test_plan_id": str(test_plan.plan_id),
             "test_plan_name": test_plan.name,
             "total_steps": len(test_plan.steps)
         })
@@ -153,35 +128,41 @@ class TestRunnerAgent(BaseAgent):
         # Initialize test state
         self._current_test_plan = test_plan
         self._test_state = TestState(
-            test_id=test_plan.test_id,
-            current_step=0,
+            test_plan=test_plan,
+            current_step=None,
             completed_steps=[],
-            remaining_steps=list(range(len(test_plan.steps))),
-            test_status="in_progress",
-            context={"test_plan_name": test_plan.name}
+            failed_steps=[],
+            skipped_steps=[],
+            status=TestStatus.IN_PROGRESS,
+            start_time=datetime.now(timezone.utc),
+            error_count=0,
+            warning_count=0
         )
         self._execution_history = []
+        self._step_index = 0  # Track current step index
         
         # Navigate to initial URL if provided
         if initial_url and self.browser_driver:
             logger.info("Navigating to initial URL", extra={"url": initial_url})
             await self.browser_driver.navigate(initial_url)
-            await self.browser_driver.wait_for_load()
         
         # Execute steps
         try:
-            while self._test_state.test_status == "in_progress":
+            while self._test_state.status == TestStatus.IN_PROGRESS:
                 await self._execute_next_step()
         except Exception as e:
             logger.error("Test execution failed", extra={
                 "error": str(e),
                 "current_step": self._test_state.current_step
             })
-            self._test_state.test_status = "failed"
-            self._test_state.context["error"] = str(e)
+            self._test_state.status = TestStatus.FAILED
+            self._test_state.error_count += 1
+        
+        # Set end time
+        self._test_state.end_time = datetime.now(timezone.utc)
         
         logger.info("Test execution completed", extra={
-            "test_status": self._test_state.test_status,
+            "test_status": self._test_state.status.value,
             "completed_steps": len(self._test_state.completed_steps),
             "total_steps": len(test_plan.steps)
         })
@@ -190,26 +171,28 @@ class TestRunnerAgent(BaseAgent):
     
     async def _execute_next_step(self) -> None:
         """Execute the next step in the test plan."""
-        if not self._test_state.remaining_steps:
+        # Check if all steps are completed
+        if self._step_index >= len(self._test_state.test_plan.steps):
             # All steps completed
-            self._test_state.test_status = "completed"
+            self._test_state.status = TestStatus.COMPLETED
             return
         
         # Get next step
-        step_index = self._test_state.remaining_steps[0]
-        current_step = self._current_test_plan.steps[step_index]
+        current_step = self._test_state.test_plan.steps[self._step_index]
+        self._test_state.current_step = current_step
         
         logger.info("Executing test step", extra={
             "step_number": current_step.step_number,
-            "action": current_step.action,
-            "is_critical": current_step.is_critical
+            "description": current_step.description,
+            "action_type": current_step.action_instruction.action_type.value,
+            "optional": current_step.optional
         })
         
         # Check dependencies
         if not self._check_dependencies(current_step):
             logger.warning("Step dependencies not met, skipping", extra={
                 "step_number": current_step.step_number,
-                "depends_on": current_step.depends_on
+                "dependencies": [str(d) for d in current_step.dependencies]
             })
             self._mark_step_skipped(current_step)
             return
@@ -225,16 +208,12 @@ class TestRunnerAgent(BaseAgent):
     
     def _check_dependencies(self, step: TestStep) -> bool:
         """Check if all step dependencies are satisfied."""
-        if not step.depends_on:
+        if not step.dependencies:
             return True
         
-        for dep_step_num in step.depends_on:
-            # Check if dependency was completed successfully
-            dep_result = next(
-                (r for r in self._execution_history if r.step.step_number == dep_step_num),
-                None
-            )
-            if not dep_result or not dep_result.success:
+        # Check if all dependencies are in completed_steps
+        for dep_step_id in step.dependencies:
+            if dep_step_id not in self._test_state.completed_steps:
                 return False
         
         return True
@@ -242,7 +221,7 @@ class TestRunnerAgent(BaseAgent):
     async def _determine_execution_mode(self, step: TestStep) -> ExecutionMode:
         """Determine the best execution mode for a step."""
         # Check if we have a scripted action for this step
-        step_key = f"{self._current_test_plan.test_id}:{step.step_number}"
+        step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
         
         if step_key in self._scripted_actions:
             # We have a recorded action, try scripted mode
@@ -263,7 +242,7 @@ class TestRunnerAgent(BaseAgent):
         try:
             # Capture pre-action screenshot
             if self.browser_driver:
-                screenshot_before = await self.browser_driver.take_screenshot()
+                screenshot_before = await self.browser_driver.screenshot()
             
             # Execute action based on mode
             if mode == ExecutionMode.VISUAL:
@@ -275,15 +254,15 @@ class TestRunnerAgent(BaseAgent):
             
             # Wait for action to complete
             if self.browser_driver:
-                await self.browser_driver.wait_for_idle()
-                screenshot_after = await self.browser_driver.take_screenshot()
+                await asyncio.sleep(0.5)  # Simple wait
+                screenshot_after = await self.browser_driver.screenshot()
             
             # Evaluate result
             if self.evaluator_agent and screenshot_after:
                 evaluation_result = await self.evaluator_agent.evaluate_result(
                     screenshot_after,
-                    step.expected_result,
-                    step_id=step.id
+                    step.action_instruction.expected_outcome,
+                    step_id=step.step_id
                 )
             
             # Create step result
@@ -301,9 +280,12 @@ class TestRunnerAgent(BaseAgent):
             )
             
         except Exception as e:
+            import traceback
             logger.error("Step execution failed", extra={
                 "step_number": step.step_number,
-                "error": str(e)
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc()
             })
             
             return TestStepResult(
@@ -324,11 +306,11 @@ class TestRunnerAgent(BaseAgent):
             return None
         
         # Get current screenshot
-        screenshot = await self.browser_driver.take_screenshot()
+        screenshot = await self.browser_driver.screenshot()
         
         # Get action coordinates from Action Agent
         action_result = await self.action_agent.determine_action(
-            screenshot, step.action
+            screenshot, step.description
         )
         
         if action_result and action_result.confidence >= 0.8:
@@ -344,7 +326,7 @@ class TestRunnerAgent(BaseAgent):
         """Execute action using recorded script."""
         if not self._current_test_plan:
             return None
-        step_key = f"{self._current_test_plan.test_id}:{step.step_number}"
+        step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
         scripted_action = self._scripted_actions.get(step_key)
         
         if not scripted_action or not self.browser_driver:
@@ -415,7 +397,7 @@ class TestRunnerAgent(BaseAgent):
         """Record successful action for future scripted execution."""
         if not self._current_test_plan:
             return
-        step_key = f"{self._current_test_plan.test_id}:{step.step_number}"
+        step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
         
         self._scripted_actions[step_key] = {
             "action_type": action.action_type,
@@ -432,32 +414,36 @@ class TestRunnerAgent(BaseAgent):
         # Add to history
         self._execution_history.append(result)
         
-        # Update state
-        self._test_state.remaining_steps.remove(step.step_number - 1)
-        self._test_state.completed_steps.append(step.step_number - 1)
-        
         if result.success:
+            # Add to completed steps
+            self._test_state.completed_steps.append(step.step_id)
             # Move to next step
-            if self._test_state.remaining_steps:
-                self._test_state.current_step = self._test_state.remaining_steps[0]
+            self._step_index += 1
         else:
+            # Add to failed steps
+            self._test_state.failed_steps.append(step.step_id)
+            self._test_state.error_count += 1
+            
             # Handle failure
-            if step.is_critical:
-                logger.error("Critical step failed, ending test", extra={
+            if not step.optional:
+                logger.error("Required step failed, ending test", extra={
                     "step_number": step.step_number
                 })
-                self._test_state.test_status = "failed"
+                self._test_state.status = TestStatus.FAILED
             else:
-                logger.warning("Non-critical step failed, continuing", extra={
+                logger.warning("Optional step failed, continuing", extra={
                     "step_number": step.step_number
                 })
+                # Move to next step even if optional step failed
+                self._step_index += 1
         
         # Check for completion
-        if not self._test_state.remaining_steps and self._test_state.test_status == "in_progress":
-            self._test_state.test_status = "completed"
+        if self._step_index >= len(self._test_state.test_plan.steps) and self._test_state.status == TestStatus.IN_PROGRESS:
+            self._test_state.status = TestStatus.COMPLETED
         
         # Use AI to analyze overall progress and determine next action
-        await self._analyze_progress()
+        # TODO: Fix this after unifying TestState
+        # await self._analyze_progress()
     
     def _mark_step_skipped(self, step: TestStep) -> None:
         """Mark a step as skipped due to unmet dependencies."""
@@ -473,8 +459,9 @@ class TestRunnerAgent(BaseAgent):
         )
         
         self._execution_history.append(result)
-        self._test_state.remaining_steps.remove(step.step_number - 1)
-        self._test_state.completed_steps.append(step.step_number - 1)
+        self._test_state.skipped_steps.append(step.step_id)
+        # Move to next step
+        self._step_index += 1
     
     async def _analyze_progress(self) -> None:
         """Use AI to analyze test progress and make decisions."""
@@ -485,7 +472,7 @@ class TestRunnerAgent(BaseAgent):
             "total_steps": len(self._current_test_plan.steps),
             "recent_results": [
                 {
-                    "step": r.step.action,
+                    "step": r.step.description,
                     "success": r.success,
                     "result": r.actual_result
                 }
@@ -509,7 +496,7 @@ Based on this information, provide:
 Respond in JSON format with keys: assessment, concerns, recommendations"""
         
         try:
-            response = await self.call_ai(
+            response = await self.call_openai(
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}
             )
@@ -533,15 +520,14 @@ Respond in JSON format with keys: assessment, concerns, recommendations"""
         the Test Runner makes decisions about what to do next.
         """
         # Find current step
-        if current_state.remaining_steps:
-            next_step_index = current_state.remaining_steps[0]
-            next_step = test_plan.steps[next_step_index]
+        if current_state.current_step:
+            next_step = current_state.current_step
             
             # Use AI to determine if we should proceed or adapt
             prompt = f"""Current test state:
 - Test: {test_plan.name}
-- Current step: {next_step.action}
-- Expected result: {next_step.expected_result}
+- Current step: {next_step.description}
+- Expected result: {next_step.action_instruction.expected_outcome}
 - Recent failures: {sum(1 for r in self._execution_history[-3:] if not r.success)}
 
 Should we:
@@ -552,7 +538,7 @@ Should we:
 
 Provide your recommendation with reasoning."""
             
-            response = await self.call_ai(
+            response = await self.call_openai(
                 messages=[{"role": "user", "content": prompt}]
             )
             

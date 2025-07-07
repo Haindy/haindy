@@ -140,6 +140,7 @@ class TestState(BaseModel):
     end_time: Optional[datetime] = None
     error_count: int = 0
     warning_count: int = 0
+    context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EvaluationResult(BaseModel):

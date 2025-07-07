@@ -1,0 +1,20 @@
+{
+  "name": "Wikipedia Search Test",
+  "description": "Test searching for information on Wikipedia - demonstrates basic search functionality and content verification",
+  "url": "https://en.wikipedia.org",
+  "requirements": "Navigate to Wikipedia, search for 'artificial intelligence', and verify that:\n1. The search functionality works correctly\n2. Search results appear with relevant suggestions\n3. The main article about AI is accessible\n4. The article contains expected sections like 'History', 'Applications', and 'Ethics'\n5. Navigation between sections works properly",
+  "expected_outcomes": [
+    "Wikipedia homepage loads successfully",
+    "Search box is visible and functional",
+    "Typing 'artificial intelligence' shows search suggestions",
+    "Clicking search or pressing enter navigates to the AI article",
+    "Article has a table of contents with expected sections",
+    "Clicking on TOC links navigates to the correct sections",
+    "Images and infobox are present in the article"
+  ],
+  "tags": ["search", "navigation", "content-verification", "wikipedia"],
+  "timeout": 180,
+  "max_steps": 20,
+  "complexity": "low",
+  "notes": "This is a simple test that doesn't require authentication and tests basic web navigation patterns"
+}

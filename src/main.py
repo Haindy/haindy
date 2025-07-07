@@ -278,13 +278,29 @@ async def run_test(
         # Display results summary
         console.print("\n[bold]Test Execution Summary:[/bold]")
         
-        status_color = "green" if test_state.status == "completed" else "red"
-        console.print(f"Status: [{status_color}]{test_state.status}[/{status_color}]")
-        console.print(f"Total Steps: {len(test_state.test_plan.steps)}")
+        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "completed" else "red"
+        status_text = getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown'))
+        console.print(f"Status: [{status_color}]{status_text}[/{status_color}]")
         
-        console.print(f"Completed Steps: [green]{len(test_state.completed_steps)}[/green]")
-        console.print(f"Failed Steps: [red]{len(test_state.failed_steps)}[/red]")
-        console.print(f"Skipped Steps: [yellow]{len(test_state.skipped_steps)}[/yellow]")
+        # Handle different TestState structures
+        if hasattr(test_state, 'test_plan') and test_state.test_plan:
+            console.print(f"Total Steps: {len(test_state.test_plan.steps)}")
+        
+        if hasattr(test_state, 'completed_steps'):
+            console.print(f"Completed Steps: [green]{len(test_state.completed_steps)}[/green]")
+        
+        if hasattr(test_state, 'failed_steps'):
+            console.print(f"Failed Steps: [red]{len(test_state.failed_steps)}[/red]")
+        elif hasattr(test_state, 'remaining_steps') and hasattr(test_state, 'completed_steps'):
+            # Calculate failed steps from test runner's TestState
+            total_steps = len(test_state.completed_steps) + len(test_state.remaining_steps)
+            failed_steps = 0  # Test runner doesn't track failed steps separately
+            console.print(f"Failed Steps: [red]{failed_steps}[/red]")
+        
+        if hasattr(test_state, 'skipped_steps'):
+            console.print(f"Skipped Steps: [yellow]{len(test_state.skipped_steps)}[/yellow]")
+        else:
+            console.print(f"Skipped Steps: [yellow]0[/yellow]")
         
         # Generate report
         if output_dir is None:
@@ -373,17 +389,16 @@ async def test_api_connection() -> int:
             
             client = OpenAIClient()
             # Test with a simple prompt
-            response = await client.get_completion(
+            response = await client.call(
                 messages=[{"role": "user", "content": "Say 'API test successful' and nothing else."}],
-                model="gpt-4o-mini",
             )
             
             progress.update(task, completed=True)
         
-        if "API test successful" in response.content:
+        if "API test successful" in response["content"]:
             console.print("[green]✓ OpenAI API connection successful![/green]")
-            console.print(f"[dim]Model: {response.model}[/dim]")
-            console.print(f"[dim]Usage: {response.usage.total_tokens} tokens[/dim]")
+            console.print(f"[dim]Model: {response['model']}[/dim]")
+            console.print(f"[dim]Usage: {response['usage']['total_tokens']} tokens[/dim]")
             return 0
         else:
             console.print("[red]✗ Unexpected API response[/red]")

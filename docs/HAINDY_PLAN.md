@@ -512,18 +512,18 @@ _Total: roughly **28–36 working days**._
 | **10 — Security & Monitoring** | ✅ Complete | #10 | Rate limiting, sanitization, analytics |
 | **10b — Test Suite Cleanup** | ✅ Complete | - | Fixed test_error_recovery.py failure, 100% pass rate |
 | **11 — End-to-end Integration** | ✅ Complete | #13 | Complete workflow integration |
+| **11b — CLI Improvements** | ✅ Complete | #15 | Improved CLI UX for real-world usage |
 
 ### In Progress
 
 | Phase | Status | Target | Description |
 |-------|--------|--------|-------------|
-| **11b — CLI Improvements** | 🔄 Next | Immediate | Improve CLI UX for real-world usage |
+| **12 — Test Scenarios** | 🔄 In Progress | Today | Created 5 test scenarios, testing next |
 
 ### Upcoming
 
 | Phase | Status | Target | Description |
 |-------|--------|--------|-------------|
-| **12 — Test Scenarios** | 📅 Planned | After 11b | Real-world test cases |
 | **13 — Packaging & docs** | 📅 Planned | After 12 | CLI, documentation, v0.1.0 |
 
 ### Key Achievements

@@ -1,0 +1,22 @@
+{
+  "name": "Navigation and Content Verification Test",
+  "description": "Test website navigation, menu interactions, and content verification - demonstrates UI navigation patterns",
+  "url": "https://the-internet.herokuapp.com",
+  "requirements": "Test various navigation patterns on The Internet demo site:\n1. Navigate to the main page and verify the list of available examples\n2. Click on 'Dropdown' link and test dropdown selection\n3. Navigate back and click on 'Checkboxes' to test checkbox interactions\n4. Test 'Hovers' example by hovering over images to reveal hidden text\n5. Navigate to 'Nested Frames' and verify frame content\n6. Return to home and test 'Sortable Data Tables' by clicking column headers\n7. Verify that navigation works correctly throughout",
+  "expected_outcomes": [
+    "Main page shows a list of example links",
+    "Clicking links navigates to respective pages",
+    "Dropdown page allows selecting options from dropdown menu",
+    "Checkboxes page has checkboxes that can be toggled",
+    "Hovers page reveals user information on mouse hover",
+    "Nested frames page shows content within frames",
+    "Data tables can be sorted by clicking column headers",
+    "Browser back button returns to previous pages",
+    "All navigations complete without errors"
+  ],
+  "tags": ["navigation", "ui-interaction", "content-verification", "demo-site"],
+  "timeout": 240,
+  "max_steps": 25,
+  "complexity": "medium",
+  "notes": "The Internet (the-internet.herokuapp.com) provides various UI challenges perfect for testing navigation and interaction capabilities"
+}

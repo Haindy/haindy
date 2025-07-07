@@ -3,7 +3,7 @@ Unit tests for Test Planner Agent.
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
@@ -81,15 +81,14 @@ class TestTestPlannerAgent:
         assert agent.system_prompt is not None
         assert "Test Planning Specialist" in agent.system_prompt
 
-    def test_create_test_plan_basic(self, agent, mock_openai_response):
+    @pytest.mark.asyncio
+    async def test_create_test_plan_basic(self, agent, mock_openai_response):
         """Test creating a basic test plan."""
         # Mock the OpenAI call
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=mock_openai_response["content"]))]
-        )
+        agent.call_openai = AsyncMock(return_value=mock_openai_response)
         
         requirements = "Test the login functionality"
-        test_plan = agent.create_test_plan(requirements)
+        test_plan = await agent.create_test_plan(requirements)
 
         assert isinstance(test_plan, TestPlan)
         assert test_plan.name == "User Login Flow Test"
@@ -98,30 +97,28 @@ class TestTestPlannerAgent:
         assert len(test_plan.steps) == 4
         assert len(test_plan.tags) == 2
 
-    def test_create_test_plan_with_context(self, agent, mock_openai_response):
+    @pytest.mark.asyncio
+    async def test_create_test_plan_with_context(self, agent, mock_openai_response):
         """Test creating a test plan with additional context."""
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=mock_openai_response["content"]))]
-        )
+        agent.call_openai = AsyncMock(return_value=mock_openai_response)
         
         requirements = "Test the login functionality"
         context = {
             "application": "E-commerce platform",
             "user_type": "Customer"
         }
-        test_plan = agent.create_test_plan(requirements, context)
+        test_plan = await agent.create_test_plan(requirements, context)
 
         assert isinstance(test_plan, TestPlan)
         assert test_plan.name == "User Login Flow Test"
 
-    def test_test_plan_steps_structure(self, agent, mock_openai_response):
+    @pytest.mark.asyncio
+    async def test_test_plan_steps_structure(self, agent, mock_openai_response):
         """Test that test plan steps have correct structure."""
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=mock_openai_response["content"]))]
-        )
+        agent.call_openai = AsyncMock(return_value=mock_openai_response)
         
         requirements = "Test the login functionality"
-        test_plan = agent.create_test_plan(requirements)
+        test_plan = await agent.create_test_plan(requirements)
 
         # Check first step
         first_step = test_plan.steps[0]
@@ -145,7 +142,8 @@ class TestTestPlannerAgent:
         with pytest.raises(ValueError, match="Failed to parse test plan response"):
             agent._parse_test_plan_response(invalid_response)
 
-    def test_refine_test_plan(self, agent):
+    @pytest.mark.asyncio
+    async def test_refine_test_plan(self, agent):
         """Test refining an existing test plan."""
         # Create initial test plan
         action_instruction = ActionInstruction(
@@ -199,12 +197,10 @@ class TestTestPlannerAgent:
             "estimated_duration_seconds": 120
         })
 
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=refined_response))]
-        )
+        agent.call_openai = AsyncMock(return_value={"content": refined_response})
         
         feedback = "Add error case testing"
-        refined_plan = agent.refine_test_plan(initial_plan, feedback)
+        refined_plan = await agent.refine_test_plan(initial_plan, feedback)
 
         assert refined_plan.name == "Enhanced Login Test"
         assert len(refined_plan.steps) == 2
@@ -245,7 +241,8 @@ class TestTestPlannerAgent:
         assert "Action: click - Submit button" in serialized
         assert "Expected: Form submitted" in serialized
 
-    def test_extract_test_scenarios(self, agent):
+    @pytest.mark.asyncio
+    async def test_extract_test_scenarios(self, agent):
         """Test extracting multiple test scenarios from requirements."""
         scenarios_response = json.dumps({
             "scenarios": [
@@ -270,26 +267,23 @@ class TestTestPlannerAgent:
             ]
         })
 
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=scenarios_response))]
-        )
+        agent.call_openai = AsyncMock(return_value={"content": scenarios_response})
         
         requirements = "Test complete login functionality including error cases"
-        scenarios = agent.extract_test_scenarios(requirements)
+        scenarios = await agent.extract_test_scenarios(requirements)
 
         assert len(scenarios) == 3
         assert scenarios[0]["name"] == "Happy Path Login"
         assert scenarios[1]["type"] == "error_handling"
         assert scenarios[2]["priority"] == "medium"
 
-    def test_extract_test_scenarios_error(self, agent):
+    @pytest.mark.asyncio
+    async def test_extract_test_scenarios_error(self, agent):
         """Test error handling when extracting scenarios fails."""
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content="invalid json"))]
-        )
+        agent.call_openai = AsyncMock(return_value={"content": "invalid json"})
         
         requirements = "Test requirements"
-        scenarios = agent.extract_test_scenarios(requirements)
+        scenarios = await agent.extract_test_scenarios(requirements)
         
         assert scenarios == []  # Should return empty list on error
 
@@ -313,7 +307,8 @@ class TestTestPlannerAgent:
         assert "app: E-commerce" in message
         assert "version: 2.0" in message
 
-    def test_openai_call_parameters(self, agent):
+    @pytest.mark.asyncio
+    async def test_openai_call_parameters(self, agent):
         """Test that OpenAI is called with correct parameters."""
         mock_response = json.dumps({
             "name": "Test",
@@ -323,14 +318,13 @@ class TestTestPlannerAgent:
             "tags": []
         })
         
-        agent._client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=mock_response))]
-        )
+        agent.call_openai = AsyncMock(return_value={"content": mock_response})
         
-        agent.create_test_plan("Test requirements")
+        await agent.create_test_plan("Test requirements")
         
         # Verify call parameters
-        agent._client.chat.completions.create.assert_called_once()
-        call_args = agent._client.chat.completions.create.call_args
+        agent.call_openai.assert_called_once()
+        call_args = agent.call_openai.call_args
+        assert "response_format" in call_args.kwargs
         assert call_args.kwargs["response_format"] == {"type": "json_object"}
         assert call_args.kwargs["temperature"] == 0.3
