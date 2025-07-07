@@ -78,7 +78,7 @@ class TestActionAgent:
             })
         }
         
-        action_agent.call_ai = AsyncMock(return_value=mock_response)
+        action_agent.call_openai = AsyncMock(return_value=mock_response)
         
         # Execute
         result = await action_agent.determine_action(
@@ -95,7 +95,7 @@ class TestActionAgent:
         assert not result.coordinate.refined  # No refinement needed
         
         # Verify AI was called once
-        action_agent.call_ai.assert_called_once()
+        action_agent.call_openai.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_determine_action_low_confidence_triggers_refinement(
@@ -123,7 +123,7 @@ class TestActionAgent:
             })
         }
         
-        action_agent.call_ai = AsyncMock(
+        action_agent.call_openai = AsyncMock(
             side_effect=[initial_response, refined_response]
         )
         
@@ -140,7 +140,7 @@ class TestActionAgent:
         assert result.coordinate.refined  # Refinement was applied
         
         # Verify AI was called once (GridRefinement handles its own logic)
-        assert action_agent.call_ai.call_count == 1
+        assert action_agent.call_openai.call_count == 1
     
     @pytest.mark.asyncio
     async def test_determine_action_refinement_disabled(
@@ -161,7 +161,7 @@ class TestActionAgent:
             })
         }
         
-        action_agent.call_ai = AsyncMock(return_value=mock_response)
+        action_agent.call_openai = AsyncMock(return_value=mock_response)
         
         # Execute
         result = await action_agent.determine_action(
@@ -172,7 +172,7 @@ class TestActionAgent:
         # Verify no refinement despite low confidence
         assert result.coordinate.confidence == 0.5
         assert not result.coordinate.refined
-        action_agent.call_ai.assert_called_once()
+        action_agent.call_openai.assert_called_once()
     
     def test_parse_coordinate_response_valid(self, action_agent):
         """Test parsing valid coordinate response."""
@@ -259,7 +259,7 @@ class TestActionAgent:
             })
         }
         
-        action_agent.call_ai = AsyncMock(return_value=mock_response)
+        action_agent.call_openai = AsyncMock(return_value=mock_response)
         
         # Execute
         refined = await action_agent.refine_coordinates(
@@ -305,7 +305,7 @@ class TestActionAgent:
         )
         
         # Mock AI error
-        action_agent.call_ai = AsyncMock(
+        action_agent.call_openai = AsyncMock(
             return_value={"content": "malformed response"}
         )
         
