@@ -73,6 +73,18 @@ class TestPlannerAgent(BaseAgent):
         # Parse and validate the response
         test_plan = self._parse_test_plan_response(response)
         
+        # Debug: Save test plan
+        import json
+        with open("debug_test_plan.json", "w") as f:
+            plan_dict = test_plan.model_dump()
+            # Convert UUIDs to strings
+            plan_dict["plan_id"] = str(plan_dict["plan_id"])
+            plan_dict["created_at"] = plan_dict["created_at"].isoformat()
+            for step in plan_dict["steps"]:
+                step["step_id"] = str(step["step_id"])
+                step["dependencies"] = [str(d) for d in step["dependencies"]]
+            json.dump(plan_dict, f, indent=2)
+        
         logger.info("Test plan created successfully", extra={
             "plan_name": test_plan.name,
             "num_steps": len(test_plan.steps),

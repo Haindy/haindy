@@ -254,8 +254,14 @@ class TestRunnerAgent(BaseAgent):
             
             # Wait for action to complete
             if self.browser_driver:
-                await asyncio.sleep(0.5)  # Simple wait
+                await asyncio.sleep(1.0)  # Increased wait for UI updates
                 screenshot_after = await self.browser_driver.screenshot()
+                
+                # Debug: Save screenshots for inspection
+                import os
+                os.makedirs("debug_screenshots", exist_ok=True)
+                with open(f"debug_screenshots/step_{step.step_number}_after.png", "wb") as f:
+                    f.write(screenshot_after)
             
             # Evaluate result
             if self.evaluator_agent and screenshot_after:
@@ -267,6 +273,16 @@ class TestRunnerAgent(BaseAgent):
             
             # Create step result
             success = evaluation_result.success if evaluation_result else True
+            
+            # Debug logging
+            if evaluation_result and not evaluation_result.success:
+                logger.warning("Step evaluation failed", extra={
+                    "step_number": step.step_number,
+                    "expected": evaluation_result.expected_outcome,
+                    "actual": evaluation_result.actual_outcome,
+                    "confidence": evaluation_result.confidence,
+                    "deviations": evaluation_result.deviations
+                })
             
             return TestStepResult(
                 step=step,
@@ -400,16 +416,48 @@ class TestRunnerAgent(BaseAgent):
         if not self.browser_driver:
             return
         
-        # Calculate absolute coordinates
-        # This is simplified - real implementation would use grid system
-        x = action.offset_x * 1920  # Assuming 1920x1080 for now
-        y = action.offset_y * 1080
+        # Get viewport size from browser
+        viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+        
+        # Create grid coordinate from action result
+        from src.grid.overlay import GridOverlay
+        grid = GridOverlay()
+        grid.initialize(viewport_width, viewport_height)
+        
+        from src.core.types import GridCoordinate
+        coord = GridCoordinate(
+            cell=action.grid_cell,
+            offset_x=action.offset_x,
+            offset_y=action.offset_y,
+            confidence=action.confidence
+        )
+        
+        # Convert to pixel coordinates
+        x, y = grid.coordinate_to_pixels(coord)
+        
+        logger.info("Performing browser action", extra={
+            "action_type": action.action_type,
+            "grid_cell": action.grid_cell,
+            "offset": f"({action.offset_x}, {action.offset_y})",
+            "pixels": f"({x}, {y})",
+            "viewport": f"{viewport_width}x{viewport_height}",
+            "step_description": self._test_state.current_step.description if self._test_state.current_step else "Unknown"
+        })
         
         if action.action_type == "click":
             await self.browser_driver.click(x, y)
         elif action.action_type == "type":
-            # For typing, we'd need additional context
-            pass
+            # First click on the input field to focus it
+            await self.browser_driver.click(x, y)
+            # Wait a bit for focus
+            await self.browser_driver.wait(200)
+            # Type the text from the action instruction
+            if hasattr(self._test_state.current_step, 'action_instruction') and self._test_state.current_step.action_instruction.value:
+                await self.browser_driver.type_text(self._test_state.current_step.action_instruction.value)
+                # Wait for UI to update after typing
+                await self.browser_driver.wait(500)
+            else:
+                logger.warning("No text value provided for type action")
     
     def _record_action(self, step: TestStep, action: ActionResult) -> None:
         """Record successful action for future scripted execution."""
@@ -417,13 +465,13 @@ class TestRunnerAgent(BaseAgent):
             return
         step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
         
+        # Don't record pixel coordinates here - they should be calculated
+        # dynamically based on viewport size when replaying
         self._scripted_actions[step_key] = {
             "action_type": action.action_type,
             "grid_cell": action.grid_cell,
             "offset_x": action.offset_x,
             "offset_y": action.offset_y,
-            "x": action.offset_x * 1920,  # Simplified
-            "y": action.offset_y * 1080,
             "timestamp": action.timestamp.isoformat()
         }
     

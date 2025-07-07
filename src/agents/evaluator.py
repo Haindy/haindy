@@ -72,7 +72,9 @@ class EvaluatorAgent(BaseAgent):
             "success": result.success,
             "confidence": result.confidence,
             "deviations_count": len(result.deviations),
-            "has_suggestions": bool(result.suggestions)
+            "has_suggestions": bool(result.suggestions),
+            "expected": expected_outcome[:100] + "..." if len(expected_outcome) > 100 else expected_outcome,
+            "actual": result.actual_outcome[:100] + "..." if len(result.actual_outcome) > 100 else result.actual_outcome
         })
         
         return result

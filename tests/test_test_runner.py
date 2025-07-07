@@ -16,12 +16,14 @@ from src.agents.test_runner import (
     TestStepResult,
 )
 from src.core.types import (
+    ActionInstruction,
+    ActionType,
     EvaluationResult,
+    GridAction,
+    GridCoordinate,
     TestPlan,
     TestState,
     TestStep,
-    ActionInstruction,
-    ActionType,
     TestStatus,
 )
 
@@ -45,6 +47,9 @@ def mock_browser_driver():
     driver.screenshot = AsyncMock(return_value=b"mock_screenshot")
     driver.click = AsyncMock()
     driver.type = AsyncMock()
+    driver.type_text = AsyncMock()
+    driver.wait = AsyncMock()
+    driver.get_viewport_size = AsyncMock(return_value=(1920, 1080))
     return driver
 
 
@@ -52,14 +57,25 @@ def mock_browser_driver():
 def mock_action_agent():
     """Mock action agent."""
     agent = AsyncMock()
-    agent.determine_action = AsyncMock(return_value=ActionResult(
-        action_type="click",
-        grid_cell="M23",
+    # Create a mock GridAction with proper structure
+    mock_coordinate = GridCoordinate(
+        cell="M23",
         offset_x=0.5,
         offset_y=0.5,
         confidence=0.95,
-        requires_refinement=False
-    ))
+        refined=False
+    )
+    mock_instruction = ActionInstruction(
+        action_type=ActionType.CLICK,
+        description="Click button",
+        target="button",
+        expected_outcome="Button clicked"
+    )
+    mock_grid_action = GridAction(
+        instruction=mock_instruction,
+        coordinate=mock_coordinate
+    )
+    agent.determine_action = AsyncMock(return_value=mock_grid_action)
     return agent
 
 
@@ -402,8 +418,9 @@ class TestTestRunnerAgent:
         recorded = test_runner_agent._scripted_actions[step_key]
         assert recorded["action_type"] == "click"
         assert recorded["grid_cell"] == "B7"
-        assert recorded["x"] == 0.3 * 1920
-        assert recorded["y"] == 0.7 * 1080
+        assert recorded["offset_x"] == 0.3
+        assert recorded["offset_y"] == 0.7
+        # No pixel coordinates should be stored anymore
     
     @pytest.mark.asyncio
     async def test_determine_execution_mode(
