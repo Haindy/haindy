@@ -57,6 +57,8 @@ class TestStepResult(BaseModel):
     evaluation: Optional[EvaluationResult] = None
     execution_mode: str = "visual"
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Enhanced debugging information from Action Agent
+    action_result_details: Optional[Dict[str, Any]] = None
 
 
 class ExecutionMode(Enum):
@@ -244,6 +246,9 @@ class TestRunnerAgent(BaseAgent):
             if self.browser_driver:
                 screenshot_before = await self.browser_driver.screenshot()
             
+            # Initialize step result details
+            self._current_step_result_details = None
+            
             # Execute action based on mode
             if mode == ExecutionMode.VISUAL:
                 action_result = await self._execute_visual_action(step)
@@ -252,9 +257,13 @@ class TestRunnerAgent(BaseAgent):
             else:  # HYBRID
                 action_result = await self._execute_hybrid_action(step)
             
-            # Wait for action to complete
-            if self.browser_driver:
-                await asyncio.sleep(1.0)  # Increased wait for UI updates
+            # Action Agent now handles waiting and screenshot capture
+            # Get screenshot after from Action Agent results if available
+            if self._current_step_result_details and self._current_step_result_details.get("screenshot_after"):
+                screenshot_after = self._current_step_result_details["screenshot_after"]
+            elif self.browser_driver:
+                # Fallback for non-visual modes
+                await asyncio.sleep(1.0)
                 screenshot_after = await self.browser_driver.screenshot()
                 
                 # Debug: Save screenshots for inspection
@@ -292,7 +301,8 @@ class TestRunnerAgent(BaseAgent):
                 screenshot_before=screenshot_before,
                 screenshot_after=screenshot_after,
                 evaluation=evaluation_result,
-                execution_mode=mode.value
+                execution_mode=mode.value,
+                action_result_details=self._current_step_result_details
             )
             
         except Exception as e:
@@ -316,43 +326,77 @@ class TestRunnerAgent(BaseAgent):
                 execution_mode=mode.value
             )
     
+    def _build_test_context(self, step: TestStep) -> Dict[str, Any]:
+        """Build comprehensive context for Action Agent."""
+        # Get recent step summaries
+        recent_steps = []
+        for result in self._execution_history[-3:]:  # Last 3 steps
+            recent_steps.append({
+                "step_number": result.step.step_number,
+                "description": result.step.description,
+                "success": result.success,
+                "result": result.actual_result
+            })
+        
+        # Build previous steps summary
+        previous_steps_summary = ""
+        if recent_steps:
+            previous_steps_summary = "Recent steps: " + "; ".join([
+                f"Step {s['step_number']} ({s['description']}): {'Success' if s['success'] else 'Failed'}"
+                for s in recent_steps
+            ])
+        
+        return {
+            "test_plan_name": self._current_test_plan.name if self._current_test_plan else "Unknown",
+            "test_plan_description": self._current_test_plan.description if self._current_test_plan else "Unknown",
+            "current_step_description": step.description,
+            "current_step_number": step.step_number,
+            "total_steps": len(self._current_test_plan.steps) if self._current_test_plan else 0,
+            "completed_steps": len(self._test_state.completed_steps) if self._test_state else 0,
+            "previous_steps_summary": previous_steps_summary,
+            "recent_failures": sum(1 for r in self._execution_history[-3:] if not r.success),
+            "expected_outcome": step.action_instruction.expected_outcome,
+            "step_dependencies": [str(d) for d in step.dependencies] if step.dependencies else [],
+            "optional_step": step.optional
+        }
+    
     async def _execute_visual_action(self, step: TestStep) -> Optional[ActionResult]:
         """Execute action using visual AI interaction."""
         if not self.action_agent or not self.browser_driver:
             logger.warning("Visual execution not available - missing dependencies")
             return None
         
+        # Build comprehensive context for Action Agent
+        test_context = self._build_test_context(step)
+        
         # Get current screenshot
         screenshot = await self.browser_driver.screenshot()
         
-        # Get action coordinates from Action Agent
-        grid_action = await self.action_agent.determine_action(
-            screenshot, step.action_instruction
+        # Use new Action Agent method that owns full action lifecycle
+        action_result_dict = await self.action_agent.execute_action(
+            test_step=step,
+            test_context=test_context,
+            screenshot=screenshot
         )
         
-        # Convert GridAction to ActionResult
+        # Store detailed result for debugging
+        self._current_step_result_details = action_result_dict
+        
+        # Convert to ActionResult for backward compatibility
         action_result = None
-        if grid_action and grid_action.coordinate:
+        if action_result_dict.get("validation_passed") and action_result_dict.get("grid_cell"):
             action_result = ActionResult(
-                action_type=grid_action.instruction.action_type.value,
-                grid_cell=grid_action.coordinate.cell,
-                offset_x=grid_action.coordinate.offset_x,
-                offset_y=grid_action.coordinate.offset_y,
-                confidence=grid_action.coordinate.confidence,
+                action_type=action_result_dict["action_type"],
+                grid_cell=action_result_dict["grid_cell"],
+                offset_x=action_result_dict["offset_x"],
+                offset_y=action_result_dict["offset_y"],
+                confidence=action_result_dict["coordinate_confidence"],
                 requires_refinement=False
             )
-        
-        if action_result and action_result.confidence >= 0.8:
-            # Execute the action
-            await self._perform_browser_action(action_result)
             
-            # Record successful action for future use
-            self._record_action(step, action_result)
-        else:
-            logger.warning("Action confidence too low or no result", extra={
-                "confidence": action_result.confidence if action_result else None,
-                "action_result": action_result
-            })
+            # Record successful action for future use if execution succeeded
+            if action_result_dict.get("execution_success"):
+                self._record_action(step, action_result)
         
         return action_result
     
@@ -367,25 +411,45 @@ class TestRunnerAgent(BaseAgent):
             return None
         
         try:
+            # Get viewport size to calculate pixels from grid coordinates
+            viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+            
+            # Create grid overlay to convert coordinates
+            from src.grid.overlay import GridOverlay
+            grid = GridOverlay()
+            grid.initialize(viewport_width, viewport_height)
+            
+            from src.core.types import GridCoordinate
+            coord = GridCoordinate(
+                cell=scripted_action["grid_cell"],
+                offset_x=scripted_action["offset_x"],
+                offset_y=scripted_action["offset_y"],
+                confidence=1.0
+            )
+            
+            # Convert to pixel coordinates
+            x, y = grid.coordinate_to_pixels(coord)
+            
             # Execute the scripted action
             action_type = scripted_action["action_type"]
             
             if action_type == "click":
-                await self.browser_driver.click(
-                    scripted_action["x"],
-                    scripted_action["y"]
-                )
+                await self.browser_driver.click(x, y)
             elif action_type == "type":
-                await self.browser_driver.type_text(
-                    scripted_action["text"]
-                )
+                # Click to focus first
+                await self.browser_driver.click(x, y)
+                await self.browser_driver.wait(200)
+                # Type the text from instruction
+                if step.action_instruction.value:
+                    await self.browser_driver.type_text(step.action_instruction.value)
+                    await self.browser_driver.wait(500)
             
             # Return a synthetic action result
             return ActionResult(
                 action_type=action_type,
                 grid_cell=scripted_action.get("grid_cell", "N/A"),
-                offset_x=scripted_action.get("offset_x", 0),
-                offset_y=scripted_action.get("offset_y", 0),
+                offset_x=scripted_action.get("offset_x", 0.5),
+                offset_y=scripted_action.get("offset_y", 0.5),
                 confidence=1.0,
                 requires_refinement=False
             )
@@ -411,53 +475,6 @@ class TestRunnerAgent(BaseAgent):
         })
         return await self._execute_visual_action(step)
     
-    async def _perform_browser_action(self, action: ActionResult) -> None:
-        """Perform the actual browser action."""
-        if not self.browser_driver:
-            return
-        
-        # Get viewport size from browser
-        viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
-        
-        # Create grid coordinate from action result
-        from src.grid.overlay import GridOverlay
-        grid = GridOverlay()
-        grid.initialize(viewport_width, viewport_height)
-        
-        from src.core.types import GridCoordinate
-        coord = GridCoordinate(
-            cell=action.grid_cell,
-            offset_x=action.offset_x,
-            offset_y=action.offset_y,
-            confidence=action.confidence
-        )
-        
-        # Convert to pixel coordinates
-        x, y = grid.coordinate_to_pixels(coord)
-        
-        logger.info("Performing browser action", extra={
-            "action_type": action.action_type,
-            "grid_cell": action.grid_cell,
-            "offset": f"({action.offset_x}, {action.offset_y})",
-            "pixels": f"({x}, {y})",
-            "viewport": f"{viewport_width}x{viewport_height}",
-            "step_description": self._test_state.current_step.description if self._test_state.current_step else "Unknown"
-        })
-        
-        if action.action_type == "click":
-            await self.browser_driver.click(x, y)
-        elif action.action_type == "type":
-            # First click on the input field to focus it
-            await self.browser_driver.click(x, y)
-            # Wait a bit for focus
-            await self.browser_driver.wait(200)
-            # Type the text from the action instruction
-            if hasattr(self._test_state.current_step, 'action_instruction') and self._test_state.current_step.action_instruction.value:
-                await self.browser_driver.type_text(self._test_state.current_step.action_instruction.value)
-                # Wait for UI to update after typing
-                await self.browser_driver.wait(500)
-            else:
-                logger.warning("No text value provided for type action")
     
     def _record_action(self, step: TestStep, action: ActionResult) -> None:
         """Record successful action for future scripted execution."""
@@ -575,6 +592,105 @@ Respond in JSON format with keys: assessment, concerns, recommendations"""
             
         except Exception as e:
             logger.warning("Failed to analyze progress", extra={"error": str(e)})
+    
+    async def judge_final_test_result(self) -> Dict[str, Any]:
+        """
+        Make final judgment on test execution with full context.
+        
+        Returns comprehensive analysis of test execution success/failure.
+        """
+        if not self._test_state or not self._current_test_plan:
+            return {
+                "overall_success": False,
+                "confidence": 0.0,
+                "reasoning": "No test state available"
+            }
+        
+        # Build comprehensive summary
+        total_steps = len(self._current_test_plan.steps)
+        completed_steps = len(self._test_state.completed_steps)
+        failed_steps = len(self._test_state.failed_steps)
+        skipped_steps = len(self._test_state.skipped_steps)
+        
+        # Get detailed failure information
+        failure_details = []
+        for result in self._execution_history:
+            if not result.success:
+                detail = {
+                    "step_number": result.step.step_number,
+                    "description": result.step.description,
+                    "expected": result.step.action_instruction.expected_outcome,
+                    "actual": result.actual_result,
+                    "optional": result.step.optional
+                }
+                # Add enhanced debugging info if available
+                if result.action_result_details:
+                    detail["validation_passed"] = result.action_result_details.get("validation_passed", False)
+                    detail["validation_reasoning"] = result.action_result_details.get("validation_reasoning", "")
+                    detail["execution_error"] = result.action_result_details.get("execution_error", "")
+                    detail["ai_analysis"] = result.action_result_details.get("ai_analysis", {})
+                failure_details.append(detail)
+        
+        # Use AI to make final judgment
+        prompt = f"""Analyze the complete test execution and provide final judgment:
+
+Test Plan: {self._current_test_plan.name}
+Description: {self._current_test_plan.description}
+
+Execution Summary:
+- Total Steps: {total_steps}
+- Completed Successfully: {completed_steps}
+- Failed: {failed_steps}
+- Skipped: {skipped_steps}
+
+Failure Details:
+{json.dumps(failure_details, indent=2)}
+
+Based on this information, provide:
+1. Overall success (true/false) - consider if the test objective was achieved
+2. Confidence in judgment (0.0-1.0)
+3. Detailed reasoning
+4. Key issues identified
+5. Recommendations for improvement
+
+Respond in JSON format with keys: overall_success, confidence, reasoning, key_issues, recommendations"""
+        
+        try:
+            response = await self.call_openai(
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            
+            judgment = json.loads(response.get("content", "{}"))
+            
+            # Add execution statistics
+            judgment["execution_stats"] = {
+                "total_steps": total_steps,
+                "completed": completed_steps,
+                "failed": failed_steps,
+                "skipped": skipped_steps,
+                "success_rate": completed_steps / total_steps if total_steps > 0 else 0
+            }
+            
+            logger.info("Final test judgment", extra=judgment)
+            return judgment
+            
+        except Exception as e:
+            logger.error("Failed to make final judgment", extra={"error": str(e)})
+            return {
+                "overall_success": self._test_state.status == TestStatus.COMPLETED,
+                "confidence": 0.5,
+                "reasoning": f"Automated judgment: {self._test_state.status.value}",
+                "key_issues": [str(e)],
+                "recommendations": ["Review test execution logs"],
+                "execution_stats": {
+                    "total_steps": total_steps,
+                    "completed": completed_steps,
+                    "failed": failed_steps,
+                    "skipped": skipped_steps,
+                    "success_rate": completed_steps / total_steps if total_steps > 0 else 0
+                }
+            }
     
     async def get_next_action(
         self, test_plan: TestPlan, current_state: TestState

@@ -64,7 +64,7 @@ python -m pytest tests/test_action_agent.py -v
 python -m pytest tests/test_evaluator_agent.py -v
 
 # Phase 6: Test Runner Agent
-python -m pytest tests/test_runner_agent.py -v
+python -m pytest tests/test_test_runner.py -v
 
 # Phase 7: Agent Coordination
 python -m pytest tests/test_communication.py tests/test_state_manager.py tests/test_coordinator.py -v
