@@ -148,7 +148,8 @@ class ActionAgent(BaseAgent):
             grid_action = await self.determine_action(screenshot, test_step.action_instruction)
             
             # Convert GridAction to CoordinateResult
-            x, y = self._get_pixel_coordinates(grid_action.coordinate)
+            self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
+            x, y = self.grid_overlay.coordinate_to_pixels(grid_action.coordinate)
             result.coordinates = CoordinateResult(
                 grid_cell=grid_action.coordinate.cell,
                 grid_coordinates=(x, y),
@@ -592,10 +593,6 @@ Provide the refined position in JSON format:
                 confidence=initial_coords.confidence,
                 refined=True
             )
-    
-    def _get_pixel_coordinates(self, grid_coord: GridCoordinate) -> Tuple[int, int]:
-        """Convert grid coordinates to pixel coordinates."""
-        return self.grid_overlay.coordinate_to_pixels(grid_coord)
     
     async def _validate_action(
         self,
