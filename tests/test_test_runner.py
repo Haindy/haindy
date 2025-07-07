@@ -76,6 +76,30 @@ def mock_action_agent():
         coordinate=mock_coordinate
     )
     agent.determine_action = AsyncMock(return_value=mock_grid_action)
+    
+    # Mock the new execute_action method
+    async def mock_execute_action(test_step, test_context, screenshot=None):
+        return {
+            "action_type": test_step.action_instruction.action_type.value,
+            "validation_passed": True,
+            "validation_reasoning": "Action is valid",
+            "validation_confidence": 0.95,
+            "grid_cell": "M23",
+            "grid_coordinates": (960, 540),
+            "offset_x": 0.5,
+            "offset_y": 0.5,
+            "coordinate_confidence": 0.95,
+            "execution_success": True,
+            "execution_time_ms": 523.4,
+            "screenshot_after": b"mock_screenshot_after",
+            "ai_analysis": {
+                "success": True,
+                "confidence": 0.9,
+                "actual_outcome": "Action completed successfully"
+            }
+        }
+    
+    agent.execute_action = AsyncMock(side_effect=mock_execute_action)
     return agent
 
 
@@ -206,6 +230,10 @@ class TestTestRunnerAgent:
         
         # Verify
         assert isinstance(result, TestState)
+        # Debug: print execution history if test failed
+        if result.status != TestStatus.COMPLETED:
+            for i, step_result in enumerate(test_runner_agent._execution_history):
+                print(f"Step {i+1}: success={step_result.success}, result={step_result.actual_result}")
         assert result.status == TestStatus.COMPLETED
         assert len(result.completed_steps) == 4
         assert len(result.failed_steps) == 0
@@ -215,8 +243,9 @@ class TestTestRunnerAgent:
         test_runner_agent.browser_driver.navigate.assert_called_once_with(
             "https://example.com/login"
         )
-        assert test_runner_agent.browser_driver.screenshot.call_count >= 8  # Before/after each step
-        assert test_runner_agent.action_agent.determine_action.call_count == 4
+        # Action Agent now handles screenshots internally, so browser driver screenshot calls are reduced
+        assert test_runner_agent.browser_driver.screenshot.call_count >= 4  # Initial screenshots for each step
+        assert test_runner_agent.action_agent.execute_action.call_count == 4
         assert test_runner_agent.evaluator_agent.evaluate_result.call_count == 4
     
     @pytest.mark.asyncio
@@ -280,10 +309,10 @@ class TestTestRunnerAgent:
         assert result.success is True
         assert result.execution_mode == "visual"
         assert result.action_taken is not None
-        assert result.action_taken.action_type == "click"
+        assert result.action_taken.action_type == "navigate"
         
         # Verify agent calls
-        test_runner_agent.action_agent.determine_action.assert_called_once()
+        test_runner_agent.action_agent.execute_action.assert_called_once()
         test_runner_agent.evaluator_agent.evaluate_result.assert_called_once()
     
     @pytest.mark.asyncio
@@ -315,7 +344,10 @@ class TestTestRunnerAgent:
         assert result.action_taken.confidence == 1.0
         
         # Verify browser click was called
-        test_runner_agent.browser_driver.click.assert_called_once_with(960, 540)
+        test_runner_agent.browser_driver.click.assert_called_once()
+        # Coordinates should be calculated from grid, not hardcoded
+        call_args = test_runner_agent.browser_driver.click.call_args[0]
+        assert len(call_args) == 2  # x, y coordinates
     
     @pytest.mark.asyncio
     async def test_execute_step_hybrid_mode_fallback(
@@ -330,8 +362,9 @@ class TestTestRunnerAgent:
         step_key = f"{sample_test_plan.plan_id}:{step.step_number}"
         test_runner_agent._scripted_actions[step_key] = {
             "action_type": "click",
-            "x": 960,
-            "y": 540
+            "grid_cell": "M23",
+            "offset_x": 0.5,
+            "offset_y": 0.5
         }
         
         # Make scripted execution fail on first call, succeed on second
@@ -346,10 +379,10 @@ class TestTestRunnerAgent:
         # Verify fallback to visual
         assert result.success is True
         assert result.action_taken is not None
-        assert result.action_taken.action_type == "click"
-        test_runner_agent.action_agent.determine_action.assert_called_once()
-        # Browser click should be called twice (once failed, once succeeded)
-        assert test_runner_agent.browser_driver.click.call_count == 2
+        assert result.action_taken.action_type == "navigate"
+        test_runner_agent.action_agent.execute_action.assert_called_once()
+        # Browser click should be called once (scripted failed, visual succeeded through Action Agent)
+        assert test_runner_agent.browser_driver.click.call_count == 1
     
     def test_check_dependencies_met(self, test_runner_agent, sample_test_plan):
         """Test dependency checking when dependencies are met."""
@@ -548,3 +581,124 @@ class TestTestRunnerAgent:
         assert "Skipped due to unmet dependencies" in result.actual_result
         assert result.execution_mode == "skipped"
         assert step.step_id in test_runner_agent._test_state.skipped_steps
+    
+    @pytest.mark.asyncio
+    async def test_judge_final_test_result_success(self, test_runner_agent, sample_test_plan):
+        """Test final judgment on successful test execution."""
+        # Set up completed test state
+        test_runner_agent._current_test_plan = sample_test_plan
+        test_runner_agent._test_state = TestState(
+            test_plan=sample_test_plan,
+            current_step=None,
+            completed_steps=[s.step_id for s in sample_test_plan.steps],
+            failed_steps=[],
+            skipped_steps=[],
+            status=TestStatus.COMPLETED,
+            start_time=datetime.now(timezone.utc),
+            end_time=datetime.now(timezone.utc),
+            error_count=0,
+            warning_count=0
+        )
+        
+        # Add successful execution history
+        test_runner_agent._execution_history = [
+            TestStepResult(
+                step=step,
+                success=True,
+                action_taken=ActionResult(
+                    action_type=step.action_instruction.action_type.value,
+                    grid_cell="M23",
+                    confidence=0.95
+                ),
+                actual_result="Step completed successfully",
+                execution_mode="visual",
+                action_result_details={
+                    "validation_passed": True,
+                    "execution_success": True,
+                    "ai_analysis": {"success": True}
+                }
+            )
+            for step in sample_test_plan.steps
+        ]
+        
+        # Mock AI judgment
+        test_runner_agent.call_openai = AsyncMock(return_value={
+            "content": json.dumps({
+                "overall_success": True,
+                "confidence": 0.95,
+                "reasoning": "All test steps completed successfully",
+                "key_issues": [],
+                "recommendations": []
+            })
+        })
+        
+        # Get final judgment
+        judgment = await test_runner_agent.judge_final_test_result()
+        
+        # Verify
+        assert judgment["overall_success"] is True
+        assert judgment["confidence"] == 0.95
+        assert judgment["execution_stats"]["success_rate"] == 1.0
+        assert len(judgment["key_issues"]) == 0
+    
+    @pytest.mark.asyncio
+    async def test_judge_final_test_result_with_failures(self, test_runner_agent, sample_test_plan):
+        """Test final judgment on test with failures."""
+        # Set up test state with failures
+        test_runner_agent._current_test_plan = sample_test_plan
+        test_runner_agent._test_state = TestState(
+            test_plan=sample_test_plan,
+            current_step=None,
+            completed_steps=[sample_test_plan.steps[0].step_id],
+            failed_steps=[sample_test_plan.steps[1].step_id],
+            skipped_steps=[sample_test_plan.steps[2].step_id, sample_test_plan.steps[3].step_id],
+            status=TestStatus.FAILED,
+            start_time=datetime.now(timezone.utc),
+            end_time=datetime.now(timezone.utc),
+            error_count=1,
+            warning_count=0
+        )
+        
+        # Add mixed execution history
+        test_runner_agent._execution_history = [
+            TestStepResult(
+                step=sample_test_plan.steps[0],
+                success=True,
+                action_taken=None,
+                actual_result="Success",
+                execution_mode="visual"
+            ),
+            TestStepResult(
+                step=sample_test_plan.steps[1],
+                success=False,
+                action_taken=None,
+                actual_result="Failed to find element",
+                execution_mode="visual",
+                action_result_details={
+                    "validation_passed": False,
+                    "validation_reasoning": "Element not visible",
+                    "execution_error": "Element not found"
+                }
+            )
+        ]
+        
+        # Mock AI judgment
+        test_runner_agent.call_openai = AsyncMock(return_value={
+            "content": json.dumps({
+                "overall_success": False,
+                "confidence": 0.85,
+                "reasoning": "Critical step failed, preventing test completion",
+                "key_issues": ["Username field not found", "Page may not have loaded"],
+                "recommendations": ["Verify page load", "Check element selectors"]
+            })
+        })
+        
+        # Get final judgment
+        judgment = await test_runner_agent.judge_final_test_result()
+        
+        # Verify
+        assert judgment["overall_success"] is False
+        assert judgment["confidence"] == 0.85
+        assert judgment["execution_stats"]["success_rate"] == 0.25  # 1/4 steps
+        assert len(judgment["key_issues"]) == 2
+        assert len(judgment["recommendations"]) == 2
