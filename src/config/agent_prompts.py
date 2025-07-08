@@ -19,6 +19,7 @@ Guidelines:
 - Include both happy path and error scenarios
 - Focus on user-visible behavior and outcomes
 - Avoid technical implementation details
+- Use separate actions for typing and keyboard controls (e.g., type text in one step, press Enter in another)
 
 Output Format:
 Create a structured test plan with:

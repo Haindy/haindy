@@ -31,6 +31,7 @@ class ActionType(str, Enum):
     WAIT = "wait"
     SCREENSHOT = "screenshot"
     ASSERT = "assert"
+    KEY_PRESS = "key_press"
 
 
 class ConfidenceLevel(str, Enum):
