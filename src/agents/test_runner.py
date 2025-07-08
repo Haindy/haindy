@@ -547,25 +547,27 @@ class TestRunnerAgent(BaseAgent):
         
         # Convert to ActionResult for backward compatibility
         action_result = None
-        if enhanced_result.validation.valid and enhanced_result.coordinates:
-            # Create a grid action for the ActionResult
-            grid_action = GridAction(
-                instruction=step.action_instruction,
-                coordinate=GridCoordinate(
-                    cell=enhanced_result.coordinates.grid_cell,
+        if enhanced_result.validation.valid:
+            # For actions that have coordinates (click, type)
+            if enhanced_result.coordinates:
+                action_result = ActionResult(
+                    action_type=step.action_instruction.action_type.value,
+                    grid_cell=enhanced_result.coordinates.grid_cell,
                     offset_x=enhanced_result.coordinates.offset_x,
                     offset_y=enhanced_result.coordinates.offset_y,
                     confidence=enhanced_result.coordinates.confidence,
-                    refined=enhanced_result.coordinates.refined
+                    requires_refinement=enhanced_result.coordinates.refined
                 )
-            )
-            
-            action_result = ActionResult(
-                success=enhanced_result.overall_success,
-                action=grid_action,
-                execution_time_ms=int(enhanced_result.execution.execution_time_ms) if enhanced_result.execution else 0,
-                confidence=enhanced_result.coordinates.confidence
-            )
+            else:
+                # For actions without coordinates (navigate, assert)
+                action_result = ActionResult(
+                    action_type=step.action_instruction.action_type.value,
+                    grid_cell="N/A",  # No grid cell for navigation/assert
+                    offset_x=0.0,
+                    offset_y=0.0,
+                    confidence=enhanced_result.validation.confidence,
+                    requires_refinement=False
+                )
             
             # Record successful action for future use if execution succeeded
             if enhanced_result.execution and enhanced_result.execution.success:
@@ -658,10 +660,10 @@ class TestRunnerAgent(BaseAgent):
         # Don't record pixel coordinates here - they should be calculated
         # dynamically based on viewport size when replaying
         self._scripted_actions[step_key] = {
-            "action_type": action.action.instruction.action_type.value,
-            "grid_cell": action.action.coordinate.cell,
-            "offset_x": action.action.coordinate.offset_x,
-            "offset_y": action.action.coordinate.offset_y,
+            "action_type": action.action_type,
+            "grid_cell": action.grid_cell,
+            "offset_x": action.offset_x,
+            "offset_y": action.offset_y,
             "timestamp": action.timestamp.isoformat()
         }
     
