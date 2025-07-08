@@ -27,6 +27,7 @@ from src.core.types import (
     TestState,
     TestStatus,
 )
+from src.core.enhanced_types import BugReport
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +59,81 @@ class TestStepResult(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # Enhanced debugging information from Action Agent
     action_result_details: Optional[Dict[str, Any]] = None
+    
+    def create_bug_report(self, test_plan_name: str) -> Optional[BugReport]:
+        """Create a detailed bug report for failed steps."""
+        if self.success:
+            return None
+        
+        # Extract details from action_result_details if available
+        details = self.action_result_details or {}
+        
+        # Determine failure type
+        failure_type = "evaluation"
+        if details.get("validation_passed") is False:
+            failure_type = "validation"
+        elif details.get("execution_success") is False:
+            failure_type = "execution"
+        
+        # Extract AI analysis components
+        ai_analysis_data = details.get("ai_analysis", {})
+        
+        # Build confidence scores
+        confidence_scores = {
+            "validation": details.get("validation_confidence", 0.0),
+            "coordinate": details.get("coordinate_confidence", 0.0),
+            "execution": 1.0 if details.get("execution_success") else 0.0,
+            "evaluation": ai_analysis_data.get("confidence", 0.0),
+            "overall": ai_analysis_data.get("confidence", 0.0)
+        }
+        
+        # Create bug report
+        return BugReport(
+            test_step=self.step,
+            test_plan_name=test_plan_name,
+            step_number=self.step.step_number,
+            execution_mode=self.execution_mode,
+            
+            # Failure details
+            failure_type=failure_type,
+            error_message=self.actual_result,
+            detailed_error=details.get("execution_error"),
+            
+            # Visual evidence
+            screenshot_before=self.screenshot_before,
+            screenshot_after=self.screenshot_after,
+            grid_screenshot=details.get("grid_screenshot_highlighted"),
+            
+            # Action details
+            attempted_action=f"{self.step.action_instruction.action_type.value} on {self.step.action_instruction.target}",
+            expected_outcome=self.step.action_instruction.expected_outcome,
+            actual_outcome=ai_analysis_data.get("actual_outcome", self.actual_result),
+            
+            # Grid interaction
+            grid_cell_targeted=details.get("grid_cell"),
+            coordinates_used=GridCoordinate(
+                cell=details.get("grid_cell", ""),
+                offset_x=details.get("offset_x", 0.5),
+                offset_y=details.get("offset_y", 0.5),
+                confidence=details.get("coordinate_confidence", 0.0)
+            ) if details.get("grid_cell") else None,
+            
+            # Browser state
+            url_before=details.get("url_before"),
+            url_after=details.get("url_after"),
+            page_title_before=details.get("page_title_before"),
+            page_title_after=details.get("page_title_after"),
+            
+            # Debugging aids
+            confidence_scores=confidence_scores,
+            ui_anomalies=ai_analysis_data.get("anomalies", []),
+            suggested_fixes=ai_analysis_data.get("recommendations", []),
+            
+            # Categorization
+            severity="critical" if not self.step.optional else "medium",
+            is_blocking=not self.step.optional,
+            is_flaky=False  # Would need historical data to determine
+        )
 
 
 class ExecutionMode(Enum):

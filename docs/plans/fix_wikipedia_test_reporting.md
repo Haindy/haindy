@@ -40,8 +40,8 @@
 | Phase 1: Enhanced ActionResult | ✅ Complete | #17 | Completed |
 | Phase 2: Refactor Test Runner | ✅ Complete | #18 | Completed |
 | Phase 3: Remove/Merge Evaluator | ✅ Complete | - | Completed |
-| Phase 4: Enhanced Error Reporting | 🔄 Next | - | - |
-| Phase 5: Terminal Output Enhancement | ⏳ Pending | - | - |
+| Phase 4: Enhanced Error Reporting | ✅ Complete | - | Completed |
+| Phase 5: Terminal Output Enhancement | 🔄 Next | - | - |
 | Phase 6: Fix Typing Action | ⏳ Pending | - | - |
 
 ## Revised Fix Plan
@@ -102,9 +102,9 @@
 - [x] Use AI to assess if actual results match expected with full context
 
 ### Phase 4: Enhanced Error Reporting
-- [ ] Update TestStepResult to capture ActionResult details
-- [ ] Create BugReport model for failed steps
-- [ ] Update HTML template to show:
+- [x] Update TestStepResult to capture ActionResult details
+- [x] Create BugReport model for failed steps
+- [x] Update HTML template to show:
   - Grid screenshots with clicked cells highlighted
   - AI reasoning for validation and coordinate selection
   - Before/after screenshots
@@ -124,6 +124,38 @@
 - [ ] Add validation that element is focusable
 - [ ] Consider multiple click strategies (single, double, click-and-wait)
 
+## Git Workflow
+
+Each phase should follow this workflow:
+
+1. **Create feature branch**: 
+   - Branch from `fix-plan` (not main)
+   - Name format: `pX-phase-description` (e.g., `p4-enhanced-error-reporting`)
+
+2. **Development**:
+   - Implement the phase requirements
+   - Write/update tests as needed
+   - Ensure all tests pass
+
+3. **Testing**:
+   - Run relevant tests: `source venv/bin/activate && python -m pytest tests/test_file.py -v`
+   - Verify no regressions in related tests
+   - Fix any test failures before proceeding
+
+4. **Documentation**:
+   - Update this fix plan with completion status
+   - Mark completed items with [x]
+   - Update progress tracking table
+
+5. **Create PR**:
+   - Create PR against `fix-plan` branch (NOT main)
+   - Include comprehensive description of changes
+   - Reference the phase number and objectives
+
+6. **Merge and Continue**:
+   - After PR is merged, pull latest from `fix-plan`
+   - Start next phase with a new branch
+
 ## Implementation Order
 
 1. Phase 0: Refactor Action Agent (most critical)
@@ -139,7 +171,7 @@
 - [x] Action Agent validates before executing
 - [x] Failed actions include comprehensive debugging info
 - [x] Grid screenshots show exactly what was clicked
-- [ ] Bug reports clearly explain what went wrong
+- [x] Bug reports clearly explain what went wrong
 - [ ] Typing works reliably on Wikipedia search
 - [ ] Architecture follows clean separation of concerns
 

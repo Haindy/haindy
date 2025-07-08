@@ -221,3 +221,81 @@ class ActionPattern(BaseModel):
         None, 
         description="Hash of screenshot for visual similarity matching"
     )
+
+
+class BugReport(BaseModel):
+    """
+    Comprehensive bug report for failed test steps.
+    
+    Captures all relevant information for debugging test failures,
+    including screenshots, AI reasoning, and execution details.
+    """
+    
+    bug_id: UUID = Field(default_factory=uuid4, description="Unique bug identifier")
+    test_step: TestStep = Field(..., description="The test step that failed")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    # Failure details
+    failure_type: str = Field(..., description="Type of failure: validation|execution|evaluation")
+    error_message: str = Field(..., description="Primary error message")
+    detailed_error: Optional[str] = Field(None, description="Detailed error with stack trace")
+    
+    # Execution context
+    test_plan_name: str = Field(..., description="Name of the test plan")
+    step_number: int = Field(..., description="Step number in the test plan")
+    execution_mode: str = Field("visual", description="How the step was executed")
+    
+    # Visual evidence
+    screenshot_before: Optional[bytes] = Field(None, description="Screenshot before action")
+    screenshot_after: Optional[bytes] = Field(None, description="Screenshot after action")
+    grid_screenshot: Optional[bytes] = Field(None, description="Grid overlay screenshot with highlight")
+    
+    # AI analysis
+    validation_result: Optional[ValidationResult] = Field(None, description="Validation phase results")
+    coordinate_result: Optional[CoordinateResult] = Field(None, description="Coordinate determination results")
+    execution_result: Optional[ExecutionResult] = Field(None, description="Execution phase results")
+    ai_analysis: Optional[AIAnalysis] = Field(None, description="AI evaluation of results")
+    
+    # Action details
+    attempted_action: str = Field(..., description="What action was attempted")
+    expected_outcome: str = Field(..., description="What was expected to happen")
+    actual_outcome: str = Field(..., description="What actually happened")
+    
+    # Grid interaction
+    grid_cell_targeted: Optional[str] = Field(None, description="Grid cell that was targeted")
+    coordinates_used: Optional[GridCoordinate] = Field(None, description="Exact coordinates used")
+    
+    # Browser state
+    url_before: Optional[str] = Field(None, description="URL before action")
+    url_after: Optional[str] = Field(None, description="URL after action")
+    page_title_before: Optional[str] = Field(None, description="Page title before action")
+    page_title_after: Optional[str] = Field(None, description="Page title after action")
+    
+    # Debugging aids
+    confidence_scores: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Confidence scores at each phase"
+    )
+    ui_anomalies: List[str] = Field(
+        default_factory=list,
+        description="Detected UI anomalies or unexpected states"
+    )
+    suggested_fixes: List[str] = Field(
+        default_factory=list,
+        description="AI-suggested fixes or workarounds"
+    )
+    
+    # Categorization
+    severity: str = Field("medium", description="Bug severity: low|medium|high|critical")
+    is_blocking: bool = Field(False, description="Whether this blocks test continuation")
+    is_flaky: bool = Field(False, description="Whether this appears to be a flaky failure")
+    
+    def to_summary(self) -> str:
+        """Generate a concise summary of the bug."""
+        return (
+            f"BUG [{self.severity.upper()}] Step {self.step_number}: {self.error_message}\n"
+            f"  Action: {self.attempted_action}\n"
+            f"  Expected: {self.expected_outcome}\n"
+            f"  Actual: {self.actual_outcome}\n"
+            f"  Confidence: {self.confidence_scores.get('overall', 0.0):.0%}"
+        )
