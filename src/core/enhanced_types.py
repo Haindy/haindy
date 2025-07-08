@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from src.core.types import ActionInstruction, GridCoordinate, TestStep
+from src.core.types import ActionInstruction, GridCoordinate, TestStep, TestState
 
 
 class ValidationResult(BaseModel):
@@ -291,11 +291,46 @@ class BugReport(BaseModel):
     is_flaky: bool = Field(False, description="Whether this appears to be a flaky failure")
     
     def to_summary(self) -> str:
-        """Generate a concise summary of the bug."""
-        return (
-            f"BUG [{self.severity.upper()}] Step {self.step_number}: {self.error_message}\n"
-            f"  Action: {self.attempted_action}\n"
-            f"  Expected: {self.expected_outcome}\n"
-            f"  Actual: {self.actual_outcome}\n"
-            f"  Confidence: {self.confidence_scores.get('overall', 0.0):.0%}"
-        )
+        """Generate a concise summary of the bug report."""
+        severity_upper = self.severity.upper()
+        blocking_text = " [BLOCKING]" if self.is_blocking else ""
+        
+        summary = f"BUG [{severity_upper}]{blocking_text}"
+        
+        if self.step_number:
+            summary += f" Step {self.step_number}: {self.test_step.description}\n"
+        else:
+            summary += f" {self.test_step.description}\n"
+        
+        summary += f"  Error: {self.error_message}\n"
+        
+        if self.expected_outcome and self.actual_outcome:
+            summary += f"  Expected: {self.expected_outcome}\n"
+            summary += f"  Actual: {self.actual_outcome}\n"
+        
+        if self.ai_analysis:
+            summary += f"  Confidence: {self.ai_analysis.confidence*100:.0f}%\n"
+        elif self.confidence_scores.get('overall'):
+            summary += f"  Confidence: {self.confidence_scores.get('overall', 0.0):.0%}\n"
+        
+        return summary
+
+
+class EnhancedTestState(TestState):
+    """Extended test state with enhanced tracking capabilities."""
+    execution_history: List[EnhancedActionResult] = Field(
+        default_factory=list,
+        description="Detailed history of all action executions"
+    )
+    bug_reports: List[BugReport] = Field(
+        default_factory=list,
+        description="Collection of bug reports for failed steps"
+    )
+    performance_metrics: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Performance metrics for the test execution"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata for test execution"
+    )

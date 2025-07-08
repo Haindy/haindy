@@ -241,6 +241,9 @@ class TestRunnerAgent(BaseAgent):
             "total_steps": len(test_plan.steps)
         })
         
+        # Print enhanced terminal output with bug report summary
+        self._print_terminal_summary()
+        
         return self._test_state
     
     async def _execute_next_step(self) -> None:
@@ -814,3 +817,80 @@ Provide your recommendation with reasoning."""
             return response.get("content", "Proceed with current step")
         
         return None
+    
+    def _print_terminal_summary(self) -> None:
+        """Print enhanced terminal summary with bug reports for failed steps."""
+        # Calculate test metrics
+        total_steps = len(self._test_state.test_plan.steps)
+        completed_steps = len(self._test_state.completed_steps)
+        failed_steps = len(self._test_state.failed_steps)
+        success_rate = (completed_steps - failed_steps) / total_steps * 100 if total_steps > 0 else 0
+        
+        # Print test summary header
+        print("\n" + "="*80)
+        print(f"TEST EXECUTION SUMMARY: {self._test_state.test_plan.name}")
+        print("="*80)
+        
+        # Print status overview
+        print(f"\nStatus: {self._test_state.status.value.upper()}")
+        print(f"Total Steps: {total_steps}")
+        print(f"Completed: {completed_steps}")
+        print(f"Failed: {failed_steps}")
+        print(f"Success Rate: {success_rate:.1f}%")
+        
+        # Calculate duration
+        if self._test_state.start_time and self._test_state.end_time:
+            duration = (self._test_state.end_time - self._test_state.start_time).total_seconds()
+            print(f"Duration: {duration:.1f}s")
+        
+        # Print detailed bug reports for failed steps
+        if failed_steps > 0:
+            print("\n" + "-"*80)
+            print("BUG REPORTS FOR FAILED STEPS:")
+            print("-"*80)
+            
+            # Process each failed step result
+            for result in self._execution_history:
+                if not result.success and result.step.step_id in self._test_state.failed_steps:
+                    # Create bug report from the failed step
+                    bug_report = result.create_bug_report(self._test_state.test_plan.name)
+                    if bug_report:
+                        print(f"\n{bug_report.to_summary()}")
+                        
+                        # Show AI reasoning if available
+                        if result.action_result_details:
+                            ai_analysis = result.action_result_details.get("ai_analysis", {})
+                            if ai_analysis:
+                                print(f"\nAI Analysis:")
+                                print(f"  - Confidence: {ai_analysis.get('confidence', 0)*100:.0f}%")
+                                print(f"  - Actual outcome: {ai_analysis.get('actual_outcome', 'Unknown')}")
+                                
+                                # Show anomalies
+                                anomalies = ai_analysis.get("anomalies", [])
+                                if anomalies:
+                                    print(f"  - UI Anomalies detected:")
+                                    for anomaly in anomalies:
+                                        print(f"    • {anomaly}")
+                                
+                                # Show recommendations
+                                recommendations = ai_analysis.get("recommendations", [])
+                                if recommendations:
+                                    print(f"  - Recommendations:")
+                                    for rec in recommendations:
+                                        print(f"    • {rec}")
+                        
+                        # Show screenshot paths if available
+                        if result.screenshot_before or result.screenshot_after:
+                            print(f"\nScreenshots saved:")
+                            if result.screenshot_before:
+                                print(f"  - Before: [Binary data, {len(result.screenshot_before)} bytes]")
+                            if result.screenshot_after:
+                                print(f"  - After: [Binary data, {len(result.screenshot_after)} bytes]")
+                            
+                            # If grid screenshot is available in action_result_details
+                            if result.action_result_details:
+                                grid_screenshot = result.action_result_details.get("grid_screenshot_highlighted")
+                                if grid_screenshot:
+                                    print(f"  - Grid (highlighted): [Binary data, {len(grid_screenshot)} bytes]")
+        
+        print("\n" + "="*80 + "\n")
