@@ -106,7 +106,15 @@ class ActionAgent(BaseAgent):
         if action_type == "navigate":
             return await self._execute_navigate_workflow(test_step, test_context)
         elif action_type == "click":
-            return await self._execute_click_workflow(test_step, test_context, screenshot)
+            # Phase 8c: Check if this is a dropdown/select action
+            target_lower = test_step.action_instruction.target.lower()
+            desc_lower = test_step.description.lower()
+            if ("dropdown" in target_lower or "dropdown" in desc_lower or
+                "select" in target_lower or "select" in desc_lower or
+                "option" in target_lower or "option" in desc_lower):
+                return await self._execute_dropdown_workflow(test_step, test_context, screenshot)
+            else:
+                return await self._execute_click_workflow(test_step, test_context, screenshot)
         elif action_type == "type":
             return await self._execute_type_workflow(test_step, test_context, screenshot)
         elif action_type == "assert":
@@ -492,6 +500,373 @@ REASON: <explanation if it doesn't match>
             
         except Exception as e:
             logger.error(f"Assert workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        return result
+    
+    async def _execute_dropdown_workflow(
+        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+    ) -> EnhancedActionResult:
+        """Execute dropdown/select action workflow with multi-step interaction."""
+        logger.info("Executing dropdown workflow", extra={
+            "target": test_step.action_instruction.target,
+            "value": test_step.action_instruction.value
+        })
+        
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            validation=ValidationResult(
+                valid=False,
+                confidence=0.0,
+                reasoning="Not yet validated"
+            )
+        )
+        
+        try:
+            if not screenshot:
+                screenshot = await self.browser_driver.screenshot()
+            
+            # Step 1: Identify dropdown element
+            dropdown_prompt = f"""
+I need to interact with a dropdown/select element.
+
+Target: {test_step.action_instruction.target}
+Description: {test_step.action_instruction.description}
+Value to select: {test_step.action_instruction.value}
+
+Please analyze the screenshot and:
+1. Identify the dropdown element
+2. Check if it's currently open or closed
+3. Provide grid coordinates to click on the dropdown
+4. Check for any blockers (overlays, animations)
+
+Respond in this format:
+DROPDOWN_FOUND: true/false
+DROPDOWN_STATE: open/closed
+GRID_CELL: <cell identifier>
+OFFSET_X: <0.0-1.0>
+OFFSET_Y: <0.0-1.0>
+BLOCKED: true/false
+BLOCKER_REASON: <if blocked, explain why>
+CONFIDENCE: <0.0-1.0>
+"""
+            
+            # Get dropdown location
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": dropdown_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            response = await self.call_openai(messages=messages, temperature=0.3)
+            dropdown_response = response.get("content", "")
+            
+            # Parse response
+            dropdown_found = "DROPDOWN_FOUND: true" in dropdown_response
+            is_open = "DROPDOWN_STATE: open" in dropdown_response
+            blocked = "BLOCKED: true" in dropdown_response
+            
+            if not dropdown_found:
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message="Unable to locate dropdown element"
+                )
+                result.failure_phase = "identification"
+                return result
+            
+            if blocked:
+                blocker_reason = ""
+                if "BLOCKER_REASON:" in dropdown_response:
+                    blocker_reason = dropdown_response.split("BLOCKER_REASON:")[1].split("\n")[0].strip()
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message=f"Dropdown is blocked: {blocker_reason}"
+                )
+                result.failure_phase = "validation"
+                return result
+            
+            # Extract coordinates
+            grid_cell = ""
+            offset_x = 0.5
+            offset_y = 0.5
+            
+            if "GRID_CELL:" in dropdown_response:
+                grid_cell = dropdown_response.split("GRID_CELL:")[1].split("\n")[0].strip()
+            if "OFFSET_X:" in dropdown_response:
+                offset_x = float(dropdown_response.split("OFFSET_X:")[1].split("\n")[0].strip())
+            if "OFFSET_Y:" in dropdown_response:
+                offset_y = float(dropdown_response.split("OFFSET_Y:")[1].split("\n")[0].strip())
+            
+            # Step 2: Open dropdown if needed
+            if not is_open:
+                logger.info("Opening dropdown", extra={"grid_cell": grid_cell})
+                
+                # Click to open dropdown
+                coordinates = self.grid_overlay.get_cell_coordinates(
+                    grid_cell, offset_x, offset_y
+                )
+                await self.browser_driver.click(coordinates[0], coordinates[1])
+                await asyncio.sleep(0.5)  # Wait for dropdown to open
+                
+                # Take new screenshot
+                screenshot_after_open = await self.browser_driver.screenshot()
+                
+                # Verify dropdown opened
+                verify_prompt = "Is the dropdown now open? Respond with DROPDOWN_OPEN: true/false"
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": verify_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64.b64encode(screenshot_after_open).decode('utf-8')}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+                
+                verify_response = await self.call_openai(messages=messages, temperature=0.3)
+                if "DROPDOWN_OPEN: false" in verify_response.get("content", ""):
+                    # Try one more time with a slight delay
+                    await asyncio.sleep(0.5)
+                    await self.browser_driver.click(coordinates[0], coordinates[1])
+                    await asyncio.sleep(0.5)
+                    screenshot_after_open = await self.browser_driver.screenshot()
+            else:
+                screenshot_after_open = screenshot
+            
+            # Step 3: Find and select target option
+            target_value = test_step.action_instruction.value
+            option_prompt = f"""
+The dropdown is now open. I need to select: "{target_value}"
+
+Please analyze the screenshot and:
+1. Find the option that matches "{target_value}" (exact or close match)
+2. If not visible, check if scrolling is needed
+3. Provide grid coordinates for the option
+
+Respond in this format:
+OPTION_FOUND: true/false
+OPTION_VISIBLE: true/false
+NEEDS_SCROLL: true/false
+SCROLL_DIRECTION: up/down/none
+GRID_CELL: <cell identifier>
+OFFSET_X: <0.0-1.0>
+OFFSET_Y: <0.0-1.0>
+CONFIDENCE: <0.0-1.0>
+MATCH_TYPE: exact/partial/none
+"""
+            
+            # Search for option
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": option_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot_after_open).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            option_response = await self.call_openai(messages=messages, temperature=0.3)
+            option_content = option_response.get("content", "")
+            
+            option_found = "OPTION_FOUND: true" in option_content
+            option_visible = "OPTION_VISIBLE: true" in option_content
+            needs_scroll = "NEEDS_SCROLL: true" in option_content
+            
+            # Handle scrolling if needed
+            if needs_scroll and not option_visible:
+                # For MVP, we'll try basic scrolling
+                scroll_direction = "down"
+                if "SCROLL_DIRECTION: up" in option_content:
+                    scroll_direction = "up"
+                
+                # Find scroll area (simplified - click and drag in center of dropdown)
+                if scroll_direction == "down":
+                    # Drag from middle to top of dropdown area
+                    start_y = coordinates[1] + 50
+                    end_y = coordinates[1] - 50
+                else:
+                    # Drag from middle to bottom
+                    start_y = coordinates[1] - 50
+                    end_y = coordinates[1] + 50
+                
+                # Simple drag to scroll
+                await self.browser_driver.click(coordinates[0], start_y)
+                await asyncio.sleep(0.1)
+                # Note: We need drag support in browser driver for this
+                # For now, we'll just try to find the option in the visible area
+                logger.warning("Dropdown scrolling not fully implemented - drag support needed")
+            
+            if not option_found:
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message=f"Could not find option '{target_value}' in dropdown"
+                )
+                result.failure_phase = "option_search"
+                return result
+            
+            # Extract option coordinates
+            option_cell = ""
+            option_x = 0.5
+            option_y = 0.5
+            
+            if "GRID_CELL:" in option_content:
+                parts = option_content.split("GRID_CELL:")
+                if len(parts) > 1:
+                    option_cell = parts[1].split("\n")[0].strip()
+            if "OFFSET_X:" in option_content:
+                parts = option_content.split("OFFSET_X:")
+                if len(parts) > 1:
+                    option_x = float(parts[1].split("\n")[0].strip())
+            if "OFFSET_Y:" in option_content:
+                parts = option_content.split("OFFSET_Y:")
+                if len(parts) > 1:
+                    option_y = float(parts[1].split("\n")[0].strip())
+            
+            # Step 4: Click on the option
+            option_coords = self.grid_overlay.get_cell_coordinates(
+                option_cell, option_x, option_y
+            )
+            
+            execution_start = asyncio.get_event_loop().time()
+            await self.browser_driver.click(option_coords[0], option_coords[1])
+            await asyncio.sleep(0.5)  # Wait for selection
+            
+            # Step 5: Validate selection
+            screenshot_after = await self.browser_driver.screenshot()
+            
+            validate_prompt = f"""
+I just selected "{target_value}" from a dropdown.
+
+Please verify:
+1. Is the dropdown now closed?
+2. Does the dropdown show the selected value "{target_value}"?
+3. Does it match the expected outcome: "{test_step.action_instruction.expected_outcome}"?
+
+Respond in this format:
+DROPDOWN_CLOSED: true/false
+SELECTED_VALUE: <what the dropdown shows>
+MATCHES_TARGET: true/false
+MATCHES_EXPECTED: true/false
+CONFIDENCE: <0.0-1.0>
+"""
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": validate_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot_after).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            validate_response = await self.call_openai(messages=messages, temperature=0.3)
+            validate_content = validate_response.get("content", "")
+            
+            # Parse validation
+            dropdown_closed = "DROPDOWN_CLOSED: true" in validate_content
+            matches_target = "MATCHES_TARGET: true" in validate_content
+            matches_expected = "MATCHES_EXPECTED: true" in validate_content
+            
+            selected_value = ""
+            if "SELECTED_VALUE:" in validate_content:
+                selected_value = validate_content.split("SELECTED_VALUE:")[1].split("\n")[0].strip()
+            
+            # Set results
+            success = matches_target and matches_expected
+            
+            result.coordinates = CoordinateResult(
+                grid_cell=option_cell,
+                grid_coordinates=(option_coords[0], option_coords[1]),
+                offset_x=option_x,
+                offset_y=option_y,
+                confidence=0.9 if success else 0.5,
+                reasoning=f"Selected '{selected_value}' from dropdown"
+            )
+            
+            result.validation = ValidationResult(
+                valid=success,
+                confidence=0.9 if success else 0.5,
+                reasoning=f"Dropdown selection: {selected_value}",
+                concerns=[] if success else [f"Selected value '{selected_value}' may not match target '{target_value}'"]
+            )
+            
+            result.execution = ExecutionResult(
+                success=success,
+                execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000,
+                error_message=None if success else f"Selection mismatch: expected '{target_value}', got '{selected_value}'"
+            )
+            
+            result.browser_state_before = BrowserState(
+                url=await self.browser_driver.get_page_url(),
+                title=await self.browser_driver.get_page_title(),
+                viewport_size=await self.browser_driver.get_viewport_size(),
+                screenshot=screenshot
+            )
+            
+            result.browser_state_after = BrowserState(
+                url=await self.browser_driver.get_page_url(),
+                title=await self.browser_driver.get_page_title(),
+                viewport_size=await self.browser_driver.get_viewport_size(),
+                screenshot=screenshot_after
+            )
+            
+            result.ai_analysis = AIAnalysis(
+                success=success,
+                confidence=0.9 if success else 0.5,
+                actual_outcome=f"Selected '{selected_value}' from dropdown",
+                matches_expected=matches_expected,
+                ui_changes=[f"Dropdown value changed to: {selected_value}"],
+                recommendations=[] if success else ["Verify the target value matches available options", "Check for case sensitivity"],
+                anomalies=[] if success else [f"Selection mismatch: '{selected_value}' vs '{target_value}'"]
+            )
+            
+            result.overall_success = success
+            if not success:
+                result.failure_phase = "validation"
+            
+        except Exception as e:
+            logger.error(f"Dropdown workflow failed: {str(e)}")
             result.overall_success = False
             result.execution = ExecutionResult(
                 success=False,
