@@ -246,7 +246,12 @@ class TestTestRunnerAgent:
                     "action_type": test_step.action_instruction.action_type.value,
                     "validation_passed": True,
                     "grid_cell": "M23",
+                    "grid_coordinates": (960, 540),
+                    "offset_x": 0.5,
+                    "offset_y": 0.5,
+                    "coordinate_confidence": 0.95,
                     "execution_success": False,
+                    "screenshot_after": b"mock_screenshot_after",
                     "ai_analysis": {
                         "success": False,  # Step 2 fails
                         "confidence": 0.90,
@@ -259,7 +264,12 @@ class TestTestRunnerAgent:
                     "action_type": test_step.action_instruction.action_type.value,
                     "validation_passed": True,
                     "grid_cell": "M23",
+                    "grid_coordinates": (960, 540),
+                    "offset_x": 0.5,
+                    "offset_y": 0.5,
+                    "coordinate_confidence": 0.95,
                     "execution_success": True,
+                    "screenshot_after": b"mock_screenshot_after",
                     "ai_analysis": {
                         "success": True,
                         "confidence": 0.95,
@@ -279,6 +289,13 @@ class TestTestRunnerAgent:
         
         # Execute
         result = await test_runner_agent.execute_test_plan(sample_test_plan)
+        
+        # Debug output
+        print(f"Test execution history:")
+        for i, step_result in enumerate(test_runner_agent._execution_history):
+            print(f"  Step {i+1}: success={step_result.success}, result={step_result.actual_result}")
+        print(f"Completed steps: {len(result.completed_steps)}")
+        print(f"Failed steps: {len(result.failed_steps)}")
         
         # Verify
         assert result.status == TestStatus.FAILED
