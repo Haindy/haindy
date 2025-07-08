@@ -372,12 +372,308 @@ REASON: <explanation of any issues>
     ) -> EnhancedActionResult:
         """Execute click action workflow with validation."""
         logger.info("Executing click workflow", extra={
-            "target": test_step.action_instruction.target
+            "target": test_step.action_instruction.target,
+            "description": test_step.description
         })
         
-        # For now, use the existing validation-coordinate-execution flow
-        # This will be enhanced in future phases
-        return await self._execute_legacy_workflow(test_step, test_context, screenshot)
+        # Initialize result
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            validation=ValidationResult(
+                valid=False,
+                confidence=0.0,
+                reasoning="Not yet validated"
+            ),
+            timestamp_end=datetime.now(timezone.utc)
+        )
+        
+        try:
+            # Step 1: Capture initial state
+            if not screenshot and self.browser_driver:
+                screenshot = await self.browser_driver.screenshot()
+            
+            # Get viewport for grid initialization
+            viewport_size = await self.browser_driver.get_viewport_size()
+            self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
+            
+            result.browser_state_before = BrowserState(
+                url=await self.browser_driver.get_page_url(),
+                title=await self.browser_driver.get_page_title(),
+                viewport_size=viewport_size,
+                screenshot=screenshot
+            )
+            
+            # Step 2: Target Identification with AI
+            click_prompt = f"""
+I need to click on an element in this screenshot.
+
+Target: {test_step.action_instruction.target}
+Description: {test_step.description}
+Expected outcome: {test_step.action_instruction.expected_outcome}
+
+Please analyze the screenshot with the grid overlay and:
+1. Find the clickable target element
+2. Check if it's visible and not obscured
+3. Identify the element type if possible (button, link, icon, etc.)
+4. Provide the grid coordinates
+
+Respond in this format:
+TARGET_FOUND: true/false
+VISIBLE: true/false
+CLICKABLE: true/false
+ELEMENT_TYPE: button/link/icon/form_element/other
+GRID_CELL: <cell identifier>
+OFFSET_X: <0.0-1.0>
+OFFSET_Y: <0.0-1.0>
+CONFIDENCE: <0.0-1.0>
+REASONING: <why you selected this location>
+BLOCKED_BY: <if blocked, what's blocking it>
+"""
+            
+            # Create grid overlay screenshot for analysis
+            grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": click_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(grid_screenshot).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            response = await self.call_openai(messages=messages, temperature=0.3)
+            click_response = response.get("content", "")
+            
+            # Parse response
+            target_found = "TARGET_FOUND: true" in click_response
+            visible = "VISIBLE: true" in click_response
+            clickable = "CLICKABLE: true" in click_response
+            
+            if not target_found:
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message="Could not locate clickable element matching instruction"
+                )
+                result.failure_phase = "identification"
+                return result
+            
+            if not visible or not clickable:
+                blocked_by = ""
+                if "BLOCKED_BY:" in click_response:
+                    blocked_by = click_response.split("BLOCKED_BY:")[1].split("\n")[0].strip()
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message=f"Target element is not clickable: {blocked_by or 'not visible'}"
+                )
+                result.failure_phase = "validation"
+                return result
+            
+            # Extract coordinates and element type
+            grid_cell = ""
+            offset_x = 0.5
+            offset_y = 0.5
+            element_type = "other"
+            confidence = 0.0
+            reasoning = ""
+            
+            if "GRID_CELL:" in click_response:
+                grid_cell = click_response.split("GRID_CELL:")[1].split("\n")[0].strip()
+            if "OFFSET_X:" in click_response:
+                offset_x = float(click_response.split("OFFSET_X:")[1].split("\n")[0].strip())
+            if "OFFSET_Y:" in click_response:
+                offset_y = float(click_response.split("OFFSET_Y:")[1].split("\n")[0].strip())
+            if "ELEMENT_TYPE:" in click_response:
+                element_type = click_response.split("ELEMENT_TYPE:")[1].split("\n")[0].strip()
+            if "CONFIDENCE:" in click_response:
+                confidence = float(click_response.split("CONFIDENCE:")[1].split("\n")[0].strip())
+            if "REASONING:" in click_response:
+                reasoning = click_response.split("REASONING:")[1].split("\n")[0].strip()
+            
+            # Create coordinate result
+            # First create a GridCoordinate object
+            grid_coord = GridCoordinate(
+                cell=grid_cell,
+                offset_x=offset_x,
+                offset_y=offset_y,
+                confidence=confidence,
+                refined=False
+            )
+            # Convert to pixel coordinates
+            pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
+            
+            result.coordinates = CoordinateResult(
+                grid_cell=grid_cell,
+                grid_coordinates=(pixel_x, pixel_y),
+                offset_x=offset_x,
+                offset_y=offset_y,
+                confidence=confidence,
+                reasoning=reasoning,
+                refined=False
+            )
+            
+            # Create grid screenshots for debugging
+            result.grid_screenshot_before = grid_screenshot
+            result.grid_screenshot_highlighted = self._create_highlighted_screenshot(
+                screenshot, grid_cell
+            )
+            
+            # Step 3: Click Execution
+            execution_start = asyncio.get_event_loop().time()
+            
+            logger.info("Executing click", extra={
+                "coordinates": coordinates,
+                "element_type": element_type,
+                "confidence": confidence
+            })
+            
+            await self.browser_driver.click(coordinates[0], coordinates[1])
+            
+            # Wait based on element type (or use generic 1s as discussed)
+            wait_time = 1000  # Default 1 second
+            await self.browser_driver.wait(wait_time)
+            
+            # Step 4: Capture post-click state
+            screenshot_after = await self.browser_driver.screenshot()
+            result.browser_state_after = BrowserState(
+                url=await self.browser_driver.get_page_url(),
+                title=await self.browser_driver.get_page_title(),
+                viewport_size=viewport_size,
+                screenshot=screenshot_after
+            )
+            
+            execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
+            
+            # Step 5: Click Validation with AI
+            validation_prompt = f"""
+I just clicked on the element at grid cell {grid_cell}.
+
+Target was: {test_step.action_instruction.target}
+Expected outcome: {test_step.action_instruction.expected_outcome}
+
+Please compare the before and after screenshots and tell me:
+1. What changed after the click?
+2. Did the expected outcome occur?
+3. Were there any unexpected changes?
+
+Respond in this format:
+CHANGES_DETECTED: true/false
+EXPECTED_OUTCOME_MET: true/false
+URL_CHANGED: true/false
+NEW_URL: <if changed>
+UI_CHANGES: <list what changed>
+UNEXPECTED_CHANGES: <any unexpected behaviors>
+CONFIDENCE: <0.0-1.0>
+"""
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": validation_prompt},
+                        {"type": "text", "text": "BEFORE screenshot:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot).decode('utf-8')}"
+                            }
+                        },
+                        {"type": "text", "text": "AFTER screenshot:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot_after).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            validation_response = await self.call_openai(messages=messages, temperature=0.3)
+            validation_content = validation_response.get("content", "")
+            
+            # Parse validation
+            changes_detected = "CHANGES_DETECTED: true" in validation_content
+            expected_met = "EXPECTED_OUTCOME_MET: true" in validation_content
+            url_changed = "URL_CHANGED: true" in validation_content
+            
+            ui_changes = []
+            unexpected_changes = []
+            validation_confidence = 0.0
+            
+            if "UI_CHANGES:" in validation_content:
+                ui_changes_text = validation_content.split("UI_CHANGES:")[1].split("\n")[0].strip()
+                ui_changes = [change.strip() for change in ui_changes_text.split(",") if change.strip()]
+            
+            if "UNEXPECTED_CHANGES:" in validation_content:
+                unexpected_text = validation_content.split("UNEXPECTED_CHANGES:")[1].split("\n")[0].strip()
+                if unexpected_text and unexpected_text.lower() not in ["none", "n/a"]:
+                    unexpected_changes = [unexpected_text]
+            
+            if "CONFIDENCE:" in validation_content:
+                validation_confidence = float(validation_content.split("CONFIDENCE:")[1].split("\n")[0].strip())
+            
+            # Determine success
+            success = changes_detected and expected_met
+            
+            # Build error message if needed
+            error_message = None
+            if not changes_detected:
+                error_message = "Click had no effect - no changes detected"
+            elif not expected_met:
+                error_message = f"Click executed but unexpected result: {', '.join(ui_changes)}"
+            
+            # Set results
+            result.validation = ValidationResult(
+                valid=True,  # Click was valid to attempt
+                confidence=confidence,
+                reasoning=f"Clicked {element_type} at {grid_cell}: {reasoning}"
+            )
+            
+            result.execution = ExecutionResult(
+                success=success,
+                execution_time_ms=execution_time,
+                error_message=error_message
+            )
+            
+            result.ai_analysis = AIAnalysis(
+                success=success,
+                confidence=validation_confidence,
+                actual_outcome=f"Clicked at {grid_cell}. Changes: {', '.join(ui_changes) if ui_changes else 'No visible changes'}",
+                matches_expected=expected_met,
+                ui_changes=ui_changes,
+                recommendations=[] if success else ["Verify the correct element was clicked", "Check if page needs more time to load"],
+                anomalies=unexpected_changes
+            )
+            
+            result.overall_success = success
+            if not success:
+                result.failure_phase = "validation" if changes_detected else "execution"
+            
+        except Exception as e:
+            logger.error(f"Click workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        return result
     
     async def _execute_type_workflow(
         self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
@@ -624,10 +920,15 @@ CONFIDENCE: <0.0-1.0>
                 logger.info("Opening dropdown", extra={"grid_cell": grid_cell})
                 
                 # Click to open dropdown
-                coordinates = self.grid_overlay.get_cell_coordinates(
-                    grid_cell, offset_x, offset_y
+                grid_coord = GridCoordinate(
+                    cell=grid_cell,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
+                    confidence=0.9,
+                    refined=False
                 )
-                await self.browser_driver.click(coordinates[0], coordinates[1])
+                pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
+                await self.browser_driver.click(pixel_x, pixel_y)
                 await asyncio.sleep(0.5)  # Wait for dropdown to open
                 
                 # Take new screenshot
@@ -654,7 +955,7 @@ CONFIDENCE: <0.0-1.0>
                 if "DROPDOWN_OPEN: false" in verify_response.get("content", ""):
                     # Try one more time with a slight delay
                     await asyncio.sleep(0.5)
-                    await self.browser_driver.click(coordinates[0], coordinates[1])
+                    await self.browser_driver.click(pixel_x, pixel_y)
                     await asyncio.sleep(0.5)
                     screenshot_after_open = await self.browser_driver.screenshot()
             else:
@@ -715,15 +1016,15 @@ MATCH_TYPE: exact/partial/none
                 # Find scroll area (simplified - click and drag in center of dropdown)
                 if scroll_direction == "down":
                     # Drag from middle to top of dropdown area
-                    start_y = coordinates[1] + 50
-                    end_y = coordinates[1] - 50
+                    start_y = pixel_y + 50
+                    end_y = pixel_y - 50
                 else:
                     # Drag from middle to bottom
-                    start_y = coordinates[1] - 50
-                    end_y = coordinates[1] + 50
+                    start_y = pixel_y - 50
+                    end_y = pixel_y + 50
                 
                 # Simple drag to scroll
-                await self.browser_driver.click(coordinates[0], start_y)
+                await self.browser_driver.click(pixel_x, start_y)
                 await asyncio.sleep(0.1)
                 # Note: We need drag support in browser driver for this
                 # For now, we'll just try to find the option in the visible area
@@ -758,9 +1059,14 @@ MATCH_TYPE: exact/partial/none
                     option_y = float(parts[1].split("\n")[0].strip())
             
             # Step 4: Click on the option
-            option_coords = self.grid_overlay.get_cell_coordinates(
-                option_cell, option_x, option_y
+            option_grid_coord = GridCoordinate(
+                cell=option_cell,
+                offset_x=option_x,
+                offset_y=option_y,
+                confidence=0.9,
+                refined=False
             )
+            option_coords = self.grid_overlay.coordinate_to_pixels(option_grid_coord)
             
             execution_start = asyncio.get_event_loop().time()
             await self.browser_driver.click(option_coords[0], option_coords[1])
