@@ -111,9 +111,9 @@ class TestPlannerAgent(BaseAgent):
         {
             "step_number": 1,
             "description": "Step description",
-            "action": "click/type/navigate/wait/verify",
+            "action": "click/type/navigate/wait/verify/key_press",
             "target": "Description of what to interact with",
-            "value": "Value to type (if action is 'type')",
+            "value": "Value to type (if action is 'type') or key name (if action is 'key_press')",
             "expected_result": "What should happen",
             "dependencies": [],
             "optional": false
@@ -150,7 +150,9 @@ class TestPlannerAgent(BaseAgent):
                     "navigate": ActionType.NAVIGATE,
                     "wait": ActionType.WAIT,
                     "verify": ActionType.ASSERT,
-                    "assert": ActionType.ASSERT
+                    "assert": ActionType.ASSERT,
+                    "key_press": ActionType.KEY_PRESS,
+                    "press": ActionType.KEY_PRESS  # Alternative name
                 }
                 action_type = action_type_map.get(
                     step_data.get("action", "verify").lower(),
