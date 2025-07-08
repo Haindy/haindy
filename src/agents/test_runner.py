@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from src.agents.action_agent import ActionAgent
 from src.agents.base_agent import BaseAgent
-from src.agents.evaluator import EvaluatorAgent
 from src.agents.test_planner import TestPlannerAgent
 from src.browser.driver import BrowserDriver
 from src.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
@@ -83,7 +82,6 @@ class TestRunnerAgent(BaseAgent):
         name: str = "TestRunnerAgent",
         browser_driver: Optional[BrowserDriver] = None,
         action_agent: Optional[ActionAgent] = None,
-        evaluator_agent: Optional[EvaluatorAgent] = None,
         **kwargs
     ):
         """
@@ -93,14 +91,12 @@ class TestRunnerAgent(BaseAgent):
             name: Agent name
             browser_driver: Browser driver instance
             action_agent: Action agent instance for visual interactions
-            evaluator_agent: Evaluator agent instance for result validation
             **kwargs: Additional arguments for BaseAgent
         """
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_RUNNER_SYSTEM_PROMPT
         self.browser_driver = browser_driver
         self.action_agent = action_agent
-        self.evaluator_agent = evaluator_agent
         
         # Test execution state
         self._current_test_plan: Optional[TestPlan] = None
@@ -272,32 +268,47 @@ class TestRunnerAgent(BaseAgent):
                 with open(f"debug_screenshots/step_{step.step_number}_after.png", "wb") as f:
                     f.write(screenshot_after)
             
-            # Evaluate result
-            if self.evaluator_agent and screenshot_after:
-                evaluation_result = await self.evaluator_agent.evaluate_result(
-                    screenshot_after,
-                    step.action_instruction.expected_outcome,
-                    step_id=step.step_id
-                )
+            # Extract evaluation from AI analysis in action result details
+            evaluation_result = None
+            success = True
+            actual_outcome = "Action completed"
             
-            # Create step result
-            success = evaluation_result.success if evaluation_result else True
-            
-            # Debug logging
-            if evaluation_result and not evaluation_result.success:
-                logger.warning("Step evaluation failed", extra={
-                    "step_number": step.step_number,
-                    "expected": evaluation_result.expected_outcome,
-                    "actual": evaluation_result.actual_outcome,
-                    "confidence": evaluation_result.confidence,
-                    "deviations": evaluation_result.deviations
-                })
+            if self._current_step_result_details:
+                ai_analysis = self._current_step_result_details.get("ai_analysis", {})
+                if ai_analysis:
+                    # Use AI analysis from Action Agent as evaluation
+                    success = ai_analysis.get("success", True)
+                    actual_outcome = ai_analysis.get("actual_outcome", "Action completed")
+                    
+                    # Create EvaluationResult for backward compatibility
+                    evaluation_result = EvaluationResult(
+                        step_id=step.step_id,
+                        success=success,
+                        expected_outcome=step.action_instruction.expected_outcome,
+                        actual_outcome=actual_outcome,
+                        confidence=ai_analysis.get("confidence", 0.0),
+                        deviations=ai_analysis.get("anomalies", [])
+                    )
+                    
+                    # Debug logging for failed evaluations
+                    if not success:
+                        logger.warning("Step evaluation failed", extra={
+                            "step_number": step.step_number,
+                            "expected": step.action_instruction.expected_outcome,
+                            "actual": actual_outcome,
+                            "confidence": ai_analysis.get("confidence", 0.0),
+                            "deviations": ai_analysis.get("anomalies", [])
+                        })
+                else:
+                    # No AI analysis available, use execution success
+                    success = self._current_step_result_details.get("execution_success", True)
+                    actual_outcome = "Action executed" if success else "Action failed"
             
             return TestStepResult(
                 step=step,
                 success=success,
                 action_taken=action_result,
-                actual_result=evaluation_result.actual_outcome if evaluation_result else "Action completed",
+                actual_result=actual_outcome,
                 screenshot_before=screenshot_before,
                 screenshot_after=screenshot_after,
                 evaluation=evaluation_result,
