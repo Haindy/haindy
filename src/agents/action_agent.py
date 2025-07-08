@@ -914,6 +914,12 @@ VISUAL_INDICATORS: <what indicates focus>
             await self.browser_driver.type_text(test_step.action_instruction.value)
             await self.browser_driver.wait(500)  # Wait for text to appear
             
+            # Check if we should press Enter (for search fields)
+            if field_type == "search" or "search" in test_step.action_instruction.target.lower():
+                logger.info("Pressing Enter for search field")
+                await self.browser_driver.press_key("Enter")
+                await self.browser_driver.wait(1000)  # Wait for search to execute
+            
             # Step 6: Capture after state and validate
             screenshot_after = await self.browser_driver.screenshot()
             result.browser_state_after = BrowserState(
