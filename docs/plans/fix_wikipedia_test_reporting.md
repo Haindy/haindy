@@ -178,6 +178,8 @@
 #### Phase 8a: Multi-Step Action Framework
 **Core Design**: Visual-only approach using grid coordinates - NO DOM access, selectors, or element IDs.
 
+**IMPORTANT RULE**: This product is IN DEVELOPMENT and not yet working. Apply changes directly to the codebase without any migration or versioning strategy. Just delete old code and implement new code.
+
 **Implementation Approach**: Hybrid model where Test Runner provides action_type hint, but AI can override based on visual analysis.
 
 **Key Components**:
@@ -221,6 +223,8 @@
 #### Phase 8b: Navigation Actions
 **Design**: Navigation is handled by Action Agent like any other action, but uses browser.navigate() instead of grid coordinates.
 
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
+
 **Navigation Workflow**:
 1. **Execute Navigation**:
    - [ ] Extract URL from instruction or test step
@@ -255,6 +259,8 @@
 
 #### Phase 8c: Dropdown and Select Actions
 **Design**: Visual-only dropdown interaction with scrolling support for long lists.
+
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
 
 **Dropdown Workflow**:
 1. **Initial Analysis**:
@@ -297,6 +303,8 @@
 #### Phase 8d: Toggle and Slider Actions
 **Design**: Visual detection of toggle states and appropriate interaction methods.
 
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
+
 **Toggle/Checkbox/Radio Workflow**:
 1. **Visual State Detection**:
    - [ ] AI identifies element type and current state from screenshot
@@ -337,6 +345,8 @@
 
 #### Phase 8e: Drag and Window Operations
 **Design**: Implement drag support in browser driver and use for complex interactions.
+
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
 
 **Driver Enhancement**:
 1. **Add Drag Support to PlaywrightDriver**:
@@ -394,6 +404,8 @@
 
 #### Phase 8g: Integration and Testing
 **Exit Criteria**: Wikipedia test passes completely.
+
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
 
 **Simple Goal**: Make the Wikipedia test work end-to-end.
 
