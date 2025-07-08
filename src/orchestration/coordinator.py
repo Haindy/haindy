@@ -85,7 +85,10 @@ class WorkflowCoordinator:
                 name="TestRunner",
                 browser_driver=self.browser_driver
             ),
-            "action_agent": ActionAgent(name="ActionAgent")
+            "action_agent": ActionAgent(
+                name="ActionAgent",
+                browser_driver=self.browser_driver
+            )
         }
         
         # Set up test runner dependencies
