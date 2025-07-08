@@ -124,6 +124,38 @@
 - [ ] Add validation that element is focusable
 - [ ] Consider multiple click strategies (single, double, click-and-wait)
 
+## Git Workflow
+
+Each phase should follow this workflow:
+
+1. **Create feature branch**: 
+   - Branch from `fix-plan` (not main)
+   - Name format: `pX-phase-description` (e.g., `p4-enhanced-error-reporting`)
+
+2. **Development**:
+   - Implement the phase requirements
+   - Write/update tests as needed
+   - Ensure all tests pass
+
+3. **Testing**:
+   - Run relevant tests: `source venv/bin/activate && python -m pytest tests/test_file.py -v`
+   - Verify no regressions in related tests
+   - Fix any test failures before proceeding
+
+4. **Documentation**:
+   - Update this fix plan with completion status
+   - Mark completed items with [x]
+   - Update progress tracking table
+
+5. **Create PR**:
+   - Create PR against `fix-plan` branch (NOT main)
+   - Include comprehensive description of changes
+   - Reference the phase number and objectives
+
+6. **Merge and Continue**:
+   - After PR is merged, pull latest from `fix-plan`
+   - Start next phase with a new branch
+
 ## Implementation Order
 
 1. Phase 0: Refactor Action Agent (most critical)
