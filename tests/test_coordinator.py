@@ -77,11 +77,10 @@ class TestWorkflowCoordinator:
         await coordinator.initialize()
         
         assert coordinator._state == CoordinatorState.IDLE
-        assert len(coordinator._agents) == 4  # All agent types
+        assert len(coordinator._agents) == 3  # All agent types (evaluator removed)
         assert "test_planner" in coordinator._agents
         assert "test_runner" in coordinator._agents
         assert "action_agent" in coordinator._agents
-        assert "evaluator_agent" in coordinator._agents
         
         # Verify agents are registered with message bus
         stats = coordinator.message_bus.get_statistics()
@@ -355,4 +354,4 @@ class TestWorkflowCoordinator:
         assert stats["active_subscriptions"]["plan_test"] > 0
         assert stats["active_subscriptions"]["execute_step"] > 0
         assert stats["active_subscriptions"]["determine_action"] > 0
-        assert stats["active_subscriptions"]["evaluate_result"] > 0
+        # evaluate_result subscription removed with evaluator agent

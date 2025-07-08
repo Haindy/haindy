@@ -103,29 +103,15 @@ def mock_action_agent():
     return agent
 
 
-@pytest.fixture
-def mock_evaluator_agent():
-    """Mock evaluator agent."""
-    agent = AsyncMock()
-    agent.evaluate_result = AsyncMock(return_value=EvaluationResult(
-        step_id=uuid4(),
-        success=True,
-        confidence=0.95,
-        expected_outcome="Expected outcome",
-        actual_outcome="Actual outcome matches expected",
-        deviations=[],
-        suggestions=[]
-    ))
-    return agent
+# Evaluator agent fixture removed - evaluation now handled by Action Agent's AI analysis
 
 
 @pytest.fixture
-def test_runner_agent(mock_browser_driver, mock_action_agent, mock_evaluator_agent):
+def test_runner_agent(mock_browser_driver, mock_action_agent):
     """Create a TestRunnerAgent instance for testing."""
     agent = TestRunnerAgent(
         browser_driver=mock_browser_driver,
-        action_agent=mock_action_agent,
-        evaluator_agent=mock_evaluator_agent
+        action_agent=mock_action_agent
     )
     agent._client = AsyncMock()
     return agent
@@ -246,35 +232,52 @@ class TestTestRunnerAgent:
         # Action Agent now handles screenshots internally, so browser driver screenshot calls are reduced
         assert test_runner_agent.browser_driver.screenshot.call_count >= 4  # Initial screenshots for each step
         assert test_runner_agent.action_agent.execute_action.call_count == 4
-        assert test_runner_agent.evaluator_agent.evaluate_result.call_count == 4
+        # Evaluation is now handled by Action Agent's AI analysis
     
     @pytest.mark.asyncio
     async def test_execute_test_plan_with_failure(
-        self, test_runner_agent, sample_test_plan, mock_evaluator_agent
+        self, test_runner_agent, sample_test_plan, mock_action_agent
     ):
         """Test test plan execution with a critical step failure."""
-        # Make step 2 fail
-        mock_evaluator_agent.evaluate_result.side_effect = [
-            EvaluationResult(
-                step_id=uuid4(),
-                success=True,
-                confidence=0.95,
-                expected_outcome="Expected",
-                actual_outcome="Actual",
-                deviations=[],
-                suggestions=[]
-            ),
-            EvaluationResult(
-                step_id=uuid4(),
-                success=False,  # Step 2 fails
-                confidence=0.90,
-                expected_outcome="Username entered",
-                actual_outcome="Error: Username field not found",
-                deviations=["Username field missing"],
-                suggestions=["Check if page loaded correctly"]
-            ),
-            # Remaining steps won't be executed
-        ]
+        # Make step 2 fail via Action Agent's AI analysis
+        async def mock_execute_action_with_failure(test_step, test_context, screenshot=None):
+            if test_step.step_number == 2:
+                return {
+                    "action_type": test_step.action_instruction.action_type.value,
+                    "validation_passed": True,
+                    "grid_cell": "M23",
+                    "grid_coordinates": (960, 540),
+                    "offset_x": 0.5,
+                    "offset_y": 0.5,
+                    "coordinate_confidence": 0.95,
+                    "execution_success": False,
+                    "screenshot_after": b"mock_screenshot_after",
+                    "ai_analysis": {
+                        "success": False,  # Step 2 fails
+                        "confidence": 0.90,
+                        "actual_outcome": "Error: Username field not found",
+                        "anomalies": ["Username field missing"]
+                    }
+                }
+            else:
+                return {
+                    "action_type": test_step.action_instruction.action_type.value,
+                    "validation_passed": True,
+                    "grid_cell": "M23",
+                    "grid_coordinates": (960, 540),
+                    "offset_x": 0.5,
+                    "offset_y": 0.5,
+                    "coordinate_confidence": 0.95,
+                    "execution_success": True,
+                    "screenshot_after": b"mock_screenshot_after",
+                    "ai_analysis": {
+                        "success": True,
+                        "confidence": 0.95,
+                        "actual_outcome": "Action completed successfully"
+                    }
+                }
+        
+        mock_action_agent.execute_action.side_effect = mock_execute_action_with_failure
         
         test_runner_agent.call_openai = AsyncMock(return_value={
             "content": json.dumps({
@@ -286,6 +289,13 @@ class TestTestRunnerAgent:
         
         # Execute
         result = await test_runner_agent.execute_test_plan(sample_test_plan)
+        
+        # Debug output
+        print(f"Test execution history:")
+        for i, step_result in enumerate(test_runner_agent._execution_history):
+            print(f"  Step {i+1}: success={step_result.success}, result={step_result.actual_result}")
+        print(f"Completed steps: {len(result.completed_steps)}")
+        print(f"Failed steps: {len(result.failed_steps)}")
         
         # Verify
         assert result.status == TestStatus.FAILED
@@ -313,7 +323,7 @@ class TestTestRunnerAgent:
         
         # Verify agent calls
         test_runner_agent.action_agent.execute_action.assert_called_once()
-        test_runner_agent.evaluator_agent.evaluate_result.assert_called_once()
+        # Evaluation is now handled by Action Agent's AI analysis
     
     @pytest.mark.asyncio
     async def test_execute_step_scripted_mode(
