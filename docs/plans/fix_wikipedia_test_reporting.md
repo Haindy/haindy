@@ -44,7 +44,7 @@
 | Phase 5: Terminal Output Enhancement | ⚠️ Incomplete | - | Partially Done |
 | Phase 6: Fix Typing Action | ✅ Complete | #23 | 2025-01-08 |
 | Phase 7: Complete Architecture Migration | ✅ Complete | #24,#25,#26 | 2025-01-08 |
-| **Phase 8: Comprehensive Action Agent** | 📅 Pending | - | - |
+| **Phase 8: Comprehensive Action Agent** | 🔄 In Progress | - | - |
 
 ## Revised Fix Plan
 
@@ -258,6 +258,7 @@
    ```
 
 #### Phase 8c: Dropdown and Select Actions
+**Status**: ✅ COMPLETE (PR #29)
 **Design**: Visual-only dropdown interaction with scrolling support for long lists.
 
 **IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
@@ -300,7 +301,92 @@
    - [ ] Option not found: "Scrolled entire list but couldn't find 'Premium Plan'"
    - [ ] Ambiguous options: "Found multiple options matching 'Plan', unclear which to select"
 
-#### Phase 8d: Toggle and Slider Actions
+#### Phase 8d: Click Actions
+**Design**: Basic click action implementation with grid coordinates and validation.
+
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
+
+**Click Workflow**:
+1. **Target Identification**:
+   - [ ] AI analyzes screenshot to find clickable target from instruction
+   - [ ] Identify element type (button, link, icon, etc.) for appropriate handling
+   - [ ] Check for visibility and clickability (not obscured by overlays)
+   - [ ] Return grid coordinates of click target
+
+2. **Click Execution**:
+   - [ ] Click at identified coordinates using browser.click(x, y)
+   - [ ] Wait appropriate time based on element type:
+     - Buttons: 500ms (may trigger actions)
+     - Links: 1-2s (may navigate)
+     - Form elements: 200ms (quick response)
+   - [ ] Take screenshot after wait period
+
+3. **Click Validation**:
+   - [ ] AI compares before/after screenshots
+   - [ ] Identify what changed:
+     - Navigation occurred (URL changed)
+     - Modal/popup appeared
+     - Element state changed (selected, expanded, etc.)
+     - Page content updated
+   - [ ] Match changes against expected_outcome
+
+4. **Error Handling**:
+   - [ ] Click had no effect: "Clicked at coordinates but nothing changed"
+   - [ ] Wrong element clicked: "Clicked but unexpected change occurred"
+   - [ ] Element not found: "Could not locate clickable element matching instruction"
+   - [ ] Element obscured: "Target element is covered by overlay/popup"
+
+5. **Special Cases**:
+   - [ ] Double-click support when needed (detected from context)
+   - [ ] Right-click for context menus (future enhancement)
+   - [ ] Long press for mobile-style interactions (future)
+
+#### Phase 8e: Type/Text Actions
+**Design**: Text input with proper focus handling and validation.
+
+**IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
+
+**Type Workflow**:
+1. **Input Field Identification**:
+   - [ ] AI identifies text input field from screenshot + instruction
+   - [ ] Verify field is editable (not disabled/readonly)
+   - [ ] Check if field already has focus (cursor visible)
+   - [ ] Return grid coordinates of input field
+
+2. **Focus Handling**:
+   - [ ] If field not focused, click to focus first
+   - [ ] Wait 200ms for focus animation/cursor
+   - [ ] Take screenshot to verify cursor is in field
+   - [ ] If no cursor visible, retry click with slight offset
+
+3. **Text Entry**:
+   - [ ] Clear existing text if needed (Ctrl+A, Delete)
+   - [ ] Type text using browser.type(text)
+   - [ ] For special characters, ensure proper encoding
+   - [ ] Add small delays between keystrokes for realism (optional)
+
+4. **Input Validation**:
+   - [ ] Take screenshot after typing
+   - [ ] AI verifies text appears in field correctly
+   - [ ] Check for:
+     - Text fully entered
+     - No truncation or overflow
+     - Proper formatting (if applicable)
+     - Field validation indicators (error/success)
+
+5. **Error Handling**:
+   - [ ] Field won't focus: "Unable to focus on input field"
+   - [ ] Text not appearing: "Typed text but field remains empty"
+   - [ ] Validation error: "Field shows validation error after input"
+   - [ ] Wrong field: "Text entered in unexpected location"
+
+6. **Special Input Types**:
+   - [ ] Password fields: Type without validation (can't see text)
+   - [ ] Autocomplete fields: Handle dropdown suggestions
+   - [ ] Multi-line text areas: Support newlines
+   - [ ] Formatted inputs (dates, phones): Respect field masks
+
+#### Phase 8f: Toggle and Slider Actions
 **Design**: Visual detection of toggle states and appropriate interaction methods.
 
 **IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
@@ -343,7 +429,7 @@
    - [ ] Click to select, verify visually selected
    - [ ] No special handling needed - AI understands groups
 
-#### Phase 8e: Drag and Window Operations
+#### Phase 8g: Drag and Window Operations
 **Design**: Implement drag support in browser driver and use for complex interactions.
 
 **IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
@@ -393,7 +479,7 @@
    - [ ] Selection rectangles: Click-drag to select area
    - [ ] Best effort - not pixel-perfect art
 
-#### Phase 8f: Advanced Interactions [FUTURE - Out of Scope]
+#### Phase 8h: Advanced Interactions [FUTURE - Out of Scope]
 **Note**: These advanced interactions are not required for MVP and will be addressed in future iterations.
 
 - [ ] Context menu operations (right-click → select option)
@@ -402,7 +488,7 @@
 - [ ] Keyboard shortcuts and key combinations
 - [ ] Frame and iframe navigation
 
-#### Phase 8g: Integration and Testing
+#### Phase 8i: Integration and Testing
 **Exit Criteria**: Wikipedia test passes completely.
 
 **IMPORTANT RULE**: This product is IN DEVELOPMENT. Replace existing code directly without versioning or migration.
