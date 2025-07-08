@@ -681,12 +681,371 @@ CONFIDENCE: <0.0-1.0>
         """Execute type action workflow with focus handling."""
         logger.info("Executing type workflow", extra={
             "target": test_step.action_instruction.target,
-            "value": test_step.action_instruction.value
+            "value": test_step.action_instruction.value,
+            "description": test_step.description
         })
         
-        # For now, use the existing flow
-        # This will be enhanced in future phases
-        return await self._execute_legacy_workflow(test_step, test_context, screenshot)
+        # Initialize result
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            validation=ValidationResult(
+                valid=False,
+                confidence=0.0,
+                reasoning="Not yet validated"
+            ),
+            timestamp_end=datetime.now(timezone.utc)
+        )
+        
+        try:
+            # Step 1: Capture initial state
+            if not screenshot and self.browser_driver:
+                screenshot = await self.browser_driver.screenshot()
+            
+            # Get viewport for grid initialization
+            viewport_size = await self.browser_driver.get_viewport_size()
+            self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
+            
+            result.browser_state_before = BrowserState(
+                url=await self.browser_driver.get_page_url(),
+                title=await self.browser_driver.get_page_title(),
+                viewport_size=viewport_size,
+                screenshot=screenshot
+            )
+            
+            # Step 2: Input Field Identification
+            type_prompt = f"""
+I need to type text into an input field in this screenshot.
+
+Target: {test_step.action_instruction.target}
+Description: {test_step.description}
+Text to type: {test_step.action_instruction.value}
+
+Please analyze the screenshot with the grid overlay and:
+1. Find the text input field (look for input boxes, text areas, search bars)
+2. Check if it's editable (not disabled/readonly)
+3. Check if it already has focus (cursor visible)
+4. Provide the grid coordinates
+
+Respond in this format:
+INPUT_FOUND: true/false
+EDITABLE: true/false
+HAS_FOCUS: true/false
+FIELD_TYPE: input/textarea/search/other
+GRID_CELL: <cell identifier>
+OFFSET_X: <0.0-1.0>
+OFFSET_Y: <0.0-1.0>
+CONFIDENCE: <0.0-1.0>
+REASONING: <why you selected this location>
+CURRENT_VALUE: <any text already in the field>
+BLOCKED_BY: <if blocked, what's blocking it>
+"""
+            
+            # Create grid overlay screenshot for analysis
+            grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": type_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(grid_screenshot).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            response = await self.call_openai(messages=messages, temperature=0.3)
+            type_response = response.get("content", "")
+            
+            # Parse response
+            input_found = "INPUT_FOUND: true" in type_response
+            editable = "EDITABLE: true" in type_response
+            has_focus = "HAS_FOCUS: true" in type_response
+            
+            if not input_found:
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message="Unable to locate text input field"
+                )
+                result.failure_phase = "identification"
+                return result
+            
+            if not editable:
+                blocked_by = ""
+                if "BLOCKED_BY:" in type_response:
+                    blocked_by = type_response.split("BLOCKED_BY:")[1].split("\n")[0].strip()
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=0.0,
+                    error_message=f"Input field is not editable: {blocked_by or 'disabled/readonly'}"
+                )
+                result.failure_phase = "validation"
+                return result
+            
+            # Extract coordinates and field info
+            grid_cell = ""
+            offset_x = 0.5
+            offset_y = 0.5
+            field_type = "input"
+            confidence = 0.0
+            reasoning = ""
+            current_value = ""
+            
+            if "GRID_CELL:" in type_response:
+                grid_cell = type_response.split("GRID_CELL:")[1].split("\n")[0].strip()
+            if "OFFSET_X:" in type_response:
+                offset_x = float(type_response.split("OFFSET_X:")[1].split("\n")[0].strip())
+            if "OFFSET_Y:" in type_response:
+                offset_y = float(type_response.split("OFFSET_Y:")[1].split("\n")[0].strip())
+            if "FIELD_TYPE:" in type_response:
+                field_type = type_response.split("FIELD_TYPE:")[1].split("\n")[0].strip()
+            if "CONFIDENCE:" in type_response:
+                confidence = float(type_response.split("CONFIDENCE:")[1].split("\n")[0].strip())
+            if "REASONING:" in type_response:
+                reasoning = type_response.split("REASONING:")[1].split("\n")[0].strip()
+            if "CURRENT_VALUE:" in type_response:
+                current_value = type_response.split("CURRENT_VALUE:")[1].split("\n")[0].strip()
+            
+            # Create coordinate result
+            grid_coord = GridCoordinate(
+                cell=grid_cell,
+                offset_x=offset_x,
+                offset_y=offset_y,
+                confidence=confidence,
+                refined=False
+            )
+            pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
+            
+            result.coordinates = CoordinateResult(
+                grid_cell=grid_cell,
+                grid_coordinates=(pixel_x, pixel_y),
+                offset_x=offset_x,
+                offset_y=offset_y,
+                confidence=confidence,
+                reasoning=reasoning,
+                refined=False
+            )
+            
+            # Create grid screenshots for debugging
+            result.grid_screenshot_before = grid_screenshot
+            result.grid_screenshot_highlighted = self._create_highlighted_screenshot(
+                screenshot, grid_cell
+            )
+            
+            # Step 3: Focus Handling
+            execution_start = asyncio.get_event_loop().time()
+            
+            if not has_focus:
+                logger.info("Input field doesn't have focus, clicking to focus", extra={
+                    "coordinates": (pixel_x, pixel_y),
+                    "field_type": field_type
+                })
+                
+                await self.browser_driver.click(pixel_x, pixel_y)
+                await self.browser_driver.wait(200)  # Wait for focus
+                
+                # Verify focus was achieved
+                focus_screenshot = await self.browser_driver.screenshot()
+                focus_check_prompt = f"""
+I just clicked on the input field at grid cell {grid_cell}.
+Please check if the field now has focus (cursor visible, highlighted border, etc).
+
+Respond with:
+HAS_FOCUS: true/false
+VISUAL_INDICATORS: <what indicates focus>
+"""
+                
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": focus_check_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64.b64encode(focus_screenshot).decode('utf-8')}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+                
+                focus_response = await self.call_openai(messages=messages, temperature=0.3)
+                focus_content = focus_response.get("content", "")
+                
+                if "HAS_FOCUS: false" in focus_content:
+                    # Try double-click as fallback
+                    logger.warning("Single click didn't achieve focus, trying double-click")
+                    await self.browser_driver.click(pixel_x, pixel_y)
+                    await self.browser_driver.wait(50)
+                    await self.browser_driver.click(pixel_x, pixel_y)
+                    await self.browser_driver.wait(200)
+            
+            # Step 4: Clear existing text if needed
+            if current_value and current_value.lower() not in ["empty", "none", ""]:
+                logger.info("Clearing existing text", extra={"current_value": current_value})
+                # Select all and delete
+                # Use Playwright's keyboard API through the page object
+                # For now, we'll use a simpler approach - triple-click to select all
+                await self.browser_driver.click(pixel_x, pixel_y)
+                await self.browser_driver.wait(50)
+                await self.browser_driver.click(pixel_x, pixel_y)
+                await self.browser_driver.wait(50)
+                await self.browser_driver.click(pixel_x, pixel_y)
+                await self.browser_driver.wait(100)
+                # Type over the selection
+                logger.info("Triple-clicked to select all text")
+            
+            # Step 5: Type the text
+            logger.info("Typing text", extra={
+                "text": test_step.action_instruction.value,
+                "field_type": field_type
+            })
+            
+            await self.browser_driver.type_text(test_step.action_instruction.value)
+            await self.browser_driver.wait(500)  # Wait for text to appear
+            
+            # Step 6: Capture after state and validate
+            screenshot_after = await self.browser_driver.screenshot()
+            result.browser_state_after = BrowserState(
+                url=await self.browser_driver.get_page_url(),
+                title=await self.browser_driver.get_page_title(),
+                viewport_size=viewport_size,
+                screenshot=screenshot_after
+            )
+            
+            execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
+            
+            # Step 7: Input Validation
+            validation_prompt = f"""
+I just typed "{test_step.action_instruction.value}" into the input field at grid cell {grid_cell}.
+
+Please verify:
+1. Is the text visible in the input field?
+2. Does it match what was supposed to be typed?
+3. Are there any validation errors shown?
+
+Expected text: {test_step.action_instruction.value}
+
+Respond in this format:
+TEXT_VISIBLE: true/false
+TEXT_MATCHES: true/false
+ACTUAL_TEXT: <what you see in the field>
+VALIDATION_ERRORS: true/false
+ERROR_MESSAGE: <any error message shown>
+FIELD_STATE: normal/error/success
+CONFIDENCE: <0.0-1.0>
+"""
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": validation_prompt},
+                        {"type": "text", "text": "BEFORE typing:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot).decode('utf-8')}"
+                            }
+                        },
+                        {"type": "text", "text": "AFTER typing:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(screenshot_after).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            validation_response = await self.call_openai(messages=messages, temperature=0.3)
+            validation_content = validation_response.get("content", "")
+            
+            # Parse validation
+            text_visible = "TEXT_VISIBLE: true" in validation_content
+            text_matches = "TEXT_MATCHES: true" in validation_content
+            validation_errors = "VALIDATION_ERRORS: true" in validation_content
+            
+            actual_text = ""
+            error_message = ""
+            field_state = "normal"
+            validation_confidence = 0.0
+            
+            if "ACTUAL_TEXT:" in validation_content:
+                actual_text = validation_content.split("ACTUAL_TEXT:")[1].split("\n")[0].strip()
+            if "ERROR_MESSAGE:" in validation_content:
+                error_message = validation_content.split("ERROR_MESSAGE:")[1].split("\n")[0].strip()
+            if "FIELD_STATE:" in validation_content:
+                field_state = validation_content.split("FIELD_STATE:")[1].split("\n")[0].strip()
+            if "CONFIDENCE:" in validation_content:
+                validation_confidence = float(validation_content.split("CONFIDENCE:")[1].split("\n")[0].strip())
+            
+            # Determine success
+            success = text_visible and text_matches and not validation_errors
+            
+            # Build error message if needed
+            error_msg = None
+            if not text_visible:
+                error_msg = "Typed text but field remains empty"
+            elif not text_matches:
+                error_msg = f"Text mismatch: expected '{test_step.action_instruction.value}', got '{actual_text}'"
+            elif validation_errors:
+                error_msg = f"Field validation error: {error_message}"
+            
+            # Set results
+            result.validation = ValidationResult(
+                valid=True,  # Type action was valid to attempt
+                confidence=confidence,
+                reasoning=f"Typed into {field_type} at {grid_cell}: {reasoning}"
+            )
+            
+            result.execution = ExecutionResult(
+                success=success,
+                execution_time_ms=execution_time,
+                error_message=error_msg
+            )
+            
+            result.ai_analysis = AIAnalysis(
+                success=success,
+                confidence=validation_confidence,
+                actual_outcome=f"Typed text: '{actual_text}' in {field_type} field",
+                matches_expected=text_matches,
+                ui_changes=[f"Text field now contains: {actual_text}"],
+                recommendations=[] if success else [
+                    "Verify the field accepts the input format",
+                    "Check for input validation rules",
+                    "Ensure field was properly focused"
+                ],
+                anomalies=[f"Field state: {field_state}"] if field_state != "normal" else []
+            )
+            
+            result.overall_success = success
+            if not success:
+                result.failure_phase = "validation" if text_visible else "execution"
+            
+        except Exception as e:
+            logger.error(f"Type workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        return result
     
     async def _execute_assert_workflow(
         self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
