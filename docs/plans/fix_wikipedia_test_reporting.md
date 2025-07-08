@@ -41,7 +41,7 @@
 | Phase 2: Refactor Test Runner | ✅ Complete | #18 | Completed |
 | Phase 3: Remove/Merge Evaluator | ✅ Complete | - | Completed |
 | Phase 4: Enhanced Error Reporting | ✅ Complete | - | Completed |
-| Phase 5: Terminal Output Enhancement | 🔄 Next | - | - |
+| Phase 5: Terminal Output Enhancement | ✅ Complete | - | Completed |
 | Phase 6: Fix Typing Action | ⏳ Pending | - | - |
 
 ## Revised Fix Plan
@@ -112,8 +112,8 @@
   - Detailed error messages
 
 ### Phase 5: Terminal Output Enhancement
-- [ ] Add bug report summary at end of test run
-- [ ] Show failed steps with:
+- [x] Add bug report summary at end of test run
+- [x] Show failed steps with:
   - What was attempted
   - What went wrong
   - Screenshots (as file paths)
