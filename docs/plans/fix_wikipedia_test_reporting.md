@@ -143,10 +143,11 @@
 - [x] **AUDIT COMPLETE**: Created PHASE_7A_AUDIT.md with detailed findings and priority order
 
 #### Phase 7b: Fix Core Test Runner
-- [ ] Replace all `.get()` calls in `TestStepResult.create_bug_report()` with proper object access
-- [ ] Replace all `.get()` calls in `TestRunner._print_terminal_summary()` with proper object access
-- [ ] Fix action recording/playback to use new EnhancedActionResult format
-- [ ] Ensure ActionResult creation uses proper new format throughout
+- [x] Replace all `.get()` calls in `TestStepResult.create_bug_report()` with proper object access
+- [x] Replace all `.get()` calls in `TestRunner._print_terminal_summary()` with proper object access  
+- [x] Fix `.get()` calls in `judge_final_test_result()` method
+- [x] **IMMEDIATE FIX**: Fixed line 980 causing Wikipedia test failure
+- [x] **VERIFIED**: Wikipedia test now runs without `.get()` attribute errors
 
 #### Phase 7c: Fix Supporting Systems
 - [ ] Fix Journal Manager to handle `EnhancedActionResult` properly

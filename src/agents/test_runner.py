@@ -784,10 +784,24 @@ Respond in JSON format with keys: assessment, concerns, recommendations"""
                 }
                 # Add enhanced debugging info if available
                 if result.action_result_details:
-                    detail["validation_passed"] = result.action_result_details.get("validation_passed", False)
-                    detail["validation_reasoning"] = result.action_result_details.get("validation_reasoning", "")
-                    detail["execution_error"] = result.action_result_details.get("execution_error", "")
-                    detail["ai_analysis"] = result.action_result_details.get("ai_analysis", {})
+                    if hasattr(result.action_result_details, 'validation'):
+                        # New EnhancedActionResult format
+                        detail["validation_passed"] = result.action_result_details.validation.valid if result.action_result_details.validation else False
+                        detail["validation_reasoning"] = result.action_result_details.validation.reasoning if result.action_result_details.validation else ""
+                        detail["execution_error"] = result.action_result_details.execution.error_message if (result.action_result_details.execution and result.action_result_details.execution.error_message) else ""
+                        detail["ai_analysis"] = {
+                            "success": result.action_result_details.ai_analysis.success if result.action_result_details.ai_analysis else False,
+                            "confidence": result.action_result_details.ai_analysis.confidence if result.action_result_details.ai_analysis else 0.0,
+                            "actual_outcome": result.action_result_details.ai_analysis.actual_outcome if result.action_result_details.ai_analysis else "",
+                            "anomalies": result.action_result_details.ai_analysis.anomalies if result.action_result_details.ai_analysis else [],
+                            "recommendations": result.action_result_details.ai_analysis.recommendations if result.action_result_details.ai_analysis else []
+                        }
+                    elif isinstance(result.action_result_details, dict):
+                        # Old dictionary format (fallback)
+                        detail["validation_passed"] = result.action_result_details.get("validation_passed", False)
+                        detail["validation_reasoning"] = result.action_result_details.get("validation_reasoning", "")
+                        detail["execution_error"] = result.action_result_details.get("execution_error", "")
+                        detail["ai_analysis"] = result.action_result_details.get("ai_analysis", {})
                 failure_details.append(detail)
         
         # Use AI to make final judgment
@@ -977,8 +991,8 @@ Provide your recommendation with reasoning."""
                             
                             # If grid screenshot is available in action_result_details
                             if result.action_result_details:
-                                grid_screenshot = result.action_result_details.get("grid_screenshot_highlighted")
-                                if grid_screenshot:
+                                if hasattr(result.action_result_details, 'grid_screenshot_highlighted') and result.action_result_details.grid_screenshot_highlighted:
+                                    grid_screenshot = result.action_result_details.grid_screenshot_highlighted
                                     print(f"  - Grid (highlighted): [Binary data, {len(grid_screenshot)} bytes]")
         
         print("\n" + "="*80 + "\n")
