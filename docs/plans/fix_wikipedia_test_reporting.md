@@ -176,50 +176,246 @@
 **Exit Criteria**: Wikipedia test runs successfully with all action types working properly.
 
 #### Phase 8a: Multi-Step Action Framework
-- [ ] Redesign Action Agent to support multi-step action execution
-- [ ] Add action type detection and routing (navigate, click, type, select, toggle, drag)
-- [ ] Implement action-specific workflows with multiple AI calls per action
-- [ ] Add state management for complex actions (dropdown open state, drag in progress, etc.)
+**Core Design**: Visual-only approach using grid coordinates - NO DOM access, selectors, or element IDs.
+
+**Implementation Approach**: Hybrid model where Test Runner provides action_type hint, but AI can override based on visual analysis.
+
+**Key Components**:
+1. **Action Analysis**:
+   - [ ] AI analyzes screenshot + instruction to determine actual workflow needed
+   - [ ] Can override Test Runner's action_type if visual evidence differs
+   - [ ] Returns workflow type and relevant visual markers
+
+2. **Workflow Architecture**:
+   - [ ] Base `ActionWorkflow` class with standard execution pattern
+   - [ ] Specialized workflows for each action type (NavigateWorkflow, ClickWorkflow, etc.)
+   - [ ] Each workflow can make multiple AI calls and screenshots as needed
+   - [ ] All interactions through grid coordinates only
+
+3. **Multi-Step Execution**:
+   - [ ] Pre-execution validation (can this action be performed?)
+   - [ ] Main action steps (may involve multiple screenshots/clicks)
+   - [ ] Post-execution verification (did it work?)
+   - [ ] State tracking between steps (dropdown open, drag in progress)
+
+4. **Coordinate-Based Operations**:
+   - [ ] All browser interactions via absolute coordinates
+   - [ ] Support for: click(x,y), drag(x1,y1,x2,y2), type(text), key(keycode)
+   - [ ] Grid refinement for precision when needed
+   - [ ] No DOM queries or element selection
+
+5. **Example Dropdown Workflow**:
+   ```
+   1. Screenshot with grid → AI locates dropdown visually
+   2. Click at grid coordinates → Open dropdown
+   3. New screenshot → See open menu
+   4. If target not visible:
+      - AI identifies scroll area
+      - Click-drag to scroll
+      - New screenshot
+      - Repeat until found
+   5. AI finds target option → Click at coordinates
+   6. Verify selection visually
+   ```
 
 #### Phase 8b: Navigation Actions
-- [ ] Implement URL navigation with validation
-- [ ] Add page load detection and timeout handling
-- [ ] Verify expected page elements are present after navigation
-- [ ] Handle navigation errors (404, timeout, etc.)
+**Design**: Navigation is handled by Action Agent like any other action, but uses browser.navigate() instead of grid coordinates.
+
+**Navigation Workflow**:
+1. **Execute Navigation**:
+   - [ ] Extract URL from instruction or test step
+   - [ ] Call browser.navigate(url)
+   - [ ] Wait 1-2 seconds for page load (no complex detection needed)
+   - [ ] Take screenshot for validation
+
+2. **Visual Validation**:
+   - [ ] AI compares screenshot against expected_outcome from test plan
+   - [ ] Test Planner must provide detailed expected outcomes (e.g., "Wikipedia article about artificial intelligence with title visible")
+   - [ ] AI confirms if expectation is met visually
+
+3. **Error Detection**:
+   - [ ] If result doesn't match expected, AI describes what it sees
+   - [ ] Common errors: 404 pages, error messages, blank pages, wrong page
+   - [ ] AI provides detailed description of unexpected result
+   - [ ] Return EnhancedActionResult with validation details
+
+4. **First Action Requirement**:
+   - [ ] Enforce that first action in test plan is navigation (unless chained)
+   - [ ] Test Planner should always start with "Navigate to [URL]"
+   - [ ] Validation ensures we're at correct starting point
+
+5. **Example Navigation Validation**:
+   ```
+   Expected: "Wikipedia homepage with search bar visible"
+   AI Analysis: 
+   - Success: "I see the Wikipedia homepage with logo and search bar"
+   - Failure: "I see a 404 error page with text 'Page not found'"
+   - Failure: "I see a blank white page with no content"
+   ```
 
 #### Phase 8c: Dropdown and Select Actions
-- [ ] Detect dropdown/select elements
-- [ ] Click to open dropdown menu
-- [ ] Take screenshot of open menu options
-- [ ] AI analysis to select correct option
-- [ ] Click on selected option and validate selection
+**Design**: Visual-only dropdown interaction with scrolling support for long lists.
+
+**Dropdown Workflow**:
+1. **Initial Analysis**:
+   - [ ] AI identifies dropdown element from screenshot + instruction
+   - [ ] Check for blockers (animations, overlays) in same analysis
+   - [ ] If blocked, wait and retry or fail with clear explanation
+   - [ ] Return grid coordinates for dropdown click
+
+2. **Open Dropdown**:
+   - [ ] Click at dropdown coordinates
+   - [ ] Wait brief moment (500ms)
+   - [ ] Take screenshot to verify dropdown opened
+   - [ ] If not open, retry once (some dropdowns are slow)
+
+3. **Find Target Option**:
+   - [ ] AI searches for target option in visible area
+   - [ ] If option not visible:
+     - Click-drag vertically in center of dropdown to scroll
+     - Take new screenshot
+     - Repeat until found or reach end
+   - [ ] Return coordinates of target option
+
+4. **Select Option**:
+   - [ ] Click at option coordinates
+   - [ ] Wait for dropdown to close (500ms)
+   - [ ] Take screenshot for validation
+
+5. **Validate Selection**:
+   - [ ] AI verifies dropdown shows selected value
+   - [ ] Standard dropdowns: Selected text visible in collapsed dropdown
+   - [ ] Custom dropdowns: Use expected_outcome from test plan
+   - [ ] If ambiguous or unclear, fail with explanation
+
+6. **Error Handling**:
+   - [ ] Can't find dropdown: "Unable to locate dropdown element"
+   - [ ] Dropdown won't open: "Clicked dropdown but menu didn't appear"
+   - [ ] Option not found: "Scrolled entire list but couldn't find 'Premium Plan'"
+   - [ ] Ambiguous options: "Found multiple options matching 'Plan', unclear which to select"
 
 #### Phase 8d: Toggle and Slider Actions
-- [ ] Detect toggle switches, checkboxes, radio buttons
-- [ ] Identify current state (on/off, checked/unchecked)
-- [ ] Determine required action (click vs drag)
-- [ ] Execute action and validate state change
-- [ ] Handle slider controls with drag operations
+**Design**: Visual detection of toggle states and appropriate interaction methods.
+
+**Toggle/Checkbox/Radio Workflow**:
+1. **Visual State Detection**:
+   - [ ] AI identifies element type and current state from screenshot
+   - [ ] Toggle switches: Visual on/off position
+   - [ ] Checkboxes: Checked/unchecked visual state
+   - [ ] Radio buttons: Selected/unselected state
+   - [ ] Return current state with coordinates
+
+2. **Determine Action**:
+   - [ ] Compare current state with desired state
+   - [ ] If already in desired state, skip action
+   - [ ] Most toggles: Simple click to change state
+   - [ ] Some toggle switches: May need horizontal drag
+
+3. **Execute Toggle**:
+   - [ ] Click at element coordinates (most common)
+   - [ ] For drag-style toggles: Click-drag horizontally
+   - [ ] Wait brief moment for animation
+   - [ ] Take screenshot for validation
+
+4. **Validate State Change**:
+   - [ ] AI confirms new visual state matches expected
+   - [ ] If state didn't change, try alternative method (drag if clicked)
+   - [ ] Return success/failure with visual confirmation
+
+**Slider Workflow**:
+1. **Slider Handling**:
+   - [ ] For MVP: Focus on sliders with text input boxes
+   - [ ] Type value in associated text box if available
+   - [ ] For drag-only sliders: Best effort drag, not pixel-perfect
+   - [ ] Validate final position visually
+
+2. **Radio Button Groups**:
+   - [ ] Instruction specifies which option to select
+   - [ ] AI finds specific radio button by label
+   - [ ] Click to select, verify visually selected
+   - [ ] No special handling needed - AI understands groups
 
 #### Phase 8e: Drag and Window Operations
-- [ ] Implement click-and-drag for movable elements
-- [ ] Window manipulation (resize, move, scroll)
-- [ ] File drag-and-drop operations
-- [ ] Canvas/drawing area interactions
+**Design**: Implement drag support in browser driver and use for complex interactions.
 
-#### Phase 8f: Advanced Interactions
+**Driver Enhancement**:
+1. **Add Drag Support to PlaywrightDriver**:
+   - [ ] Add `drag(start_x, start_y, end_x, end_y)` method
+   - [ ] Implementation using Playwright mouse API:
+     ```python
+     async def drag(self, start_x: int, start_y: int, end_x: int, end_y: int):
+         await self._page.mouse.move(start_x, start_y)
+         await self._page.mouse.down()
+         await self._page.mouse.move(end_x, end_y)
+         await self._page.mouse.up()
+     ```
+   - [ ] Add optional speed parameter for smooth dragging
+   - [ ] Update BrowserDriver interface to include drag method
+
+**Drag Workflows**:
+1. **Element Dragging**:
+   - [ ] AI identifies draggable element from screenshot
+   - [ ] AI identifies drop target location
+   - [ ] Get start coordinates (center of draggable)
+   - [ ] Get end coordinates (center of drop zone)
+   - [ ] Execute drag(start_x, start_y, end_x, end_y)
+   - [ ] Validate element moved visually
+
+2. **Window/Pane Resizing**:
+   - [ ] AI identifies resize handle (corner or edge)
+   - [ ] Click and drag from handle to new position
+   - [ ] Validate new size visually
+
+3. **Scrollbar Dragging**:
+   - [ ] AI identifies scrollbar thumb
+   - [ ] Calculate drag distance based on desired scroll
+   - [ ] Drag scrollbar thumb to new position
+   - [ ] More precise than mouse wheel scrolling
+
+4. **File Drag-and-Drop**:
+   - [ ] For MVP: Focus on dragging within the page
+   - [ ] File system integration is out of scope
+   - [ ] Drag from file list to upload zone if both visible
+
+5. **Canvas/Drawing**:
+   - [ ] Support basic drawing gestures
+   - [ ] Signature fields: Click-drag to draw
+   - [ ] Selection rectangles: Click-drag to select area
+   - [ ] Best effort - not pixel-perfect art
+
+#### Phase 8f: Advanced Interactions [FUTURE - Out of Scope]
+**Note**: These advanced interactions are not required for MVP and will be addressed in future iterations.
+
 - [ ] Context menu operations (right-click → select option)
-- [ ] File upload dialogs
+- [ ] File upload dialogs  
 - [ ] Multi-step form validation and error handling
 - [ ] Keyboard shortcuts and key combinations
 - [ ] Frame and iframe navigation
 
 #### Phase 8g: Integration and Testing
-- [ ] Update Action Agent interface to support new action types
-- [ ] Test each action type independently
-- [ ] Integration testing with Test Runner
-- [ ] Performance optimization for multi-step actions
-- [ ] Comprehensive error handling and recovery
+**Exit Criteria**: Wikipedia test passes completely.
+
+**Simple Goal**: Make the Wikipedia test work end-to-end.
+
+1. **Test Execution**:
+   - [ ] Run `python -m src.main --json-test-plan test_scenarios/wikipedia_search.json`
+   - [ ] If it passes: Phase 8 COMPLETE! 🎉
+   - [ ] If it fails: Generate detailed failure report
+
+2. **Failure Reporting** (if test fails):
+   - [ ] Which step failed? (Step number and description)
+   - [ ] What was the error? (Exact error message)
+   - [ ] What did the AI see? (Screenshot analysis)
+   - [ ] What did the AI try to do? (Action attempted)
+   - [ ] Why did it fail? (Root cause analysis)
+   - [ ] DO NOT attempt fixes - just document clearly
+
+3. **Success Criteria**:
+   - [ ] All 11 steps of Wikipedia test execute successfully
+   - [ ] Search functionality works (can type in search box)
+   - [ ] Navigation works (can click on article)
+   - [ ] Validation works (can verify page content)
+   - [ ] No errors or exceptions during execution
 
 ## Git Workflow
 
