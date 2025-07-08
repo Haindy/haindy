@@ -114,6 +114,9 @@ def test_runner_agent(mock_browser_driver, mock_action_agent):
         action_agent=mock_action_agent
     )
     agent._client = AsyncMock()
+    # Ensure the action agent's call_openai is properly mocked if needed
+    if hasattr(mock_action_agent, 'call_openai'):
+        mock_action_agent.call_openai = AsyncMock()
     return agent
 
 

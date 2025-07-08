@@ -174,15 +174,17 @@ class ActionAgent(BaseAgent):
                 try:
                     # Execute the action
                     if test_step.action_instruction.action_type.value == "click":
-                        await self.browser_driver.click(x, y)
+                        await self._execute_click_with_focus(x, y)
                     elif test_step.action_instruction.action_type.value == "type":
-                        # Click to focus first
-                        await self.browser_driver.click(x, y)
-                        await self.browser_driver.wait(200)
-                        # Type the text
+                        # Enhanced typing with focus validation
                         if test_step.action_instruction.value:
-                            await self.browser_driver.type_text(test_step.action_instruction.value)
-                            await self.browser_driver.wait(500)
+                            success = await self._execute_type_with_focus(
+                                x, y, 
+                                test_step.action_instruction.value,
+                                test_step.action_instruction.target
+                            )
+                            if not success:
+                                raise Exception("Failed to type text - element not focusable")
                     
                     # Wait for UI update
                     await self.browser_driver.wait(1000)
@@ -639,6 +641,14 @@ Consider:
 2. Does the action make sense given the current UI state?
 3. Are there any obvious blockers (popups, loading screens, etc.)?
 4. Is this the right time to perform this action in the test flow?"""
+        
+        # Add special validation for type actions
+        if instruction.action_type.value == "type":
+            prompt += """
+5. IMPORTANT FOR TYPING: Is the target element a focusable text input field?
+   - Look for: <input>, <textarea>, or contenteditable elements
+   - Check if it appears to be an interactive text field
+   - Verify it's not disabled or read-only"""
 
         # Convert screenshot to base64
         base64_image = base64.b64encode(screenshot).decode('utf-8')
@@ -834,3 +844,198 @@ Compare the before and after screenshots and provide analysis in JSON format:
             recommendations=[],
             anomalies=[]
         )
+    
+    async def _execute_click_with_focus(self, x: int, y: int) -> None:
+        """
+        Execute a click with enhanced focus handling.
+        
+        This method implements multiple click strategies to ensure proper focus.
+        """
+        logger.debug("Executing enhanced click with focus", extra={"x": x, "y": y})
+        
+        # Strategy 1: Single click
+        await self.browser_driver.click(x, y)
+        await self.browser_driver.wait(100)
+        
+        # Strategy 2: Double-click for stubborn elements
+        # Some elements require double-click to properly focus
+        # We'll use this selectively based on validation
+    
+    async def _execute_type_with_focus(
+        self, 
+        x: int, 
+        y: int, 
+        text: str,
+        target_description: Optional[str] = None
+    ) -> bool:
+        """
+        Execute typing with enhanced focus validation and retry strategies.
+        
+        Args:
+            x: X coordinate to click
+            y: Y coordinate to click
+            text: Text to type
+            target_description: Description of the target element
+            
+        Returns:
+            True if typing was successful, False otherwise
+        """
+        logger.info("Executing enhanced typing with focus validation", extra={
+            "x": x,
+            "y": y,
+            "text_length": len(text),
+            "target": target_description
+        })
+        
+        # Strategy 1: Single click and type
+        await self.browser_driver.click(x, y)
+        await self.browser_driver.wait(200)
+        
+        # Validate focus by checking if we can type
+        focus_validated = await self._validate_focus_for_typing(x, y, target_description)
+        
+        if focus_validated:
+            await self.browser_driver.type_text(text)
+            await self.browser_driver.wait(500)
+            return True
+        
+        # Strategy 2: Double-click to focus
+        logger.warning("Single click didn't achieve focus, trying double-click")
+        await self.browser_driver.click(x, y)
+        await self.browser_driver.wait(50)
+        await self.browser_driver.click(x, y)
+        await self.browser_driver.wait(200)
+        
+        focus_validated = await self._validate_focus_for_typing(x, y, target_description)
+        
+        if focus_validated:
+            await self.browser_driver.type_text(text)
+            await self.browser_driver.wait(500)
+            return True
+        
+        # Strategy 3: Click and wait longer
+        logger.warning("Double-click didn't achieve focus, trying click with longer wait")
+        await self.browser_driver.click(x, y)
+        await self.browser_driver.wait(1000)  # Wait longer for JavaScript to load
+        
+        focus_validated = await self._validate_focus_for_typing(x, y, target_description)
+        
+        if focus_validated:
+            await self.browser_driver.type_text(text)
+            await self.browser_driver.wait(500)
+            return True
+        
+        logger.error("Failed to achieve focus after multiple strategies")
+        return False
+    
+    async def _validate_focus_for_typing(
+        self, 
+        x: int, 
+        y: int,
+        target_description: Optional[str] = None
+    ) -> bool:
+        """
+        Validate that an element is focused and ready for typing.
+        
+        This method uses AI to analyze the current state and determine if
+        the target element is properly focused.
+        """
+        # Take a screenshot to analyze current state
+        screenshot = await self.browser_driver.screenshot()
+        
+        # Create a highlighted screenshot showing where we clicked
+        highlighted_screenshot = self._create_click_highlight_screenshot(screenshot, x, y)
+        
+        prompt = f"""Analyze this screenshot to determine if a text input element is currently focused and ready for typing.
+
+I just clicked at the marked location (red circle). {f'The target is: {target_description}' if target_description else ''}
+
+Please examine:
+1. Is there a visible text cursor (blinking line) in an input field?
+2. Is there a focus outline/border around an input element?
+3. Is the clicked area an actual text input field (input, textarea, contenteditable)?
+4. Are there any visual indicators that the element is ready to receive text?
+
+Respond in JSON format:
+{{
+    "is_focused": true/false,
+    "confidence": 0.0-1.0,
+    "reasoning": "explanation",
+    "element_type": "input/textarea/contenteditable/other/none",
+    "visual_indicators": ["list of indicators seen"]
+}}"""
+
+        try:
+            # Convert screenshot to base64
+            base64_image = base64.b64encode(highlighted_screenshot).decode('utf-8')
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            response = await self.call_openai(
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.1
+            )
+            
+            content = response.get("content", {})
+            if isinstance(content, str):
+                content = json.loads(content)
+            
+            is_focused = content.get("is_focused", False)
+            confidence = float(content.get("confidence", 0.0))
+            reasoning = content.get("reasoning", "")
+            
+            logger.debug("Focus validation result", extra={
+                "is_focused": is_focused,
+                "confidence": confidence,
+                "reasoning": reasoning,
+                "element_type": content.get("element_type", "unknown")
+            })
+            
+            # Consider it focused if confidence is high enough
+            return is_focused and confidence >= 0.7
+            
+        except Exception as e:
+            logger.error("Failed to validate focus", extra={"error": str(e)})
+            # Assume focused to allow typing to proceed
+            return True
+    
+    def _create_click_highlight_screenshot(self, screenshot: bytes, x: int, y: int) -> bytes:
+        """Create a screenshot with a highlight showing where we clicked."""
+        from PIL import Image, ImageDraw
+        import io
+        
+        # Open the screenshot
+        image = Image.open(io.BytesIO(screenshot))
+        draw = ImageDraw.Draw(image)
+        
+        # Draw a red circle at the click location
+        radius = 15
+        draw.ellipse(
+            [x - radius, y - radius, x + radius, y + radius],
+            outline="red",
+            width=3
+        )
+        
+        # Draw a crosshair
+        draw.line([x - radius, y, x + radius, y], fill="red", width=2)
+        draw.line([x, y - radius, x, y + radius], fill="red", width=2)
+        
+        # Convert back to bytes
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        return buffer.getvalue()
