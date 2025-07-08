@@ -133,14 +133,14 @@
 **Exit Criteria**: Wikipedia test runs successfully without any `.get()` attribute errors.
 
 #### Phase 7a: Audit and Fix Broken Legacy Code
-- [ ] Search codebase for all `.get()` calls on result/action objects
-- [ ] Identify all locations expecting dictionary-format ActionResult 
-- [ ] Map which files need fixing:
-  - `test_runner.py` - Multiple locations in bug reporting, terminal output
-  - `journal/manager.py` - Action recording functionality  
-  - `journal/script_recorder.py` - Script generation
-  - `monitoring/reporter.py` - HTML report generation
-  - Any other files using old broken ActionResult format
+- [x] Search codebase for all `.get()` calls on result/action objects
+- [x] Identify all locations expecting dictionary-format ActionResult 
+- [x] Map which files need fixing:
+  - `test_runner.py` - **CRITICAL**: 20+ broken `.get()` calls in bug reporting, terminal output
+  - `test_runner_v2.py` - **LEGACY**: May be unused file with broken `.get()` calls
+  - `journal/manager.py` - **DIFFERENT ISSUE**: Uses JournalActionResult (separate type)  
+  - `monitoring/reporter.py` - **CLEAN**: No ActionResult dependency found
+- [x] **AUDIT COMPLETE**: Created PHASE_7A_AUDIT.md with detailed findings and priority order
 
 #### Phase 7b: Fix Core Test Runner
 - [ ] Replace all `.get()` calls in `TestStepResult.create_bug_report()` with proper object access
