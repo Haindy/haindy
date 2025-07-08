@@ -58,7 +58,7 @@ class TestStepResult(BaseModel):
     execution_mode: str = "visual"
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # Enhanced debugging information from Action Agent
-    action_result_details: Optional[Dict[str, Any]] = None
+    action_result_details: Optional[Any] = None
     
     def create_bug_report(self, test_plan_name: str) -> Optional[BugReport]:
         """Create a detailed bug report for failed steps."""
@@ -66,26 +66,84 @@ class TestStepResult(BaseModel):
             return None
         
         # Extract details from action_result_details if available
-        details = self.action_result_details or {}
+        details = self.action_result_details
         
-        # Determine failure type
+        # Determine failure type and confidence scores based on result type
         failure_type = "evaluation"
-        if details.get("validation_passed") is False:
-            failure_type = "validation"
-        elif details.get("execution_success") is False:
-            failure_type = "execution"
-        
-        # Extract AI analysis components
-        ai_analysis_data = details.get("ai_analysis", {})
-        
-        # Build confidence scores
         confidence_scores = {
-            "validation": details.get("validation_confidence", 0.0),
-            "coordinate": details.get("coordinate_confidence", 0.0),
-            "execution": 1.0 if details.get("execution_success") else 0.0,
-            "evaluation": ai_analysis_data.get("confidence", 0.0),
-            "overall": ai_analysis_data.get("confidence", 0.0)
+            "validation": 0.0,
+            "coordinate": 0.0,
+            "execution": 0.0,
+            "evaluation": 0.0,
+            "overall": 0.0
         }
+        
+        if details and hasattr(details, 'validation'):
+            # New EnhancedActionResult format
+            if not details.validation.valid:
+                failure_type = "validation"
+            elif details.execution and not details.execution.success:
+                failure_type = "execution"
+            
+            confidence_scores = {
+                "validation": details.validation.confidence if details.validation else 0.0,
+                "coordinate": details.coordinates.confidence if details.coordinates else 0.0,
+                "execution": 1.0 if (details.execution and details.execution.success) else 0.0,
+                "evaluation": details.ai_analysis.confidence if details.ai_analysis else 0.0,
+                "overall": details.ai_analysis.confidence if details.ai_analysis else 0.0
+            }
+        elif isinstance(details, dict):
+            # Old dictionary format (fallback)
+            if details.get("validation_passed") is False:
+                failure_type = "validation"
+            elif details.get("execution_success") is False:
+                failure_type = "execution"
+            
+            ai_analysis_data = details.get("ai_analysis", {})
+            confidence_scores = {
+                "validation": details.get("validation_confidence", 0.0),
+                "coordinate": details.get("coordinate_confidence", 0.0),
+                "execution": 1.0 if details.get("execution_success") else 0.0,
+                "evaluation": ai_analysis_data.get("confidence", 0.0),
+                "overall": ai_analysis_data.get("confidence", 0.0)
+            }
+        
+        # Extract information based on details type
+        detailed_error = None
+        grid_screenshot = None
+        actual_outcome = self.actual_result
+        grid_cell_targeted = None
+        coordinates_used = None
+        
+        if details and hasattr(details, 'validation'):
+            # New EnhancedActionResult format
+            detailed_error = details.execution.error_message if details.execution else None
+            grid_screenshot = details.grid_screenshot_highlighted
+            actual_outcome = details.ai_analysis.actual_outcome if details.ai_analysis else self.actual_result
+            grid_cell_targeted = details.coordinates.grid_cell if details.coordinates else None
+            if details.coordinates:
+                coordinates_used = GridCoordinate(
+                    cell=details.coordinates.grid_cell,
+                    offset_x=details.coordinates.offset_x,
+                    offset_y=details.coordinates.offset_y,
+                    confidence=details.coordinates.confidence,
+                    refined=details.coordinates.refined
+                )
+        elif isinstance(details, dict):
+            # Old dictionary format
+            detailed_error = details.get("execution_error")
+            grid_screenshot = details.get("grid_screenshot_highlighted")
+            ai_analysis_data = details.get("ai_analysis", {})
+            actual_outcome = ai_analysis_data.get("actual_outcome", self.actual_result)
+            grid_cell_targeted = details.get("grid_cell")
+            if details.get("grid_cell"):
+                coordinates_used = GridCoordinate(
+                    cell=details.get("grid_cell", ""),
+                    offset_x=details.get("offset_x", 0.5),
+                    offset_y=details.get("offset_y", 0.5),
+                    confidence=details.get("coordinate_confidence", 0.0),
+                    refined=False
+                )
         
         # Create bug report
         return BugReport(
@@ -97,37 +155,32 @@ class TestStepResult(BaseModel):
             # Failure details
             failure_type=failure_type,
             error_message=self.actual_result,
-            detailed_error=details.get("execution_error"),
+            detailed_error=detailed_error,
             
             # Visual evidence
             screenshot_before=self.screenshot_before,
             screenshot_after=self.screenshot_after,
-            grid_screenshot=details.get("grid_screenshot_highlighted"),
+            grid_screenshot=grid_screenshot,
             
             # Action details
             attempted_action=f"{self.step.action_instruction.action_type.value} on {self.step.action_instruction.target}",
             expected_outcome=self.step.action_instruction.expected_outcome,
-            actual_outcome=ai_analysis_data.get("actual_outcome", self.actual_result),
+            actual_outcome=actual_outcome,
             
             # Grid interaction
-            grid_cell_targeted=details.get("grid_cell"),
-            coordinates_used=GridCoordinate(
-                cell=details.get("grid_cell", ""),
-                offset_x=details.get("offset_x", 0.5),
-                offset_y=details.get("offset_y", 0.5),
-                confidence=details.get("coordinate_confidence", 0.0)
-            ) if details.get("grid_cell") else None,
+            grid_cell_targeted=grid_cell_targeted,
+            coordinates_used=coordinates_used,
             
             # Browser state
-            url_before=details.get("url_before"),
-            url_after=details.get("url_after"),
-            page_title_before=details.get("page_title_before"),
-            page_title_after=details.get("page_title_after"),
+            url_before=details.browser_state_before.url if (details and hasattr(details, 'browser_state_before') and details.browser_state_before) else None,
+            url_after=details.browser_state_after.url if (details and hasattr(details, 'browser_state_after') and details.browser_state_after) else None,
+            page_title_before=details.browser_state_before.title if (details and hasattr(details, 'browser_state_before') and details.browser_state_before) else None,
+            page_title_after=details.browser_state_after.title if (details and hasattr(details, 'browser_state_after') and details.browser_state_after) else None,
             
             # Debugging aids
             confidence_scores=confidence_scores,
-            ui_anomalies=ai_analysis_data.get("anomalies", []),
-            suggested_fixes=ai_analysis_data.get("recommendations", []),
+            ui_anomalies=details.ai_analysis.anomalies if (details and hasattr(details, 'ai_analysis') and details.ai_analysis) else [],
+            suggested_fixes=details.ai_analysis.recommendations if (details and hasattr(details, 'ai_analysis') and details.ai_analysis) else [],
             
             # Categorization
             severity="critical" if not self.step.optional else "medium",
@@ -334,8 +387,10 @@ class TestRunnerAgent(BaseAgent):
             
             # Action Agent now handles waiting and screenshot capture
             # Get screenshot after from Action Agent results if available
-            if self._current_step_result_details and self._current_step_result_details.get("screenshot_after"):
-                screenshot_after = self._current_step_result_details["screenshot_after"]
+            if (self._current_step_result_details and 
+                self._current_step_result_details.browser_state_after and
+                self._current_step_result_details.browser_state_after.screenshot):
+                screenshot_after = self._current_step_result_details.browser_state_after.screenshot
             elif self.browser_driver:
                 # Fallback for non-visual modes
                 await asyncio.sleep(1.0)
@@ -353,11 +408,11 @@ class TestRunnerAgent(BaseAgent):
             actual_outcome = "Action completed"
             
             if self._current_step_result_details:
-                ai_analysis = self._current_step_result_details.get("ai_analysis", {})
+                ai_analysis = self._current_step_result_details.ai_analysis
                 if ai_analysis:
                     # Use AI analysis from Action Agent as evaluation
-                    success = ai_analysis.get("success", True)
-                    actual_outcome = ai_analysis.get("actual_outcome", "Action completed")
+                    success = ai_analysis.success
+                    actual_outcome = ai_analysis.actual_outcome
                     
                     # Create EvaluationResult for backward compatibility
                     evaluation_result = EvaluationResult(
@@ -365,8 +420,8 @@ class TestRunnerAgent(BaseAgent):
                         success=success,
                         expected_outcome=step.action_instruction.expected_outcome,
                         actual_outcome=actual_outcome,
-                        confidence=ai_analysis.get("confidence", 0.0),
-                        deviations=ai_analysis.get("anomalies", [])
+                        confidence=ai_analysis.confidence,
+                        deviations=ai_analysis.anomalies
                     )
                     
                     # Debug logging for failed evaluations
@@ -375,13 +430,17 @@ class TestRunnerAgent(BaseAgent):
                             "step_number": step.step_number,
                             "expected": step.action_instruction.expected_outcome,
                             "actual": actual_outcome,
-                            "confidence": ai_analysis.get("confidence", 0.0),
-                            "deviations": ai_analysis.get("anomalies", [])
+                            "confidence": ai_analysis.confidence,
+                            "deviations": ai_analysis.anomalies
                         })
                 else:
                     # No AI analysis available, use execution success
-                    success = self._current_step_result_details.get("execution_success", True)
-                    actual_outcome = "Action executed" if success else "Action failed"
+                    if hasattr(self._current_step_result_details, 'execution') and self._current_step_result_details.execution:
+                        success = self._current_step_result_details.execution.success
+                        actual_outcome = "Action executed" if success else "Action failed"
+                    else:
+                        success = self._current_step_result_details.overall_success
+                        actual_outcome = "Action executed" if success else "Action failed"
             
             return TestStepResult(
                 step=step,
@@ -463,29 +522,39 @@ class TestRunnerAgent(BaseAgent):
         screenshot = await self.browser_driver.screenshot()
         
         # Use new Action Agent method that owns full action lifecycle
-        action_result_dict = await self.action_agent.execute_action(
+        enhanced_result = await self.action_agent.execute_action(
             test_step=step,
             test_context=test_context,
             screenshot=screenshot
         )
         
         # Store detailed result for debugging
-        self._current_step_result_details = action_result_dict
+        self._current_step_result_details = enhanced_result
         
         # Convert to ActionResult for backward compatibility
         action_result = None
-        if action_result_dict.get("validation_passed") and action_result_dict.get("grid_cell"):
+        if enhanced_result.validation.valid and enhanced_result.coordinates:
+            # Create a grid action for the ActionResult
+            grid_action = GridAction(
+                instruction=step.action_instruction,
+                coordinate=GridCoordinate(
+                    cell=enhanced_result.coordinates.grid_cell,
+                    offset_x=enhanced_result.coordinates.offset_x,
+                    offset_y=enhanced_result.coordinates.offset_y,
+                    confidence=enhanced_result.coordinates.confidence,
+                    refined=enhanced_result.coordinates.refined
+                )
+            )
+            
             action_result = ActionResult(
-                action_type=action_result_dict["action_type"],
-                grid_cell=action_result_dict["grid_cell"],
-                offset_x=action_result_dict["offset_x"],
-                offset_y=action_result_dict["offset_y"],
-                confidence=action_result_dict["coordinate_confidence"],
-                requires_refinement=False
+                success=enhanced_result.overall_success,
+                action=grid_action,
+                execution_time_ms=int(enhanced_result.execution.execution_time_ms) if enhanced_result.execution else 0,
+                confidence=enhanced_result.coordinates.confidence
             )
             
             # Record successful action for future use if execution succeeded
-            if action_result_dict.get("execution_success"):
+            if enhanced_result.execution and enhanced_result.execution.success:
                 self._record_action(step, action_result)
         
         return action_result
@@ -575,10 +644,10 @@ class TestRunnerAgent(BaseAgent):
         # Don't record pixel coordinates here - they should be calculated
         # dynamically based on viewport size when replaying
         self._scripted_actions[step_key] = {
-            "action_type": action.action_type,
-            "grid_cell": action.grid_cell,
-            "offset_x": action.offset_x,
-            "offset_y": action.offset_y,
+            "action_type": action.action.instruction.action_type.value,
+            "grid_cell": action.action.coordinate.cell,
+            "offset_x": action.action.coordinate.offset_x,
+            "offset_y": action.action.coordinate.offset_y,
             "timestamp": action.timestamp.isoformat()
         }
     
@@ -859,25 +928,44 @@ Provide your recommendation with reasoning."""
                         
                         # Show AI reasoning if available
                         if result.action_result_details:
-                            ai_analysis = result.action_result_details.get("ai_analysis", {})
-                            if ai_analysis:
+                            if hasattr(result.action_result_details, 'ai_analysis') and result.action_result_details.ai_analysis:
+                                ai_analysis = result.action_result_details.ai_analysis
                                 print(f"\nAI Analysis:")
-                                print(f"  - Confidence: {ai_analysis.get('confidence', 0)*100:.0f}%")
-                                print(f"  - Actual outcome: {ai_analysis.get('actual_outcome', 'Unknown')}")
+                                print(f"  - Confidence: {ai_analysis.confidence*100:.0f}%")
+                                print(f"  - Actual outcome: {ai_analysis.actual_outcome}")
                                 
                                 # Show anomalies
-                                anomalies = ai_analysis.get("anomalies", [])
-                                if anomalies:
+                                if ai_analysis.anomalies:
                                     print(f"  - UI Anomalies detected:")
-                                    for anomaly in anomalies:
+                                    for anomaly in ai_analysis.anomalies:
                                         print(f"    • {anomaly}")
                                 
                                 # Show recommendations
-                                recommendations = ai_analysis.get("recommendations", [])
-                                if recommendations:
+                                if ai_analysis.recommendations:
                                     print(f"  - Recommendations:")
-                                    for rec in recommendations:
+                                    for rec in ai_analysis.recommendations:
                                         print(f"    • {rec}")
+                            elif isinstance(result.action_result_details, dict):
+                                # Fallback for old format
+                                ai_analysis = result.action_result_details.get("ai_analysis", {})
+                                if ai_analysis:
+                                    print(f"\nAI Analysis:")
+                                    print(f"  - Confidence: {ai_analysis.get('confidence', 0)*100:.0f}%")
+                                    print(f"  - Actual outcome: {ai_analysis.get('actual_outcome', 'Unknown')}")
+                                    
+                                    # Show anomalies
+                                    anomalies = ai_analysis.get("anomalies", [])
+                                    if anomalies:
+                                        print(f"  - UI Anomalies detected:")
+                                        for anomaly in anomalies:
+                                            print(f"    • {anomaly}")
+                                    
+                                    # Show recommendations
+                                    recommendations = ai_analysis.get("recommendations", [])
+                                    if recommendations:
+                                        print(f"  - Recommendations:")
+                                        for rec in recommendations:
+                                            print(f"    • {rec}")
                         
                         # Show screenshot paths if available
                         if result.screenshot_before or result.screenshot_after:
