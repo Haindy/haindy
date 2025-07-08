@@ -151,24 +151,38 @@ class ActionAgent(BaseAgent):
         )
         
         try:
-            # Get URL from instruction
-            url = test_step.action_instruction.value or test_step.action_instruction.target
+            # Phase 8b: Enhanced URL extraction from multiple sources
+            url = test_step.action_instruction.value
             
-            # Handle generic URLs like "Wikipedia homepage URL"
+            # If URL not in value, try to get from test context
             if not url or "URL" in url:
-                # Try to infer from description
-                desc_lower = test_step.description.lower()
-                if "wikipedia" in desc_lower:
-                    url = "https://en.wikipedia.org"
-                else:
-                    result.overall_success = False
-                    result.execution = ExecutionResult(
-                        success=False,
-                        execution_time_ms=0.0,
-                        error_message=f"No valid URL provided. Got: '{url}'"
-                    )
-                    result.failure_phase = "url_extraction"
-                    return result
+                # Check if test_context has scenario info with URL
+                if "test_scenario" in test_context:
+                    scenario = test_context["test_scenario"]
+                    if isinstance(scenario, dict) and "url" in scenario:
+                        url = scenario["url"]
+                        logger.info(f"Found URL in test_scenario: {url}")
+                elif "url" in test_context:
+                    url = test_context["url"]
+                    logger.info(f"Found URL in test_context: {url}")
+                
+                # Still no URL? Try to infer from description
+                if not url or "URL" in url:
+                    desc_lower = test_step.description.lower()
+                    target_lower = test_step.action_instruction.target.lower()
+                    
+                    if "wikipedia" in desc_lower or "wikipedia" in target_lower:
+                        url = "https://en.wikipedia.org"
+                        logger.info("Inferred Wikipedia URL from description")
+                    else:
+                        result.overall_success = False
+                        result.execution = ExecutionResult(
+                            success=False,
+                            execution_time_ms=0.0,
+                            error_message="No valid URL found in instruction value, test context, or description"
+                        )
+                        result.failure_phase = "url_extraction"
+                        return result
             
             # Capture before state
             if self.browser_driver:
@@ -197,21 +211,32 @@ class ActionAgent(BaseAgent):
                 screenshot=screenshot_after
             )
             
-            # Validate navigation succeeded
+            # Phase 8b: Enhanced visual validation
             validation_prompt = f"""
-I navigated to a webpage. Please analyze the screenshot and tell me:
+I navigated to: {url}
 
-1. Did the navigation succeed?
-2. What page am I looking at?
+Please analyze the screenshot and answer:
+
+1. Did the navigation succeed? (Check for error pages, blank pages, connection errors)
+2. What page am I looking at? Be specific about the content you see.
 3. Does it match the expected outcome: "{test_step.action_instruction.expected_outcome}"?
 
-If the page doesn't match expectations, describe what you see instead.
+Common error patterns to check for:
+- 404 or "Page not found" errors
+- Blank white pages
+- Connection error messages
+- Certificate warnings
+- "Site can't be reached" messages
+- Wrong domain/website
 
-Respond in this format:
+Expected outcome detail: {test_step.action_instruction.expected_outcome}
+
+Respond in this EXACT format:
 SUCCESS: true/false
-PAGE_DESCRIPTION: <what you see>
+PAGE_DESCRIPTION: <detailed description of what you see>
 MATCHES_EXPECTED: true/false
-REASON: <explanation if it doesn't match>
+ERROR_TYPE: none/404/blank/connection/wrong_site/other
+REASON: <explanation of any issues>
 """
             
             # Use call_openai directly with image
@@ -233,38 +258,89 @@ REASON: <explanation if it doesn't match>
             response = await self.call_openai(messages=messages, temperature=0.3)
             validation_response = response.get("content", "")
             
-            # Parse validation
+            # Phase 8b: Enhanced parsing of validation response
             success = "SUCCESS: true" in validation_response
             matches = "MATCHES_EXPECTED: true" in validation_response
             
-            # Extract page description
+            # Extract detailed information
             page_desc = ""
+            error_type = "none"
+            reason = ""
+            
             if "PAGE_DESCRIPTION:" in validation_response:
                 page_desc = validation_response.split("PAGE_DESCRIPTION:")[1].split("\n")[0].strip()
+            
+            if "ERROR_TYPE:" in validation_response:
+                error_type = validation_response.split("ERROR_TYPE:")[1].split("\n")[0].strip()
+            
+            if "REASON:" in validation_response:
+                reason = validation_response.split("REASON:")[1].strip()
+            
+            # Create detailed validation result
+            validation_confidence = 1.0 if success and matches else 0.0
+            validation_reasoning = f"{page_desc}"
+            if not matches:
+                validation_reasoning += f" | Error type: {error_type}"
+                if reason:
+                    validation_reasoning += f" | {reason}"
             
             # Set validation result
             result.validation = ValidationResult(
                 valid=success and matches,
-                confidence=1.0 if success and matches else 0.0,
-                reasoning=page_desc
+                confidence=validation_confidence,
+                reasoning=validation_reasoning,
+                concerns=[] if matches else [f"Navigation may have failed: {error_type}"],
+                suggestions=[] if matches else ["Check URL validity", "Verify expected outcome description"]
             )
             
-            # Set execution result
+            # Set execution result with detailed error info
+            error_msg = None
+            if not success:
+                error_msg = f"Navigation failed - {error_type}: {page_desc}"
+            elif not matches:
+                error_msg = f"Page loaded but doesn't match expected: {reason}"
+            
             result.execution = ExecutionResult(
                 success=success and matches,
                 execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000,
-                error_message=None if success and matches else f"Navigation validation failed: {page_desc}"
+                error_message=error_msg
             )
+            
+            # Create comprehensive AI analysis
+            ui_changes = []
+            anomalies = []
+            recommendations = []
+            
+            if success:
+                ui_changes.append(f"Navigated to {url}")
+                ui_changes.append(f"Page loaded: {page_desc}")
+            
+            if not matches:
+                anomalies.append(f"Expected: {test_step.action_instruction.expected_outcome}")
+                anomalies.append(f"Actual: {page_desc}")
+                
+                if error_type == "404":
+                    recommendations.append("Verify the URL is correct")
+                    recommendations.append("Check if the page exists")
+                elif error_type == "blank":
+                    recommendations.append("Wait longer for page load")
+                    recommendations.append("Check for JavaScript errors")
+                elif error_type == "connection":
+                    recommendations.append("Check internet connection")
+                    recommendations.append("Verify the site is accessible")
+                elif error_type == "wrong_site":
+                    recommendations.append("Verify the URL in test scenario")
+                    recommendations.append("Check for redirects")
             
             result.overall_success = success and matches
             result.ai_analysis = AIAnalysis(
                 success=success and matches,
-                confidence=1.0 if success and matches else 0.0,
+                confidence=validation_confidence,
                 actual_outcome=page_desc,
                 matches_expected=matches,
-                ui_changes=[],
-                recommendations=[],
-                anomalies=[] if success and matches else [f"Navigation validation failed: {page_desc}"]
+                ui_changes=ui_changes,
+                recommendations=recommendations,
+                anomalies=anomalies
             )
             
             if not result.overall_success:

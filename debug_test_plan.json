@@ -1,11 +1,11 @@
 {
-  "plan_id": "0a0cddb0-7160-46f0-96ab-072baa509410",
+  "plan_id": "69590bf9-4b1e-40f0-9dc9-6435a29a74a8",
   "name": "Wikipedia Search Functionality Test Plan",
   "description": "Testing the search functionality on Wikipedia for the term 'artificial intelligence' and verifying the accessibility and content of the main article.",
   "requirements": "1. The search functionality works correctly; 2. Search results appear with relevant suggestions; 3. The main article about AI is accessible; 4. The article contains expected sections like 'History', 'Applications', and 'Ethics'; 5. Navigation between sections works properly.",
   "steps": [
     {
-      "step_id": "c385ae1d-da73-46d8-a834-6c71b101c456",
+      "step_id": "5c0619f6-a9d6-4469-ba8f-ddaadf21a3a6",
       "step_number": 1,
       "description": "Navigate to Wikipedia homepage",
       "action_instruction": {
@@ -21,25 +21,25 @@
       "max_retries": 3
     },
     {
-      "step_id": "b37568f8-12c7-4959-bc5f-32b5bf2ddaab",
+      "step_id": "8f1802d6-babe-485c-bfd7-492af7519693",
       "step_number": 2,
       "description": "Locate the search bar",
       "action_instruction": {
         "action_type": "assert",
         "description": "Locate the search bar",
-        "target": "Search bar on the homepage",
+        "target": "Search bar on Wikipedia homepage",
         "value": "",
         "expected_outcome": "Search bar is visible and accessible",
         "timeout": 5000
       },
       "dependencies": [
-        "c385ae1d-da73-46d8-a834-6c71b101c456"
+        "5c0619f6-a9d6-4469-ba8f-ddaadf21a3a6"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "b46e6be9-1b57-4d20-8944-afe03d2fe27b",
+      "step_id": "b45fa09f-ae22-4699-9f5a-2462f2f4b213",
       "step_number": 3,
       "description": "Type 'artificial intelligence' in the search bar",
       "action_instruction": {
@@ -47,89 +47,89 @@
         "description": "Type 'artificial intelligence' in the search bar",
         "target": "Search bar",
         "value": "artificial intelligence",
-        "expected_outcome": "Text 'artificial intelligence' is entered in the search bar",
+        "expected_outcome": "The text 'artificial intelligence' appears in the search bar",
         "timeout": 5000
       },
       "dependencies": [
-        "b37568f8-12c7-4959-bc5f-32b5bf2ddaab"
+        "8f1802d6-babe-485c-bfd7-492af7519693"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "45e3b064-c081-403d-88a4-85328fe9ff1d",
+      "step_id": "7394e545-83b7-4e01-a0c1-6bad35fca08c",
       "step_number": 4,
-      "description": "Initiate the search",
+      "description": "Submit the search",
       "action_instruction": {
         "action_type": "click",
-        "description": "Initiate the search",
+        "description": "Submit the search",
         "target": "Search button",
         "value": "",
-        "expected_outcome": "Search results page is displayed",
+        "expected_outcome": "Search results page is displayed with relevant results",
         "timeout": 5000
       },
       "dependencies": [
-        "b46e6be9-1b57-4d20-8944-afe03d2fe27b"
+        "b45fa09f-ae22-4699-9f5a-2462f2f4b213"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "231f3704-3aee-4b17-bf08-5fdab472aeeb",
+      "step_id": "0650f2ce-c0f4-409e-8eb1-fa79d9dd7096",
       "step_number": 5,
-      "description": "Verify search results are displayed",
+      "description": "Verify search results contain relevant suggestions",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Verify search results are displayed",
-        "target": "Search results section",
+        "description": "Verify search results contain relevant suggestions",
+        "target": "Search results list",
         "value": "",
-        "expected_outcome": "Search results appear with relevant suggestions for 'artificial intelligence'",
+        "expected_outcome": "Search results include 'Artificial Intelligence' as the first result",
         "timeout": 5000
       },
       "dependencies": [
-        "45e3b064-c081-403d-88a4-85328fe9ff1d"
+        "7394e545-83b7-4e01-a0c1-6bad35fca08c"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "2a50b4bb-05a1-4980-a8ae-c7d41454645b",
+      "step_id": "ee1cf284-8fe5-4e9a-9581-57275368dc1f",
       "step_number": 6,
       "description": "Click on the main article link for 'Artificial Intelligence'",
       "action_instruction": {
         "action_type": "click",
         "description": "Click on the main article link for 'Artificial Intelligence'",
-        "target": "Main article link",
+        "target": "First search result link",
         "value": "",
-        "expected_outcome": "Main article about 'Artificial Intelligence' is displayed",
+        "expected_outcome": "The article about 'Artificial Intelligence' is displayed",
         "timeout": 5000
       },
       "dependencies": [
-        "231f3704-3aee-4b17-bf08-5fdab472aeeb"
+        "0650f2ce-c0f4-409e-8eb1-fa79d9dd7096"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "501449a9-b281-4d62-b76e-e3d92f85b9fb",
+      "step_id": "30b1dbfb-1e39-4e06-a51f-9b9fa004fb4b",
       "step_number": 7,
-      "description": "Verify the presence of expected sections in the article",
+      "description": "Verify the article contains expected sections",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Verify the presence of expected sections in the article",
+        "description": "Verify the article contains expected sections",
         "target": "Article content",
         "value": "",
         "expected_outcome": "Article contains sections: 'History', 'Applications', and 'Ethics'",
         "timeout": 5000
       },
       "dependencies": [
-        "2a50b4bb-05a1-4980-a8ae-c7d41454645b"
+        "ee1cf284-8fe5-4e9a-9581-57275368dc1f"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "67b760c8-c33c-4b00-8cfb-af63d8b31576",
+      "step_id": "b4573b0d-7a79-45f0-bb5a-571f185a91f6",
       "step_number": 8,
       "description": "Navigate to the 'History' section",
       "action_instruction": {
@@ -137,71 +137,53 @@
         "description": "Navigate to the 'History' section",
         "target": "'History' section link",
         "value": "",
-        "expected_outcome": "User is taken to the 'History' section of the article",
+        "expected_outcome": "The page scrolls to the 'History' section",
         "timeout": 5000
       },
       "dependencies": [
-        "501449a9-b281-4d62-b76e-e3d92f85b9fb"
+        "30b1dbfb-1e39-4e06-a51f-9b9fa004fb4b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "5dd1fd2f-065d-4a82-b00c-fdffe36f74cf",
+      "step_id": "48b4f271-7639-4d00-ace5-8ca80218d2c8",
       "step_number": 9,
-      "description": "Navigate back to the top of the article",
-      "action_instruction": {
-        "action_type": "click",
-        "description": "Navigate back to the top of the article",
-        "target": "Back to top link",
-        "value": "",
-        "expected_outcome": "User is taken back to the top of the article",
-        "timeout": 5000
-      },
-      "dependencies": [
-        "67b760c8-c33c-4b00-8cfb-af63d8b31576"
-      ],
-      "optional": false,
-      "max_retries": 3
-    },
-    {
-      "step_id": "73bf7996-1053-4cbf-b475-cf7bdc575456",
-      "step_number": 10,
       "description": "Navigate to the 'Applications' section",
       "action_instruction": {
         "action_type": "click",
         "description": "Navigate to the 'Applications' section",
         "target": "'Applications' section link",
         "value": "",
-        "expected_outcome": "User is taken to the 'Applications' section of the article",
+        "expected_outcome": "The page scrolls to the 'Applications' section",
         "timeout": 5000
       },
       "dependencies": [
-        "501449a9-b281-4d62-b76e-e3d92f85b9fb"
+        "b4573b0d-7a79-45f0-bb5a-571f185a91f6"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "482eaf66-b790-456b-b9b3-ff9bd88b314f",
-      "step_number": 11,
+      "step_id": "a21dde31-ad9b-40de-8ee2-1e5269c9cda6",
+      "step_number": 10,
       "description": "Navigate to the 'Ethics' section",
       "action_instruction": {
         "action_type": "click",
         "description": "Navigate to the 'Ethics' section",
         "target": "'Ethics' section link",
         "value": "",
-        "expected_outcome": "User is taken to the 'Ethics' section of the article",
+        "expected_outcome": "The page scrolls to the 'Ethics' section",
         "timeout": 5000
       },
       "dependencies": [
-        "501449a9-b281-4d62-b76e-e3d92f85b9fb"
+        "48b4f271-7639-4d00-ace5-8ca80218d2c8"
       ],
       "optional": false,
       "max_retries": 3
     }
   ],
-  "created_at": "2025-07-08T15:29:32.828459+00:00",
+  "created_at": "2025-07-08T15:53:00.444652+00:00",
   "estimated_duration_seconds": 300,
   "tags": [
     "functional",

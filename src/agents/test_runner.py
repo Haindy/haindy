@@ -232,6 +232,7 @@ class TestRunnerAgent(BaseAgent):
         self._test_state: Optional[TestState] = None
         self._execution_history: List[TestStepResult] = []
         self._scripted_actions: Dict[str, Dict[str, Any]] = {}
+        self._initial_url: Optional[str] = None  # Store initial URL for context
     
     async def execute_test_plan(
         self, test_plan: TestPlan, initial_url: Optional[str] = None
@@ -254,6 +255,7 @@ class TestRunnerAgent(BaseAgent):
         
         # Initialize test state
         self._current_test_plan = test_plan
+        self._initial_url = initial_url  # Store for context
         self._test_state = TestState(
             test_plan=test_plan,
             current_step=None,
@@ -495,7 +497,8 @@ class TestRunnerAgent(BaseAgent):
                 for s in recent_steps
             ])
         
-        return {
+        # Phase 8b: Include URL information in test context
+        context = {
             "test_plan_name": self._current_test_plan.name if self._current_test_plan else "Unknown",
             "test_plan_description": self._current_test_plan.description if self._current_test_plan else "Unknown",
             "current_step_description": step.description,
@@ -508,6 +511,17 @@ class TestRunnerAgent(BaseAgent):
             "step_dependencies": [str(d) for d in step.dependencies] if step.dependencies else [],
             "optional_step": step.optional
         }
+        
+        # Add URL info if available
+        if self._initial_url:
+            context["url"] = self._initial_url
+            # Simulate test_scenario structure for navigation workflow
+            context["test_scenario"] = {
+                "url": self._initial_url,
+                "name": self._current_test_plan.name if self._current_test_plan else "Test"
+            }
+        
+        return context
     
     async def _execute_visual_action(self, step: TestStep) -> Optional[ActionResult]:
         """Execute action using visual AI interaction."""
