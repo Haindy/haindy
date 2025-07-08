@@ -419,6 +419,56 @@ HTML_REPORT_TEMPLATE = """
             margin: 10px 0;
             border-left: 4px solid #2196f3;
         }
+        .bug-report {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .bug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .severity-critical { color: #d32f2f; font-weight: bold; }
+        .severity-high { color: #f44336; font-weight: bold; }
+        .severity-medium { color: #ff9800; }
+        .severity-low { color: #2196f3; }
+        .debug-info {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+        }
+        .screenshots {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .screenshot-container {
+            text-align: center;
+        }
+        .screenshot-container img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .confidence-score {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .confidence-high { background: #c8e6c9; color: #1b5e20; }
+        .confidence-medium { background: #fff3cd; color: #856404; }
+        .confidence-low { background: #ffcdd2; color: #c62828; }
     </style>
 </head>
 <body>
