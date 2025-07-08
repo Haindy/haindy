@@ -3,11 +3,13 @@ Script recorder for converting AI actions to Playwright commands.
 """
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
 from src.core.types import ActionType
+from src.core.enhanced_types import EnhancedActionResult
 from src.journal.models import ActionRecord, JournalActionResult, ScriptedCommand
+from src.journal.adapters import enhanced_to_journal_action_result
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -35,7 +37,7 @@ class ScriptRecorder:
     def record_action(
         self,
         action_type: ActionType,
-        action_result: JournalActionResult,
+        action_result: Union[JournalActionResult, EnhancedActionResult],
         element_info: Optional[Dict[str, Any]] = None
     ) -> Optional[ScriptedCommand]:
         """
@@ -43,13 +45,23 @@ class ScriptRecorder:
         
         Args:
             action_type: Type of action performed
-            action_result: Result of the action
+            action_result: Result of the action (JournalActionResult or EnhancedActionResult)
             element_info: Additional element information
             
         Returns:
             ScriptedCommand if recording successful
         """
-        if not action_result.success:
+        # Convert EnhancedActionResult to JournalActionResult if needed
+        if isinstance(action_result, EnhancedActionResult):
+            journal_result = enhanced_to_journal_action_result(action_result, action_type)
+            logger.debug("Converted EnhancedActionResult to JournalActionResult for script recording", extra={
+                "enhanced_success": action_result.overall_success,
+                "journal_success": journal_result.success
+            })
+        else:
+            journal_result = action_result
+        
+        if not journal_result.success:
             return None
         
         # Generate command based on action type
@@ -66,7 +78,7 @@ class ScriptRecorder:
             logger.warning(f"Unknown action type: {action_type}")
             return None
         
-        return command_func(action_result, element_info)
+        return command_func(journal_result, element_info)
     
     def generate_selectors(
         self,
