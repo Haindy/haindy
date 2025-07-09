@@ -154,6 +154,7 @@ reports/*.pdf
 reports/*.json
 reports/*.md
 screenshots/
+debug_screenshots/
 *.log
 examples/demo_output/
 demo_journals/

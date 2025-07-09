@@ -6,10 +6,11 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from src.core.types import TestPlan, TestStep
+from src.core.enhanced_types import EnhancedActionResult
 from src.journal.models import (
     ActionRecord,
     ExecutionJournal,
@@ -19,6 +20,7 @@ from src.journal.models import (
     PatternType
 )
 from src.journal.pattern_matcher import PatternMatcher
+from src.journal.adapters import enhanced_to_journal_action_result, extract_journal_context
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -83,9 +85,9 @@ class JournalManager:
         journal_id: UUID,
         test_scenario: str,
         step: TestStep,
-        action_result: JournalActionResult,
+        action_result: Union[JournalActionResult, EnhancedActionResult],
         execution_mode: ExecutionMode,
-        execution_time_ms: int,
+        execution_time_ms: Optional[int] = None,
         screenshot_before: Optional[str] = None,
         screenshot_after: Optional[str] = None
     ) -> JournalEntry:
@@ -96,9 +98,9 @@ class JournalManager:
             journal_id: ID of the journal
             test_scenario: Current test scenario name
             step: The test step executed
-            action_result: Result of the action
+            action_result: Result of the action (JournalActionResult or EnhancedActionResult)
             execution_mode: How the action was executed
-            execution_time_ms: Execution time in milliseconds
+            execution_time_ms: Execution time in milliseconds (extracted from EnhancedActionResult if not provided)
             screenshot_before: Path to before screenshot
             screenshot_after: Path to after screenshot
             
@@ -110,21 +112,47 @@ class JournalManager:
             if not journal:
                 raise ValueError(f"No active journal found: {journal_id}")
             
+            # Convert EnhancedActionResult to JournalActionResult if needed
+            if isinstance(action_result, EnhancedActionResult):
+                # Extract execution time from enhanced result if not provided
+                if execution_time_ms is None and action_result.execution:
+                    execution_time_ms = int(action_result.execution.execution_time_ms)
+                
+                # Convert to journal format
+                journal_result = enhanced_to_journal_action_result(action_result)
+                
+                # Extract additional context
+                journal_context = extract_journal_context(action_result)
+                
+                logger.debug("Converted EnhancedActionResult to JournalActionResult", extra={
+                    "enhanced_success": action_result.overall_success,
+                    "journal_success": journal_result.success,
+                    "execution_time_ms": execution_time_ms
+                })
+            else:
+                # Already in journal format
+                journal_result = action_result
+                journal_context = {}
+            
+            # Fallback execution time if still not available
+            if execution_time_ms is None:
+                execution_time_ms = 0
+            
             # Create journal entry
             entry = JournalEntry(
                 test_scenario=test_scenario,
                 step_reference=f"Step {step.step_number}: {step.description}",
-                action_taken=self._describe_action(step, action_result),
-                grid_coordinates=action_result.grid_coordinates if execution_mode == ExecutionMode.VISUAL else None,
-                scripted_command=action_result.playwright_command,
-                selectors=action_result.selectors,
+                action_taken=self._describe_action(step, journal_result),
+                grid_coordinates=journal_result.grid_coordinates if execution_mode == ExecutionMode.VISUAL else None,
+                scripted_command=journal_result.playwright_command,
+                selectors=journal_result.selectors,
                 execution_mode=execution_mode,
                 execution_time_ms=execution_time_ms,
-                agent_confidence=action_result.confidence,
+                agent_confidence=journal_result.confidence,
                 expected_result=step.action_instruction.expected_outcome,
-                actual_result=action_result.actual_outcome or "Unknown",
-                success=action_result.success,
-                error_message=action_result.error_message,
+                actual_result=journal_result.actual_outcome or "Unknown",
+                success=journal_result.success,
+                error_message=journal_result.error_message,
                 screenshot_before=screenshot_before,
                 screenshot_after=screenshot_after
             )
@@ -133,8 +161,8 @@ class JournalManager:
             journal.add_entry(entry)
             
             # Record pattern if successful and confidence is high
-            if action_result.success and action_result.confidence > 0.85:
-                pattern = await self._create_action_pattern(step, action_result, entry)
+            if journal_result.success and journal_result.confidence > 0.85:
+                pattern = await self._create_action_pattern(step, journal_result, entry)
                 if pattern:
                     self._pattern_library[pattern.record_id] = pattern
                     journal.discovered_patterns.append(pattern)

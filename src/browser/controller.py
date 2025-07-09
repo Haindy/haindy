@@ -63,6 +63,13 @@ class BrowserController:
 
         await self.driver.navigate(url)
 
+    async def press_key(self, key: str) -> None:
+        """Press a keyboard key."""
+        if not self._initialized:
+            raise RuntimeError("Controller not started. Call start() first.")
+        
+        await self.driver.press_key(key)
+
     async def click_at_grid(
         self,
         coord: GridCoordinate,

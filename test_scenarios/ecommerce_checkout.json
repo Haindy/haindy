@@ -1,0 +1,29 @@
+{
+  "name": "E-commerce Checkout Flow Test",
+  "description": "Test a complete e-commerce checkout process on a demo site - demonstrates complex multi-step workflows",
+  "url": "https://www.saucedemo.com",
+  "requirements": "Complete a full purchase flow on the Sauce Demo e-commerce site:\n1. Login with credentials (username: standard_user, password: secret_sauce)\n2. Browse the product catalog\n3. Add 2-3 items to the shopping cart\n4. View the shopping cart and verify items\n5. Proceed to checkout\n6. Fill in shipping information (First: Test, Last: User, Zip: 12345)\n7. Review order summary\n8. Complete the purchase\n9. Verify order confirmation message",
+  "expected_outcomes": [
+    "Login page loads with username and password fields",
+    "After login, product catalog page is displayed",
+    "Products show images, names, prices, and 'Add to cart' buttons",
+    "Cart badge updates when items are added",
+    "Cart page shows all added items with quantities and prices",
+    "Checkout form accepts shipping information",
+    "Order summary shows items, subtotal, tax, and total",
+    "Finish button completes the order",
+    "Success message confirms order completion"
+  ],
+  "tags": ["e-commerce", "checkout", "multi-step", "form-filling", "demo-site"],
+  "timeout": 300,
+  "max_steps": 30,
+  "complexity": "high",
+  "test_data": {
+    "username": "standard_user",
+    "password": "secret_sauce",
+    "first_name": "Test",
+    "last_name": "User",
+    "zip_code": "12345"
+  },
+  "notes": "This uses saucedemo.com, a public demo site specifically designed for testing automation tools"
+}

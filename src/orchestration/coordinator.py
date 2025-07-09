@@ -11,7 +11,6 @@ from src.agents import (
     TestPlannerAgent,
     TestRunnerAgent,
     ActionAgent,
-    EvaluatorAgent,
 )
 from src.browser.driver import BrowserDriver
 from src.core.types import AgentMessage, TestPlan, TestState, TestStatus
@@ -86,14 +85,15 @@ class WorkflowCoordinator:
                 name="TestRunner",
                 browser_driver=self.browser_driver
             ),
-            "action_agent": ActionAgent(name="ActionAgent"),
-            "evaluator_agent": EvaluatorAgent(name="Evaluator")
+            "action_agent": ActionAgent(
+                name="ActionAgent",
+                browser_driver=self.browser_driver
+            )
         }
         
         # Set up test runner dependencies
         if "test_runner" in self._agents:
             self._agents["test_runner"].action_agent = self._agents["action_agent"]
-            self._agents["test_runner"].evaluator_agent = self._agents["evaluator_agent"]
         
         # Register agents with message bus
         for agent_name, agent in self._agents.items():
@@ -131,12 +131,7 @@ class WorkflowCoordinator:
                 agent_name
             )
         
-        elif agent_name == "evaluator_agent":
-            self.message_bus.subscribe(
-                MessageType.EVALUATE_RESULT,
-                lambda msg: asyncio.create_task(self._handle_evaluate_result(msg)),
-                agent_name
-            )
+        # Evaluator agent removed - evaluation now handled by Action Agent
     
     async def execute_test_from_requirements(
         self,
@@ -353,12 +348,6 @@ class WorkflowCoordinator:
         """Handle action determination request."""
         logger.debug("Handling determine action")
         # Implementation handled by Action Agent
-        pass
-    
-    async def _handle_evaluate_result(self, message: AgentMessage) -> None:
-        """Handle result evaluation request."""
-        logger.debug("Handling evaluate result")
-        # Implementation handled by Evaluator Agent
         pass
     
     async def _on_state_change(

@@ -2,31 +2,32 @@
 
 ## 1  MVP Goals
 
-| # | Goal | Success criterion |
-|---|------|-------------------|
-| 1 | Accept high-level requirements (PRD, test scenarios) and autonomously execute testing workflows. | Agent successfully completes 3/5 different test scenarios without human intervention. |
-| 2 | Multi-agent coordination: Test planning → execution → evaluation → iteration. | Each agent fulfills its role with >80% accuracy in its domain. |
-| 3 | Grid-based browser interaction for reliable cross-application compatibility. | Successfully navigates and interacts with 5+ different web applications. |
-| 4 | Comprehensive test execution reporting with evidence collection. | Generates detailed reports with screenshots, steps, and outcomes for each test run. |
+| # | Goal | Success criterion | Status |
+|---|------|-------------------|---------|
+| 1 | Accept high-level requirements (PRD, test scenarios) and autonomously execute testing workflows. | Agent successfully completes 3/5 different test scenarios without human intervention. | 🔄 In Progress |
+| 2 | Multi-agent coordination: Test planning → execution → evaluation → iteration. | Each agent fulfills its role with >80% accuracy in its domain. | ✅ Achieved |
+| 3 | Grid-based browser interaction for reliable cross-application compatibility. | Successfully navigates and interacts with 5+ different web applications. | ✅ Achieved |
+| 4 | Comprehensive test execution reporting with evidence collection. | Generates detailed reports with screenshots, steps, and outcomes for each test run. | ✅ Achieved |
+| 5 | Debug visibility and AI interaction logging. | Complete visibility into AI prompts, responses, and decision-making process. | ✅ Achieved |
 
 ---
 
 ## 2  Tech Stack
 
-| Layer | Technology | Why |
-|-------|------------|-----|
-| Orchestrator | **Python 3.10+** | Best ecosystem for AI & agent coordination. |
-| Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. |
-| AI Agents | **4x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action, Evaluator agents. |
-| Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. |
-| Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (initially 60×60, refined as needed). |
-| Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. |
-| Packaging | `setuptools` + `pyproject.toml` | Simple `pip` distribution. |
-| Logs / metrics | JSONL + PNG + [`rich`](https://github.com/Textualize/rich) console | Human-readable and machine-parsable. |
+| Layer | Technology | Why | Status |
+|-------|------------|-----|--------|
+| Orchestrator | **Python 3.10+** | Best ecosystem for AI & agent coordination. | ✅ |
+| Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. | ✅ |
+| AI Agents | **4x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action, Evaluator agents. | ⚠️ Vision limitations |
+| Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. | ✅ |
+| Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (60×60 grid). | ✅ |
+| Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. | ✅ |
+| Debug logging | **JSONL + HTML reports** | AI conversations, screenshots, comprehensive debugging. | ✅ |
+| Packaging | `setuptools` + `pyproject.toml` | Simple `pip` distribution. | ✅ |
 
 ---
 
-## 3  Suggested Folder Layout
+## 3  Folder Structure
 
 ```
 autonomous-ai-testing-agent/
@@ -495,39 +496,101 @@ _Total: roughly **28–36 working days**._
 
 ## 14  Progress Tracking
 
-### Completed Phases
+### ✅ Completed Phases (16/18)
 
-| Phase | Status | PR | Notes |
-|-------|--------|----|----|
-| **0 — Prep** | ✅ Complete | - | Repository setup, structure, initial plan |
-| **1 — Core foundation** | ✅ Complete | #1 | Base classes, OpenAI client, core types |
-| **2 — Browser & Grid system** | ✅ Complete | #2 | Playwright wrapper, grid overlay system |
-| **3 — Test Planner Agent** | ✅ Complete | #3 | Requirements analysis, test plan generation |
-| **4 — Action Agent** | ✅ Complete | #4 | Visual analysis, coordinate determination |
-| **5 — Evaluator Agent** | ✅ Complete | #5 | Result assessment, state validation |
-| **6 — Test Runner Agent** | ✅ Complete | #6 | Test orchestration, flow management |
-| **7 — Agent Coordination** | ✅ Complete | #7 | Message bus, state management |
-| **8 — Execution Journaling** | ✅ Complete | #8 | Journal models, pattern matching |
-| **9 — Error Handling** | ✅ Complete | #9 | Recovery strategies, validation |
-| **10 — Security & Monitoring** | ✅ Complete | #10 | Rate limiting, sanitization, analytics |
-| **10b — Test Suite Cleanup** | ✅ Complete | - | Fixed test_error_recovery.py failure, 100% pass rate |
-| **11 — End-to-end Integration** | ✅ Complete | #13 | Complete workflow integration |
+For detailed information about completed phases, see [COMPLETED_PHASES_DETAILS.md](./COMPLETED_PHASES_DETAILS.md).
 
-### In Progress
+| Phase | Description | Key Achievement |
+|-------|-------------|-----------------|
+| **0-11b** | Core system implementation | Full multi-agent testing framework operational |
+| **Architecture Refactor** | Action Agent owns execution lifecycle | Improved debugging and error handling |
+| **Debug Enhancement** | AI interaction logging & screenshot management | Complete visibility into test execution |
 
-| Phase | Status | Target | Description |
-|-------|--------|--------|-------------|
-| **11b — CLI Improvements** | 🔄 Next | Immediate | Improve CLI UX for real-world usage |
+### 🔄 In Progress
 
-### Upcoming
+#### Phase 12 — Test Scenarios
 
-| Phase | Status | Target | Description |
-|-------|--------|--------|-------------|
-| **12 — Test Scenarios** | 📅 Planned | After 11b | Real-world test cases |
-| **13 — Packaging & docs** | 📅 Planned | After 12 | CLI, documentation, v0.1.0 |
+| Status | Target | Progress |
+|--------|--------|----------|
+| 🔄 In Progress | This week | 1/5 scenarios working |
 
-### Key Achievements
-- **Test Coverage**: 81% overall (exceeds 60% requirement)
-- **Code Quality**: Zero deprecation warnings, modern Python patterns
-- **Documentation**: Comprehensive runbook created (docs/RUNBOOK.md)
-- **Security**: Rate limiting, data sanitization, and monitoring in place 
+**Current State**:
+- Created 5 comprehensive test scenarios
+- Wikipedia search scenario demonstrates all action types
+- Known limitation: GPT-4o-mini vision capabilities with multiple images
+
+**Remaining Work**:
+- Fix typing validation issues
+- Test remaining 4 scenarios
+- Document scenario creation best practices
+
+### 📅 Upcoming Phases
+
+#### Phase 13 — Conversation-Based AI Interactions
+
+| Status | Target | ETA |
+|--------|--------|-----|
+| 📅 Planned | Next | 3-4 days |
+
+**Problem Statement**:
+Currently, each AI call is isolated without context from previous interactions. This leads to:
+- Redundant information in every prompt
+- Inability to reference previous analyses
+- Complex workarounds for image comparison
+- GPT-4o-mini limitations with multiple images
+
+**Proposed Solution**:
+Implement conversation threads for Action Agent where:
+- Each test step maintains conversation history
+- AI remembers previous screenshots and analyses
+- Natural comparison between states (before/after)
+- Single image per message (works with GPT-4o-mini)
+
+**Implementation Plan**:
+
+1. **Conversation State Management** (1 day)
+   - Add `conversation_history` to ActionAgent
+   - Implement message history tracking per test execution
+   - Create conversation context builder
+
+2. **Refactor AI Interactions** (1-2 days)
+   - Update all `call_openai_with_debug` calls to include history
+   - Implement sliding window for context management
+   - Add conversation reset between test steps
+
+3. **Optimize Prompts** (1 day)
+   - Rewrite prompts to leverage conversation context
+   - Remove redundant information
+   - Implement natural language transitions
+
+4. **Testing & Validation** (1 day)
+   - Test with Wikipedia scenario
+   - Verify improved accuracy
+   - Measure token usage optimization
+
+**Success Criteria**:
+- AI accurately references previous screenshots
+- Successful visual comparison without sending multiple images
+- Improved typing detection accuracy
+- Reduced token usage by 30%+
+
+#### Phase 14 — Packaging & Documentation
+
+| Status | Target | ETA |
+|--------|--------|-----|
+| 📅 Planned | After Phase 13 | 1-2 days |
+
+**Tasks**:
+- PyPI package preparation
+- Comprehensive API documentation
+- User guide and tutorials
+- Release v0.1.0
+
+### Key Metrics
+
+| Metric | Current | Target |
+|--------|---------|--------|
+| Test Coverage | 81% | 80%+ ✅ |
+| Code Quality | Zero warnings | Maintained ✅ |
+| Test Success Rate | 20% (1/5 scenarios) | 60%+ (3/5 scenarios) |
+| AI Vision Accuracy | Low (typing issues) | High | 

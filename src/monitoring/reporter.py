@@ -113,8 +113,17 @@ class TestExecutionReport:
     
     def to_html(self) -> str:
         """Generate HTML report."""
+        from src.monitoring.debug_logger import get_debug_logger
+        
         template = Template(HTML_REPORT_TEMPLATE)
-        return template.render(report=self.to_dict())
+        template_data = self.to_dict()
+        
+        # Add AI conversations if available
+        debug_logger = get_debug_logger()
+        if debug_logger:
+            template_data['ai_conversations'] = debug_logger.get_ai_conversations_html()
+        
+        return template.render(report=template_data, ai_conversations=template_data.get('ai_conversations'))
     
     def to_markdown(self) -> str:
         """Generate Markdown report."""
@@ -419,6 +428,56 @@ HTML_REPORT_TEMPLATE = """
             margin: 10px 0;
             border-left: 4px solid #2196f3;
         }
+        .bug-report {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .bug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .severity-critical { color: #d32f2f; font-weight: bold; }
+        .severity-high { color: #f44336; font-weight: bold; }
+        .severity-medium { color: #ff9800; }
+        .severity-low { color: #2196f3; }
+        .debug-info {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+        }
+        .screenshots {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .screenshot-container {
+            text-align: center;
+        }
+        .screenshot-container img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .confidence-score {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .confidence-high { background: #c8e6c9; color: #1b5e20; }
+        .confidence-medium { background: #fff3cd; color: #856404; }
+        .confidence-low { background: #ffcdd2; color: #c62828; }
     </style>
 </head>
 <body>
@@ -479,6 +538,14 @@ HTML_REPORT_TEMPLATE = """
         {% endif %}
         {% endif %}
         
+        <!-- AI Conversations Section -->
+        {% if ai_conversations %}
+        <h2>🤖 AI Conversations</h2>
+        <div style="margin: 20px 0;">
+            {{ ai_conversations|safe }}
+        </div>
+        {% endif %}
+        
         <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #666;">
             Generated at {{ report.metadata.generated_at }} | HAINDY Test Report v{{ report.metadata.report_version }}
         </footer>
@@ -534,7 +601,7 @@ class TestReporter:
         
         # Generate the report
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"test_report_{test_state.test_id}_{timestamp}.{format}"
+        filename = f"test_report_{test_state.test_plan.plan_id}_{timestamp}.{format}"
         output_path = output_dir / filename
         
         if format == "html":
@@ -555,16 +622,17 @@ class TestReporter:
     def _convert_to_metrics(self, test_state: TestState) -> TestMetrics:
         """Convert TestState to TestMetrics."""
         # Calculate metrics from test state
-        total_steps = len(test_state.step_results)
-        passed_steps = sum(1 for r in test_state.step_results.values() if r.success)
-        failed_steps = total_steps - passed_steps
+        total_steps = len(test_state.test_plan.steps)
+        passed_steps = len(test_state.completed_steps)
+        failed_steps = len(test_state.failed_steps)
         
         # Determine overall outcome
-        if test_state.status == "completed" and failed_steps == 0:
+        from src.core.types import TestStatus
+        if test_state.status == TestStatus.COMPLETED and failed_steps == 0:
             outcome = TestOutcome.PASSED
-        elif test_state.status == "failed" or failed_steps > 0:
+        elif test_state.status == TestStatus.FAILED or failed_steps > 0:
             outcome = TestOutcome.FAILED
-        elif test_state.status == "error":
+        elif test_state.status == TestStatus.SKIPPED:
             outcome = TestOutcome.ERROR
         else:
             outcome = TestOutcome.PASSED  # Default
@@ -574,44 +642,48 @@ class TestReporter:
         start_time = now
         end_time = now
         
-        # If we have step results, calculate actual times
-        if test_state.step_results:
-            # Use execution time to estimate duration
-            total_exec_time_ms = sum(r.execution_time_ms for r in test_state.step_results.values())
-            duration = total_exec_time_ms / 1000.0
+        # Calculate duration from start/end times
+        if test_state.start_time and test_state.end_time:
+            duration = (test_state.end_time - test_state.start_time).total_seconds()
+        elif test_state.start_time:
+            duration = (now - test_state.start_time).total_seconds()
         else:
             duration = 0.0
         
         return TestMetrics(
-            test_id=UUID(str(test_state.test_id)),
-            test_name=f"Test {test_state.test_id}",
-            start_time=start_time,
-            end_time=end_time,
+            test_id=test_state.test_plan.plan_id,
+            test_name=test_state.test_plan.name,
+            start_time=test_state.start_time or now,
+            end_time=test_state.end_time or now,
             outcome=outcome,
             steps_total=total_steps,
             steps_passed=passed_steps,
             steps_failed=failed_steps,
-            steps_skipped=0,
+            steps_skipped=len(test_state.skipped_steps),
             api_calls=0,  # TODO: Track API calls
             browser_actions=0,  # TODO: Track browser actions
             screenshots_taken=0,  # TODO: Track screenshots
-            errors=test_state.errors if test_state.errors else [],
+            errors=[],  # TODO: Track errors
             performance_metrics={}
         )
     
     def _extract_error_report(self, test_state: TestState) -> Optional[ErrorReport]:
         """Extract error report from test state."""
-        if not test_state.errors:
+        # TODO: Implement proper error tracking in TestState
+        # For now, return a basic error report based on error_count
+        if test_state.error_count == 0:
             return None
         
-        # Create a basic error report
-        # TODO: Integrate with ErrorAggregator for better error analysis
+        from src.error_handling.aggregator import ErrorCategory
         return ErrorReport(
-            total_errors=len(test_state.errors),
-            error_types={},
-            error_frequency={},
-            error_timeline=[],
-            recommendations=[],
-            recovery_success_rate=0.0,
-            common_patterns=[]
+            test_id=str(test_state.test_plan.plan_id),
+            test_name=test_state.test_plan.name,
+            start_time=test_state.start_time or datetime.now(timezone.utc),
+            end_time=test_state.end_time or datetime.now(timezone.utc),
+            total_errors=test_state.error_count,
+            errors_by_category={},
+            errors_by_type={},
+            critical_errors=[],
+            recovery_summary={"total_attempts": 0, "successful_recoveries": 0},
+            recommendations=[]
         )

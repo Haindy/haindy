@@ -21,6 +21,7 @@ from src.browser.controller import BrowserController
 from src.config.settings import get_settings
 from src.monitoring.logger import get_logger, setup_logging
 from src.monitoring.reporter import TestReporter
+from src.monitoring.debug_logger import initialize_debug_logger
 from src.orchestration.communication import MessageBus
 from src.orchestration.coordinator import WorkflowCoordinator
 from src.orchestration.state_manager import StateManager
@@ -187,6 +188,13 @@ async def run_test(
     coordinator = None
     
     try:
+        # Generate test run ID
+        test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Initialize debug logger
+        debug_logger = initialize_debug_logger(test_run_id)
+        console.print(f"[dim]Debug logging initialized for run: {test_run_id}[/dim]")
+        
         # Show startup banner
         console.print(Panel.fit(
             "[bold cyan]HAINDY - Autonomous AI Testing Agent[/bold cyan]\n"
@@ -278,17 +286,34 @@ async def run_test(
         # Display results summary
         console.print("\n[bold]Test Execution Summary:[/bold]")
         
-        status_color = "green" if test_state.status == "completed" else "red"
-        console.print(f"Status: [{status_color}]{test_state.status}[/{status_color}]")
-        console.print(f"Total Steps: {len(test_state.test_plan.steps)}")
+        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "completed" else "red"
+        status_text = getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown'))
+        console.print(f"Status: [{status_color}]{status_text}[/{status_color}]")
         
-        console.print(f"Completed Steps: [green]{len(test_state.completed_steps)}[/green]")
-        console.print(f"Failed Steps: [red]{len(test_state.failed_steps)}[/red]")
-        console.print(f"Skipped Steps: [yellow]{len(test_state.skipped_steps)}[/yellow]")
+        # Handle different TestState structures
+        if hasattr(test_state, 'test_plan') and test_state.test_plan:
+            console.print(f"Total Steps: {len(test_state.test_plan.steps)}")
+        
+        if hasattr(test_state, 'completed_steps'):
+            console.print(f"Completed Steps: [green]{len(test_state.completed_steps)}[/green]")
+        
+        if hasattr(test_state, 'failed_steps'):
+            console.print(f"Failed Steps: [red]{len(test_state.failed_steps)}[/red]")
+        elif hasattr(test_state, 'remaining_steps') and hasattr(test_state, 'completed_steps'):
+            # Calculate failed steps from test runner's TestState
+            total_steps = len(test_state.completed_steps) + len(test_state.remaining_steps)
+            failed_steps = 0  # Test runner doesn't track failed steps separately
+            console.print(f"Failed Steps: [red]{failed_steps}[/red]")
+        
+        if hasattr(test_state, 'skipped_steps'):
+            console.print(f"Skipped Steps: [yellow]{len(test_state.skipped_steps)}[/yellow]")
+        else:
+            console.print(f"Skipped Steps: [yellow]0[/yellow]")
         
         # Generate report
         if output_dir is None:
-            output_dir = Path("reports")
+            # Use the debug logger's reports directory for organized output
+            output_dir = debug_logger.reports_dir
         output_dir.mkdir(exist_ok=True)
         
         console.print(f"\n[cyan]Generating {report_format} report...[/cyan]")
@@ -301,6 +326,14 @@ async def run_test(
         )
         
         console.print(f"[green]Report saved to:[/green] {report_path}")
+        
+        # Show debug summary
+        debug_summary = debug_logger.get_debug_summary()
+        console.print(f"\n[bold]Debug Information:[/bold]")
+        console.print(f"Test Run ID: [cyan]{debug_summary['test_run_id']}[/cyan]")
+        console.print(f"Debug Directory: [cyan]{debug_summary['debug_directory']}[/cyan]")
+        console.print(f"AI Interactions Logged: [green]{debug_summary['ai_interactions']}[/green]")
+        console.print(f"Screenshots Saved: [green]{debug_summary['screenshots_saved']}[/green]")
         
         # Return appropriate exit code
         return 0 if test_state.status == "completed" else 1
@@ -373,17 +406,16 @@ async def test_api_connection() -> int:
             
             client = OpenAIClient()
             # Test with a simple prompt
-            response = await client.get_completion(
+            response = await client.call(
                 messages=[{"role": "user", "content": "Say 'API test successful' and nothing else."}],
-                model="gpt-4o-mini",
             )
             
             progress.update(task, completed=True)
         
-        if "API test successful" in response.content:
+        if "API test successful" in response["content"]:
             console.print("[green]✓ OpenAI API connection successful![/green]")
-            console.print(f"[dim]Model: {response.model}[/dim]")
-            console.print(f"[dim]Usage: {response.usage.total_tokens} tokens[/dim]")
+            console.print(f"[dim]Model: {response['model']}[/dim]")
+            console.print(f"[dim]Usage: {response['usage']['total_tokens']} tokens[/dim]")
             return 0
         else:
             console.print("[red]✗ Unexpected API response[/red]")

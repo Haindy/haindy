@@ -72,7 +72,9 @@ class EvaluatorAgent(BaseAgent):
             "success": result.success,
             "confidence": result.confidence,
             "deviations_count": len(result.deviations),
-            "has_suggestions": bool(result.suggestions)
+            "has_suggestions": bool(result.suggestions),
+            "expected": expected_outcome[:100] + "..." if len(expected_outcome) > 100 else expected_outcome,
+            "actual": result.actual_outcome[:100] + "..." if len(result.actual_outcome) > 100 else result.actual_outcome
         })
         
         return result
@@ -105,7 +107,7 @@ class EvaluatorAgent(BaseAgent):
         ]
         
         # Call AI for analysis
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for consistent evaluation
@@ -265,7 +267,7 @@ Provide response in JSON format:
         ]
         
         # Get AI analysis
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3
@@ -341,7 +343,7 @@ Provide response in JSON format:
             }
         ]
         
-        response = await self.call_ai(
+        response = await self.call_openai(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.2  # Very low temperature for error detection

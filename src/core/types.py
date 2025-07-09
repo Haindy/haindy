@@ -31,6 +31,7 @@ class ActionType(str, Enum):
     WAIT = "wait"
     SCREENSHOT = "screenshot"
     ASSERT = "assert"
+    KEY_PRESS = "key_press"
 
 
 class ConfidenceLevel(str, Enum):
@@ -140,6 +141,7 @@ class TestState(BaseModel):
     end_time: Optional[datetime] = None
     error_count: int = 0
     warning_count: int = 0
+    context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EvaluationResult(BaseModel):

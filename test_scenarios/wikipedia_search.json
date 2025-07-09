@@ -1,0 +1,20 @@
+{
+  "name": "Wikipedia Search Test",
+  "description": "Test searching for information on Wikipedia - demonstrates basic search functionality and content verification",
+  "url": "https://en.wikipedia.org",
+  "requirements": "Navigate to Wikipedia, search for 'artificial intelligence', and verify that:\n1. The search functionality works correctly - type in search box and press Enter to submit\n2. Pressing Enter in the search box navigates directly to the article or search results\n3. The main article about AI is accessible\n4. The article contains expected sections like 'History', 'Applications', and 'Ethics'\n5. Navigation between sections works properly",
+  "expected_outcomes": [
+    "Wikipedia homepage loads successfully",
+    "Search box is visible and functional",
+    "Typing 'artificial intelligence' and pressing Enter submits the search",
+    "Search results or article page loads after pressing Enter",
+    "Article has a table of contents with expected sections",
+    "Clicking on TOC links navigates to the correct sections",
+    "Images and infobox are present in the article"
+  ],
+  "tags": ["search", "navigation", "content-verification", "wikipedia"],
+  "timeout": 180,
+  "max_steps": 20,
+  "complexity": "low",
+  "notes": "Wikipedia search works by pressing Enter in the search box - there is no search button. The test should type in the search box and then use a separate KEY_PRESS action with value 'Enter' to submit the search."
+}

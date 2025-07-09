@@ -116,7 +116,7 @@ class PlaywrightDriver(BrowserDriver):
         if not self._page:
             raise RuntimeError("Browser not started. Call start() first.")
 
-        self.logger.debug(f"Clicking at coordinates", extra={"x": x, "y": y})
+        self.logger.debug("Clicking at coordinates", extra={"x": x, "y": y})
         await self._page.mouse.click(x, y)
 
     async def type_text(self, text: str) -> None:
@@ -126,6 +126,14 @@ class PlaywrightDriver(BrowserDriver):
 
         self.logger.debug(f"Typing text", extra={"length": len(text)})
         await self._page.keyboard.type(text)
+    
+    async def press_key(self, key: str) -> None:
+        """Press a keyboard key."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+        
+        self.logger.debug(f"Pressing key", extra={"key": key})
+        await self._page.keyboard.press(key)
 
     async def scroll(self, direction: str, amount: int) -> None:
         """Scroll in given direction."""

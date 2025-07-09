@@ -64,7 +64,7 @@ python -m pytest tests/test_action_agent.py -v
 python -m pytest tests/test_evaluator_agent.py -v
 
 # Phase 6: Test Runner Agent
-python -m pytest tests/test_runner_agent.py -v
+python -m pytest tests/test_test_runner.py -v
 
 # Phase 7: Agent Coordination
 python -m pytest tests/test_communication.py tests/test_state_manager.py tests/test_coordinator.py -v
@@ -296,10 +296,10 @@ python -m twine upload dist/*
 ## Monitoring and Logs
 
 ### Log Locations
-- Application logs: `logs/haindy.log`
-- Test execution journals: `data/journals/`
-- Screenshots: `data/screenshots/`
-- Test reports: `reports/`
+- Application logs: `logs/haindy.log` (Note: Directory may need to be created manually)
+- Test execution journals: `data/journals/` (Note: Not yet implemented)
+- Screenshots: `data/screenshots/` (Note: Currently empty, screenshots embedded in reports)
+- Test reports: `reports/` (HTML reports with embedded screenshots and step details)
 
 ### Log Levels
 ```bash
@@ -309,6 +309,46 @@ export HAINDY_LOG_LEVEL=DEBUG
 # Or via command line (once implemented)
 python -m src.main --log-level DEBUG
 ```
+
+### Debugging Test Executions
+
+#### Understanding Test Output
+When running tests, the console output shows:
+- JSON-formatted log messages with timestamps
+- Test execution progress indicators
+- Summary of test results including:
+  - Total steps planned
+  - Steps completed
+  - Steps failed
+  - Success rate
+  - Bug reports for failed steps
+
+#### Accessing Test Details
+1. **HTML Reports**: The most comprehensive source of test execution details
+   ```bash
+   # Reports are saved with timestamp and UUID
+   ls -la reports/test_report_*.html
+   
+   # Open the latest report
+   xdg-open reports/test_report_*_$(date +%Y%m%d)*.html  # Linux
+   open reports/test_report_*_$(date +%Y%m%d)*.html      # macOS
+   ```
+
+2. **Console Output**: Run with `--debug` flag for verbose output
+   ```bash
+   python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
+   ```
+
+3. **Test Execution Flow**:
+   - Step 1 is typically navigation (uses navigation workflow)
+   - Subsequent steps use click, type, or assert workflows
+   - Each step shows success/failure in the summary
+   - Failed steps include detailed error messages
+
+#### Common Issues
+- **"Field required" errors**: Usually indicates a mismatch between expected and actual result formats
+- **"Could not locate element"**: The AI couldn't find the target element in the screenshot
+- **"Click had no effect"**: The click was executed but no UI changes were detected
 
 ## Notes
 

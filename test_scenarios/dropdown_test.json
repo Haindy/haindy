@@ -1,0 +1,17 @@
+{
+  "name": "Dropdown Selection Test",
+  "description": "Test dropdown/select element interaction on a form",
+  "url": "https://www.w3schools.com/html/tryit.asp?filename=tryhtml_form_select",
+  "requirements": "Navigate to a page with a dropdown, open the dropdown, select an option, and verify the selection",
+  "expected_outcomes": [
+    "Page loads with dropdown visible",
+    "Dropdown opens when clicked",
+    "Target option is found and selected",
+    "Selected value is displayed in the dropdown"
+  ],
+  "tags": ["dropdown", "select", "form"],
+  "timeout": 60,
+  "max_steps": 5,
+  "complexity": "low",
+  "notes": "Simple dropdown test using W3Schools example"
+}

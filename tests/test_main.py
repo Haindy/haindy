@@ -80,14 +80,15 @@ class TestUtilityCommands:
     @pytest.mark.asyncio
     async def test_api_connection_success(self, capsys):
         """Test successful API connection test."""
-        mock_response = MagicMock()
-        mock_response.content = "API test successful"
-        mock_response.model = "gpt-4o-mini"
-        mock_response.usage.total_tokens = 10
+        mock_response = {
+            "content": "API test successful",
+            "model": "gpt-4o-mini",
+            "usage": {"total_tokens": 10}
+        }
         
         with patch("src.models.openai_client.OpenAIClient") as mock_client_class:
             mock_client = AsyncMock()
-            mock_client.get_completion = AsyncMock(return_value=mock_response)
+            mock_client.call = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
             
             result = await test_api_connection()
@@ -102,7 +103,7 @@ class TestUtilityCommands:
         """Test failed API connection test."""
         with patch("src.models.openai_client.OpenAIClient") as mock_client_class:
             mock_client = AsyncMock()
-            mock_client.get_completion = AsyncMock(side_effect=Exception("API Error"))
+            mock_client.call = AsyncMock(side_effect=Exception("API Error"))
             mock_client_class.return_value = mock_client
             
             result = await test_api_connection()

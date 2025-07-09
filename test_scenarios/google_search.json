@@ -1,0 +1,21 @@
+{
+  "name": "Google Search Test",
+  "description": "Test Google search functionality - demonstrates search, result navigation, and content extraction",
+  "url": "https://www.google.com",
+  "requirements": "Navigate to Google, search for 'OpenAI GPT-4', and verify that:\n1. The Google search page loads correctly\n2. The search box accepts input\n3. Search suggestions appear as you type\n4. Search results page loads with relevant results\n5. Results contain titles, URLs, and descriptions\n6. The 'Images' and 'News' tabs are accessible\n7. Pagination works at the bottom of results",
+  "expected_outcomes": [
+    "Google homepage loads with search box visible",
+    "Typing in search box shows autocomplete suggestions",
+    "Pressing Enter or clicking search button loads results",
+    "Results page shows approximately 10 results",
+    "Each result has a title, URL, and snippet",
+    "Navigation tabs (All, Images, News, etc.) are visible",
+    "Next/Previous page links appear at bottom",
+    "Results are relevant to 'OpenAI GPT-4' query"
+  ],
+  "tags": ["search", "navigation", "google", "results-verification"],
+  "timeout": 180,
+  "max_steps": 15,
+  "complexity": "low",
+  "notes": "Google's UI may vary by region and user. Test focuses on core search functionality."
+}

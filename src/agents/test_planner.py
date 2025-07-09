@@ -28,24 +28,17 @@ class TestPlannerAgent(BaseAgent):
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_PLANNER_SYSTEM_PROMPT
     
-    def _call_openai_sync(self, messages: List[Dict[str, str]], **kwargs) -> Dict:
-        """Synchronous wrapper for OpenAI calls."""
-        # This is a simplified version for testing
-        # In production, this would use the actual OpenAI client
-        if not hasattr(self, '_client') or self._client is None:
-            raise RuntimeError("OpenAI client not initialized")
-        
-        # Call the mocked client for testing
-        response = self._client.chat.completions.create(
+    async def _get_completion(self, messages: List[Dict[str, str]], **kwargs) -> Dict:
+        """Get completion from OpenAI."""
+        response = await self.call_openai(
             messages=messages,
-            model=self.model,
             temperature=kwargs.get("temperature", self.temperature),
             response_format=kwargs.get("response_format"),
         )
         
-        return {"content": response.choices[0].message.content}
+        return response
     
-    def create_test_plan(self, requirements: str, context: Optional[Dict] = None) -> TestPlan:
+    async def create_test_plan(self, requirements: str, context: Optional[Dict] = None) -> TestPlan:
         """
         Create a structured test plan from requirements.
         
@@ -71,7 +64,7 @@ class TestPlannerAgent(BaseAgent):
         ]
         
         # Get test plan from AI
-        response = self._call_openai_sync(
+        response = await self._get_completion(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for more consistent planning
@@ -79,6 +72,18 @@ class TestPlannerAgent(BaseAgent):
         
         # Parse and validate the response
         test_plan = self._parse_test_plan_response(response)
+        
+        # Debug: Save test plan
+        import json
+        with open("debug_test_plan.json", "w") as f:
+            plan_dict = test_plan.model_dump()
+            # Convert UUIDs to strings
+            plan_dict["plan_id"] = str(plan_dict["plan_id"])
+            plan_dict["created_at"] = plan_dict["created_at"].isoformat()
+            for step in plan_dict["steps"]:
+                step["step_id"] = str(step["step_id"])
+                step["dependencies"] = [str(d) for d in step["dependencies"]]
+            json.dump(plan_dict, f, indent=2)
         
         logger.info("Test plan created successfully", extra={
             "plan_name": test_plan.name,
@@ -106,9 +111,9 @@ class TestPlannerAgent(BaseAgent):
         {
             "step_number": 1,
             "description": "Step description",
-            "action": "click/type/navigate/wait/verify",
+            "action": "click/type/navigate/wait/verify/key_press",
             "target": "Description of what to interact with",
-            "value": "Value to type (if action is 'type')",
+            "value": "Value to type (if action is 'type') or key name (if action is 'key_press')",
             "expected_result": "What should happen",
             "dependencies": [],
             "optional": false
@@ -123,10 +128,15 @@ class TestPlannerAgent(BaseAgent):
     def _parse_test_plan_response(self, response: Dict) -> TestPlan:
         """Parse the AI response into a TestPlan object."""
         try:
-            # Extract the JSON content
-            content = response.get("content", "{}")
+            # Extract the content - it's already a dict when using JSON response format
+            content = response.get("content", {})
             import json
-            plan_data = json.loads(content)
+            
+            # If content is a string, parse it. If it's already a dict, use it directly
+            if isinstance(content, str):
+                plan_data = json.loads(content)
+            else:
+                plan_data = content
             
             # Create test steps
             steps = []
@@ -140,7 +150,9 @@ class TestPlannerAgent(BaseAgent):
                     "navigate": ActionType.NAVIGATE,
                     "wait": ActionType.WAIT,
                     "verify": ActionType.ASSERT,
-                    "assert": ActionType.ASSERT
+                    "assert": ActionType.ASSERT,
+                    "key_press": ActionType.KEY_PRESS,
+                    "press": ActionType.KEY_PRESS  # Alternative name
                 }
                 action_type = action_type_map.get(
                     step_data.get("action", "verify").lower(),
@@ -178,10 +190,15 @@ class TestPlannerAgent(BaseAgent):
                         step.dependencies.append(step_by_number[dep_num].step_id)
             
             # Create test plan
+            # Handle requirements as either string or list
+            requirements = plan_data.get("requirements", "")
+            if isinstance(requirements, list):
+                requirements = "\n".join(requirements)
+            
             test_plan = TestPlan(
                 name=plan_data["name"],
                 description=plan_data["description"],
-                requirements=plan_data.get("requirements", ""),
+                requirements=requirements,
                 steps=steps,
                 tags=plan_data.get("tags", []),
                 estimated_duration_seconds=plan_data.get("estimated_duration_seconds")
@@ -196,7 +213,7 @@ class TestPlannerAgent(BaseAgent):
             })
             raise ValueError(f"Failed to parse test plan response: {e}")
     
-    def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
+    async def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
         """
         Refine an existing test plan based on feedback.
         
@@ -229,7 +246,7 @@ Please provide an updated test plan that addresses the feedback while maintainin
         ]
         
         # Get refined plan from AI
-        response = self._call_openai_sync(
+        response = await self._get_completion(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3
@@ -271,7 +288,7 @@ Please provide an updated test plan that addresses the feedback while maintainin
         
         return "\n".join(lines)
     
-    def extract_test_scenarios(self, requirements: str) -> List[Dict[str, str]]:
+    async def extract_test_scenarios(self, requirements: str) -> List[Dict[str, str]]:
         """
         Extract multiple test scenarios from complex requirements.
         
@@ -298,7 +315,7 @@ Output as JSON object with a "scenarios" array."""
             {"role": "user", "content": requirements}
         ]
         
-        response = self._call_openai_sync(
+        response = await self._get_completion(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.3
