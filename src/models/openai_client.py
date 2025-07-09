@@ -17,7 +17,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "gpt-4o-mini",
+        model: str = "o4-mini-2025-04-16",
         api_key: Optional[str] = None,
         max_retries: int = 3,
     ) -> None:
@@ -84,11 +84,20 @@ class OpenAIClient:
             kwargs: Dict[str, Any] = {
                 "model": self.model,
                 "messages": final_messages,
-                "temperature": temperature,
             }
-
-            if max_tokens:
-                kwargs["max_tokens"] = max_tokens
+            
+            # o4-mini uses different parameters
+            if "o4-mini" in self.model:
+                # Use max_completion_tokens instead of max_tokens
+                if max_tokens:
+                    kwargs["max_completion_tokens"] = max_tokens
+                # Add reasoning_effort for better accuracy
+                kwargs["reasoning_effort"] = "medium"
+            else:
+                # Traditional models use temperature and max_tokens
+                kwargs["temperature"] = temperature
+                if max_tokens:
+                    kwargs["max_tokens"] = max_tokens
 
             if response_format:
                 kwargs["response_format"] = response_format

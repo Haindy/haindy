@@ -1,7 +1,7 @@
 {
   "name": "Wikipedia Search Test",
   "description": "Test searching for information on Wikipedia - demonstrates basic search functionality and content verification",
-  "url": "https://en.wikipedia.org",
+  "url": "https://www.wikipedia.org/",
   "requirements": "Navigate to Wikipedia, search for 'artificial intelligence', and verify that:\n1. The search functionality works correctly - type in search box and press Enter to submit\n2. Pressing Enter in the search box navigates directly to the article or search results\n3. The main article about AI is accessible\n4. The article contains expected sections like 'History', 'Applications', and 'Ethics'\n5. Navigation between sections works properly",
   "expected_outcomes": [
     "Wikipedia homepage loads successfully",

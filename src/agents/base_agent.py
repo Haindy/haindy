@@ -16,7 +16,7 @@ class BaseAgent(Agent):
     def __init__(
         self,
         name: str,
-        model: str = "gpt-4o-mini",
+        model: str = "o4-mini-2025-04-16",
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
     ) -> None:
