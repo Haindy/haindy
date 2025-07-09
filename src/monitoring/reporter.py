@@ -113,8 +113,17 @@ class TestExecutionReport:
     
     def to_html(self) -> str:
         """Generate HTML report."""
+        from src.monitoring.debug_logger import get_debug_logger
+        
         template = Template(HTML_REPORT_TEMPLATE)
-        return template.render(report=self.to_dict())
+        template_data = self.to_dict()
+        
+        # Add AI conversations if available
+        debug_logger = get_debug_logger()
+        if debug_logger:
+            template_data['ai_conversations'] = debug_logger.get_ai_conversations_html()
+        
+        return template.render(report=template_data, ai_conversations=template_data.get('ai_conversations'))
     
     def to_markdown(self) -> str:
         """Generate Markdown report."""
@@ -527,6 +536,14 @@ HTML_REPORT_TEMPLATE = """
         <div class="recommendation">{{ rec }}</div>
         {% endfor %}
         {% endif %}
+        {% endif %}
+        
+        <!-- AI Conversations Section -->
+        {% if ai_conversations %}
+        <h2>🤖 AI Conversations</h2>
+        <div style="margin: 20px 0;">
+            {{ ai_conversations|safe }}
+        </div>
         {% endif %}
         
         <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #666;">

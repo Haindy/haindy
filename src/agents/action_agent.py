@@ -15,7 +15,7 @@ import re
 import traceback
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any, List
 
 from PIL import Image, ImageDraw
 
@@ -31,6 +31,7 @@ from src.core.enhanced_types import (
 from src.grid.overlay import GridOverlay
 from src.grid.refinement import GridRefinement
 from src.monitoring.logger import get_logger
+from src.monitoring.debug_logger import get_debug_logger
 
 logger = get_logger(__name__)
 
@@ -75,6 +76,70 @@ class ActionAgent(BaseAgent):
         # Configuration
         self.confidence_threshold = settings.grid_confidence_threshold
         self.refinement_enabled = settings.grid_refinement_enabled
+    
+    async def call_openai_with_debug(
+        self,
+        messages: List[Dict[str, Any]],
+        action_type: str,
+        step_number: Optional[int] = None,
+        temperature: Optional[float] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+        screenshot_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Wrapper around call_openai that adds debug logging.
+        
+        Args:
+            messages: List of message dictionaries
+            action_type: Type of action being performed
+            step_number: Test step number if applicable
+            temperature: Override default temperature
+            response_format: Optional response format specification
+            screenshot_path: Path to associated screenshot if any
+            
+        Returns:
+            API response
+        """
+        debug_logger = get_debug_logger()
+        
+        # Extract prompt text from messages
+        prompt_text = ""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    prompt_text += content
+                elif isinstance(content, list):
+                    # Handle multimodal content
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            prompt_text += item.get("text", "")
+                        elif isinstance(item, dict) and item.get("type") == "image_url":
+                            prompt_text += " [IMAGE INCLUDED]"
+        
+        # Make the API call
+        response = await self.call_openai(
+            messages=messages,
+            temperature=temperature,
+            response_format=response_format
+        )
+        
+        # Log the interaction
+        if debug_logger:
+            debug_logger.log_ai_interaction(
+                agent_name=self.name,
+                action_type=action_type,
+                prompt=prompt_text,
+                response=response.get("content", ""),
+                screenshot_path=screenshot_path,
+                additional_context={
+                    "step_number": step_number,
+                    "temperature": temperature,
+                    "response_format": response_format
+                }
+            )
+        
+        return response
     
     async def execute_action(
         self,
@@ -250,6 +315,16 @@ ERROR_TYPE: none/404/blank/connection/wrong_site/other
 REASON: <explanation of any issues>
 """
             
+            # Save screenshot for debugging
+            debug_logger = get_debug_logger()
+            screenshot_path = None
+            if debug_logger:
+                screenshot_path = debug_logger.save_screenshot(
+                    screenshot_after,
+                    "navigation_validation",
+                    step_number=test_step.step_number
+                )
+            
             # Use call_openai directly with image
             messages = [
                 {
@@ -266,7 +341,13 @@ REASON: <explanation of any issues>
                 }
             ]
             
-            response = await self.call_openai(messages=messages, temperature=0.3)
+            response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="navigation_validation",
+                step_number=test_step.step_number,
+                temperature=0.3,
+                screenshot_path=screenshot_path
+            )
             validation_response = response.get("content", "")
             
             # Phase 8b: Enhanced parsing of validation response
@@ -438,6 +519,17 @@ BLOCKED_BY: <if blocked, what's blocking it>
             # Create grid overlay screenshot for analysis
             grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
             
+            # Save grid screenshot for debugging
+            debug_logger = get_debug_logger()
+            screenshot_path = None
+            if debug_logger:
+                screenshot_path = debug_logger.save_screenshot(
+                    grid_screenshot,
+                    "click_analysis",
+                    step_number=test_step.step_number,
+                    with_grid=True
+                )
+            
             messages = [
                 {
                     "role": "user",
@@ -453,7 +545,13 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 }
             ]
             
-            response = await self.call_openai(messages=messages, temperature=0.3)
+            response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="click_analysis",
+                step_number=test_step.step_number,
+                temperature=0.3,
+                screenshot_path=screenshot_path
+            )
             click_response = response.get("content", "")
             
             # Parse response
@@ -604,7 +702,12 @@ CONFIDENCE: <0.0-1.0>
                 }
             ]
             
-            validation_response = await self.call_openai(messages=messages, temperature=0.3)
+            validation_response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="click_validation",
+                step_number=test_step.step_number,
+                temperature=0.3
+            )
             validation_content = validation_response.get("content", "")
             
             # Parse validation
@@ -748,6 +851,17 @@ BLOCKED_BY: <if blocked, what's blocking it>
             # Create grid overlay screenshot for analysis
             grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
             
+            # Save grid screenshot for debugging
+            debug_logger = get_debug_logger()
+            screenshot_path = None
+            if debug_logger:
+                screenshot_path = debug_logger.save_screenshot(
+                    grid_screenshot,
+                    "type_analysis",
+                    step_number=test_step.step_number,
+                    with_grid=True
+                )
+            
             messages = [
                 {
                     "role": "user",
@@ -763,7 +877,13 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 }
             ]
             
-            response = await self.call_openai(messages=messages, temperature=0.3)
+            response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="type_analysis",
+                step_number=test_step.step_number,
+                temperature=0.3,
+                screenshot_path=screenshot_path
+            )
             type_response = response.get("content", "")
             
             # Parse response
@@ -844,54 +964,109 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 screenshot, grid_cell
             )
             
-            # Step 3: Focus Handling
+            # Step 3: Robust Focus Detection with Visual Comparison
             execution_start = asyncio.get_event_loop().time()
             
             if not has_focus:
-                logger.info("Input field doesn't have focus, clicking to focus", extra={
+                logger.info("Input field doesn't have focus, using robust focus detection", extra={
                     "coordinates": (pixel_x, pixel_y),
                     "field_type": field_type
                 })
                 
-                await self.browser_driver.click(pixel_x, pixel_y)
-                await self.browser_driver.wait(200)  # Wait for focus
+                # Strategy 1: Click outside first, then click inside to compare
+                viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
                 
-                # Verify focus was achieved
-                focus_screenshot = await self.browser_driver.screenshot()
-                focus_check_prompt = f"""
-I just clicked on the input field at grid cell {grid_cell}.
-Please check if the field now has focus (cursor visible, highlighted border, etc).
+                # Click outside the search box (top-left corner)
+                await self.browser_driver.click(50, 50)
+                await self.browser_driver.wait(200)
+                
+                # Take screenshot without focus
+                unfocused_screenshot = await self.browser_driver.screenshot()
+                
+                # Save unfocused screenshot for debugging
+                debug_logger = get_debug_logger()
+                unfocused_screenshot_path = None
+                if debug_logger:
+                    unfocused_screenshot_path = debug_logger.save_screenshot(
+                        unfocused_screenshot,
+                        "unfocused_field",
+                        step_number=test_step.step_number
+                    )
+                
+                # Click on the input field
+                await self.browser_driver.click(pixel_x, pixel_y)
+                await self.browser_driver.wait(200)
+                
+                # Take screenshot with focus
+                focused_screenshot = await self.browser_driver.screenshot()
+                
+                # Save focused screenshot for debugging
+                focused_screenshot_path = None
+                if debug_logger:
+                    focused_screenshot_path = debug_logger.save_screenshot(
+                        focused_screenshot,
+                        "focused_field",
+                        step_number=test_step.step_number
+                    )
+                
+                # Compare the two screenshots for visual differences
+                focus_comparison_prompt = f"""
+I need to determine if clicking on the input field at grid cell {grid_cell} achieved focus.
+
+I have two screenshots:
+1. BEFORE clicking (unfocused)
+2. AFTER clicking (potentially focused)
+
+Please compare these screenshots and look for visual differences around the input field:
+- Cursor/caret visible in the input field
+- Border color change (blue outline, etc.)
+- Background color change
+- Any other visual indicators of focus
 
 Respond with:
-HAS_FOCUS: true/false
-VISUAL_INDICATORS: <what indicates focus>
+VISUAL_DIFFERENCES: true/false
+FOCUS_ACHIEVED: true/false
+DIFFERENCES_DESCRIPTION: <describe what changed>
+CONFIDENCE: <0.0-1.0>
 """
                 
                 messages = [
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": focus_check_prompt},
+                            {"type": "text", "text": focus_comparison_prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/png;base64,{base64.b64encode(focus_screenshot).decode('utf-8')}"
+                                    "url": f"data:image/png;base64,{base64.b64encode(unfocused_screenshot).decode('utf-8')}"
+                                }
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64.b64encode(focused_screenshot).decode('utf-8')}"
                                 }
                             }
                         ]
                     }
                 ]
                 
-                focus_response = await self.call_openai(messages=messages, temperature=0.3)
+                focus_response = await self.call_openai_with_debug(
+                    messages=messages,
+                    action_type="focus_comparison",
+                    step_number=test_step.step_number,
+                    temperature=0.3,
+                    screenshot_path=f"{unfocused_screenshot_path}, {focused_screenshot_path}"
+                )
                 focus_content = focus_response.get("content", "")
                 
-                if "HAS_FOCUS: false" in focus_content:
-                    # Try double-click as fallback
-                    logger.warning("Single click didn't achieve focus, trying double-click")
-                    await self.browser_driver.click(pixel_x, pixel_y)
-                    await self.browser_driver.wait(50)
-                    await self.browser_driver.click(pixel_x, pixel_y)
-                    await self.browser_driver.wait(200)
+                # Parse focus comparison response
+                visual_differences = "VISUAL_DIFFERENCES: true" in focus_content
+                focus_achieved = "FOCUS_ACHIEVED: true" in focus_content
+                
+                if not visual_differences or not focus_achieved:
+                    logger.info("No clear visual focus indicators, will validate by typing")
+                    focus_achieved = True  # Assume focus and validate with typing later
             
             # Step 4: Clear existing text if needed
             if current_value and current_value.lower() not in ["empty", "none", ""]:
@@ -908,82 +1083,123 @@ VISUAL_INDICATORS: <what indicates focus>
                 # Type over the selection
                 logger.info("Triple-clicked to select all text")
             
-            # Step 5: Type the text
-            logger.info("Typing text", extra={
+            # Step 5: Type the text with validation
+            logger.info("Typing text with validation", extra={
                 "text": test_step.action_instruction.value,
                 "field_type": field_type
             })
             
+            # Take screenshot BEFORE typing
+            before_typing_screenshot = await self.browser_driver.screenshot()
+            
+            # Save before typing screenshot for debugging
+            before_typing_screenshot_path = None
+            if debug_logger:
+                before_typing_screenshot_path = debug_logger.save_screenshot(
+                    before_typing_screenshot,
+                    "before_typing",
+                    step_number=test_step.step_number
+                )
+            
+            # Type the text
             await self.browser_driver.type_text(test_step.action_instruction.value)
             await self.browser_driver.wait(500)  # Wait for text to appear
             
+            # Take screenshot AFTER typing
+            after_typing_screenshot = await self.browser_driver.screenshot()
+            
+            # Save after typing screenshot for debugging
+            after_typing_screenshot_path = None
+            if debug_logger:
+                after_typing_screenshot_path = debug_logger.save_screenshot(
+                    after_typing_screenshot,
+                    "after_typing",
+                    step_number=test_step.step_number
+                )
+            
             # Step 6: Capture after state and validate
-            screenshot_after = await self.browser_driver.screenshot()
             result.browser_state_after = BrowserState(
                 url=await self.browser_driver.get_page_url(),
                 title=await self.browser_driver.get_page_title(),
                 viewport_size=viewport_size,
-                screenshot=screenshot_after
+                screenshot=after_typing_screenshot
             )
             
             execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
             
-            # Step 7: Input Validation
-            validation_prompt = f"""
-I just typed "{test_step.action_instruction.value}" into the input field at grid cell {grid_cell}.
+            # Step 7: Typing Result Validation with Visual Comparison
+            typing_validation_prompt = f"""
+I need to validate if typing "{test_step.action_instruction.value}" into the input field was successful.
 
-Please verify:
-1. Is the text visible in the input field?
-2. Does it match what was supposed to be typed?
-3. Are there any validation errors shown?
+I have two screenshots:
+1. BEFORE typing
+2. AFTER typing
+
+Please compare these screenshots and check:
+1. Is the typed text visible in the input field?
+2. Does the text match what was supposed to be typed?
+3. Are there any validation errors or issues?
+
+Focus on the input field at grid cell {grid_cell}.
 
 Expected text: {test_step.action_instruction.value}
 
-Respond in this format:
+Respond with:
 TEXT_VISIBLE: true/false
 TEXT_MATCHES: true/false
 ACTUAL_TEXT: <what you see in the field>
 VALIDATION_ERRORS: true/false
 ERROR_MESSAGE: <any error message shown>
 FIELD_STATE: normal/error/success
+TYPING_SUCCESSFUL: true/false
 CONFIDENCE: <0.0-1.0>
+REASONING: <explain what you observed>
+
 """
             
             messages = [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": validation_prompt},
+                        {"type": "text", "text": typing_validation_prompt},
                         {"type": "text", "text": "BEFORE typing:"},
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(screenshot).decode('utf-8')}"
+                                "url": f"data:image/png;base64,{base64.b64encode(before_typing_screenshot).decode('utf-8')}"
                             }
                         },
                         {"type": "text", "text": "AFTER typing:"},
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(screenshot_after).decode('utf-8')}"
+                                "url": f"data:image/png;base64,{base64.b64encode(after_typing_screenshot).decode('utf-8')}"
                             }
                         }
                     ]
                 }
             ]
             
-            validation_response = await self.call_openai(messages=messages, temperature=0.3)
+            validation_response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="typing_validation",
+                step_number=test_step.step_number,
+                temperature=0.3,
+                screenshot_path=f"{before_typing_screenshot_path}, {after_typing_screenshot_path}"
+            )
             validation_content = validation_response.get("content", "")
             
             # Parse validation
             text_visible = "TEXT_VISIBLE: true" in validation_content
             text_matches = "TEXT_MATCHES: true" in validation_content
+            typing_successful = "TYPING_SUCCESSFUL: true" in validation_content
             validation_errors = "VALIDATION_ERRORS: true" in validation_content
             
             actual_text = ""
             error_message = ""
             field_state = "normal"
             validation_confidence = 0.0
+            reasoning = ""
             
             if "ACTUAL_TEXT:" in validation_content:
                 actual_text = validation_content.split("ACTUAL_TEXT:")[1].split("\n")[0].strip()
@@ -993,17 +1209,21 @@ CONFIDENCE: <0.0-1.0>
                 field_state = validation_content.split("FIELD_STATE:")[1].split("\n")[0].strip()
             if "CONFIDENCE:" in validation_content:
                 validation_confidence = float(validation_content.split("CONFIDENCE:")[1].split("\n")[0].strip())
+            if "REASONING:" in validation_content:
+                reasoning = validation_content.split("REASONING:")[1].strip()
             
-            # Determine success - be more lenient for search boxes
-            if field_type == "search" and not text_visible:
-                # For search boxes, if we can't see the text but no errors occurred,
-                # assume success (search boxes often have overlays/dropdowns that obscure text)
-                success = not validation_errors and execution_time > 0
-                if success:
-                    actual_text = test_step.action_instruction.value  # Assume typed correctly
-                    text_matches = True
-            else:
-                success = text_visible and text_matches and not validation_errors
+            logger.info("Typing validation results", extra={
+                "text_visible": text_visible,
+                "text_matches": text_matches,
+                "typing_successful": typing_successful,
+                "actual_text": actual_text,
+                "validation_errors": validation_errors,
+                "error_message": error_message,
+                "reasoning": reasoning
+            })
+            
+            # Use the comprehensive typing_successful flag
+            success = typing_successful
             
             # Build error message if needed
             error_msg = None
@@ -1126,7 +1346,12 @@ REASON: <explanation if it doesn't match>
                 }
             ]
             
-            response = await self.call_openai(messages=messages, temperature=0.3)
+            response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="action_execution",
+                step_number=test_step.step_number,
+                temperature=0.3
+            )
             validation_response = response.get("content", "")
             
             # Parse validation
@@ -1210,6 +1435,15 @@ REASON: <explanation if it doesn't match>
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
+            
+            # Save screenshot for debugging
+            debug_logger = get_debug_logger()
+            if debug_logger:
+                debug_logger.save_screenshot(
+                    screenshot,
+                    "before_key_press",
+                    step_number=test_step.step_number
+                )
             
             # Get the key to press
             key = test_step.action_instruction.value
@@ -1302,7 +1536,12 @@ REASONING: What happened and why it matches/doesn't match expectations
                 }
             ]
             
-            response = await self.call_openai(messages=messages, temperature=0.3)
+            response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="action_execution",
+                step_number=test_step.step_number,
+                temperature=0.3
+            )
             validation_content = response.get("content", "")
             
             # Parse validation
@@ -1426,7 +1665,12 @@ CONFIDENCE: <0.0-1.0>
                 }
             ]
             
-            response = await self.call_openai(messages=messages, temperature=0.3)
+            response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="action_execution",
+                step_number=test_step.step_number,
+                temperature=0.3
+            )
             dropdown_response = response.get("content", "")
             
             # Parse response
@@ -1505,7 +1749,12 @@ CONFIDENCE: <0.0-1.0>
                     }
                 ]
                 
-                verify_response = await self.call_openai(messages=messages, temperature=0.3)
+                verify_response = await self.call_openai_with_debug(
+                    messages=messages,
+                    action_type="verify_selection",
+                    step_number=test_step.step_number,
+                    temperature=0.3
+                )
                 if "DROPDOWN_OPEN: false" in verify_response.get("content", ""):
                     # Try one more time with a slight delay
                     await asyncio.sleep(0.5)
@@ -1553,7 +1802,12 @@ MATCH_TYPE: exact/partial/none
                 }
             ]
             
-            option_response = await self.call_openai(messages=messages, temperature=0.3)
+            option_response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="find_option",
+                step_number=test_step.step_number,
+                temperature=0.3
+            )
             option_content = option_response.get("content", "")
             
             option_found = "OPTION_FOUND: true" in option_content
@@ -1660,7 +1914,12 @@ CONFIDENCE: <0.0-1.0>
                 }
             ]
             
-            validate_response = await self.call_openai(messages=messages, temperature=0.3)
+            validate_response = await self.call_openai_with_debug(
+                messages=messages,
+                action_type="validate_selection",
+                step_number=test_step.step_number,
+                temperature=0.3
+            )
             validate_content = validate_response.get("content", "")
             
             # Parse validation
@@ -2030,8 +2289,10 @@ CONFIDENCE: <0.0-1.0>
         ]
         
         # Call AI for analysis
-        response = await self.call_openai(
+        response = await self.call_openai_with_debug(
             messages=messages,
+            action_type="coordinate_analysis",
+            step_number=None,
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for precision
         )
@@ -2197,8 +2458,10 @@ Provide the refined position in JSON format:
             }
         ]
         
-        response = await self.call_openai(
+        response = await self.call_openai_with_debug(
             messages=messages,
+            action_type="refinement_analysis",
+            step_number=None,
             response_format={"type": "json_object"},
             temperature=0.2  # Even lower temperature for refinement
         )
@@ -2312,8 +2575,10 @@ Consider:
             }
         ]
         
-        response = await self.call_openai(
+        response = await self.call_openai_with_debug(
             messages=messages,
+            action_type="pattern_analysis",
+            step_number=None,
             response_format={"type": "json_object"},
             temperature=0.3
         )
@@ -2455,8 +2720,10 @@ Compare the before and after screenshots and provide analysis in JSON format:
                 }
             ]
             
-            response = await self.call_openai(
+            response = await self.call_openai_with_debug(
                 messages=messages,
+                action_type="result_analysis",
+                step_number=None,
                 response_format={"type": "json_object"},
                 temperature=0.3
             )
@@ -2628,8 +2895,10 @@ Respond in JSON format:
                 }
             ]
             
-            response = await self.call_openai(
+            response = await self.call_openai_with_debug(
                 messages=messages,
+                action_type="focus_analysis",
+                step_number=None,
                 response_format={"type": "json_object"},
                 temperature=0.1
             )
