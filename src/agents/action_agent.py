@@ -803,7 +803,7 @@ Please check for any other changes (errors, popups, navigation) but assume the f
 
 Respond in this format:
 CHANGES_DETECTED: true/false
-EXPECTED_OUTCOME_MET: true (unless there are errors)
+EXPECTED_OUTCOME_MET: true
 URL_CHANGED: true/false
 NEW_URL: <if changed>
 UI_CHANGES: <list what changed, or 'focus assumed' for input fields>

@@ -2,15 +2,15 @@
   "name": "Wikipedia Search Test",
   "description": "Test searching for information on Wikipedia - demonstrates basic search functionality and content verification",
   "url": "https://www.wikipedia.org/",
-  "requirements": "Navigate to Wikipedia, search for 'artificial intelligence', and verify that:\n1. The search functionality works correctly - type in search box and press Enter to submit\n2. Pressing Enter in the search box navigates directly to the article or search results\n3. The main article about AI is accessible\n4. The article contains expected sections like 'History', 'Applications', and 'Ethics'\n5. Navigation between sections works properly",
+  "requirements": "Navigate to Wikipedia, search for 'artificial intelligence', and verify that:\n1. The search functionality works correctly - type in search box and press Enter to submit\n2. Pressing Enter navigates directly to the 'Artificial intelligence' article (Wikipedia goes directly to exact matches)\n3. The article page loads successfully with the title 'Artificial intelligence'\n4. The article contains expected sections like 'History', 'Applications', and 'Ethics'\n5. Basic article elements are present (table of contents, images, infobox)",
   "expected_outcomes": [
     "Wikipedia homepage loads successfully",
-    "Search box is visible and functional",
-    "Typing 'artificial intelligence' and pressing Enter submits the search",
-    "Search results or article page loads after pressing Enter",
-    "Article has a table of contents with expected sections",
-    "Clicking on TOC links navigates to the correct sections",
-    "Images and infobox are present in the article"
+    "Typing 'artificial intelligence' in the search box works correctly",
+    "Pressing Enter submits the search",
+    "Browser navigates directly to the 'Artificial intelligence' article page",
+    "Article title 'Artificial intelligence' is displayed",
+    "Table of contents is visible with sections like History, Applications, Ethics",
+    "Article has images and an infobox with basic information"
   ],
   "tags": ["search", "navigation", "content-verification", "wikipedia"],
   "timeout": 180,

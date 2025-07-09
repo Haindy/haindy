@@ -25,6 +25,7 @@ Guidelines:
 - Never include steps like "wait", "pause", or "sleep" - instead describe what the user should see
 - Use separate actions for typing and keyboard controls (e.g., type text in one step, press Enter in another)
 - IMPORTANT: Use the EXACT URL provided in the requirements - do not change or "correct" URLs
+- IMPORTANT: Do not add redundant "click to focus" steps before typing - the type action handles focusing automatically
 
 Output Format:
 Create a structured test plan with:
