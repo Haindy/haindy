@@ -1,0 +1,15 @@
+Test Wikipedia Search
+
+Go to https://www.wikipedia.org/
+
+I want to make sure our users can search for topics on Wikipedia and find good information.
+
+Please test:
+- Search for "artificial intelligence" 
+- Make sure the search works when you press Enter
+- Verify you get to the AI article page
+- Check that the article is complete with all the important sections (it should have history, applications, ethics, etc.)
+- Make sure there are images and useful information boxes
+- The article should look professional and well-organized
+
+This is important because Wikipedia is often the first place people go to learn about new topics.

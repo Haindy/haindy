@@ -115,16 +115,50 @@ python examples/orchestration_demo.py
 python examples/journaling_demo.py
 ```
 
-### Interactive Testing
+### Running Test Scenarios
+
+#### Run Existing Test Scenario
 ```bash
-# Run the main entry point (once implemented)
-python -m src.main
+# Run a test scenario from JSON file
+python -m src.main --json-test-plan test_scenarios/wikipedia_search.json
 
-# With debug mode
-python -m src.main --debug
+# Short form
+python -m src.main -j test_scenarios/wikipedia_search.json
 
-# With custom config
-python -m src.main --config custom_config.json
+# With debug output
+python -m src.main -j test_scenarios/wikipedia_search.json --debug
+```
+
+#### Interactive Mode
+```bash
+# Enter requirements interactively
+python -m src.main --requirements
+python -m src.main -r
+```
+
+#### Document-based Testing
+```bash
+# Extract requirements from document
+python -m src.main --plan requirements.md
+python -m src.main -p requirements.md
+```
+
+#### Execution Options
+```bash
+# Berserk mode (fully autonomous)
+python -m src.main --berserk -j test_scenarios/login_test.json
+
+# Plan-only mode (generate plan without executing)
+python -m src.main --plan-only -j test_scenarios/wikipedia_search.json
+
+# Browser runs headless by default
+# To show browser, set BROWSER_HEADLESS=false in .env file
+
+# Custom timeout (default: 300 seconds)
+python -m src.main -j test_scenarios/complex_test.json --timeout 600
+
+# Custom output directory
+python -m src.main -j test_scenarios/login_test.json --output custom_reports/
 ```
 
 ## Code Quality Checks

@@ -453,12 +453,22 @@ async def process_plan_file(file_path: Path, berserk: bool = False) -> int:
         # Initialize planner
         planner = TestPlannerAgent()
         
-        # Let the AI read the file directly
-        console.print("[dim]Analyzing document with AI...[/dim]")
+        # Read the file contents
+        console.print("[dim]Reading requirements document...[/dim]")
+        try:
+            with open(file_path, 'r') as f:
+                file_contents = f.read()
+        except Exception as e:
+            console.print(f"[red]Error reading file: {e}[/red]")
+            return 1
         
-        # Create a prompt that includes the file path for the AI to read
+        # Create a prompt that includes the file contents
         analysis_prompt = f"""
-Please analyze the test requirements document at: {file_path}
+Please analyze the following test requirements document:
+
+---
+{file_contents}
+---
 
 Extract:
 1. The test requirements or user stories
@@ -482,7 +492,8 @@ Format your response as JSON with these fields:
         try:
             # Extract JSON from response
             import re
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response.content, re.DOTALL)
+            response_content = response.get("content", "")
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_content, re.DOTALL)
             if json_match:
                 extracted = json.loads(json_match.group())
             else:
