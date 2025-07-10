@@ -27,6 +27,14 @@ Guidelines:
 - IMPORTANT: Use the EXACT URL provided in the requirements - do not change or "correct" URLs
 - IMPORTANT: Do not add redundant "click to focus" steps before typing - the type action handles focusing automatically
 
+Rules for Creating Test Steps:
+1. **URL Validation**: Do NOT validate URLs unless explicitly required in the requirements. Screenshots cannot show browser address bars.
+2. **Location Specificity**: Always specify WHERE to look for elements (e.g., "in the table of contents" vs "in the article body")
+3. **Element Type Clarity**: Be specific about element types (e.g., "link" vs "heading" vs "button")
+4. **Visual Context**: Describe how elements appear visually (e.g., "as a blue link in the sidebar" vs "as a section header")
+5. **Feasibility**: Only create assertions that can be verified visually in a screenshot
+6. **Ambiguity Prevention**: If multiple interpretations exist, choose the most specific one
+
 Output Format:
 Create a structured test plan with:
 - Clear test objective

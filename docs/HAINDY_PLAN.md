@@ -602,4 +602,26 @@ Implement conversation threads for Action Agent where:
 | Test Coverage | 81% | 80%+ ✅ |
 | Code Quality | Zero warnings | Maintained ✅ |
 | Test Success Rate | 20% (1/5 scenarios) | 60%+ (3/5 scenarios) |
-| AI Vision Accuracy | Low (typing issues) | High | 
+| AI Vision Accuracy | Low (typing issues) | High |
+
+---
+
+## Future Enhancement: URL Validation Action Type
+
+### Problem
+Currently, test plans that require URL validation fail because:
+- Screenshots don't show browser address bars
+- The AI can only see webpage content, not browser chrome
+- Test Planner Agent creates assertions that cannot be verified visually
+
+### Proposed Solution
+Add a new action type `validate_url` that:
+- Uses the browser driver to get the current URL programmatically
+- Compares against expected URL patterns
+- Returns structured validation results
+
+### Implementation Notes
+- Would require new action type in TestStep model
+- Action Agent would delegate to browser driver instead of visual analysis
+- Enables validation of redirects, URL parameters, and navigation state
+- Should only be used when explicitly required by test requirements 
