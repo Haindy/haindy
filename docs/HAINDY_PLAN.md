@@ -590,6 +590,8 @@ Implement conversation threads for Action Agent where:
 |--------|--------|-----|
 | 📅 Planned | After Phase 13 | 2-3 days |
 
+**Detailed Plan**: See [PHASE_14_PLAN.md](./PHASE_14_PLAN.md) for comprehensive implementation details and progress tracking.
+
 **Problem Statement**:
 Current limitations prevent testing of content below the viewport and complex interactions.
 
