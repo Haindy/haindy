@@ -1,0 +1,23 @@
+{
+  "name": "Wikipedia Search and Article Content Verification",
+  "description": "Test that users can search for \u201cartificial intelligence\u201d on Wikipedia, land on the correct article page, and find a complete, well-structured article with key sections, images, and infobox.",
+  "url": "https://www.wikipedia.org/",
+  "requirements": [
+    "Navigate to the Wikipedia homepage.",
+    "Enter the term \u201cartificial intelligence\u201d into the search field.",
+    "Submit the search by pressing the Enter key.",
+    "Validate that the browser navigates to the \u201cArtificial intelligence\u201d article page.",
+    "On the article page, verify the presence of all major sections, including but not limited to History, Applications, and Ethics.",
+    "Confirm that at least one illustrative image is displayed within the article content.",
+    "Confirm that a useful information box (infobox) appears, summarizing key details about Artificial Intelligence.",
+    "Assess the overall layout and styling of the article to ensure it looks professional and well-organized."
+  ],
+  "expected_outcomes": [],
+  "tags": [
+    "generated",
+    "from_document"
+  ],
+  "timeout": 300,
+  "source_document": "test_scenarios/wikipedia_search_simple.txt",
+  "generated_at": "2025-07-10T15:27:34.445017"
+}

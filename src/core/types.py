@@ -26,12 +26,18 @@ class ActionType(str, Enum):
 
     CLICK = "click"
     TYPE = "type"
-    SCROLL = "scroll"
+    SCROLL = "scroll"  # Deprecated - use specific scroll types
     NAVIGATE = "navigate"
     WAIT = "wait"
     SCREENSHOT = "screenshot"
     ASSERT = "assert"
     KEY_PRESS = "key_press"
+    # Specific scroll actions
+    SCROLL_TO_ELEMENT = "scroll_to_element"
+    SCROLL_BY_PIXELS = "scroll_by_pixels"
+    SCROLL_TO_TOP = "scroll_to_top"
+    SCROLL_TO_BOTTOM = "scroll_to_bottom"
+    SCROLL_HORIZONTAL = "scroll_horizontal"
 
 
 class ConfidenceLevel(str, Enum):
@@ -198,3 +204,76 @@ class AgentMessage(BaseModel):
     correlation_id: Optional[UUID] = Field(
         None, description="ID to correlate related messages"
     )
+
+
+# Scroll-specific models
+class ScrollDirection(str, Enum):
+    """Direction for scrolling actions."""
+    
+    UP = "up"
+    DOWN = "down"
+    LEFT = "left"
+    RIGHT = "right"
+
+
+class VisibilityStatus(str, Enum):
+    """Element visibility status for scroll operations."""
+    
+    FULLY_VISIBLE = "fully_visible"
+    PARTIALLY_VISIBLE = "partially_visible"
+    NOT_VISIBLE = "not_visible"
+
+
+class ScrollParameters(BaseModel):
+    """Parameters for scroll actions."""
+    
+    direction: Optional[ScrollDirection] = Field(None, description="Scroll direction")
+    pixels: Optional[int] = Field(None, description="Number of pixels to scroll")
+    target_element: Optional[str] = Field(None, description="Description of element to scroll to")
+    max_attempts: int = Field(15, description="Maximum scroll attempts")
+    
+
+class VisibilityResult(BaseModel):
+    """Result of element visibility check."""
+    
+    status: VisibilityStatus
+    coordinates: Optional[GridCoordinate] = Field(None, description="Grid coordinates if visible")
+    visible_percentage: Optional[int] = Field(None, description="Percentage visible if partial")
+    suggested_direction: Optional[ScrollDirection] = Field(None, description="Suggested scroll direction")
+    direction_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Confidence in direction")
+    notes: str = Field("", description="Additional AI observations")
+
+
+class ScrollAction(BaseModel):
+    """A scroll action to be executed."""
+    
+    direction: ScrollDirection
+    distance: int = Field(..., description="Distance in pixels")
+    is_correction: bool = Field(False, description="Whether this is a correction scroll")
+    executed_at: Optional[datetime] = None
+
+
+class ScrollState(BaseModel):
+    """State tracking for scroll operations."""
+    
+    target_element: str
+    attempts: int = 0
+    max_attempts: int = 15
+    scroll_history: List[ScrollAction] = Field(default_factory=list)
+    last_direction: Optional[ScrollDirection] = None
+    overshoot_detected: bool = False
+    element_partially_visible: bool = False
+    last_screenshot_hash: Optional[str] = None
+
+
+class ScrollResult(BaseModel):
+    """Result of a scroll operation."""
+    
+    success: bool
+    action_type: str = "scroll_to_element"
+    coordinates: Optional[GridCoordinate] = None
+    confidence: Optional[float] = None
+    attempts: Optional[int] = None
+    total_scroll_distance: Optional[int] = None
+    error: Optional[str] = None
+    scroll_history: Optional[List[Dict[str, Any]]] = None

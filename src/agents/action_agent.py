@@ -13,6 +13,7 @@ import base64
 import json
 import re
 import traceback
+import io
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Dict, Optional, Tuple, Any, List
@@ -24,7 +25,11 @@ from src.agents.base_agent import BaseAgent
 from src.browser.driver import BrowserDriver
 from src.config.agent_prompts import ACTION_AGENT_SYSTEM_PROMPT
 from src.config.settings import get_settings
-from src.core.types import ActionInstruction, GridAction, GridCoordinate, TestStep
+from src.core.types import (
+    ActionInstruction, GridAction, GridCoordinate, TestStep,
+    ScrollDirection, VisibilityStatus, ScrollParameters, 
+    VisibilityResult, ScrollAction, ScrollState, ScrollResult
+)
 from src.core.enhanced_types import (
     EnhancedActionResult, ValidationResult, CoordinateResult,
     ExecutionResult, BrowserState, AIAnalysis
@@ -298,6 +303,16 @@ class ActionAgent(BaseAgent):
             return await self._execute_assert_workflow(test_step, test_context, screenshot)
         elif action_type == "key_press":
             return await self._execute_key_press_workflow(test_step, test_context, screenshot)
+        elif action_type == "scroll_to_element":
+            return await self._execute_scroll_to_element_workflow(test_step, test_context, screenshot)
+        elif action_type == "scroll_by_pixels":
+            return await self._execute_scroll_by_pixels_workflow(test_step, test_context, screenshot)
+        elif action_type == "scroll_to_top":
+            return await self._execute_scroll_to_top_workflow(test_step, test_context, screenshot)
+        elif action_type == "scroll_to_bottom":
+            return await self._execute_scroll_to_bottom_workflow(test_step, test_context, screenshot)
+        elif action_type == "scroll_horizontal":
+            return await self._execute_scroll_horizontal_workflow(test_step, test_context, screenshot)
         else:
             # Unknown action type
             logger.warning(f"Unknown action type: {action_type}")
@@ -3138,3 +3153,817 @@ Respond in JSON format:
         buffer = io.BytesIO()
         image.save(buffer, format='PNG')
         return buffer.getvalue()
+    
+    # Scroll action workflows
+    
+    async def _execute_scroll_to_element_workflow(
+        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+    ) -> EnhancedActionResult:
+        """
+        Execute iterative scroll-to-element workflow.
+        
+        This implements the intelligent scrolling algorithm that:
+        1. Checks element visibility (fully/partially/not visible)
+        2. Determines scroll direction with confidence
+        3. Calculates optimal scroll distance
+        4. Handles overshoot correction
+        5. Prevents oscillation
+        """
+        logger.info("Executing scroll-to-element workflow", extra={
+            "target": test_step.action_instruction.target,
+            "step_number": test_step.step_number
+        })
+        
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            timestamp_start=datetime.now(timezone.utc),
+            validation=ValidationResult(
+                valid=True,
+                confidence=1.0,
+                reasoning="Scroll action validated"
+            )
+        )
+        
+        try:
+            # Initialize scroll state
+            state = ScrollState(
+                target_element=test_step.action_instruction.target or test_step.description
+            )
+            
+            # Capture initial screenshot if not provided
+            if not screenshot:
+                screenshot = await self.browser_driver.screenshot()
+            
+            while state.attempts < state.max_attempts:
+                state.attempts += 1
+                
+                logger.info(f"Scroll attempt {state.attempts}/{state.max_attempts}")
+                
+                # Check element visibility
+                visibility = await self._check_element_visibility(
+                    screenshot, 
+                    state.target_element, 
+                    state,
+                    test_step.step_number
+                )
+                
+                logger.info(
+                    f"Visibility check result",
+                    extra={
+                        "status": visibility.status.value,
+                        "confidence": visibility.direction_confidence,
+                        "coordinates": visibility.coordinates
+                    }
+                )
+                
+                # Success case - element fully visible
+                if visibility.status == VisibilityStatus.FULLY_VISIBLE and visibility.coordinates:
+                    result.overall_success = True
+                    # We don't need to set coordinates for scroll actions
+                    # The element is now visible, that's the success criteria
+                    result.execution = ExecutionResult(
+                        success=True,
+                        execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                        browser_state_after=BrowserState(
+                            url=await self.browser_driver.get_page_url(),
+                            title=await self.browser_driver.get_page_title(),
+                            viewport_size=await self.browser_driver.get_viewport_size(),
+                            scroll_position=await self.browser_driver.get_scroll_position()
+                        )
+                    )
+                    result.ai_analysis = AIAnalysis(
+                        success=True,
+                        confidence=visibility.coordinates.confidence if visibility.coordinates else 0.9,
+                        actual_outcome=f"Successfully scrolled to {state.target_element}",
+                        matches_expected=True,
+                        ui_changes=[f"Element now visible after {state.attempts} scroll attempts"]
+                    )
+                    break
+                
+                # Plan next scroll action
+                scroll_action = await self._plan_scroll_action(state, visibility)
+                
+                if not scroll_action:
+                    # AI couldn't determine scroll direction
+                    result.overall_success = False
+                    result.execution = ExecutionResult(
+                        success=False,
+                        execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                        error_message="Could not determine scroll direction"
+                    )
+                    result.failure_phase = "scroll_planning"
+                    break
+                
+                # Execute scroll
+                await self._execute_scroll(scroll_action)
+                state.scroll_history.append(scroll_action)
+                state.last_direction = scroll_action.direction
+                
+                # Wait for scroll animation and any dynamic content
+                await asyncio.sleep(0.8)
+                
+                # Capture new screenshot
+                screenshot = await self.browser_driver.screenshot()
+                
+                # Check if we're making progress
+                if not await self._is_making_progress(state, screenshot):
+                    logger.warning("No progress detected, may have reached page boundary")
+                    # Could implement alternative strategies here
+            
+            # Max attempts reached
+            if state.attempts >= state.max_attempts:
+                result.overall_success = False
+                result.execution = ExecutionResult(
+                    success=False,
+                    execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                    error_message=f"Element not found after {state.max_attempts} scroll attempts"
+                )
+                result.failure_phase = "max_attempts"
+                result.ai_analysis = AIAnalysis(
+                    success=False,
+                    confidence=0.2,
+                    actual_outcome=f"Could not locate {state.target_element}",
+                    matches_expected=False,
+                    ui_changes=[],
+                    anomalies=[f"Element not found after {state.max_attempts} attempts"]
+                )
+            
+        except Exception as e:
+            logger.error(f"Scroll-to-element workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        result.timestamp_end = datetime.now(timezone.utc)
+        return result
+    
+    async def _check_element_visibility(
+        self, 
+        screenshot: bytes, 
+        target: str, 
+        state: ScrollState,
+        step_number: int
+    ) -> VisibilityResult:
+        """
+        Use AI to check if target element is visible in screenshot.
+        Handles full, partial, and not visible cases.
+        """
+        # Add grid overlay
+        grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
+        
+        # Craft context-aware prompt
+        context = self._build_visibility_context(state)
+        
+        prompt = f"""
+        Analyze this screenshot with a {self.grid_overlay.grid_size}x{self.grid_overlay.grid_size} grid overlay.
+        
+        Target element: "{target}"
+        
+        Determine the visibility of the target element:
+        
+        1. If FULLY VISIBLE (entire element is visible and clickable):
+           - Provide exact grid coordinates (e.g., "M23")
+           - Confidence score (0-100)
+           
+        2. If PARTIALLY VISIBLE (only part is visible):
+           - Indicate visible portion (top/bottom/left/right edge)
+           - Estimate percentage visible
+           - Suggest scroll direction to reveal fully
+           
+        3. If NOT VISIBLE:
+           - Based on current page content, suggest scroll direction
+           - Consider these patterns:
+             * Headers/navigation → scroll UP
+             * Footers/submit buttons → scroll DOWN  
+             * Next/continue buttons → usually DOWN
+             * Previous/back → usually UP
+           - Provide confidence in direction (0-100)
+        
+        {context}
+        
+        Respond in this format:
+        STATUS: [FULLY_VISIBLE|PARTIALLY_VISIBLE|NOT_VISIBLE]
+        COORDINATES: [grid coords if visible, e.g. M23]
+        CONFIDENCE: [0-100]
+        VISIBLE_PERCENT: [if partial, e.g. 30]
+        DIRECTION: [UP|DOWN|LEFT|RIGHT if not fully visible]
+        DIRECTION_CONFIDENCE: [0-100]
+        NOTES: [any relevant observations]
+        """
+        
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64.b64encode(grid_screenshot).decode()}"
+                        }
+                    }
+                ]
+            }
+        ]
+        
+        response = await self.call_openai_with_debug(
+            messages=messages,
+            action_type="scroll_visibility_check",
+            step_number=step_number,
+            temperature=0.3
+        )
+        
+        return self._parse_visibility_response(response['content'])
+    
+    def _build_visibility_context(self, state: ScrollState) -> str:
+        """Build context from scroll history for better AI decisions."""
+        if not state.scroll_history:
+            return ""
+        
+        context_parts = ["Previous scroll attempts:"]
+        
+        # Summarize recent history
+        recent_scrolls = state.scroll_history[-3:]  # Last 3 scrolls
+        for i, scroll in enumerate(recent_scrolls):
+            context_parts.append(
+                f"- Scrolled {scroll.direction.value} {scroll.distance}px"
+            )
+        
+        # Add warnings about patterns
+        if self._is_oscillating(state.scroll_history):
+            context_parts.append(
+                "WARNING: Oscillating pattern detected - element might be in the middle"
+            )
+        
+        return "\n".join(context_parts)
+    
+    async def _plan_scroll_action(
+        self, 
+        state: ScrollState, 
+        visibility: VisibilityResult
+    ) -> Optional[ScrollAction]:
+        """
+        Plan the next scroll action based on current visibility and history.
+        Implements intelligent scroll distance calculation.
+        """
+        # Handle overshoot correction
+        if self._detect_overshoot(state, visibility):
+            logger.info("Overshoot detected, planning correction")
+            return self._create_correction_scroll(state)
+        
+        # Handle partial visibility - fine-tune positioning  
+        if visibility.status == VisibilityStatus.PARTIALLY_VISIBLE:
+            return self._create_fine_tune_scroll(visibility)
+        
+        # Handle not visible - calculate smart scroll distance
+        if visibility.status == VisibilityStatus.NOT_VISIBLE:
+            if not visibility.suggested_direction:
+                return None
+                
+            distance = self._calculate_scroll_distance(state, visibility)
+            
+            return ScrollAction(
+                direction=visibility.suggested_direction,
+                distance=distance,
+                is_correction=False
+            )
+        
+        return None
+    
+    def _calculate_scroll_distance(
+        self, 
+        state: ScrollState, 
+        visibility: VisibilityResult
+    ) -> int:
+        """
+        Calculate optimal scroll distance based on confidence and history.
+        Implements convergence to avoid overshooting.
+        """
+        # Base distances for different confidence levels
+        if visibility.direction_confidence > 0.90:
+            base_distance = 600  # Very confident - bigger jumps
+        elif visibility.direction_confidence > 0.70:
+            base_distance = 400  # Confident - medium jumps
+        else:
+            base_distance = 200  # Less confident - smaller jumps
+        
+        # Reduce distance as attempts increase (convergence)
+        attempt_factor = max(0.3, 1.0 - (state.attempts * 0.1))
+        
+        # Further reduce if we've been oscillating
+        if self._is_oscillating(state.scroll_history):
+            attempt_factor *= 0.5
+            logger.debug("Oscillation detected, reducing scroll distance")
+        
+        final_distance = int(base_distance * attempt_factor)
+        
+        # Ensure minimum scroll distance
+        return max(100, final_distance)
+    
+    def _create_fine_tune_scroll(self, visibility: VisibilityResult) -> ScrollAction:
+        """Create small scroll action for fine-tuning when element is partially visible."""
+        # Small distances for fine-tuning
+        if visibility.visible_percentage and visibility.visible_percentage > 70:
+            distance = 50  # Very small adjustment
+        elif visibility.visible_percentage and visibility.visible_percentage > 40:
+            distance = 100  # Small adjustment
+        else:
+            distance = 200  # Medium adjustment
+        
+        return ScrollAction(
+            direction=visibility.suggested_direction,
+            distance=distance,
+            is_correction=False
+        )
+    
+    def _detect_overshoot(self, state: ScrollState, visibility: VisibilityResult) -> bool:
+        """Detect if we've scrolled past the target element."""
+        if state.attempts < 2:
+            return False
+        
+        # Was partially visible, now not visible = likely overshot
+        if state.element_partially_visible and visibility.status == VisibilityStatus.NOT_VISIBLE:
+            return True
+        
+        # Direction reversal with high confidence = likely overshot
+        if (state.last_direction and 
+            visibility.suggested_direction and
+            self._is_opposite_direction(state.last_direction, visibility.suggested_direction) and
+            visibility.direction_confidence > 0.80):
+            return True
+        
+        return False
+    
+    def _create_correction_scroll(self, state: ScrollState) -> ScrollAction:
+        """Create a corrective scroll action after overshoot."""
+        last_scroll = state.scroll_history[-1]
+        opposite_dir = self._get_opposite_direction(last_scroll.direction)
+        
+        # Scroll back partial distance of last scroll
+        correction_distance = last_scroll.distance // 3
+        
+        return ScrollAction(
+            direction=opposite_dir,
+            distance=max(50, correction_distance),  # Minimum 50px
+            is_correction=True
+        )
+    
+    def _is_oscillating(self, history: List[ScrollAction], window: int = 4) -> bool:
+        """Check if scroll history shows oscillating pattern."""
+        if len(history) < window:
+            return False
+        
+        recent = history[-window:]
+        directions = [s.direction for s in recent]
+        
+        # Check for alternating directions
+        changes = 0
+        for i in range(1, len(directions)):
+            if directions[i] != directions[i-1]:
+                changes += 1
+        
+        return changes >= window - 1
+    
+    def _is_opposite_direction(self, dir1: ScrollDirection, dir2: ScrollDirection) -> bool:
+        """Check if two directions are opposite."""
+        opposites = {
+            ScrollDirection.UP: ScrollDirection.DOWN,
+            ScrollDirection.DOWN: ScrollDirection.UP,
+            ScrollDirection.LEFT: ScrollDirection.RIGHT,
+            ScrollDirection.RIGHT: ScrollDirection.LEFT
+        }
+        return opposites.get(dir1) == dir2
+    
+    def _get_opposite_direction(self, direction: ScrollDirection) -> ScrollDirection:
+        """Get the opposite scroll direction."""
+        opposites = {
+            ScrollDirection.UP: ScrollDirection.DOWN,
+            ScrollDirection.DOWN: ScrollDirection.UP,
+            ScrollDirection.LEFT: ScrollDirection.RIGHT,
+            ScrollDirection.RIGHT: ScrollDirection.LEFT
+        }
+        return opposites[direction]
+    
+    async def _execute_scroll(self, action: ScrollAction):
+        """Execute the actual scroll action in the browser."""
+        x, y = 0, 0
+        
+        if action.direction == ScrollDirection.DOWN:
+            y = action.distance
+        elif action.direction == ScrollDirection.UP:
+            y = -action.distance
+        elif action.direction == ScrollDirection.RIGHT:
+            x = action.distance
+        elif action.direction == ScrollDirection.LEFT:
+            x = -action.distance
+        
+        logger.debug(
+            f"Executing scroll: {action.direction.value} by {action.distance}px",
+            extra={"x": x, "y": y, "is_correction": action.is_correction}
+        )
+        
+        # Use smooth scrolling for better UX
+        await self.browser_driver.scroll_by_pixels(x, y, smooth=True)
+        
+        # Record execution time
+        action.executed_at = datetime.now(timezone.utc)
+    
+    async def _is_making_progress(self, state: ScrollState, screenshot: bytes) -> bool:
+        """Check if scrolling is having an effect (not stuck)."""
+        # Simple hash comparison to detect identical screenshots
+        import hashlib
+        current_hash = hashlib.md5(screenshot).hexdigest()
+        
+        if state.last_screenshot_hash == current_hash:
+            # Screenshot hasn't changed - might be at page boundary
+            return False
+        
+        state.last_screenshot_hash = current_hash
+        return True
+    
+    def _parse_visibility_response(self, ai_response: str) -> VisibilityResult:
+        """Parse AI response into VisibilityResult object."""
+        # Parse the structured response
+        lines = ai_response.strip().split('\n')
+        result = VisibilityResult(status=VisibilityStatus.NOT_VISIBLE)
+        
+        for line in lines:
+            if line.startswith('STATUS:'):
+                status_str = line.split(':', 1)[1].strip()
+                try:
+                    result.status = VisibilityStatus[status_str]
+                except KeyError:
+                    logger.warning(f"Unknown visibility status: {status_str}")
+            elif line.startswith('COORDINATES:'):
+                coords = line.split(':', 1)[1].strip()
+                if coords and coords.lower() not in ['none', 'n/a', '']:
+                    # Parse grid coordinates into GridCoordinate object
+                    try:
+                        result.coordinates = GridCoordinate(
+                            cell=coords,
+                            offset_x=0.5,
+                            offset_y=0.5,
+                            confidence=0.9,
+                            refined=False
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to parse coordinates: {coords}, error: {e}")
+            elif line.startswith('CONFIDENCE:'):
+                try:
+                    conf_value = float(line.split(':', 1)[1].strip())
+                    if result.coordinates:
+                        result.coordinates.confidence = conf_value / 100.0
+                except ValueError:
+                    pass
+            elif line.startswith('VISIBLE_PERCENT:'):
+                pct = line.split(':', 1)[1].strip()
+                if pct and pct.lower() not in ['none', 'n/a', '']:
+                    try:
+                        result.visible_percentage = int(pct)
+                    except ValueError:
+                        pass
+            elif line.startswith('DIRECTION:'):
+                dir_str = line.split(':', 1)[1].strip().upper()
+                try:
+                    if dir_str in [d.name for d in ScrollDirection]:
+                        result.suggested_direction = ScrollDirection[dir_str]
+                except KeyError:
+                    logger.warning(f"Unknown scroll direction: {dir_str}")
+            elif line.startswith('DIRECTION_CONFIDENCE:'):
+                try:
+                    # Convert from 0-100 range to 0-1 range if needed
+                    conf_value = float(line.split(':', 1)[1].strip())
+                    if conf_value > 1:
+                        conf_value = conf_value / 100.0
+                    result.direction_confidence = conf_value
+                except ValueError:
+                    pass
+            elif line.startswith('NOTES:'):
+                result.notes = line.split(':', 1)[1].strip()
+        
+        return result
+    
+    async def _execute_scroll_by_pixels_workflow(
+        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+    ) -> EnhancedActionResult:
+        """Execute precise pixel-based scrolling."""
+        logger.info("Executing scroll-by-pixels workflow", extra={
+            "step_number": test_step.step_number
+        })
+        
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            timestamp_start=datetime.now(timezone.utc),
+            validation=ValidationResult(
+                valid=True,
+                confidence=1.0,
+                reasoning="Scroll action validated"
+            )
+        )
+        
+        try:
+            # Extract scroll parameters from instruction
+            # Expected format: "scroll_by_pixels: x=0, y=300" or similar
+            value_str = test_step.action_instruction.value or ""
+            x, y = 0, 0
+            
+            # Parse x and y values
+            import re
+            x_match = re.search(r'x=(-?\d+)', value_str)
+            y_match = re.search(r'y=(-?\d+)', value_str)
+            
+            if x_match:
+                x = int(x_match.group(1))
+            if y_match:
+                y = int(y_match.group(1))
+            
+            # If no explicit values, use defaults based on direction hints
+            if x == 0 and y == 0:
+                if "down" in test_step.description.lower():
+                    y = 300
+                elif "up" in test_step.description.lower():
+                    y = -300
+                elif "right" in test_step.description.lower():
+                    x = 300
+                elif "left" in test_step.description.lower():
+                    x = -300
+                else:
+                    y = 300  # Default to scrolling down
+            
+            # Execute scroll
+            await self.browser_driver.scroll_by_pixels(x, y)
+            
+            # Wait for scroll to complete
+            await asyncio.sleep(0.5)
+            
+            # Capture result
+            screenshot_after = await self.browser_driver.screenshot()
+            
+            result.overall_success = True
+            result.execution = ExecutionResult(
+                success=True,
+                execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                browser_state_after=BrowserState(
+                    url=await self.browser_driver.get_page_url(),
+                    title=await self.browser_driver.get_page_title(),
+                    viewport_size=await self.browser_driver.get_viewport_size(),
+                    scroll_position=await self.browser_driver.get_scroll_position()
+                )
+            )
+            result.ai_analysis = AIAnalysis(
+                success=True,
+                confidence=1.0,
+                actual_outcome=f"Scrolled by {x}px horizontal, {y}px vertical",
+                matches_expected=True,
+                ui_changes=["Page scrolled to new position"]
+            )
+            
+        except Exception as e:
+            logger.error(f"Scroll-by-pixels workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        result.timestamp_end = datetime.now(timezone.utc)
+        return result
+    
+    async def _execute_scroll_to_top_workflow(
+        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+    ) -> EnhancedActionResult:
+        """Execute scroll to top of page."""
+        logger.info("Executing scroll-to-top workflow", extra={
+            "step_number": test_step.step_number
+        })
+        
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            timestamp_start=datetime.now(timezone.utc),
+            validation=ValidationResult(
+                valid=True,
+                confidence=1.0,
+                reasoning="Scroll action validated"
+            )
+        )
+        
+        try:
+            # Execute scroll to top
+            await self.browser_driver.scroll_to_top()
+            
+            # Wait for scroll to complete
+            await asyncio.sleep(0.5)
+            
+            # Capture result
+            screenshot_after = await self.browser_driver.screenshot()
+            
+            result.overall_success = True
+            result.execution = ExecutionResult(
+                success=True,
+                execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                browser_state_after=BrowserState(
+                    url=await self.browser_driver.get_page_url(),
+                    title=await self.browser_driver.get_page_title(),
+                    viewport_size=await self.browser_driver.get_viewport_size(),
+                    scroll_position=await self.browser_driver.get_scroll_position()
+                )
+            )
+            
+            # Verify we're at the top
+            scroll_x, scroll_y = await self.browser_driver.get_scroll_position()
+            at_top = scroll_y == 0
+            
+            result.ai_analysis = AIAnalysis(
+                success=at_top,
+                confidence=1.0,
+                actual_outcome=f"Scrolled to top of page (position: {scroll_y})",
+                matches_expected=at_top,
+                ui_changes=["Page scrolled to top"],
+                anomalies=[] if at_top else ["Not at absolute top of page"]
+            )
+            
+        except Exception as e:
+            logger.error(f"Scroll-to-top workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        result.timestamp_end = datetime.now(timezone.utc)
+        return result
+    
+    async def _execute_scroll_to_bottom_workflow(
+        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+    ) -> EnhancedActionResult:
+        """Execute scroll to bottom of page."""
+        logger.info("Executing scroll-to-bottom workflow", extra={
+            "step_number": test_step.step_number
+        })
+        
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            timestamp_start=datetime.now(timezone.utc),
+            validation=ValidationResult(
+                valid=True,
+                confidence=1.0,
+                reasoning="Scroll action validated"
+            )
+        )
+        
+        try:
+            # Execute scroll to bottom
+            await self.browser_driver.scroll_to_bottom()
+            
+            # Wait for scroll to complete and any lazy-loaded content
+            await asyncio.sleep(1.0)
+            
+            # Capture result
+            screenshot_after = await self.browser_driver.screenshot()
+            
+            result.overall_success = True
+            result.execution = ExecutionResult(
+                success=True,
+                execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                browser_state_after=BrowserState(
+                    url=await self.browser_driver.get_page_url(),
+                    title=await self.browser_driver.get_page_title(),
+                    viewport_size=await self.browser_driver.get_viewport_size(),
+                    scroll_position=await self.browser_driver.get_scroll_position()
+                )
+            )
+            
+            # Verify we're at the bottom
+            vw, vh, pw, ph = await self.browser_driver.get_page_dimensions()
+            scroll_x, scroll_y = await self.browser_driver.get_scroll_position()
+            at_bottom = scroll_y >= (ph - vh - 10)  # Allow 10px tolerance
+            
+            result.ai_analysis = AIAnalysis(
+                success=at_bottom,
+                confidence=1.0,
+                actual_outcome=f"Scrolled to bottom of page (position: {scroll_y}/{ph-vh})",
+                matches_expected=at_bottom,
+                ui_changes=["Page scrolled to bottom"],
+                anomalies=[] if at_bottom else ["Not at absolute bottom of page"]
+            )
+            
+        except Exception as e:
+            logger.error(f"Scroll-to-bottom workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        result.timestamp_end = datetime.now(timezone.utc)
+        return result
+    
+    async def _execute_scroll_horizontal_workflow(
+        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+    ) -> EnhancedActionResult:
+        """Execute horizontal scrolling."""
+        logger.info("Executing horizontal scroll workflow", extra={
+            "step_number": test_step.step_number,
+            "description": test_step.description
+        })
+        
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            timestamp_start=datetime.now(timezone.utc),
+            validation=ValidationResult(
+                valid=True,
+                confidence=1.0,
+                reasoning="Scroll action validated"
+            )
+        )
+        
+        try:
+            # Determine scroll direction and amount
+            description_lower = test_step.description.lower()
+            value = test_step.action_instruction.value or ""
+            
+            # Default scroll amount
+            scroll_amount = 300
+            
+            # Try to extract amount from value
+            import re
+            amount_match = re.search(r'(\d+)', value)
+            if amount_match:
+                scroll_amount = int(amount_match.group(1))
+            
+            # Determine direction
+            if "right" in description_lower:
+                x = scroll_amount
+            elif "left" in description_lower:
+                x = -scroll_amount
+            else:
+                # Default to right
+                x = scroll_amount
+            
+            # Execute horizontal scroll
+            await self.browser_driver.scroll_by_pixels(x, 0)
+            
+            # Wait for scroll to complete
+            await asyncio.sleep(0.5)
+            
+            # Capture result
+            screenshot_after = await self.browser_driver.screenshot()
+            
+            result.overall_success = True
+            result.execution = ExecutionResult(
+                success=True,
+                execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
+                browser_state_after=BrowserState(
+                    url=await self.browser_driver.get_page_url(),
+                    title=await self.browser_driver.get_page_title(),
+                    viewport_size=await self.browser_driver.get_viewport_size(),
+                    scroll_position=await self.browser_driver.get_scroll_position()
+                )
+            )
+            
+            result.ai_analysis = AIAnalysis(
+                success=True,
+                confidence=1.0,
+                actual_outcome=f"Scrolled horizontally by {x}px",
+                matches_expected=True,
+                ui_changes=["Page scrolled horizontally"]
+            )
+            
+        except Exception as e:
+            logger.error(f"Horizontal scroll workflow failed: {str(e)}")
+            result.overall_success = False
+            result.execution = ExecutionResult(
+                success=False,
+                execution_time_ms=0.0,
+                error_message=str(e),
+                error_traceback=traceback.format_exc()
+            )
+            result.failure_phase = "execution"
+        
+        result.timestamp_end = datetime.now(timezone.utc)
+        return result

@@ -1,0 +1,489 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Report: Wikipedia Artificial Intelligence Article Page Test Plan</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .passed { color: #4caf50; }
+        .failed { color: #f44336; }
+        .skipped { color: #ff9800; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        .recommendation {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #2196f3;
+        }
+        .bug-report {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .bug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .severity-critical { color: #d32f2f; font-weight: bold; }
+        .severity-high { color: #f44336; font-weight: bold; }
+        .severity-medium { color: #ff9800; }
+        .severity-low { color: #2196f3; }
+        .debug-info {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+        }
+        .screenshots {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .screenshot-container {
+            text-align: center;
+        }
+        .screenshot-container img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .confidence-score {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .confidence-high { background: #c8e6c9; color: #1b5e20; }
+        .confidence-medium { background: #fff3cd; color: #856404; }
+        .confidence-low { background: #ffcdd2; color: #c62828; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Execution Report</h1>
+        <h2>Wikipedia Artificial Intelligence Article Page Test Plan</h2>
+        
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value failed">
+                    FAILED
+                </div>
+                <div class="metric-label">Test Outcome</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">81.14s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">40.0%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+        </div>
+        
+        <h2>Test Steps</h2>
+        <table>
+            <tr>
+                <th>Status</th>
+                <th>Count</th>
+                <th>Percentage</th>
+            </tr>
+            <tr>
+                <td class="passed">Passed</td>
+                <td>4</td>
+                <td>40.0%</td>
+            </tr>
+            <tr>
+                <td class="failed">Failed</td>
+                <td>1</td>
+                <td>10.0%</td>
+            </tr>
+            <tr>
+                <td class="skipped">Skipped</td>
+                <td>0</td>
+                <td>0.0%</td>
+            </tr>
+        </table>
+        
+        
+        <h2>Errors and Recommendations</h2>
+        <p>Total errors encountered: 1</p>
+        
+        
+        
+        
+        <!-- AI Conversations Section -->
+        
+        <h2>🤖 AI Conversations</h2>
+        <div style="margin: 20px 0;">
+            <div class='ai-conversations'>
+<h3>🤖 AI Conversations</h3>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #1: navigation_validation (Step 1)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+I navigated to: https://www.wikipedia.org/
+
+Please analyze the screenshot and answer:
+
+1. Did the navigation succeed? (Check for error pages, blank pages, connection errors)
+2. What page am I looking at? Be specific about the content you see.
+3. Does it match the expected outcome: "The Wikipedia homepage loads and displays the central search input field."?
+
+Common error patterns to check for:
+- 404 or "Page not found" errors
+- Blank white pages
+- Connection error messages
+- Certificate warnings
+- "Site can't be reached" messages
+- Wrong domain/website
+
+Expected outcome detail: The Wikipedia homepage loads and displays the central search input field.
+
+Respond in this EXACT format:
+SUCCESS: true/false
+PAGE_DESCRIPTION: <detailed description of what you see>
+MATCHES_EXPECTED: true/false
+ERROR_TYPE: none/404/blank/connection/wrong_site/other
+REASON: <explanation of any issues>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>SUCCESS: true  
+PAGE_DESCRIPTION: The screenshot shows the Wikipedia homepage (“Wikipedia – The Free Encyclopedia”) with the iconic jigsaw‐puzzle globe logo centered. Around it are links to major language editions (English, 日本語, Русский, Deutsch, Español, Français, 中文, Italiano, Português, فارسی). Below the globe is the central search bar with a language dropdown (“EN”) and a search button. Footer links to other Wikimedia projects are visible at the bottom.  
+MATCHES_EXPECTED: true  
+ERROR_TYPE: none  
+REASON: The page loaded correctly and displays the central search input field as expected.</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250710_152734/step_1_navigation_validation_152803_77260.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #2: type_analysis (Step 2)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+I need to type text into an input field in this screenshot.
+
+Target: Search input field on the Wikipedia homepage
+Description: Enter the search term into the Wikipedia search field
+Text to type: artificial intelligence
+
+Please analyze the screenshot with the grid overlay and:
+1. Find the text input field (look for input boxes, text areas, search bars)
+2. Check if it's editable (not disabled/readonly)
+3. Check if it already has focus (cursor visible)
+4. Provide the grid coordinates
+
+Respond in this format:
+INPUT_FOUND: true/false
+EDITABLE: true/false
+HAS_FOCUS: true/false
+FIELD_TYPE: input/textarea/search/other
+GRID_CELL: <cell identifier>
+OFFSET_X: <0.0-1.0>
+OFFSET_Y: <0.0-1.0>
+CONFIDENCE: <0.0-1.0>
+REASONING: <why you selected this location>
+CURRENT_VALUE: <any text already in the field>
+BLOCKED_BY: <if blocked, what's blocking it>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>INPUT_FOUND: true  
+EDITABLE: true  
+HAS_FOCUS: false  
+FIELD_TYPE: search  
+GRID_CELL: AE28  
+OFFSET_X: 0.50  
+OFFSET_Y: 0.50  
+CONFIDENCE: 0.85  
+REASONING: The Wikipedia search input is the long text‐entry box in row 28, spanning roughly Y28–AK28. AE28 sits centrally inside that box. It appears enabled and empty, but no blinking cursor shows it isn’t focused yet.  
+CURRENT_VALUE: ""  
+BLOCKED_BY: none</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250710_152734/step_2_type_analysis_grid_152813_21194.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #3: focus_before (Step 2)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Here is a screenshot of the page BEFORE clicking on the input field at grid cell AE28.
+Please observe the current state of the input field - its border, background, and whether there's a cursor visible.
+I'll show you another screenshot after clicking to compare.
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>INPUT_FOUND: true  
+EDITABLE: true  
+HAS_FOCUS: false  
+FIELD_TYPE: search  
+GRID_CELL: AE28  
+OFFSET_X: 0.50  
+OFFSET_Y: 0.50  
+CONFIDENCE: 0.90  
+REASONING: In the “before” screenshot the search box at row 28 (Y28–AK28) has a thin light-gray border and white background, with no blinking cursor or highlight indicating focus. It’s enabled but not active.  
+CURRENT_VALUE: “”  
+BLOCKED_BY: none</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250710_152734/step_2_unfocused_field_152823_56854.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #4: focus_comparison (Step 2)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Now here is the screenshot AFTER clicking on the input field at grid cell AE28.
+
+Compare this with the previous screenshot and look for visual differences around the input field:
+- Cursor/caret visible in the input field
+- Border color change (blue outline, etc.)
+- Background color change
+- Any other visual indicators of focus
+
+Respond with:
+VISUAL_DIFFERENCES: true/false
+FOCUS_ACHIEVED: true/false
+DIFFERENCES_DESCRIPTION: <describe what changed>
+CONFIDENCE: <0.0-1.0>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>VISUAL_DIFFERENCES: true  
+FOCUS_ACHIEVED: true  
+DIFFERENCES_DESCRIPTION: After clicking, the input field’s border changes from light gray to a prominent blue outline and the interior has a very subtle highlight. A text caret is now visible at the left edge of the box, indicating it’s ready to receive input.  
+CONFIDENCE: 0.95</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250710_152734/step_2_unfocused_field_152823_56854.png, debug_screenshots/20250710_152734/step_2_focused_field_152823_91773.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #5: typing_before (Step 2)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Here is the screenshot BEFORE typing. Please observe the input field at grid cell AE28 - 
+note what text (if any) is currently in the field.
+I'm about to type: "artificial intelligence"
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>GRID_CELL: AE28  
+CURRENT_VALUE: “” (empty)  
+CONFIDENCE: 0.98  
+REASONING: The focused search field at AE28 shows no placeholder or existing text—its content area is blank.</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250710_152734/step_2_before_typing_152835_17261.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #6: typing_validation (Step 2)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Now here is the screenshot AFTER typing "artificial intelligence".
+
+Compare this with the previous screenshot and check:
+1. Is the typed text visible in the input field at grid cell AE28?
+2. Does the text match what was supposed to be typed?
+3. Are there any validation errors or issues?
+
+Expected text: artificial intelligence
+
+Respond with:
+TEXT_VISIBLE: true/false
+TEXT_MATCHES: true/false
+ACTUAL_TEXT: <what you see in the field>
+VALIDATION_ERRORS: true/false
+ERROR_MESSAGE: <any error message shown>
+FIELD_STATE: normal/error/success
+TYPING_SUCCESSFUL: true/false
+CONFIDENCE: <0.0-1.0>
+REASONING: <explain what you observed>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>TEXT_VISIBLE: true  
+TEXT_MATCHES: true  
+ACTUAL_TEXT: artificial intelligence  
+VALIDATION_ERRORS: false  
+ERROR_MESSAGE: ""  
+FIELD_STATE: normal  
+TYPING_SUCCESSFUL: true  
+CONFIDENCE: 0.95  
+REASONING: The input field at AE28 clearly shows the full phrase “artificial intelligence” with no red outlines or error messages. An autocomplete dropdown is visible but there are no validation or formatting errors, indicating successful entry.</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250710_152734/step_2_before_typing_152835_17261.png, debug_screenshots/20250710_152734/step_2_after_typing_152835_81592.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #7: action_execution (Step 3)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Compare these before and after screenshots to determine if pressing Enter had the expected effect.
+
+Expected outcome: The browser navigates to the article page for “Artificial intelligence.”
+
+What changed after pressing Enter?
+1. Did the page navigate/reload?
+2. Did a form submit?
+3. Did focus move to another element?
+4. Any other visible changes?
+
+Respond in this format:
+SUCCESS: true/false
+CHANGES_DETECTED: none/navigation/form_submit/focus_change/other
+MATCHES_EXPECTED: true/false
+CONFIDENCE: <0.0-1.0>
+REASONING: What happened and why it matches/doesn't match expectations
+BEFORE screenshot: [IMAGE INCLUDED]AFTER screenshot: [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>SUCCESS: true  
+CHANGES_DETECTED: navigation  
+MATCHES_EXPECTED: true  
+CONFIDENCE: 0.92  
+
+REASONING:  
+– In the BEFORE image we see the Wikipedia front page with the search box open and “artificial intelligence” entered.  
+– In the AFTER image the UI has changed to the “Artificial intelligence” article page: the page header reads “Artificial intelligence,” the table of contents and article text are visible, and the search box has moved into the site’s main header.  
+– This indicates the browser navigated/reloaded to the requested article. There’s no evidence of merely a focus shift or form overlay remaining—this is a full page navigation, matching the expected outcome.</pre>
+</div>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #8: action_execution (Step 4)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Please analyze this screenshot and verify:
+
+Target: Page heading at top of article
+Description: Verify the article page title is “Artificial intelligence”
+Expected: A heading with the exact text “Artificial intelligence” is displayed at the top of the page.
+
+Questions:
+1. Can you see what is described?
+2. Does it match the expected outcome?
+
+Respond in this format:
+VISIBLE: true/false
+MATCHES_EXPECTED: true/false
+WHAT_I_SEE: <description>
+REASON: <explanation if it doesn't match>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>VISIBLE: true  
+MATCHES_EXPECTED: true  
+WHAT_I_SEE: A prominent page heading at the top reads “Artificial intelligence.”  
+REASON: N/A</pre>
+</div>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #9: action_execution (Step 5)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Please analyze this screenshot and verify:
+
+Target: Section heading named “History” in the article content
+Description: Verify the presence of the “History” section
+Expected: A section heading “History” is visible within the article body.
+
+Questions:
+1. Can you see what is described?
+2. Does it match the expected outcome?
+
+Respond in this format:
+VISIBLE: true/false
+MATCHES_EXPECTED: true/false
+WHAT_I_SEE: <description>
+REASON: <explanation if it doesn't match>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>VISIBLE: false  
+MATCHES_EXPECTED: false  
+WHAT_I_SEE: The screenshot shows the article title, introduction paragraphs, and in the table of contents a “History” link, but no “History” heading is present in the article body.  
+REASON: The view is limited to the lead section; the actual “History” section heading isn’t in view, so it’s not visible as expected.</pre>
+</div>
+</div>
+</div>
+
+        </div>
+        
+        
+        <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #666;">
+            Generated at 2025-07-10T13:29:21.079870+00:00 | HAINDY Test Report v1.0
+        </footer>
+    </div>
+</body>
+</html>
