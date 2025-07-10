@@ -1,19 +1,19 @@
 {
-  "plan_id": "a925e8a7-e782-4614-b650-e563a75ecf31",
-  "name": "Wikipedia Artificial Intelligence Article Page Test Plan",
-  "description": "Verify the search functionality on Wikipedia and validate the content, images, infobox, and layout of the Artificial Intelligence article page.",
-  "requirements": "['Navigate to the Wikipedia homepage.', 'Enter the term \u201cartificial intelligence\u201d into the search field.', 'Submit the search by pressing the Enter key.', 'Validate that the browser navigates to the \u201cArtificial intelligence\u201d article page.', 'On the article page, verify the presence of all major sections, including but not limited to History, Applications, and Ethics.', 'Confirm that at least one illustrative image is displayed within the article content.', 'Confirm that a useful information box (infobox) appears, summarizing key details about Artificial Intelligence.', 'Assess the overall layout and styling of the article to ensure it looks professional and well-organized.']",
+  "plan_id": "9a1dc92b-3842-4eac-86eb-cced6149c4da",
+  "name": "Wikipedia Artificial Intelligence Article Verification",
+  "description": "Verify that the Artificial Intelligence article on Wikipedia loads correctly and contains key sections, images, and a professional layout.",
+  "requirements": "['Navigate to https://www.wikipedia.org/', 'In the search input field on the homepage, type \"artificial intelligence\"', 'Press the Enter key to initiate the search', 'Verify that the browser navigates to the \"Artificial intelligence\" article page', 'Verify the article contains a \"History\" section header', 'Verify the article contains an \"Applications\" section header', 'Verify the article contains an \"Ethics\" section header', 'Verify there is at least one image displayed in the article body', 'Verify there is a visible infobox (useful information box) on the right side of the article', 'Confirm the overall layout appears professional, with clear headings, well-organized content, and no major visual defects']",
   "steps": [
     {
-      "step_id": "e483be8a-4be2-44ef-afac-1d0e4bdf60c8",
+      "step_id": "b92ec3c6-ee49-43d5-a5a9-c06567c6525b",
       "step_number": 1,
-      "description": "Open the Wikipedia homepage",
+      "description": "Navigate to Wikipedia homepage",
       "action_instruction": {
         "action_type": "navigate",
-        "description": "Open the Wikipedia homepage",
-        "target": "Browser",
-        "value": "https://www.wikipedia.org/",
-        "expected_outcome": "The Wikipedia homepage loads and displays the central search input field.",
+        "description": "Navigate to Wikipedia homepage",
+        "target": "https://www.wikipedia.org/",
+        "value": "",
+        "expected_outcome": "The Wikipedia homepage is displayed, showing a central search input field.",
         "timeout": 5000
       },
       "dependencies": [],
@@ -21,169 +21,169 @@
       "max_retries": 3
     },
     {
-      "step_id": "dad67bec-1bac-4ba9-8062-2730365c71db",
+      "step_id": "0e07fab2-d337-45ba-ba99-448687cab970",
       "step_number": 2,
-      "description": "Enter the search term into the Wikipedia search field",
+      "description": "Type 'artificial intelligence' into the search input",
       "action_instruction": {
         "action_type": "type",
-        "description": "Enter the search term into the Wikipedia search field",
-        "target": "Search input field on the Wikipedia homepage",
+        "description": "Type 'artificial intelligence' into the search input",
+        "target": "search input field on the homepage",
         "value": "artificial intelligence",
-        "expected_outcome": "The text \u201cartificial intelligence\u201d appears in the search input field.",
+        "expected_outcome": "The text 'artificial intelligence' appears in the search input field.",
         "timeout": 5000
       },
       "dependencies": [
-        "e483be8a-4be2-44ef-afac-1d0e4bdf60c8"
+        "b92ec3c6-ee49-43d5-a5a9-c06567c6525b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "3e651202-76dd-48ae-afd3-610a74bf3407",
+      "step_id": "c8a0f2d4-1c79-4b58-8934-5c8bf30d5e3a",
       "step_number": 3,
-      "description": "Submit the search by pressing the Enter key",
+      "description": "Press Enter to initiate the search",
       "action_instruction": {
         "action_type": "key_press",
-        "description": "Submit the search by pressing the Enter key",
-        "target": "Search input field on the Wikipedia homepage",
+        "description": "Press Enter to initiate the search",
+        "target": "search input field on the homepage",
         "value": "Enter",
-        "expected_outcome": "The browser navigates to the article page for \u201cArtificial intelligence.\u201d",
+        "expected_outcome": "The browser begins loading the search results or the article page.",
         "timeout": 5000
       },
       "dependencies": [
-        "dad67bec-1bac-4ba9-8062-2730365c71db"
+        "0e07fab2-d337-45ba-ba99-448687cab970"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "e23e966e-ba76-4528-bed6-846bd77a359f",
+      "step_id": "e9793663-432d-431d-96f7-c81adfc1098b",
       "step_number": 4,
-      "description": "Verify the article page title is \u201cArtificial intelligence\u201d",
+      "description": "Verify navigation to Artificial intelligence article page",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Verify the article page title is \u201cArtificial intelligence\u201d",
-        "target": "Page heading at top of article",
+        "description": "Verify navigation to Artificial intelligence article page",
+        "target": "page heading",
         "value": "Artificial intelligence",
-        "expected_outcome": "A heading with the exact text \u201cArtificial intelligence\u201d is displayed at the top of the page.",
+        "expected_outcome": "The page heading reads 'Artificial intelligence', indicating the correct article.",
         "timeout": 5000
       },
       "dependencies": [
-        "3e651202-76dd-48ae-afd3-610a74bf3407"
+        "c8a0f2d4-1c79-4b58-8934-5c8bf30d5e3a"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "42c97e01-3da9-49f2-ba87-3e06532d80f7",
+      "step_id": "e8b3c187-750e-409c-a278-60c4f53c439f",
       "step_number": 5,
-      "description": "Verify the presence of the \u201cHistory\u201d section",
+      "description": "Verify presence of 'History' section header",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Verify the presence of the \u201cHistory\u201d section",
-        "target": "Section heading named \u201cHistory\u201d in the article content",
-        "value": "",
-        "expected_outcome": "A section heading \u201cHistory\u201d is visible within the article body.",
+        "description": "Verify presence of 'History' section header",
+        "target": "section header in the article body",
+        "value": "History",
+        "expected_outcome": "A section header labeled 'History' is visible in the article.",
         "timeout": 5000
       },
       "dependencies": [
-        "e23e966e-ba76-4528-bed6-846bd77a359f"
+        "e9793663-432d-431d-96f7-c81adfc1098b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "dc16fe5a-6049-4fc4-b63a-edef9244b20d",
+      "step_id": "dbf5316e-6452-41bc-bae0-28bedb329081",
       "step_number": 6,
-      "description": "Verify the presence of the \u201cApplications\u201d section",
+      "description": "Verify presence of 'Applications' section header",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Verify the presence of the \u201cApplications\u201d section",
-        "target": "Section heading named \u201cApplications\u201d in the article content",
-        "value": "",
-        "expected_outcome": "A section heading \u201cApplications\u201d is visible within the article body.",
+        "description": "Verify presence of 'Applications' section header",
+        "target": "section header in the article body",
+        "value": "Applications",
+        "expected_outcome": "A section header labeled 'Applications' is visible in the article.",
         "timeout": 5000
       },
       "dependencies": [
-        "e23e966e-ba76-4528-bed6-846bd77a359f"
+        "e9793663-432d-431d-96f7-c81adfc1098b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "7d3aecba-b9ef-43a8-95b4-df6cbe43486f",
+      "step_id": "6abaa065-1a41-43f8-991e-de942411e1a2",
       "step_number": 7,
-      "description": "Verify the presence of the \u201cEthics\u201d section",
+      "description": "Verify presence of 'Ethics' section header",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Verify the presence of the \u201cEthics\u201d section",
-        "target": "Section heading named \u201cEthics\u201d in the article content",
-        "value": "",
-        "expected_outcome": "A section heading \u201cEthics\u201d is visible within the article body.",
+        "description": "Verify presence of 'Ethics' section header",
+        "target": "section header in the article body",
+        "value": "Ethics",
+        "expected_outcome": "A section header labeled 'Ethics' is visible in the article.",
         "timeout": 5000
       },
       "dependencies": [
-        "e23e966e-ba76-4528-bed6-846bd77a359f"
+        "e9793663-432d-431d-96f7-c81adfc1098b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "77def91a-c2c0-46e3-a16d-11f711a55fd7",
+      "step_id": "f9b3d3c8-2359-4505-bf80-c6be38d4b706",
       "step_number": 8,
-      "description": "Confirm at least one illustrative image is displayed in the article content",
+      "description": "Verify at least one image is displayed in the article body",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Confirm at least one illustrative image is displayed in the article content",
-        "target": "Image element within the article content",
+        "description": "Verify at least one image is displayed in the article body",
+        "target": "image element within the article content",
         "value": "",
-        "expected_outcome": "At least one photograph, diagram, or illustration is visible in the body of the article.",
+        "expected_outcome": "At least one image is visible in the body of the article.",
         "timeout": 5000
       },
       "dependencies": [
-        "e23e966e-ba76-4528-bed6-846bd77a359f"
+        "e9793663-432d-431d-96f7-c81adfc1098b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "28992fc5-911c-4a37-9aec-1c735b60ccb3",
+      "step_id": "46d88cdb-ee95-4d75-ba79-0a7d5eea00b3",
       "step_number": 9,
-      "description": "Confirm that an infobox summarizing key details appears",
+      "description": "Verify that an infobox is visible on the right side of the article",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Confirm that an infobox summarizing key details appears",
-        "target": "Infobox on the right side of the article page",
+        "description": "Verify that an infobox is visible on the right side of the article",
+        "target": "infobox container on the right side",
         "value": "",
-        "expected_outcome": "An infobox with a title (e.g., \u201cArtificial intelligence\u201d) and summary fields is visible.",
+        "expected_outcome": "A styled infobox (information box) appears on the right side of the article page.",
         "timeout": 5000
       },
       "dependencies": [
-        "e23e966e-ba76-4528-bed6-846bd77a359f"
+        "e9793663-432d-431d-96f7-c81adfc1098b"
       ],
       "optional": false,
       "max_retries": 3
     },
     {
-      "step_id": "46594d90-a8ea-4de7-ab52-38c9fd5c5feb",
+      "step_id": "4a6f4b12-47b6-4b8c-a223-dac4199ac688",
       "step_number": 10,
-      "description": "Assess the overall layout and styling of the article",
+      "description": "Confirm overall page layout is professional and well-organized",
       "action_instruction": {
         "action_type": "assert",
-        "description": "Assess the overall layout and styling of the article",
-        "target": "Entire article page layout",
+        "description": "Confirm overall page layout is professional and well-organized",
+        "target": "entire article page",
         "value": "",
-        "expected_outcome": "The article content is well-organized with consistent font styling, clear section separations, and professional formatting.",
+        "expected_outcome": "The page has clear headings, well-organized content sections, and no major visual defects.",
         "timeout": 5000
       },
       "dependencies": [
-        "e23e966e-ba76-4528-bed6-846bd77a359f"
+        "e9793663-432d-431d-96f7-c81adfc1098b"
       ],
       "optional": false,
       "max_retries": 3
     }
   ],
-  "created_at": "2025-07-10T13:27:59.939444+00:00",
+  "created_at": "2025-07-10T13:52:26.901605+00:00",
   "estimated_duration_seconds": 300,
   "tags": [
     "functional",
