@@ -1,4 +1,4 @@
-# Phase 15 — Packaging & Documentation
+# Phase 18 — Packaging & Documentation
 
 ## Overview
 CLI interface, documentation, release v0.1.0.

@@ -1,8 +1,8 @@
-# Phase 14: Additional Action Types Implementation Plan
+# Phase 17: Additional Action Types Implementation Plan
 
 ## Overview
 
-Phase 14 extends HAINDY's Action Agent capabilities with new action types essential for comprehensive web application testing. This phase addresses current limitations that prevent testing of content below the viewport and complex interactions.
+Phase 17 extends HAINDY's Action Agent capabilities with new action types essential for comprehensive web application testing. This phase addresses current limitations that prevent testing of content below the viewport and complex interactions.
 
 ## Progress Tracking
 
@@ -15,7 +15,7 @@ Phase 14 extends HAINDY's Action Agent capabilities with new action types essent
 | Form Interactions (4) | 0/4 | ⬜ Not Started |
 | Validation Actions (3) | 0/3 | ⬜ Not Started |
 
-**Note**: Phase 14 is paused. The scroll actions are implemented but cannot be used intelligently until the Test Runner architecture is enhanced to break down test steps into multiple actions.
+**Note**: Phase 17 is paused. The scroll actions are implemented but cannot be used intelligently until the Test Runner architecture is enhanced to break down test steps into multiple actions.
 
 ### Detailed Progress
 

@@ -183,7 +183,7 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 
 ## 7  Development Phases
 
-### ✅ Completed Phases (17/18)
+### ✅ Completed Phases (17/21)
 
 For detailed information about completed phases, see the individual phase documents:
 
@@ -213,14 +213,17 @@ Additional completed work:
 
 | Phase | Status | Target | Documentation |
 |-------|--------|--------|---------------|
-| **Phase 14** | Additional Action Types (PAUSED) | TBD | [PHASE_14_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_14_ADDITIONAL_ACTION_TYPES.md) |
+| **Phase 14** | Test Planner Agent Refinement | 2 days | [PHASE_14_TEST_PLANNER_REFINEMENT.md](./phases/PHASE_14_TEST_PLANNER_REFINEMENT.md) |
+| **Phase 15** | Test Runner Agent Enhancement | 3 days | [PHASE_15_TEST_RUNNER_ENHANCEMENT.md](./phases/PHASE_15_TEST_RUNNER_ENHANCEMENT.md) |
+| **Phase 16** | Evaluator Agent Reassessment | 1 day | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
+| **Phase 17** | Additional Action Types (PAUSED) | TBD | [PHASE_17_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_17_ADDITIONAL_ACTION_TYPES.md) |
 
 ### 📅 Upcoming Phases
 
 | Phase | Status | ETA | Documentation |
 |-------|--------|-----|---------------|
 | **Phase 12** | Test Scenarios | 1/5 scenarios working | [PHASE_12_TEST_SCENARIOS.md](./phases/PHASE_12_TEST_SCENARIOS.md) |
-| **Phase 15** | Packaging & Documentation | 1-2 days | [PHASE_15_PACKAGING_DOCUMENTATION.md](./phases/PHASE_15_PACKAGING_DOCUMENTATION.md) |
+| **Phase 18** | Packaging & Documentation | 1-2 days | [PHASE_18_PACKAGING_DOCUMENTATION.md](./phases/PHASE_18_PACKAGING_DOCUMENTATION.md) |
 
 ---
 
@@ -251,10 +254,12 @@ Additional completed work:
 
 ## 10  Immediate Next Steps
 
-1. Resolve Test Runner limitations blocking Phase 14
-2. Complete Phase 14 additional action types
-3. Complete Phase 12 test scenarios (4 remaining)
-4. Package and release v0.1.0
+1. Complete Phase 14 Test Planner Agent Refinement
+2. Complete Phase 15 Test Runner Agent Enhancement
+3. Complete Phase 16 Evaluator Agent Reassessment
+4. Resume Phase 17 Additional Action Types
+5. Complete Phase 12 test scenarios (4 remaining)
+6. Package and release v0.1.0
 
 ---
 
