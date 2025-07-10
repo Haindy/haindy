@@ -520,9 +520,10 @@ For detailed information about completed phases, see [COMPLETED_PHASES_DETAILS.m
 - Known limitation: GPT-4o-mini vision capabilities with multiple images
 
 **Remaining Work**:
-- Fix typing validation issues
 - Test remaining 4 scenarios
 - Document scenario creation best practices
+
+**Note**: Typing validation issues have been resolved with o4-mini model
 
 ### 📅 Upcoming Phases
 
@@ -583,11 +584,56 @@ Implement conversation threads for Action Agent where:
 - Reduced token usage by 30%+
 - Clean conversation reset between actions
 
-#### Phase 14 — Packaging & Documentation
+#### Phase 14 — Additional Action Types
 
 | Status | Target | ETA |
 |--------|--------|-----|
-| 📅 Planned | After Phase 13 | 1-2 days |
+| 📅 Planned | After Phase 13 | 2-3 days |
+
+**Problem Statement**:
+Current limitations prevent testing of content below the viewport and complex interactions.
+
+**Action Types to Implement**:
+
+1. **Scroll Actions** (Priority 1)
+   - Scroll to element
+   - Scroll by pixels
+   - Scroll to bottom/top
+   - Horizontal scrolling
+
+2. **Extended Interactions** (Priority 2)
+   - Hover/mouse over
+   - Drag and drop
+   - Right-click/context menu
+   - Double-click
+
+3. **Form Interactions** (Priority 3)
+   - Select dropdown options
+   - File upload
+   - Checkbox/radio button groups
+   - Date picker interactions
+
+4. **Validation Actions** (Priority 2)
+   - URL validation (programmatic, not visual)
+   - Page title validation
+   - Browser state validation
+
+**Implementation Approach**:
+- Extend TestStep action_type enum
+- Add corresponding workflows in ActionAgent
+- Update browser driver with new capabilities
+- Test with scenarios requiring these actions
+
+**Success Criteria**:
+- Wikipedia test can verify sections below viewport
+- Can interact with dropdown menus
+- Can handle complex form interactions
+
+#### Phase 15 — Packaging & Documentation
+
+| Status | Target | ETA |
+|--------|--------|-----|
+| 📅 Planned | After Phase 14 | 1-2 days |
 
 **Tasks**:
 - PyPI package preparation
@@ -602,26 +648,4 @@ Implement conversation threads for Action Agent where:
 | Test Coverage | 81% | 80%+ ✅ |
 | Code Quality | Zero warnings | Maintained ✅ |
 | Test Success Rate | 20% (1/5 scenarios) | 60%+ (3/5 scenarios) |
-| AI Vision Accuracy | Low (typing issues) | High |
-
----
-
-## Future Enhancement: URL Validation Action Type
-
-### Problem
-Currently, test plans that require URL validation fail because:
-- Screenshots don't show browser address bars
-- The AI can only see webpage content, not browser chrome
-- Test Planner Agent creates assertions that cannot be verified visually
-
-### Proposed Solution
-Add a new action type `validate_url` that:
-- Uses the browser driver to get the current URL programmatically
-- Compares against expected URL patterns
-- Returns structured validation results
-
-### Implementation Notes
-- Would require new action type in TestStep model
-- Action Agent would delegate to browser driver instead of visual analysis
-- Enables validation of redirects, URL parameters, and navigation state
-- Should only be used when explicitly required by test requirements 
+| AI Vision Accuracy | Improved with o4-mini | High | 
