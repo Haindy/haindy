@@ -1,0 +1,307 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Report: Wikipedia AI Article Search and Navigation Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .passed { color: #4caf50; }
+        .failed { color: #f44336; }
+        .skipped { color: #ff9800; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        .recommendation {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #2196f3;
+        }
+        .bug-report {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .bug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .severity-critical { color: #d32f2f; font-weight: bold; }
+        .severity-high { color: #f44336; font-weight: bold; }
+        .severity-medium { color: #ff9800; }
+        .severity-low { color: #2196f3; }
+        .debug-info {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+        }
+        .screenshots {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .screenshot-container {
+            text-align: center;
+        }
+        .screenshot-container img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .confidence-score {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .confidence-high { background: #c8e6c9; color: #1b5e20; }
+        .confidence-medium { background: #fff3cd; color: #856404; }
+        .confidence-low { background: #ffcdd2; color: #c62828; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Execution Report</h1>
+        <h2>Wikipedia AI Article Search and Navigation Test</h2>
+        
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value failed">
+                    FAILED
+                </div>
+                <div class="metric-label">Test Outcome</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">35.75s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">12.5%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+        </div>
+        
+        <h2>Test Steps</h2>
+        <table>
+            <tr>
+                <th>Status</th>
+                <th>Count</th>
+                <th>Percentage</th>
+            </tr>
+            <tr>
+                <td class="passed">Passed</td>
+                <td>2</td>
+                <td>12.5%</td>
+            </tr>
+            <tr>
+                <td class="failed">Failed</td>
+                <td>1</td>
+                <td>6.2%</td>
+            </tr>
+            <tr>
+                <td class="skipped">Skipped</td>
+                <td>0</td>
+                <td>0.0%</td>
+            </tr>
+        </table>
+        
+        
+        <h2>Errors and Recommendations</h2>
+        <p>Total errors encountered: 1</p>
+        
+        
+        
+        
+        <!-- AI Conversations Section -->
+        
+        <h2>🤖 AI Conversations</h2>
+        <div style="margin: 20px 0;">
+            <div class='ai-conversations'>
+<h3>🤖 AI Conversations</h3>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #1: navigation_validation (Step 1)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+I navigated to: https://www.wikipedia.org/
+
+Please analyze the screenshot and answer:
+
+1. Did the navigation succeed? (Check for error pages, blank pages, connection errors)
+2. What page am I looking at? Be specific about the content you see.
+3. Does it match the expected outcome: "Wikipedia homepage is loaded"?
+
+Common error patterns to check for:
+- 404 or "Page not found" errors
+- Blank white pages
+- Connection error messages
+- Certificate warnings
+- "Site can't be reached" messages
+- Wrong domain/website
+
+Expected outcome detail: Wikipedia homepage is loaded
+
+Respond in this EXACT format:
+SUCCESS: true/false
+PAGE_DESCRIPTION: <detailed description of what you see>
+MATCHES_EXPECTED: true/false
+ERROR_TYPE: none/404/blank/connection/wrong_site/other
+REASON: <explanation of any issues>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>SUCCESS: true  
+PAGE_DESCRIPTION: The Wikipedia homepage is displayed. At the top is the “WIKIPEDIA – The Free Encyclopedia” header, followed by a circular puzzle-globe logo. Surrounding the globe are links to major languages (English, 日本語, Русский, Deutsch, Español, Français, 中文, Italiano, Português, فارسی) each showing article counts. Below is a search input with a language selector (EN) and a search button, plus a “Read Wikipedia in your language” link. The footer shows Wikimedia Foundation information, app download prompts (Google Play, App Store), and links to related projects (Commons, Wiktionary, Wikibooks, Wikidata, Wikiversity, MediaWiki, etc.).  
+MATCHES_EXPECTED: true  
+ERROR_TYPE: none  
+REASON: The page loaded successfully with the expected Wikipedia homepage content and no error indicators.</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250709_222602/step_1_navigation_validation_222635_71247.png</p>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #2: action_execution (Step 2)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+Please analyze this screenshot and verify:
+
+Target: Wikipedia logo in the header
+Description: Verify the Wikipedia logo is visible
+Expected: Wikipedia logo is displayed
+
+Questions:
+1. Can you see what is described?
+2. Does it match the expected outcome?
+
+Respond in this format:
+VISIBLE: true/false
+MATCHES_EXPECTED: true/false
+WHAT_I_SEE: <description>
+REASON: <explanation if it doesn't match>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>VISIBLE: true  
+MATCHES_EXPECTED: true  
+WHAT_I_SEE: The Wikipedia wordmark “WIKIPEDIA” appears at the top center of the page with the tagline “The Free Encyclopedia,” and the puzzle‐globe logo is visible below.  
+REASON: N/A</pre>
+</div>
+</div>
+<div class='ai-interaction' style='border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;'>
+<h4>📋 Interaction #3: click_analysis (Step 3)</h4>
+<div style='margin: 10px 0;'>
+<strong>🤖 PROMPT:</strong>
+<pre style='background: #f5f5f5; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>
+I need to click on an element in this screenshot.
+
+Target: Search input box
+Description: Click on the search input box
+Expected outcome: Search box is focused
+
+Please analyze the screenshot with the grid overlay and:
+1. Find the clickable target element
+2. Check if it's visible and not obscured
+3. Identify the element type if possible (button, link, icon, etc.)
+4. Provide the grid coordinates
+
+Respond in this format:
+TARGET_FOUND: true/false
+VISIBLE: true/false
+CLICKABLE: true/false
+ELEMENT_TYPE: button/link/icon/form_element/other
+GRID_CELL: <cell identifier>
+OFFSET_X: <0.0-1.0>
+OFFSET_Y: <0.0-1.0>
+CONFIDENCE: <0.0-1.0>
+REASONING: <why you selected this location>
+BLOCKED_BY: <if blocked, what's blocking it>
+ [IMAGE INCLUDED]</pre>
+</div>
+<div style='margin: 10px 0;'>
+<strong>💬 AI RESPONSE:</strong>
+<pre style='background: #e8f4f8; padding: 10px; border-radius: 3px; white-space: pre-wrap;'>TARGET_FOUND: true  
+VISIBLE: true  
+CLICKABLE: true  
+ELEMENT_TYPE: form_element  
+GRID_CELL: Y28  
+OFFSET_X: 0.50  
+OFFSET_Y: 0.50  
+CONFIDENCE: 0.75  
+REASONING: The Wikipedia search input field appears centered in row 28, spanning roughly columns V–AB. Clicking in the center of cell Y28 (mid-cell) falls squarely within the text-entry area.  
+BLOCKED_BY: none</pre>
+</div>
+<p><strong>📸 SCREENSHOT:</strong> debug_screenshots/20250709_222602/step_3_click_analysis_grid_222654_03477.png</p>
+</div>
+</div>
+
+        </div>
+        
+        
+        <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #666;">
+            Generated at 2025-07-09T20:27:07.531806+00:00 | HAINDY Test Report v1.0
+        </footer>
+    </div>
+</body>
+</html>

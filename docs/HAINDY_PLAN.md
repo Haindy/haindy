@@ -541,38 +541,47 @@ Currently, each AI call is isolated without context from previous interactions. 
 
 **Proposed Solution**:
 Implement conversation threads for Action Agent where:
-- Each test step maintains conversation history
-- AI remembers previous screenshots and analyses
+- **One conversation per action** - New action = new conversation
+- AI remembers previous screenshots and analyses within the same action
 - Natural comparison between states (before/after)
 - Single image per message (works with GPT-4o-mini)
+- Errors and retries remain part of the conversation
 
 **Implementation Plan**:
 
 1. **Conversation State Management** (1 day)
    - Add `conversation_history` to ActionAgent
-   - Implement message history tracking per test execution
-   - Create conversation context builder
+   - Implement message history tracking per action (not per step)
+   - Token-based sliding window with raw message storage (no compression)
+   - Reset conversation when moving to next action
 
-2. **Refactor AI Interactions** (1-2 days)
-   - Update all `call_openai_with_debug` calls to include history
-   - Implement sliding window for context management
-   - Add conversation reset between test steps
+2. **Replace AI Interaction Code** (1-2 days)
+   - **Replace** (not wrap) existing `call_openai_with_debug` implementation
+   - Build conversation-aware OpenAI calls from scratch
+   - Include all messages in conversation (including errors/retries)
+   - Implement token-based context window management
 
 3. **Optimize Prompts** (1 day)
    - Rewrite prompts to leverage conversation context
    - Remove redundant information
-   - Implement natural language transitions
+   - Implement natural language transitions between attempts
 
 4. **Testing & Validation** (1 day)
    - Test with Wikipedia scenario
    - Verify improved accuracy
    - Measure token usage optimization
 
+**Scope**:
+- **Action Agent only** - Other agents will be addressed in future phases if needed
+- No wrappers or fallbacks - direct replacement of existing code
+- Conversation boundary: Start of action → End of action (success or final failure)
+
 **Success Criteria**:
-- AI accurately references previous screenshots
+- AI accurately references previous screenshots within an action
 - Successful visual comparison without sending multiple images
 - Improved typing detection accuracy
 - Reduced token usage by 30%+
+- Clean conversation reset between actions
 
 #### Phase 14 — Packaging & Documentation
 

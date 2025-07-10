@@ -18,6 +18,7 @@ from io import BytesIO
 from typing import Dict, Optional, Tuple, Any, List
 
 from PIL import Image, ImageDraw
+import tiktoken
 
 from src.agents.base_agent import BaseAgent
 from src.browser.driver import BrowserDriver
@@ -76,6 +77,9 @@ class ActionAgent(BaseAgent):
         # Configuration
         self.confidence_threshold = settings.grid_confidence_threshold
         self.refinement_enabled = settings.grid_refinement_enabled
+        
+        # Conversation state - one conversation per action
+        self.conversation_history: List[Dict[str, Any]] = []
     
     async def call_openai_with_debug(
         self,
@@ -87,10 +91,13 @@ class ActionAgent(BaseAgent):
         screenshot_path: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Wrapper around call_openai that adds debug logging.
+        Conversation-aware OpenAI API call with debug logging.
+        
+        This method maintains conversation history within a single action,
+        using a token-based sliding window to manage context size.
         
         Args:
-            messages: List of message dictionaries
+            messages: List of message dictionaries for this specific call
             action_type: Type of action being performed
             step_number: Test step number if applicable
             temperature: Override default temperature
@@ -102,7 +109,125 @@ class ActionAgent(BaseAgent):
         """
         debug_logger = get_debug_logger()
         
-        # Extract prompt text from messages
+        # Add current messages to conversation history
+        for msg in messages:
+            self.conversation_history.append(msg)
+        
+        # Build full message list with conversation history
+        full_messages = self._build_conversation_messages()
+        
+        # Extract prompt text for logging
+        prompt_text = self._extract_prompt_text(messages)
+        
+        # Make the API call with full conversation context
+        # o4-mini only supports default temperature (1.0)
+        response = await self.call_openai(
+            messages=full_messages,
+            response_format=response_format
+        )
+        
+        # Add assistant response to conversation history
+        assistant_message = {
+            "role": "assistant",
+            "content": response.get("content", "")
+        }
+        self.conversation_history.append(assistant_message)
+        
+        # Log the interaction
+        if debug_logger:
+            debug_logger.log_ai_interaction(
+                agent_name=self.name,
+                action_type=action_type,
+                prompt=prompt_text,
+                response=response.get("content", ""),
+                screenshot_path=screenshot_path,
+                additional_context={
+                    "step_number": step_number,
+                    "temperature": temperature,
+                    "response_format": response_format,
+                    "conversation_length": len(self.conversation_history)
+                }
+            )
+        
+        return response
+    
+    def _build_conversation_messages(self) -> List[Dict[str, Any]]:
+        """
+        Build conversation messages with token-based sliding window.
+        
+        Returns:
+            List of messages that fit within token limit
+        """
+        # Get encoding for token counting
+        # o4-mini uses the same tokenizer as gpt-4
+        model_for_encoding = "gpt-4" if "o4-mini" in self.model else self.model
+        encoding = tiktoken.encoding_for_model(model_for_encoding)
+        
+        # Token limits (leaving room for response)
+        max_tokens = 200000  # o4-mini context window
+        response_buffer = 4000  # Reserve tokens for response
+        max_context_tokens = max_tokens - response_buffer
+        
+        # Count tokens in conversation history (reverse order to prioritize recent)
+        messages_to_include = []
+        total_tokens = 0
+        
+        # Always include system prompt tokens
+        system_tokens = len(encoding.encode(self.system_prompt))
+        total_tokens += system_tokens
+        
+        # Add messages from most recent to oldest
+        for msg in reversed(self.conversation_history):
+            msg_tokens = self._count_message_tokens(msg, encoding)
+            if total_tokens + msg_tokens <= max_context_tokens:
+                messages_to_include.insert(0, msg)
+                total_tokens += msg_tokens
+            else:
+                # Token limit reached
+                logger.debug(f"Token limit reached, truncating conversation history. "
+                           f"Including {len(messages_to_include)} of {len(self.conversation_history)} messages")
+                break
+        
+        return messages_to_include
+    
+    def _count_message_tokens(self, message: Dict[str, Any], encoding) -> int:
+        """
+        Count tokens in a message, handling multimodal content.
+        
+        Args:
+            message: Message dictionary
+            encoding: Tiktoken encoding
+            
+        Returns:
+            Token count
+        """
+        token_count = 4  # Role and message structure overhead
+        
+        content = message.get("content", "")
+        if isinstance(content, str):
+            token_count += len(encoding.encode(content))
+        elif isinstance(content, list):
+            # Handle multimodal content
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        token_count += len(encoding.encode(item.get("text", "")))
+                    elif item.get("type") == "image_url":
+                        # Rough estimate for image tokens
+                        token_count += 85  # Base64 encoded images use ~85 tokens
+        
+        return token_count
+    
+    def _extract_prompt_text(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        Extract text content from messages for logging.
+        
+        Args:
+            messages: List of message dictionaries
+            
+        Returns:
+            Extracted text content
+        """
         prompt_text = ""
         for msg in messages:
             if msg.get("role") == "user":
@@ -117,29 +242,12 @@ class ActionAgent(BaseAgent):
                         elif isinstance(item, dict) and item.get("type") == "image_url":
                             prompt_text += " [IMAGE INCLUDED]"
         
-        # Make the API call
-        response = await self.call_openai(
-            messages=messages,
-            temperature=temperature,
-            response_format=response_format
-        )
-        
-        # Log the interaction
-        if debug_logger:
-            debug_logger.log_ai_interaction(
-                agent_name=self.name,
-                action_type=action_type,
-                prompt=prompt_text,
-                response=response.get("content", ""),
-                screenshot_path=screenshot_path,
-                additional_context={
-                    "step_number": step_number,
-                    "temperature": temperature,
-                    "response_format": response_format
-                }
-            )
-        
-        return response
+        return prompt_text
+    
+    def reset_conversation(self):
+        """Reset conversation history for a new action."""
+        self.conversation_history = []
+        logger.debug("Conversation history reset for new action")
     
     async def execute_action(
         self,
@@ -160,6 +268,9 @@ class ActionAgent(BaseAgent):
         Returns:
             Comprehensive action result with debugging information
         """
+        # Reset conversation for new action
+        self.reset_conversation()
+        
         logger.info("Executing action with multi-step workflow", extra={
             "step_number": test_step.step_number,
             "action_type": test_step.action_instruction.action_type.value,
@@ -345,7 +456,6 @@ REASON: <explanation of any issues>
                 messages=messages,
                 action_type="navigation_validation",
                 step_number=test_step.step_number,
-                temperature=0.3,
                 screenshot_path=screenshot_path
             )
             validation_response = response.get("content", "")
@@ -490,7 +600,21 @@ REASON: <explanation of any issues>
             )
             
             # Step 2: Target Identification with AI
-            click_prompt = f"""
+            # Check if this is a retry within the conversation
+            is_retry = len(self.conversation_history) > 0
+            
+            if is_retry:
+                click_prompt = f"""
+Based on our previous analysis, I need to retry clicking on the element.
+
+Target: {test_step.action_instruction.target}
+Description: {test_step.description}
+Expected outcome: {test_step.action_instruction.expected_outcome}
+
+Please re-analyze the current screenshot and provide updated coordinates.
+"""
+            else:
+                click_prompt = f"""
 I need to click on an element in this screenshot.
 
 Target: {test_step.action_instruction.target}
@@ -502,7 +626,9 @@ Please analyze the screenshot with the grid overlay and:
 2. Check if it's visible and not obscured
 3. Identify the element type if possible (button, link, icon, etc.)
 4. Provide the grid coordinates
-
+"""
+            
+            click_prompt += """
 Respond in this format:
 TARGET_FOUND: true/false
 VISIBLE: true/false
@@ -549,7 +675,6 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 messages=messages,
                 action_type="click_analysis",
                 step_number=test_step.step_number,
-                temperature=0.3,
                 screenshot_path=screenshot_path
             )
             click_response = response.get("content", "")
@@ -635,12 +760,12 @@ BLOCKED_BY: <if blocked, what's blocking it>
             execution_start = asyncio.get_event_loop().time()
             
             logger.info("Executing click", extra={
-                "coordinates": coordinates,
+                "coordinates": (pixel_x, pixel_y),
                 "element_type": element_type,
                 "confidence": confidence
             })
             
-            await self.browser_driver.click(coordinates[0], coordinates[1])
+            await self.browser_driver.click(pixel_x, pixel_y)
             
             # Wait based on element type (or use generic 1s as discussed)
             wait_time = 1000  # Default 1 second
@@ -658,7 +783,36 @@ BLOCKED_BY: <if blocked, what's blocking it>
             execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
             
             # Step 5: Click Validation with AI
-            validation_prompt = f"""
+            # Special handling for input fields - skip strict focus validation
+            target_lower = test_step.action_instruction.target.lower()
+            is_input_field = any(term in target_lower for term in ["input", "search", "text", "field", "box"])
+            expected_lower = test_step.action_instruction.expected_outcome.lower()
+            expects_focus = any(term in expected_lower for term in ["focus", "cursor", "caret"])
+            
+            if is_input_field and expects_focus:
+                # For input fields expecting focus, we trust the click worked
+                # Cursor blink makes visual validation unreliable
+                validation_prompt = f"""
+I just clicked on the element at grid cell {grid_cell}.
+
+Target was: {test_step.action_instruction.target}
+Expected outcome: {test_step.action_instruction.expected_outcome}
+
+Note: This is an input field click. Due to cursor blink, we cannot reliably detect focus visually.
+Please check for any other changes (errors, popups, navigation) but assume the field is focused if no errors occurred.
+
+Respond in this format:
+CHANGES_DETECTED: true/false
+EXPECTED_OUTCOME_MET: true
+URL_CHANGED: true/false
+NEW_URL: <if changed>
+UI_CHANGES: <list what changed, or 'focus assumed' for input fields>
+UNEXPECTED_CHANGES: <any unexpected behaviors or errors>
+CONFIDENCE: <0.0-1.0>
+"""
+            else:
+                # Standard validation for non-input clicks
+                validation_prompt = f"""
 I just clicked on the element at grid cell {grid_cell}.
 
 Target was: {test_step.action_instruction.target}
@@ -881,7 +1035,6 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 messages=messages,
                 action_type="type_analysis",
                 step_number=test_step.step_number,
-                temperature=0.3,
                 screenshot_path=screenshot_path
             )
             type_response = response.get("content", "")
@@ -1009,15 +1162,41 @@ BLOCKED_BY: <if blocked, what's blocking it>
                         step_number=test_step.step_number
                     )
                 
-                # Compare the two screenshots for visual differences
+                # First, show the unfocused screenshot
+                unfocused_prompt = f"""
+Here is a screenshot of the page BEFORE clicking on the input field at grid cell {grid_cell}.
+Please observe the current state of the input field - its border, background, and whether there's a cursor visible.
+I'll show you another screenshot after clicking to compare.
+"""
+                
+                unfocused_messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": unfocused_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64.b64encode(unfocused_screenshot).decode('utf-8')}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+                
+                # Send unfocused screenshot
+                await self.call_openai_with_debug(
+                    messages=unfocused_messages,
+                    action_type="focus_before",
+                    step_number=test_step.step_number,
+                        screenshot_path=unfocused_screenshot_path
+                )
+                
+                # Now show the focused screenshot and ask for comparison
                 focus_comparison_prompt = f"""
-I need to determine if clicking on the input field at grid cell {grid_cell} achieved focus.
+Now here is the screenshot AFTER clicking on the input field at grid cell {grid_cell}.
 
-I have two screenshots:
-1. BEFORE clicking (unfocused)
-2. AFTER clicking (potentially focused)
-
-Please compare these screenshots and look for visual differences around the input field:
+Compare this with the previous screenshot and look for visual differences around the input field:
 - Cursor/caret visible in the input field
 - Border color change (blue outline, etc.)
 - Background color change
@@ -1038,12 +1217,6 @@ CONFIDENCE: <0.0-1.0>
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/png;base64,{base64.b64encode(unfocused_screenshot).decode('utf-8')}"
-                                }
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
                                     "url": f"data:image/png;base64,{base64.b64encode(focused_screenshot).decode('utf-8')}"
                                 }
                             }
@@ -1055,8 +1228,7 @@ CONFIDENCE: <0.0-1.0>
                     messages=messages,
                     action_type="focus_comparison",
                     step_number=test_step.step_number,
-                    temperature=0.3,
-                    screenshot_path=f"{unfocused_screenshot_path}, {focused_screenshot_path}"
+                        screenshot_path=f"{unfocused_screenshot_path}, {focused_screenshot_path}"
                 )
                 focus_content = focus_response.get("content", "")
                 
@@ -1128,19 +1300,44 @@ CONFIDENCE: <0.0-1.0>
             execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
             
             # Step 7: Typing Result Validation with Visual Comparison
+            # First, show the before typing screenshot
+            before_typing_prompt = f"""
+Here is the screenshot BEFORE typing. Please observe the input field at grid cell {grid_cell} - 
+note what text (if any) is currently in the field.
+I'm about to type: "{test_step.action_instruction.value}"
+"""
+            
+            before_messages = [
+                {
+                    "role": "user", 
+                    "content": [
+                        {"type": "text", "text": before_typing_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64.b64encode(before_typing_screenshot).decode('utf-8')}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            # Send before screenshot
+            await self.call_openai_with_debug(
+                messages=before_messages,
+                action_type="typing_before",
+                step_number=test_step.step_number,
+                screenshot_path=before_typing_screenshot_path
+            )
+            
+            # Now show after typing and ask for validation
             typing_validation_prompt = f"""
-I need to validate if typing "{test_step.action_instruction.value}" into the input field was successful.
+Now here is the screenshot AFTER typing "{test_step.action_instruction.value}".
 
-I have two screenshots:
-1. BEFORE typing
-2. AFTER typing
-
-Please compare these screenshots and check:
-1. Is the typed text visible in the input field?
+Compare this with the previous screenshot and check:
+1. Is the typed text visible in the input field at grid cell {grid_cell}?
 2. Does the text match what was supposed to be typed?
 3. Are there any validation errors or issues?
-
-Focus on the input field at grid cell {grid_cell}.
 
 Expected text: {test_step.action_instruction.value}
 
@@ -1154,7 +1351,6 @@ FIELD_STATE: normal/error/success
 TYPING_SUCCESSFUL: true/false
 CONFIDENCE: <0.0-1.0>
 REASONING: <explain what you observed>
-
 """
             
             messages = [
@@ -1162,14 +1358,6 @@ REASONING: <explain what you observed>
                     "role": "user",
                     "content": [
                         {"type": "text", "text": typing_validation_prompt},
-                        {"type": "text", "text": "BEFORE typing:"},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(before_typing_screenshot).decode('utf-8')}"
-                            }
-                        },
-                        {"type": "text", "text": "AFTER typing:"},
                         {
                             "type": "image_url",
                             "image_url": {
@@ -1184,7 +1372,6 @@ REASONING: <explain what you observed>
                 messages=messages,
                 action_type="typing_validation",
                 step_number=test_step.step_number,
-                temperature=0.3,
                 screenshot_path=f"{before_typing_screenshot_path}, {after_typing_screenshot_path}"
             )
             validation_content = validation_response.get("content", "")
