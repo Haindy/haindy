@@ -167,6 +167,87 @@ class PlaywrightDriver(BrowserDriver):
 
         # Perform scroll
         await self._page.mouse.wheel(delta_x, delta_y)
+    
+    async def scroll_by_pixels(self, x: int = 0, y: int = 0, smooth: bool = True) -> None:
+        """
+        Scroll by a specific number of pixels.
+        
+        Args:
+            x: Horizontal scroll amount (positive = right, negative = left)
+            y: Vertical scroll amount (positive = down, negative = up)
+            smooth: Use smooth scrolling animation
+        """
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+        
+        self.logger.debug(f"Scrolling by pixels", extra={"x": x, "y": y, "smooth": smooth})
+        
+        behavior = "smooth" if smooth else "auto"
+        await self._page.evaluate(
+            f"""
+            window.scrollBy({{
+                left: {x},
+                top: {y},
+                behavior: '{behavior}'
+            }});
+            """
+        )
+        
+    async def scroll_to_top(self) -> None:
+        """Scroll to the top of the page."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+        
+        self.logger.debug("Scrolling to top of page")
+        await self._page.evaluate("window.scrollTo(0, 0)")
+        
+    async def scroll_to_bottom(self) -> None:
+        """Scroll to the bottom of the page."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+        
+        self.logger.debug("Scrolling to bottom of page")
+        await self._page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    
+    async def get_scroll_position(self) -> Tuple[int, int]:
+        """
+        Get current scroll position.
+        
+        Returns:
+            Tuple of (x, y) scroll position
+        """
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+        
+        position = await self._page.evaluate(
+            "({x: window.pageXOffset || document.documentElement.scrollLeft, y: window.pageYOffset || document.documentElement.scrollTop})"
+        )
+        return position["x"], position["y"]
+    
+    async def get_page_dimensions(self) -> Tuple[int, int, int, int]:
+        """
+        Get page dimensions including scrollable area.
+        
+        Returns:
+            Tuple of (viewport_width, viewport_height, page_width, page_height)
+        """
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+        
+        dimensions = await self._page.evaluate(
+            """({
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                pageWidth: document.documentElement.scrollWidth,
+                pageHeight: document.documentElement.scrollHeight
+            })"""
+        )
+        return (
+            dimensions["viewportWidth"],
+            dimensions["viewportHeight"],
+            dimensions["pageWidth"],
+            dimensions["pageHeight"]
+        )
 
     async def screenshot(self) -> bytes:
         """Take a screenshot and return as bytes."""
@@ -216,6 +297,11 @@ class PlaywrightDriver(BrowserDriver):
             raise RuntimeError("Browser not started. Call start() first.")
 
         return self._page.url
+    
+    @property
+    def page(self) -> Optional[Page]:
+        """Get the current page object (for advanced operations)."""
+        return self._page
 
     async def wait_for_load_state(self, state: str = "networkidle") -> None:
         """

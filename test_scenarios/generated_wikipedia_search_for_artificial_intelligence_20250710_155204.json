@@ -1,0 +1,25 @@
+{
+  "name": "Wikipedia Search for Artificial Intelligence",
+  "description": "Validate the search functionality on Wikipedia.org and verify the completeness and organization of the 'Artificial intelligence' article.",
+  "url": "https://www.wikipedia.org/",
+  "requirements": [
+    "Navigate to https://www.wikipedia.org/",
+    "In the search input field on the homepage, type \"artificial intelligence\"",
+    "Press the Enter key to initiate the search",
+    "Verify that the browser navigates to the 'Artificial intelligence' article page",
+    "Verify the article contains a 'History' section header",
+    "Verify the article contains an 'Applications' section header",
+    "Verify the article contains an 'Ethics' section header",
+    "Verify there is at least one image displayed in the article body",
+    "Verify there is a visible infobox (useful information box) on the right side of the article",
+    "Confirm the overall layout appears professional, with clear headings, well-organized content, and no major visual defects"
+  ],
+  "expected_outcomes": [],
+  "tags": [
+    "generated",
+    "from_document"
+  ],
+  "timeout": 300,
+  "source_document": "test_scenarios/wikipedia_search_simple.txt",
+  "generated_at": "2025-07-10T15:52:04.397440"
+}
