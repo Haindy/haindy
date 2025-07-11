@@ -1,1014 +1,1067 @@
 """
-Test Runner Agent implementation.
+Enhanced Test Runner Agent implementation for Phase 15.
 
-Orchestrates test execution by coordinating other agents and managing test state.
+This agent orchestrates test execution with intelligent step interpretation,
+living document reporting, and comprehensive failure handling.
 """
 
 import asyncio
 import json
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
-from uuid import UUID, uuid4
+import os
+import traceback
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from uuid import UUID
 
 from src.agents.action_agent import ActionAgent
 from src.agents.base_agent import BaseAgent
-from src.agents.test_planner import TestPlannerAgent
+from src.agents.formatters import TestPlanFormatter
 from src.browser.driver import BrowserDriver
 from src.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
 from src.core.types import (
-    EvaluationResult,
-    GridAction,
-    GridCoordinate,
     ActionInstruction,
+    ActionType,
+    BugReport,
+    BugSeverity,
+    StepResult,
+    TestCase,
+    TestCaseResult,
     TestPlan,
-    TestStep,
+    TestReport,
     TestState,
     TestStatus,
+    TestStep,
+    TestSummary,
 )
-from src.core.enhanced_types import BugReport
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-
-
-class ActionResult(BaseModel):
-    """Simplified action result for test runner."""
-    action_type: str
-    grid_cell: str
-    offset_x: float = 0.5
-    offset_y: float = 0.5
-    confidence: float = Field(0.0, ge=0.0, le=1.0)
-    requires_refinement: bool = False
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class TestStepResult(BaseModel):
-    """Result of executing a single test step."""
-    step: TestStep
-    success: bool
-    action_taken: Optional[ActionResult] = None
-    actual_result: str
-    screenshot_before: Optional[bytes] = None
-    screenshot_after: Optional[bytes] = None
-    evaluation: Optional[EvaluationResult] = None
-    execution_mode: str = "visual"
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    # Enhanced debugging information from Action Agent
-    action_result_details: Optional[Any] = None
-    
-    def create_bug_report(self, test_plan_name: str) -> Optional[BugReport]:
-        """Create a detailed bug report for failed steps."""
-        if self.success:
-            return None
-        
-        # Extract details from action_result_details if available
-        details = self.action_result_details
-        
-        # Determine failure type and confidence scores based on result type
-        failure_type = "evaluation"
-        confidence_scores = {
-            "validation": 0.0,
-            "coordinate": 0.0,
-            "execution": 0.0,
-            "evaluation": 0.0,
-            "overall": 0.0
-        }
-        
-        if details and hasattr(details, 'validation'):
-            # New EnhancedActionResult format
-            if not details.validation.valid:
-                failure_type = "validation"
-            elif details.execution and not details.execution.success:
-                failure_type = "execution"
-            
-            confidence_scores = {
-                "validation": details.validation.confidence if details.validation else 0.0,
-                "coordinate": details.coordinates.confidence if details.coordinates else 0.0,
-                "execution": 1.0 if (details.execution and details.execution.success) else 0.0,
-                "evaluation": details.ai_analysis.confidence if details.ai_analysis else 0.0,
-                "overall": details.ai_analysis.confidence if details.ai_analysis else 0.0
-            }
-        elif isinstance(details, dict):
-            # Old dictionary format (fallback)
-            if details.get("validation_passed") is False:
-                failure_type = "validation"
-            elif details.get("execution_success") is False:
-                failure_type = "execution"
-            
-            ai_analysis_data = details.get("ai_analysis", {})
-            confidence_scores = {
-                "validation": details.get("validation_confidence", 0.0),
-                "coordinate": details.get("coordinate_confidence", 0.0),
-                "execution": 1.0 if details.get("execution_success") else 0.0,
-                "evaluation": ai_analysis_data.get("confidence", 0.0),
-                "overall": ai_analysis_data.get("confidence", 0.0)
-            }
-        
-        # Extract information based on details type
-        detailed_error = None
-        grid_screenshot = None
-        actual_outcome = self.actual_result
-        grid_cell_targeted = None
-        coordinates_used = None
-        
-        if details and hasattr(details, 'validation'):
-            # New EnhancedActionResult format
-            detailed_error = details.execution.error_message if details.execution else None
-            grid_screenshot = details.grid_screenshot_highlighted
-            actual_outcome = details.ai_analysis.actual_outcome if details.ai_analysis else self.actual_result
-            grid_cell_targeted = details.coordinates.grid_cell if details.coordinates else None
-            if details.coordinates:
-                coordinates_used = GridCoordinate(
-                    cell=details.coordinates.grid_cell,
-                    offset_x=details.coordinates.offset_x,
-                    offset_y=details.coordinates.offset_y,
-                    confidence=details.coordinates.confidence,
-                    refined=details.coordinates.refined
-                )
-        elif isinstance(details, dict):
-            # Old dictionary format
-            detailed_error = details.get("execution_error")
-            grid_screenshot = details.get("grid_screenshot_highlighted")
-            ai_analysis_data = details.get("ai_analysis", {})
-            actual_outcome = ai_analysis_data.get("actual_outcome", self.actual_result)
-            grid_cell_targeted = details.get("grid_cell")
-            if details.get("grid_cell"):
-                coordinates_used = GridCoordinate(
-                    cell=details.get("grid_cell", ""),
-                    offset_x=details.get("offset_x", 0.5),
-                    offset_y=details.get("offset_y", 0.5),
-                    confidence=details.get("coordinate_confidence", 0.0),
-                    refined=False
-                )
-        
-        # Create bug report
-        return BugReport(
-            test_step=self.step,
-            test_plan_name=test_plan_name,
-            step_number=self.step.step_number,
-            execution_mode=self.execution_mode,
-            
-            # Failure details
-            failure_type=failure_type,
-            error_message=self.actual_result,
-            detailed_error=detailed_error,
-            
-            # Visual evidence
-            screenshot_before=self.screenshot_before,
-            screenshot_after=self.screenshot_after,
-            grid_screenshot=grid_screenshot,
-            
-            # Action details
-            attempted_action=f"{self.step.action_instruction.action_type.value} on {self.step.action_instruction.target}",
-            expected_outcome=self.step.action_instruction.expected_outcome,
-            actual_outcome=actual_outcome,
-            
-            # Grid interaction
-            grid_cell_targeted=grid_cell_targeted,
-            coordinates_used=coordinates_used,
-            
-            # Browser state
-            url_before=details.browser_state_before.url if (details and hasattr(details, 'browser_state_before') and details.browser_state_before) else None,
-            url_after=details.browser_state_after.url if (details and hasattr(details, 'browser_state_after') and details.browser_state_after) else None,
-            page_title_before=details.browser_state_before.title if (details and hasattr(details, 'browser_state_before') and details.browser_state_before) else None,
-            page_title_after=details.browser_state_after.title if (details and hasattr(details, 'browser_state_after') and details.browser_state_after) else None,
-            
-            # Debugging aids
-            confidence_scores=confidence_scores,
-            ui_anomalies=details.ai_analysis.anomalies if (details and hasattr(details, 'ai_analysis') and details.ai_analysis) else [],
-            suggested_fixes=details.ai_analysis.recommendations if (details and hasattr(details, 'ai_analysis') and details.ai_analysis) else [],
-            
-            # Categorization
-            severity="critical" if not self.step.optional else "medium",
-            is_blocking=not self.step.optional,
-            is_flaky=False  # Would need historical data to determine
-        )
-
-
-class ExecutionMode(Enum):
-    """Execution mode for test steps."""
-    
-    VISUAL = "visual"  # Use AI visual interaction
-    SCRIPTED = "scripted"  # Use recorded script
-    HYBRID = "hybrid"  # Try scripted, fallback to visual
-
-
-class TestRunnerAgent(BaseAgent):
+class TestRunner(BaseAgent):
     """
-    AI agent that orchestrates test execution.
+    Enhanced Test Runner Agent that orchestrates test execution with intelligence.
     
-    This agent coordinates between Test Planner, Action, and Evaluator agents
-    to execute test plans step by step. It maintains test state, handles
-    branching logic, and decides on execution strategies.
+    Key improvements:
+    - Hierarchical test plan execution (TestPlan → TestCase → TestStep)
+    - Living document report generation
+    - Intelligent step interpretation and decomposition
+    - Comprehensive bug reporting
+    - Smart failure handling and recovery
     """
     
     def __init__(
         self,
-        name: str = "TestRunnerAgent",
+        name: str = "TestRunner",
         browser_driver: Optional[BrowserDriver] = None,
         action_agent: Optional[ActionAgent] = None,
+        report_dir: str = "test_reports",
         **kwargs
     ):
         """
-        Initialize the Test Runner Agent.
+        Initialize the Enhanced Test Runner.
         
         Args:
             name: Agent name
             browser_driver: Browser driver instance
-            action_agent: Action agent instance for visual interactions
+            action_agent: Action agent for executing browser actions
+            report_dir: Directory to save test reports
             **kwargs: Additional arguments for BaseAgent
         """
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_RUNNER_SYSTEM_PROMPT
         self.browser_driver = browser_driver
         self.action_agent = action_agent
+        self.report_dir = Path(report_dir)
+        self.report_dir.mkdir(exist_ok=True)
         
-        # Test execution state
+        # Current execution state
         self._current_test_plan: Optional[TestPlan] = None
+        self._current_test_case: Optional[TestCase] = None
+        self._current_test_step: Optional[TestStep] = None
         self._test_state: Optional[TestState] = None
-        self._execution_history: List[TestStepResult] = []
-        self._scripted_actions: Dict[str, Dict[str, Any]] = {}
-        self._initial_url: Optional[str] = None  # Store initial URL for context
+        self._test_report: Optional[TestReport] = None
+        
+        # Execution context
+        self._initial_url: Optional[str] = None
+        self._execution_history: List[Dict[str, Any]] = []
     
     async def execute_test_plan(
-        self, test_plan: TestPlan, initial_url: Optional[str] = None
-    ) -> TestState:
+        self,
+        test_plan: TestPlan,
+        initial_url: Optional[str] = None
+    ) -> TestReport:
         """
-        Execute a complete test plan.
+        Execute a complete test plan with all test cases.
         
         Args:
             test_plan: The test plan to execute
-            initial_url: Optional starting URL for the test
+            initial_url: Optional starting URL
             
         Returns:
-            Final test state after execution
+            Comprehensive test report
         """
-        logger.info("Starting test plan execution", extra={
+        logger.info("Starting enhanced test plan execution", extra={
             "test_plan_id": str(test_plan.plan_id),
             "test_plan_name": test_plan.name,
-            "total_steps": len(test_plan.steps)
+            "total_test_cases": len(test_plan.test_cases)
         })
         
-        # Initialize test state
+        # Initialize execution
         self._current_test_plan = test_plan
-        self._initial_url = initial_url  # Store for context
+        self._initial_url = initial_url
+        
+        # Initialize test report
+        self._test_report = TestReport(
+            test_plan_id=test_plan.plan_id,
+            test_plan_name=test_plan.name,
+            started_at=datetime.now(timezone.utc),
+            status=TestStatus.IN_PROGRESS,
+            environment={
+                "initial_url": initial_url,
+                "browser": "Chromium",
+                "execution_mode": "enhanced"
+            }
+        )
+        
+        # Initialize test state for backward compatibility
         self._test_state = TestState(
             test_plan=test_plan,
-            current_step=None,
-            completed_steps=[],
-            failed_steps=[],
-            skipped_steps=[],
             status=TestStatus.IN_PROGRESS,
-            start_time=datetime.now(timezone.utc),
-            error_count=0,
-            warning_count=0
+            start_time=self._test_report.started_at
         )
-        self._execution_history = []
-        self._step_index = 0  # Track current step index
         
-        # Navigate to initial URL if provided
-        if initial_url and self.browser_driver:
-            logger.info("Navigating to initial URL", extra={"url": initial_url})
-            await self.browser_driver.navigate(initial_url)
+        # Save initial report
+        await self._save_report()
         
-        # Execute steps
         try:
-            while self._test_state.status == TestStatus.IN_PROGRESS:
-                await self._execute_next_step()
+            # Navigate to initial URL if provided
+            if initial_url and self.browser_driver:
+                logger.info("Navigating to initial URL", extra={"url": initial_url})
+                await self.browser_driver.navigate(initial_url)
+            
+            # Execute each test case sequentially
+            for test_case in test_plan.test_cases:
+                await self._execute_test_case(test_case)
+                
+                # Save report after each test case
+                await self._save_report()
+            
+            # Finalize report
+            self._test_report.completed_at = datetime.now(timezone.utc)
+            self._test_report.status = self._determine_overall_status()
+            self._test_report.summary = self._calculate_summary()
+            
+            # Update test state
+            self._test_state.end_time = self._test_report.completed_at
+            self._test_state.status = self._test_report.status
+            
         except Exception as e:
-            logger.error("Test execution failed", extra={
+            logger.error("Test execution failed with error", extra={
                 "error": str(e),
-                "current_step": self._test_state.current_step
+                "test_plan": test_plan.name
             })
+            self._test_report.status = TestStatus.FAILED
             self._test_state.status = TestStatus.FAILED
-            self._test_state.error_count += 1
+            raise
         
-        # Set end time
-        self._test_state.end_time = datetime.now(timezone.utc)
+        finally:
+            # Save final report
+            await self._save_report()
+            
+            # Print summary to console
+            self._print_summary()
         
-        logger.info("Test execution completed", extra={
-            "test_status": self._test_state.status.value,
-            "completed_steps": len(self._test_state.completed_steps),
-            "total_steps": len(test_plan.steps)
-        })
-        
-        # Print enhanced terminal output with bug report summary
-        self._print_terminal_summary()
-        
-        return self._test_state
+        return self._test_report
     
-    async def _execute_next_step(self) -> None:
-        """Execute the next step in the test plan."""
-        # Check if all steps are completed
-        if self._step_index >= len(self._test_state.test_plan.steps):
-            # All steps completed
-            self._test_state.status = TestStatus.COMPLETED
-            return
-        
-        # Get next step
-        current_step = self._test_state.test_plan.steps[self._step_index]
-        self._test_state.current_step = current_step
-        
-        logger.info("Executing test step", extra={
-            "step_number": current_step.step_number,
-            "description": current_step.description,
-            "action_type": current_step.action_instruction.action_type.value,
-            "optional": current_step.optional
+    async def _execute_test_case(self, test_case: TestCase) -> TestCaseResult:
+        """Execute a single test case with all its steps."""
+        logger.info("Starting test case execution", extra={
+            "test_case_id": test_case.test_id,
+            "test_case_name": test_case.name,
+            "priority": test_case.priority.value,
+            "total_steps": len(test_case.steps)
         })
         
-        # Check dependencies
-        if not self._check_dependencies(current_step):
-            logger.warning("Step dependencies not met, skipping", extra={
-                "step_number": current_step.step_number,
-                "dependencies": [str(d) for d in current_step.dependencies]
+        self._current_test_case = test_case
+        
+        # Initialize test case result
+        case_result = TestCaseResult(
+            case_id=test_case.case_id,
+            test_id=test_case.test_id,
+            name=test_case.name,
+            status=TestStatus.IN_PROGRESS,
+            started_at=datetime.now(timezone.utc),
+            steps_total=len(test_case.steps),
+            steps_completed=0,
+            steps_failed=0
+        )
+        
+        # Add to report
+        self._test_report.test_cases.append(case_result)
+        
+        try:
+            # Check prerequisites
+            if not await self._verify_prerequisites(test_case.prerequisites):
+                case_result.status = TestStatus.BLOCKED
+                case_result.error_message = "Prerequisites not met"
+                return case_result
+            
+            # Execute each step
+            for step in test_case.steps:
+                step_result = await self._execute_test_step(step, test_case, case_result)
+                case_result.step_results.append(step_result)
+                
+                # Update counters
+                if step_result.status == TestStatus.COMPLETED:
+                    case_result.steps_completed += 1
+                elif step_result.status == TestStatus.FAILED:
+                    case_result.steps_failed += 1
+                    
+                    # Create bug report for failed step
+                    bug_report = await self._create_bug_report(
+                        step_result, step, test_case, case_result
+                    )
+                    if bug_report:
+                        case_result.bugs.append(bug_report)
+                        self._test_report.bugs.append(bug_report)
+                    
+                    # Determine if we should continue
+                    if not step.optional and await self._is_blocker_failure(step_result):
+                        logger.error("Blocker failure detected, stopping test case", extra={
+                            "step_number": step.step_number,
+                            "test_case": test_case.name
+                        })
+                        case_result.status = TestStatus.FAILED
+                        break
+                
+                # Save report after each step
+                await self._save_report()
+            
+            # Verify postconditions if test case completed
+            if case_result.status != TestStatus.FAILED:
+                if await self._verify_postconditions(test_case.postconditions):
+                    case_result.status = TestStatus.COMPLETED
+                else:
+                    case_result.status = TestStatus.FAILED
+                    case_result.error_message = "Postconditions not met"
+            
+        except Exception as e:
+            logger.error("Test case execution failed", extra={
+                "error": str(e),
+                "test_case": test_case.name
             })
-            self._mark_step_skipped(current_step)
-            return
+            case_result.status = TestStatus.FAILED
+            case_result.error_message = str(e)
         
-        # Determine execution mode
-        execution_mode = await self._determine_execution_mode(current_step)
+        finally:
+            case_result.completed_at = datetime.now(timezone.utc)
         
-        # Execute the step
-        step_result = await self._execute_step(current_step, execution_mode)
-        
-        # Update state based on result
-        await self._update_state(current_step, step_result)
+        return case_result
     
-    def _check_dependencies(self, step: TestStep) -> bool:
-        """Check if all step dependencies are satisfied."""
+    async def _execute_test_step(
+        self,
+        step: TestStep,
+        test_case: TestCase,
+        case_result: TestCaseResult
+    ) -> StepResult:
+        """Execute a single test step with intelligent interpretation."""
+        logger.info("Executing test step", extra={
+            "step_number": step.step_number,
+            "action": step.action,
+            "test_case": test_case.name
+        })
+        
+        self._current_test_step = step
+        
+        # Initialize step result
+        step_result = StepResult(
+            step_id=step.step_id,
+            step_number=step.step_number,
+            status=TestStatus.IN_PROGRESS,
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),  # Will update later
+            action=step.action,
+            expected_result=step.expected_result,
+            actual_result=""
+        )
+        
+        try:
+            # Check dependencies
+            if not self._check_dependencies(step, case_result):
+                step_result.status = TestStatus.SKIPPED
+                step_result.actual_result = "Skipped due to unmet dependencies"
+                return step_result
+            
+            # Capture before screenshot
+            if self.browser_driver:
+                screenshot_before = await self.browser_driver.screenshot()
+                screenshot_path = self._save_screenshot(
+                    screenshot_before,
+                    f"tc{test_case.test_id}_step{step.step_number}_before"
+                )
+                step_result.screenshot_before = str(screenshot_path)
+            
+            # Interpret step and decompose into actions
+            actions = await self._interpret_step(step, test_case, case_result)
+            
+            # Execute each action
+            success = True
+            actual_outcomes = []
+            
+            for action in actions:
+                logger.debug("Executing sub-action", extra={
+                    "action_type": action["type"],
+                    "description": action.get("description", "")
+                })
+                
+                action_result = await self._execute_action(action, step)
+                step_result.actions_performed.append(action_result)
+                
+                if not action_result.get("success", False):
+                    success = False
+                    actual_outcomes.append(f"Failed: {action_result.get('error', 'Unknown error')}")
+                    
+                    # Determine if we should continue with remaining actions
+                    if action.get("critical", True):
+                        break
+                else:
+                    actual_outcomes.append(action_result.get("outcome", "Action completed"))
+            
+            # Capture after screenshot
+            if self.browser_driver:
+                await asyncio.sleep(1)  # Brief wait for UI to stabilize
+                screenshot_after = await self.browser_driver.screenshot()
+                screenshot_path = self._save_screenshot(
+                    screenshot_after,
+                    f"tc{test_case.test_id}_step{step.step_number}_after"
+                )
+                step_result.screenshot_after = str(screenshot_path)
+            
+            # Evaluate overall step result
+            if success:
+                # Verify expected outcome is achieved
+                verification = await self._verify_expected_outcome(
+                    step.expected_result,
+                    actual_outcomes
+                )
+                
+                if verification["success"]:
+                    step_result.status = TestStatus.COMPLETED
+                    step_result.actual_result = verification["actual_outcome"]
+                else:
+                    step_result.status = TestStatus.FAILED
+                    step_result.actual_result = verification["actual_outcome"]
+                    step_result.error_message = verification.get("reason", "Verification failed")
+                
+                step_result.confidence = verification.get("confidence", 0.0)
+            else:
+                step_result.status = TestStatus.FAILED
+                step_result.actual_result = "; ".join(actual_outcomes)
+                step_result.error_message = "One or more actions failed"
+            
+        except Exception as e:
+            logger.error("Step execution failed", extra={
+                "error": str(e),
+                "step_number": step.step_number
+            })
+            step_result.status = TestStatus.FAILED
+            step_result.actual_result = f"Error: {str(e)}"
+            step_result.error_message = str(e)
+        
+        finally:
+            step_result.completed_at = datetime.now(timezone.utc)
+            
+            # Add to execution history
+            self._execution_history.append({
+                "test_case": test_case.name,
+                "step": step.step_number,
+                "action": step.action,
+                "result": step_result.status.value,
+                "timestamp": step_result.completed_at
+            })
+        
+        return step_result
+    
+    async def _interpret_step(
+        self,
+        step: TestStep,
+        test_case: TestCase,
+        case_result: TestCaseResult
+    ) -> List[Dict[str, Any]]:
+        """
+        Interpret a test step and decompose it into executable actions.
+        
+        Returns a list of actions to be executed sequentially.
+        """
+        # Build context for interpretation
+        # Convert recent history to JSON-serializable format
+        recent_history = []
+        for item in self._execution_history[-3:]:
+            recent_history.append({
+                "test_case": item.get("test_case", ""),
+                "step": item.get("step", 0),
+                "action": item.get("action", ""),
+                "result": item.get("result", ""),
+                "timestamp": item.get("timestamp").isoformat() if isinstance(item.get("timestamp"), datetime) else str(item.get("timestamp", ""))
+            })
+        
+        context = {
+            "test_case": test_case.name,
+            "step_number": step.step_number,
+            "action": step.action,
+            "expected_result": step.expected_result,
+            "recent_history": recent_history,
+            "current_url": self._initial_url
+        }
+        
+        # Use AI to interpret the step
+        prompt = f"""Analyze this test step and break it down into specific browser actions:
+
+Test Case: {context['test_case']}
+Step {context['step_number']}: {context['action']}
+Expected Result: {context['expected_result']}
+
+Recent actions:
+{json.dumps(context['recent_history'], indent=2)}
+
+Break this down into a sequence of specific actions. For each action provide:
+1. type: The action type (navigate, click, type, scroll, wait, assert)
+2. target: What element/location to interact with (be specific)
+3. value: Any value needed (for type actions)
+4. description: Brief description of what this action does
+5. critical: Whether failure should stop remaining actions (true/false)
+
+Consider:
+- Do we need to scroll to make elements visible?
+- Should we wait for page loads or animations?
+- Are there multiple UI interactions needed?
+- Should we verify intermediate states?
+
+Respond with a JSON object containing an "actions" array."""
+
+        try:
+            response = await self.call_openai(
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            
+            content = json.loads(response.get("content", "{}"))
+            actions = content.get("actions", [])
+            
+            # Fallback to simple interpretation if AI fails
+            if not actions:
+                actions = [self._create_simple_action(step)]
+            
+            logger.debug("Step interpretation", extra={
+                "step": step.step_number,
+                "original_action": step.action,
+                "decomposed_actions": len(actions)
+            })
+            
+            return actions
+            
+        except Exception as e:
+            logger.warning("Failed to interpret step with AI, using simple action", extra={
+                "error": str(e),
+                "step": step.step_number
+            })
+            return [self._create_simple_action(step)]
+    
+    def _create_simple_action(self, step: TestStep) -> Dict[str, Any]:
+        """Create a simple action from a test step as fallback."""
+        # Map step action to ActionType
+        action_keywords = {
+            "navigate": ActionType.NAVIGATE,
+            "click": ActionType.CLICK,
+            "type": ActionType.TYPE,
+            "enter": ActionType.TYPE,
+            "scroll": ActionType.SCROLL,
+            "verify": ActionType.ASSERT,
+            "check": ActionType.ASSERT,
+            "assert": ActionType.ASSERT,
+            "wait": ActionType.WAIT
+        }
+        
+        # Determine action type from step action text
+        action_lower = step.action.lower()
+        action_type = ActionType.ASSERT  # Default
+        
+        for keyword, atype in action_keywords.items():
+            if keyword in action_lower:
+                action_type = atype
+                break
+        
+        return {
+            "type": action_type.value,
+            "target": step.action,
+            "value": None,
+            "description": step.action,
+            "critical": not step.optional
+        }
+    
+    async def _execute_action(
+        self,
+        action: Dict[str, Any],
+        step: TestStep
+    ) -> Dict[str, Any]:
+        """Execute a single decomposed action."""
+        action_type = action.get("type", "assert")
+        
+        try:
+            if not self.action_agent or not self.browser_driver:
+                return {
+                    "success": False,
+                    "error": "Action agent or browser driver not available"
+                }
+            
+            # Create ActionInstruction for the action
+            instruction = ActionInstruction(
+                action_type=ActionType(action_type),
+                description=action.get("description", ""),
+                target=action.get("target", ""),
+                value=action.get("value"),
+                expected_outcome=action.get("expected_outcome", step.expected_result)
+            )
+            
+            # Create a temporary TestStep for the action
+            action_step = TestStep(
+                step_number=step.step_number,
+                description=action.get("description", step.description),
+                action=action.get("description", step.action),
+                expected_result=action.get("expected_outcome", step.expected_result),
+                action_instruction=instruction,
+                optional=not action.get("critical", True)
+            )
+            
+            # Build context
+            test_context = {
+                "test_plan_name": self._current_test_plan.name,
+                "test_case_name": self._current_test_case.name,
+                "step_number": step.step_number,
+                "action_description": action.get("description", ""),
+                "recent_actions": self._execution_history[-3:]
+            }
+            
+            # Get screenshot
+            screenshot = await self.browser_driver.screenshot()
+            
+            # Execute via Action Agent
+            result = await self.action_agent.execute_action(
+                test_step=action_step,
+                test_context=test_context,
+                screenshot=screenshot
+            )
+            
+            # Process result
+            success = (
+                result.validation.valid if result.validation else False
+            ) and (
+                result.execution.success if result.execution else False
+            )
+            
+            outcome = "Action completed"
+            if result.ai_analysis:
+                outcome = result.ai_analysis.actual_outcome
+            
+            return {
+                "success": success,
+                "action_type": action_type,
+                "target": action.get("target", ""),
+                "outcome": outcome,
+                "confidence": result.ai_analysis.confidence if result.ai_analysis else 0.0,
+                "error": result.execution.error_message if (result.execution and not success) else None
+            }
+            
+        except Exception as e:
+            logger.error("Action execution failed", extra={
+                "error": str(e),
+                "action_type": action_type
+            })
+            return {
+                "success": False,
+                "action_type": action_type,
+                "error": str(e)
+            }
+    
+    async def _verify_expected_outcome(
+        self,
+        expected: str,
+        actual_outcomes: List[str]
+    ) -> Dict[str, Any]:
+        """Use AI to verify if expected outcome was achieved."""
+        prompt = f"""Compare the expected outcome with what actually happened:
+
+Expected: {expected}
+
+Actual outcomes:
+{chr(10).join(f"- {outcome}" for outcome in actual_outcomes)}
+
+Determine:
+1. Was the expected outcome achieved? (true/false)
+2. What was the actual outcome? (concise summary)
+3. Confidence in this assessment (0.0-1.0)
+4. If not achieved, what was the reason?
+
+Respond in JSON format with keys: success, actual_outcome, confidence, reason"""
+
+        try:
+            response = await self.call_openai(
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.get("content", "{}")
+            if isinstance(content, str):
+                result = json.loads(content)
+            else:
+                result = content
+            
+            # Debug logging
+            logger.debug("Verification result", extra={
+                "expected": expected,
+                "actual_outcomes": actual_outcomes,
+                "result": result
+            })
+            
+            # Ensure required keys exist with proper types
+            if "success" not in result:
+                result["success"] = False
+            else:
+                # Ensure success is a boolean, not a string
+                result["success"] = bool(result["success"])
+            if "actual_outcome" not in result:
+                result["actual_outcome"] = "; ".join(actual_outcomes)
+            if "confidence" not in result:
+                result["confidence"] = 0.5
+                
+            return result
+            
+        except Exception as e:
+            logger.error("Failed to verify outcome with AI", extra={
+                "error": str(e), 
+                "traceback": traceback.format_exc(),
+                "expected": expected,
+                "actual_outcomes": actual_outcomes
+            })
+            # Raise the exception - don't fallback
+            raise
+    
+    async def _create_bug_report(
+        self,
+        step_result: StepResult,
+        step: TestStep,
+        test_case: TestCase,
+        case_result: TestCaseResult
+    ) -> Optional[BugReport]:
+        """Create a detailed bug report for a failed step."""
+        if step_result.status != TestStatus.FAILED:
+            return None
+        
+        # Determine error type and severity
+        error_type = "unknown_error"
+        severity = BugSeverity.MEDIUM
+        
+        error_lower = (step_result.error_message or "").lower()
+        if "not found" in error_lower or "element" in error_lower:
+            error_type = "element_not_found"
+            severity = BugSeverity.HIGH if not step.optional else BugSeverity.MEDIUM
+        elif "assert" in error_lower or "verification" in error_lower:
+            error_type = "assertion_failed"
+            severity = BugSeverity.HIGH
+        elif "timeout" in error_lower:
+            error_type = "timeout"
+            severity = BugSeverity.MEDIUM
+        elif "navigation" in error_lower:
+            error_type = "navigation_error"
+            severity = BugSeverity.CRITICAL
+        
+        # Build reproduction steps
+        reproduction_steps = [
+            f"1. Execute test case: {test_case.name}",
+            f"2. Navigate to step {step.step_number}: {step.action}"
+        ]
+        
+        # Add recent successful steps for context
+        for i, result in enumerate(case_result.step_results[-3:]):
+            if result.status == TestStatus.COMPLETED:
+                reproduction_steps.append(
+                    f"{i+3}. Previous step completed: Step {result.step_number}"
+                )
+        
+        reproduction_steps.append(
+            f"{len(reproduction_steps)+1}. Execute failing step: {step.action}"
+        )
+        
+        bug_report = BugReport(
+            step_id=step.step_id,
+            test_case_id=test_case.case_id,
+            test_plan_id=self._current_test_plan.plan_id,
+            step_number=step.step_number,
+            description=f"Step {step.step_number} failed: {step.action}",
+            severity=severity,
+            error_type=error_type,
+            expected_result=step.expected_result,
+            actual_result=step_result.actual_result,
+            screenshot_path=step_result.screenshot_after,
+            error_details=step_result.error_message,
+            reproduction_steps=reproduction_steps
+        )
+        
+        logger.info("Bug report created", extra={
+            "bug_id": str(bug_report.bug_id),
+            "severity": severity.value,
+            "error_type": error_type
+        })
+        
+        return bug_report
+    
+    async def _is_blocker_failure(self, step_result: StepResult) -> bool:
+        """Determine if a failure should block test case execution."""
+        # Navigation errors are always blockers
+        if "navigation" in (step_result.error_message or "").lower():
+            return True
+        
+        # Critical element not found
+        if "not found" in (step_result.error_message or "").lower():
+            # Use AI to determine criticality
+            prompt = f"""Analyze if this failure should stop the test case:
+
+Failed action: {step_result.action}
+Error: {step_result.error_message}
+Expected: {step_result.expected_result}
+Actual: {step_result.actual_result}
+
+Is this a critical failure that prevents continuing the test? Consider:
+- Can subsequent steps still be meaningful?
+- Is this a core functionality failure?
+- Would continuing provide useful information?
+
+Respond with JSON: {{"is_blocker": true/false, "reasoning": "explanation"}}"""
+
+            try:
+                response = await self.call_openai(
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"}
+                )
+                result = json.loads(response.get("content", "{}"))
+                return result.get("is_blocker", True)
+                
+            except Exception:
+                # Default to blocking on error
+                return True
+        
+        return False
+    
+    async def _verify_prerequisites(self, prerequisites: List[str]) -> bool:
+        """Verify test case prerequisites are met."""
+        if not prerequisites:
+            return True
+        
+        # For now, log prerequisites and assume they're met
+        # In future, could implement actual verification
+        logger.info("Checking prerequisites", extra={
+            "prerequisites": prerequisites
+        })
+        
+        return True
+    
+    async def _verify_postconditions(self, postconditions: List[str]) -> bool:
+        """Verify test case postconditions are met."""
+        if not postconditions:
+            return True
+        
+        # Take screenshot for verification
+        if self.browser_driver:
+            screenshot = await self.browser_driver.screenshot()
+            
+            # Use AI to verify postconditions
+            prompt = f"""Verify these postconditions are met based on the current state:
+
+Postconditions:
+{chr(10).join(f"- {pc}" for pc in postconditions)}
+
+Analyze the screenshot and determine if all postconditions are satisfied.
+
+Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...]}}"""
+
+            # For now, assume postconditions are met
+            # Full implementation would analyze screenshot with AI
+            logger.info("Checking postconditions", extra={
+                "postconditions": postconditions
+            })
+        
+        return True
+    
+    def _check_dependencies(self, step: TestStep, case_result: TestCaseResult) -> bool:
+        """Check if step dependencies are satisfied."""
         if not step.dependencies:
             return True
         
-        # Check if all dependencies are in completed_steps
-        for dep_step_id in step.dependencies:
-            if dep_step_id not in self._test_state.completed_steps:
+        # Check if all dependent steps completed successfully
+        for dep_num in step.dependencies:
+            # Find the step result for the dependency
+            dep_result = next(
+                (r for r in case_result.step_results if r.step_number == dep_num),
+                None
+            )
+            
+            if not dep_result or dep_result.status != TestStatus.COMPLETED:
+                logger.warning("Step dependency not met", extra={
+                    "step": step.step_number,
+                    "dependency": dep_num,
+                    "dependency_status": dep_result.status.value if dep_result else "not_found"
+                })
                 return False
         
         return True
     
-    async def _determine_execution_mode(self, step: TestStep) -> ExecutionMode:
-        """Determine the best execution mode for a step."""
-        # Check if we have a scripted action for this step
-        step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
+    def _determine_overall_status(self) -> TestStatus:
+        """Determine overall test execution status."""
+        if not self._test_report.test_cases:
+            return TestStatus.FAILED
         
-        if step_key in self._scripted_actions:
-            # We have a recorded action, try scripted mode
-            return ExecutionMode.HYBRID
+        # If any test case failed, overall status is failed
+        failed_cases = [tc for tc in self._test_report.test_cases 
+                       if tc.status == TestStatus.FAILED]
+        if failed_cases:
+            return TestStatus.FAILED
         
-        # Default to visual mode for new steps
-        return ExecutionMode.VISUAL
+        # If all completed, overall is completed
+        all_completed = all(tc.status == TestStatus.COMPLETED 
+                           for tc in self._test_report.test_cases)
+        if all_completed:
+            return TestStatus.COMPLETED
+        
+        # Otherwise, partial completion
+        return TestStatus.BLOCKED
     
-    async def _execute_step(
-        self, step: TestStep, mode: ExecutionMode
-    ) -> TestStepResult:
-        """Execute a single test step."""
-        screenshot_before = None
-        screenshot_after = None
-        action_result = None
-        evaluation_result = None
+    def _calculate_summary(self) -> TestSummary:
+        """Calculate test execution summary statistics."""
+        total_cases = len(self._test_report.test_cases)
+        completed_cases = sum(1 for tc in self._test_report.test_cases 
+                             if tc.status == TestStatus.COMPLETED)
+        failed_cases = sum(1 for tc in self._test_report.test_cases 
+                          if tc.status == TestStatus.FAILED)
         
-        try:
-            # Capture pre-action screenshot
-            if self.browser_driver:
-                screenshot_before = await self.browser_driver.screenshot()
-            
-            # Initialize step result details
-            self._current_step_result_details = None
-            
-            # Execute action based on mode
-            if mode == ExecutionMode.VISUAL:
-                action_result = await self._execute_visual_action(step)
-            elif mode == ExecutionMode.SCRIPTED:
-                action_result = await self._execute_scripted_action(step)
-            else:  # HYBRID
-                action_result = await self._execute_hybrid_action(step)
-            
-            # Action Agent now handles waiting and screenshot capture
-            # Get screenshot after from Action Agent results if available
-            if (self._current_step_result_details and 
-                self._current_step_result_details.browser_state_after and
-                self._current_step_result_details.browser_state_after.screenshot):
-                screenshot_after = self._current_step_result_details.browser_state_after.screenshot
-            elif self.browser_driver:
-                # Fallback for non-visual modes
-                await asyncio.sleep(1.0)
-                screenshot_after = await self.browser_driver.screenshot()
-                
-                # Debug: Save screenshots for inspection
-                import os
-                os.makedirs("debug_screenshots", exist_ok=True)
-                with open(f"debug_screenshots/step_{step.step_number}_after.png", "wb") as f:
-                    f.write(screenshot_after)
-            
-            # Extract evaluation from AI analysis in action result details
-            evaluation_result = None
-            success = True
-            actual_outcome = "Action completed"
-            
-            if self._current_step_result_details:
-                ai_analysis = self._current_step_result_details.ai_analysis
-                if ai_analysis:
-                    # Use AI analysis from Action Agent as evaluation
-                    success = ai_analysis.success
-                    actual_outcome = ai_analysis.actual_outcome
-                    
-                    # Create EvaluationResult for backward compatibility
-                    evaluation_result = EvaluationResult(
-                        step_id=step.step_id,
-                        success=success,
-                        expected_outcome=step.action_instruction.expected_outcome,
-                        actual_outcome=actual_outcome,
-                        confidence=ai_analysis.confidence,
-                        deviations=ai_analysis.anomalies
-                    )
-                    
-                    # Debug logging for failed evaluations
-                    if not success:
-                        logger.warning("Step evaluation failed", extra={
-                            "step_number": step.step_number,
-                            "expected": step.action_instruction.expected_outcome,
-                            "actual": actual_outcome,
-                            "confidence": ai_analysis.confidence,
-                            "deviations": ai_analysis.anomalies
-                        })
-                else:
-                    # No AI analysis available, use execution success
-                    if hasattr(self._current_step_result_details, 'execution') and self._current_step_result_details.execution:
-                        success = self._current_step_result_details.execution.success
-                        actual_outcome = "Action executed" if success else "Action failed"
-                    else:
-                        success = self._current_step_result_details.overall_success
-                        actual_outcome = "Action executed" if success else "Action failed"
-            
-            return TestStepResult(
-                step=step,
-                success=success,
-                action_taken=action_result,
-                actual_result=actual_outcome,
-                screenshot_before=screenshot_before,
-                screenshot_after=screenshot_after,
-                evaluation=evaluation_result,
-                execution_mode=mode.value,
-                action_result_details=self._current_step_result_details
-            )
-            
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            logger.error("Step execution failed", extra={
-                "step_number": step.step_number,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": tb
-            })
-            
-            return TestStepResult(
-                step=step,
-                success=False,
-                action_taken=None,
-                actual_result=f"Error: {str(e)}",
-                screenshot_before=screenshot_before,
-                screenshot_after=screenshot_after,
-                evaluation=None,
-                execution_mode=mode.value
-            )
-    
-    def _build_test_context(self, step: TestStep) -> Dict[str, Any]:
-        """Build comprehensive context for Action Agent."""
-        # Get recent step summaries
-        recent_steps = []
-        for result in self._execution_history[-3:]:  # Last 3 steps
-            recent_steps.append({
-                "step_number": result.step.step_number,
-                "description": result.step.description,
-                "success": result.success,
-                "result": result.actual_result
-            })
+        total_steps = sum(tc.steps_total for tc in self._test_report.test_cases)
+        completed_steps = sum(tc.steps_completed for tc in self._test_report.test_cases)
+        failed_steps = sum(tc.steps_failed for tc in self._test_report.test_cases)
         
-        # Build previous steps summary
-        previous_steps_summary = ""
-        if recent_steps:
-            previous_steps_summary = "Recent steps: " + "; ".join([
-                f"Step {s['step_number']} ({s['description']}): {'Success' if s['success'] else 'Failed'}"
-                for s in recent_steps
-            ])
+        # Count bugs by severity
+        critical_bugs = sum(1 for bug in self._test_report.bugs 
+                           if bug.severity == BugSeverity.CRITICAL)
+        high_bugs = sum(1 for bug in self._test_report.bugs 
+                       if bug.severity == BugSeverity.HIGH)
+        medium_bugs = sum(1 for bug in self._test_report.bugs 
+                         if bug.severity == BugSeverity.MEDIUM)
+        low_bugs = sum(1 for bug in self._test_report.bugs 
+                      if bug.severity == BugSeverity.LOW)
         
-        # Phase 8b: Include URL information in test context
-        context = {
-            "test_plan_name": self._current_test_plan.name if self._current_test_plan else "Unknown",
-            "test_plan_description": self._current_test_plan.description if self._current_test_plan else "Unknown",
-            "current_step_description": step.description,
-            "current_step_number": step.step_number,
-            "total_steps": len(self._current_test_plan.steps) if self._current_test_plan else 0,
-            "completed_steps": len(self._test_state.completed_steps) if self._test_state else 0,
-            "previous_steps_summary": previous_steps_summary,
-            "recent_failures": sum(1 for r in self._execution_history[-3:] if not r.success),
-            "expected_outcome": step.action_instruction.expected_outcome,
-            "step_dependencies": [str(d) for d in step.dependencies] if step.dependencies else [],
-            "optional_step": step.optional
-        }
-        
-        # Add URL info if available
-        if self._initial_url:
-            context["url"] = self._initial_url
-            # Simulate test_scenario structure for navigation workflow
-            context["test_scenario"] = {
-                "url": self._initial_url,
-                "name": self._current_test_plan.name if self._current_test_plan else "Test"
-            }
-        
-        return context
-    
-    async def _execute_visual_action(self, step: TestStep) -> Optional[ActionResult]:
-        """Execute action using visual AI interaction."""
-        if not self.action_agent or not self.browser_driver:
-            logger.warning("Visual execution not available - missing dependencies")
-            return None
-        
-        # Build comprehensive context for Action Agent
-        test_context = self._build_test_context(step)
-        
-        # Get current screenshot
-        screenshot = await self.browser_driver.screenshot()
-        
-        # Use new Action Agent method that owns full action lifecycle
-        enhanced_result = await self.action_agent.execute_action(
-            test_step=step,
-            test_context=test_context,
-            screenshot=screenshot
-        )
-        
-        # Store detailed result for debugging
-        self._current_step_result_details = enhanced_result
-        
-        # Convert to ActionResult for backward compatibility
-        action_result = None
-        if enhanced_result.validation.valid:
-            # For actions that have coordinates (click, type)
-            if enhanced_result.coordinates:
-                action_result = ActionResult(
-                    action_type=step.action_instruction.action_type.value,
-                    grid_cell=enhanced_result.coordinates.grid_cell,
-                    offset_x=enhanced_result.coordinates.offset_x,
-                    offset_y=enhanced_result.coordinates.offset_y,
-                    confidence=enhanced_result.coordinates.confidence,
-                    requires_refinement=enhanced_result.coordinates.refined
-                )
-            else:
-                # For actions without coordinates (navigate, assert)
-                action_result = ActionResult(
-                    action_type=step.action_instruction.action_type.value,
-                    grid_cell="N/A",  # No grid cell for navigation/assert
-                    offset_x=0.0,
-                    offset_y=0.0,
-                    confidence=enhanced_result.validation.confidence,
-                    requires_refinement=False
-                )
-            
-            # Record successful action for future use if execution succeeded
-            if enhanced_result.execution and enhanced_result.execution.success:
-                self._record_action(step, action_result)
-        
-        return action_result
-    
-    async def _execute_scripted_action(self, step: TestStep) -> Optional[ActionResult]:
-        """Execute action using recorded script."""
-        if not self._current_test_plan:
-            return None
-        step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
-        scripted_action = self._scripted_actions.get(step_key)
-        
-        if not scripted_action or not self.browser_driver:
-            return None
-        
-        try:
-            # Get viewport size to calculate pixels from grid coordinates
-            viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
-            
-            # Create grid overlay to convert coordinates
-            from src.grid.overlay import GridOverlay
-            grid = GridOverlay()
-            grid.initialize(viewport_width, viewport_height)
-            
-            from src.core.types import GridCoordinate
-            coord = GridCoordinate(
-                cell=scripted_action["grid_cell"],
-                offset_x=scripted_action["offset_x"],
-                offset_y=scripted_action["offset_y"],
-                confidence=1.0
-            )
-            
-            # Convert to pixel coordinates
-            x, y = grid.coordinate_to_pixels(coord)
-            
-            # Execute the scripted action
-            action_type = scripted_action["action_type"]
-            
-            if action_type == "click":
-                await self.browser_driver.click(x, y)
-            elif action_type == "type":
-                # Click to focus first
-                await self.browser_driver.click(x, y)
-                await self.browser_driver.wait(200)
-                # Type the text from instruction
-                if step.action_instruction.value:
-                    await self.browser_driver.type_text(step.action_instruction.value)
-                    await self.browser_driver.wait(500)
-            
-            # Return a synthetic action result
-            return ActionResult(
-                action_type=action_type,
-                grid_cell=scripted_action.get("grid_cell", "N/A"),
-                offset_x=scripted_action.get("offset_x", 0.5),
-                offset_y=scripted_action.get("offset_y", 0.5),
-                confidence=1.0,
-                requires_refinement=False
-            )
-            
-        except Exception as e:
-            logger.warning("Scripted action failed", extra={
-                "step": step_key,
-                "error": str(e)
-            })
-            return None
-    
-    async def _execute_hybrid_action(self, step: TestStep) -> Optional[ActionResult]:
-        """Try scripted execution, fall back to visual if needed."""
-        # Try scripted first
-        result = await self._execute_scripted_action(step)
-        
-        if result:
-            return result
-        
-        # Fall back to visual
-        logger.info("Falling back to visual execution", extra={
-            "step_number": step.step_number
-        })
-        return await self._execute_visual_action(step)
-    
-    
-    def _record_action(self, step: TestStep, action: ActionResult) -> None:
-        """Record successful action for future scripted execution."""
-        if not self._current_test_plan:
-            return
-        step_key = f"{self._current_test_plan.plan_id}:{step.step_number}"
-        
-        # Don't record pixel coordinates here - they should be calculated
-        # dynamically based on viewport size when replaying
-        self._scripted_actions[step_key] = {
-            "action_type": action.action_type,
-            "grid_cell": action.grid_cell,
-            "offset_x": action.offset_x,
-            "offset_y": action.offset_y,
-            "timestamp": action.timestamp.isoformat()
-        }
-    
-    async def _update_state(self, step: TestStep, result: TestStepResult) -> None:
-        """Update test state after step execution."""
-        # Add to history
-        self._execution_history.append(result)
-        
-        if result.success:
-            # Add to completed steps
-            self._test_state.completed_steps.append(step.step_id)
-            # Move to next step
-            self._step_index += 1
+        # Calculate execution time
+        if self._test_report.completed_at and self._test_report.started_at:
+            execution_time = (
+                self._test_report.completed_at - self._test_report.started_at
+            ).total_seconds()
         else:
-            # Add to failed steps
-            self._test_state.failed_steps.append(step.step_id)
-            self._test_state.error_count += 1
-            
-            # Handle failure
-            if not step.optional:
-                logger.error("Required step failed, ending test", extra={
-                    "step_number": step.step_number
-                })
-                self._test_state.status = TestStatus.FAILED
-            else:
-                logger.warning("Optional step failed, continuing", extra={
-                    "step_number": step.step_number
-                })
-                # Move to next step even if optional step failed
-                self._step_index += 1
+            execution_time = 0.0
         
-        # Check for completion
-        if self._step_index >= len(self._test_state.test_plan.steps) and self._test_state.status == TestStatus.IN_PROGRESS:
-            self._test_state.status = TestStatus.COMPLETED
+        # Calculate success rate
+        success_rate = completed_steps / total_steps if total_steps > 0 else 0.0
         
-        # Use AI to analyze overall progress and determine next action
-        # TODO: Fix this after unifying TestState
-        # await self._analyze_progress()
-    
-    def _mark_step_skipped(self, step: TestStep) -> None:
-        """Mark a step as skipped due to unmet dependencies."""
-        result = TestStepResult(
-            step=step,
-            success=False,
-            action_taken=None,
-            actual_result="Skipped due to unmet dependencies",
-            screenshot_before=None,
-            screenshot_after=None,
-            evaluation=None,
-            execution_mode="skipped"
+        return TestSummary(
+            total_test_cases=total_cases,
+            completed_test_cases=completed_cases,
+            failed_test_cases=failed_cases,
+            total_steps=total_steps,
+            completed_steps=completed_steps,
+            failed_steps=failed_steps,
+            critical_bugs=critical_bugs,
+            high_bugs=high_bugs,
+            medium_bugs=medium_bugs,
+            low_bugs=low_bugs,
+            success_rate=success_rate,
+            execution_time_seconds=execution_time
         )
-        
-        self._execution_history.append(result)
-        self._test_state.skipped_steps.append(step.step_id)
-        # Move to next step
-        self._step_index += 1
     
-    async def _analyze_progress(self) -> None:
-        """Use AI to analyze test progress and make decisions."""
-        # Build context for AI
-        context = {
-            "test_plan": self._current_test_plan.name,
-            "completed_steps": len(self._test_state.completed_steps),
-            "total_steps": len(self._current_test_plan.steps),
-            "recent_results": [
-                {
-                    "step": r.step.description,
-                    "success": r.success,
-                    "result": r.actual_result
-                }
-                for r in self._execution_history[-3:]  # Last 3 results
-            ]
-        }
+    def _save_screenshot(self, screenshot: bytes, name: str) -> Path:
+        """Save screenshot to disk and return path."""
+        screenshots_dir = self.report_dir / "screenshots"
+        screenshots_dir.mkdir(exist_ok=True)
         
-        prompt = f"""Analyze the current test execution progress:
-
-Test Plan: {context['test_plan']}
-Progress: {context['completed_steps']}/{context['total_steps']} steps completed
-
-Recent Results:
-{json.dumps(context['recent_results'], indent=2)}
-
-Based on this information, provide:
-1. Overall assessment of test progress
-2. Any concerns or patterns noticed
-3. Recommendations for next steps
-
-Respond in JSON format with keys: assessment, concerns, recommendations"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{name}_{timestamp}.png"
+        filepath = screenshots_dir / filename
         
-        try:
-            response = await self.call_openai(
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
-            
-            analysis = json.loads(response.get("content", "{}"))
-            logger.info("Test progress analysis", extra=analysis)
-            
-            # Store analysis in context
-            self._test_state.context["latest_analysis"] = analysis
-            
-        except Exception as e:
-            logger.warning("Failed to analyze progress", extra={"error": str(e)})
+        with open(filepath, "wb") as f:
+            f.write(screenshot)
+        
+        return filepath
     
-    async def judge_final_test_result(self) -> Dict[str, Any]:
-        """
-        Make final judgment on test execution with full context.
+    async def _save_report(self) -> None:
+        """Save the current test report to disk."""
+        if not self._test_report:
+            return
         
-        Returns comprehensive analysis of test execution success/failure.
-        """
-        if not self._test_state or not self._current_test_plan:
-            return {
-                "overall_success": False,
-                "confidence": 0.0,
-                "reasoning": "No test state available"
-            }
-        
-        # Build comprehensive summary
-        total_steps = len(self._current_test_plan.steps)
-        completed_steps = len(self._test_state.completed_steps)
-        failed_steps = len(self._test_state.failed_steps)
-        skipped_steps = len(self._test_state.skipped_steps)
-        
-        # Get detailed failure information
-        failure_details = []
-        for result in self._execution_history:
-            if not result.success:
-                detail = {
-                    "step_number": result.step.step_number,
-                    "description": result.step.description,
-                    "expected": result.step.action_instruction.expected_outcome,
-                    "actual": result.actual_result,
-                    "optional": result.step.optional
-                }
-                # Add enhanced debugging info if available
-                if result.action_result_details:
-                    if hasattr(result.action_result_details, 'validation'):
-                        # New EnhancedActionResult format
-                        detail["validation_passed"] = result.action_result_details.validation.valid if result.action_result_details.validation else False
-                        detail["validation_reasoning"] = result.action_result_details.validation.reasoning if result.action_result_details.validation else ""
-                        detail["execution_error"] = result.action_result_details.execution.error_message if (result.action_result_details.execution and result.action_result_details.execution.error_message) else ""
-                        detail["ai_analysis"] = {
-                            "success": result.action_result_details.ai_analysis.success if result.action_result_details.ai_analysis else False,
-                            "confidence": result.action_result_details.ai_analysis.confidence if result.action_result_details.ai_analysis else 0.0,
-                            "actual_outcome": result.action_result_details.ai_analysis.actual_outcome if result.action_result_details.ai_analysis else "",
-                            "anomalies": result.action_result_details.ai_analysis.anomalies if result.action_result_details.ai_analysis else [],
-                            "recommendations": result.action_result_details.ai_analysis.recommendations if result.action_result_details.ai_analysis else []
-                        }
-                    elif isinstance(result.action_result_details, dict):
-                        # Old dictionary format (fallback)
-                        detail["validation_passed"] = result.action_result_details.get("validation_passed", False)
-                        detail["validation_reasoning"] = result.action_result_details.get("validation_reasoning", "")
-                        detail["execution_error"] = result.action_result_details.get("execution_error", "")
-                        detail["ai_analysis"] = result.action_result_details.get("ai_analysis", {})
-                failure_details.append(detail)
-        
-        # Use AI to make final judgment
-        prompt = f"""Analyze the complete test execution and provide final judgment:
-
-Test Plan: {self._current_test_plan.name}
-Description: {self._current_test_plan.description}
-
-Execution Summary:
-- Total Steps: {total_steps}
-- Completed Successfully: {completed_steps}
-- Failed: {failed_steps}
-- Skipped: {skipped_steps}
-
-Failure Details:
-{json.dumps(failure_details, indent=2)}
-
-Based on this information, provide:
-1. Overall success (true/false) - consider if the test objective was achieved
-2. Confidence in judgment (0.0-1.0)
-3. Detailed reasoning
-4. Key issues identified
-5. Recommendations for improvement
-
-Respond in JSON format with keys: overall_success, confidence, reasoning, key_issues, recommendations"""
-        
-        try:
-            response = await self.call_openai(
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
+        # Save as JSON
+        json_path = self.report_dir / f"test_report_{self._test_report.report_id}.json"
+        with open(json_path, "w") as f:
+            # Convert to dict and handle UUIDs/datetimes
+            report_dict = self._test_report.model_dump()
             
-            judgment = json.loads(response.get("content", "{}"))
+            # Custom JSON encoder for UUIDs and datetimes
+            def default(obj):
+                if isinstance(obj, UUID):
+                    return str(obj)
+                elif isinstance(obj, datetime):
+                    return obj.isoformat()
+                return obj
             
-            # Add execution statistics
-            judgment["execution_stats"] = {
-                "total_steps": total_steps,
-                "completed": completed_steps,
-                "failed": failed_steps,
-                "skipped": skipped_steps,
-                "success_rate": completed_steps / total_steps if total_steps > 0 else 0
-            }
-            
-            logger.info("Final test judgment", extra=judgment)
-            return judgment
-            
-        except Exception as e:
-            logger.error("Failed to make final judgment", extra={"error": str(e)})
-            return {
-                "overall_success": self._test_state.status == TestStatus.COMPLETED,
-                "confidence": 0.5,
-                "reasoning": f"Automated judgment: {self._test_state.status.value}",
-                "key_issues": [str(e)],
-                "recommendations": ["Review test execution logs"],
-                "execution_stats": {
-                    "total_steps": total_steps,
-                    "completed": completed_steps,
-                    "failed": failed_steps,
-                    "skipped": skipped_steps,
-                    "success_rate": completed_steps / total_steps if total_steps > 0 else 0
-                }
-            }
+            json.dump(report_dict, f, indent=2, default=default)
+        
+        # Also save as Markdown for readability
+        md_path = self.report_dir / f"test_report_{self._test_report.report_id}.md"
+        with open(md_path, "w") as f:
+            f.write(self._generate_markdown_report())
+        
+        logger.debug("Report saved", extra={
+            "json_path": str(json_path),
+            "md_path": str(md_path)
+        })
     
-    async def get_next_action(
-        self, test_plan: TestPlan, current_state: TestState
-    ) -> Optional[str]:
-        """
-        Determine the next action based on current state.
+    def _generate_markdown_report(self) -> str:
+        """Generate a markdown version of the test report."""
+        if not self._test_report:
+            return ""
         
-        This method can be used for more dynamic test execution where
-        the Test Runner makes decisions about what to do next.
-        """
-        # Find current step
-        if current_state.current_step:
-            next_step = current_state.current_step
-            
-            # Use AI to determine if we should proceed or adapt
-            prompt = f"""Current test state:
-- Test: {test_plan.name}
-- Current step: {next_step.description}
-- Expected result: {next_step.action_instruction.expected_outcome}
-- Recent failures: {sum(1 for r in self._execution_history[-3:] if not r.success)}
-
-Should we:
-1. Proceed with the current step as planned
-2. Skip this step
-3. Retry a previous step
-4. Abort the test
-
-Provide your recommendation with reasoning."""
-            
-            response = await self.call_openai(
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            return response.get("content", "Proceed with current step")
+        lines = []
         
-        return None
+        # Header
+        lines.append(f"# Test Report: {self._test_report.test_plan_name}")
+        lines.append("")
+        lines.append(f"**Report ID**: {self._test_report.report_id}")
+        lines.append(f"**Started**: {self._test_report.started_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        
+        if self._test_report.completed_at:
+            lines.append(f"**Completed**: {self._test_report.completed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        
+        lines.append(f"**Status**: {self._test_report.status.value}")
+        lines.append("")
+        
+        # Summary if available
+        if self._test_report.summary:
+            s = self._test_report.summary
+            lines.append("## Summary")
+            lines.append("")
+            lines.append(f"- **Test Cases**: {s.completed_test_cases}/{s.total_test_cases} completed")
+            lines.append(f"- **Steps**: {s.completed_steps}/{s.total_steps} completed")
+            lines.append(f"- **Success Rate**: {s.success_rate*100:.1f}%")
+            lines.append(f"- **Execution Time**: {s.execution_time_seconds:.1f} seconds")
+            lines.append("")
+            
+            if self._test_report.bugs:
+                lines.append("### Bugs Found")
+                lines.append(f"- Critical: {s.critical_bugs}")
+                lines.append(f"- High: {s.high_bugs}")
+                lines.append(f"- Medium: {s.medium_bugs}")
+                lines.append(f"- Low: {s.low_bugs}")
+                lines.append("")
+        
+        # Test Cases
+        lines.append("## Test Cases")
+        lines.append("")
+        
+        for tc in self._test_report.test_cases:
+            lines.append(f"### {tc.test_id}: {tc.name}")
+            lines.append(f"**Status**: {tc.status.value}")
+            lines.append(f"**Steps**: {tc.steps_completed}/{tc.steps_total} completed")
+            
+            if tc.error_message:
+                lines.append(f"**Error**: {tc.error_message}")
+            
+            lines.append("")
+            
+            # Step details
+            if tc.step_results:
+                lines.append("#### Steps")
+                for sr in tc.step_results:
+                    status_icon = "✅" if sr.status == TestStatus.COMPLETED else "❌"
+                    lines.append(f"{sr.step_number}. {status_icon} {sr.action}")
+                    
+                    if sr.status == TestStatus.FAILED:
+                        lines.append(f"   - Expected: {sr.expected_result}")
+                        lines.append(f"   - Actual: {sr.actual_result}")
+                        if sr.error_message:
+                            lines.append(f"   - Error: {sr.error_message}")
+                    
+                    lines.append("")
+            
+            # Bugs for this test case
+            case_bugs = [b for b in tc.bugs]
+            if case_bugs:
+                lines.append("#### Bugs")
+                for bug in case_bugs:
+                    lines.append(f"- **{bug.severity.value.upper()}**: {bug.description}")
+                    lines.append(f"  - Type: {bug.error_type}")
+                    lines.append(f"  - Step: {bug.step_number}")
+                lines.append("")
+            
+            lines.append("---")
+            lines.append("")
+        
+        # All bugs
+        if self._test_report.bugs:
+            lines.append("## All Bugs")
+            lines.append("")
+            
+            for bug in self._test_report.bugs:
+                lines.append(f"### Bug {bug.bug_id}")
+                lines.append(f"- **Severity**: {bug.severity.value}")
+                lines.append(f"- **Type**: {bug.error_type}")
+                lines.append(f"- **Description**: {bug.description}")
+                lines.append(f"- **Expected**: {bug.expected_result}")
+                lines.append(f"- **Actual**: {bug.actual_result}")
+                
+                if bug.reproduction_steps:
+                    lines.append("- **Reproduction Steps**:")
+                    for step in bug.reproduction_steps:
+                        lines.append(f"  - {step}")
+                
+                lines.append("")
+        
+        return "\n".join(lines)
     
-    def _print_terminal_summary(self) -> None:
-        """Print enhanced terminal summary with bug reports for failed steps."""
-        # Calculate test metrics
-        total_steps = len(self._test_state.test_plan.steps)
-        completed_steps = len(self._test_state.completed_steps)
-        failed_steps = len(self._test_state.failed_steps)
-        success_rate = (completed_steps - failed_steps) / total_steps * 100 if total_steps > 0 else 0
+    def _print_summary(self) -> None:
+        """Print test execution summary to console."""
+        if not self._test_report or not self._test_report.summary:
+            return
         
-        # Print test summary header
+        s = self._test_report.summary
+        
         print("\n" + "="*80)
-        print(f"TEST EXECUTION SUMMARY: {self._test_state.test_plan.name}")
+        print(f"TEST EXECUTION SUMMARY: {self._test_report.test_plan_name}")
         print("="*80)
         
-        # Print status overview
-        print(f"\nStatus: {self._test_state.status.value.upper()}")
-        print(f"Total Steps: {total_steps}")
-        print(f"Completed: {completed_steps}")
-        print(f"Failed: {failed_steps}")
-        print(f"Success Rate: {success_rate:.1f}%")
+        print(f"\nStatus: {self._test_report.status.value.upper()}")
+        print(f"Test Cases: {s.completed_test_cases}/{s.total_test_cases} completed")
+        print(f"Steps: {s.completed_steps}/{s.total_steps} completed")
+        print(f"Success Rate: {s.success_rate*100:.1f}%")
+        print(f"Execution Time: {s.execution_time_seconds:.1f}s")
         
-        # Calculate duration
-        if self._test_state.start_time and self._test_state.end_time:
-            duration = (self._test_state.end_time - self._test_state.start_time).total_seconds()
-            print(f"Duration: {duration:.1f}s")
-        
-        # Print detailed bug reports for failed steps
-        if failed_steps > 0:
-            print("\n" + "-"*80)
-            print("BUG REPORTS FOR FAILED STEPS:")
-            print("-"*80)
+        if self._test_report.bugs:
+            print(f"\nBugs Found: {len(self._test_report.bugs)}")
+            print(f"  Critical: {s.critical_bugs}")
+            print(f"  High: {s.high_bugs}")
+            print(f"  Medium: {s.medium_bugs}")
+            print(f"  Low: {s.low_bugs}")
             
-            # Process each failed step result
-            for result in self._execution_history:
-                if not result.success and result.step.step_id in self._test_state.failed_steps:
-                    # Create bug report from the failed step
-                    bug_report = result.create_bug_report(self._test_state.test_plan.name)
-                    if bug_report:
-                        print(f"\n{bug_report.to_summary()}")
-                        
-                        # Show AI reasoning if available
-                        if result.action_result_details:
-                            if hasattr(result.action_result_details, 'ai_analysis') and result.action_result_details.ai_analysis:
-                                ai_analysis = result.action_result_details.ai_analysis
-                                print(f"\nAI Analysis:")
-                                print(f"  - Confidence: {ai_analysis.confidence*100:.0f}%")
-                                print(f"  - Actual outcome: {ai_analysis.actual_outcome}")
-                                
-                                # Show anomalies
-                                if ai_analysis.anomalies:
-                                    print(f"  - UI Anomalies detected:")
-                                    for anomaly in ai_analysis.anomalies:
-                                        print(f"    • {anomaly}")
-                                
-                                # Show recommendations
-                                if ai_analysis.recommendations:
-                                    print(f"  - Recommendations:")
-                                    for rec in ai_analysis.recommendations:
-                                        print(f"    • {rec}")
-                            elif isinstance(result.action_result_details, dict):
-                                # Fallback for old format
-                                ai_analysis = result.action_result_details.get("ai_analysis", {})
-                                if ai_analysis:
-                                    print(f"\nAI Analysis:")
-                                    print(f"  - Confidence: {ai_analysis.get('confidence', 0)*100:.0f}%")
-                                    print(f"  - Actual outcome: {ai_analysis.get('actual_outcome', 'Unknown')}")
-                                    
-                                    # Show anomalies
-                                    anomalies = ai_analysis.get("anomalies", [])
-                                    if anomalies:
-                                        print(f"  - UI Anomalies detected:")
-                                        for anomaly in anomalies:
-                                            print(f"    • {anomaly}")
-                                    
-                                    # Show recommendations
-                                    recommendations = ai_analysis.get("recommendations", [])
-                                    if recommendations:
-                                        print(f"  - Recommendations:")
-                                        for rec in recommendations:
-                                            print(f"    • {rec}")
-                        
-                        # Show screenshot paths if available
-                        if result.screenshot_before or result.screenshot_after:
-                            print(f"\nScreenshots saved:")
-                            if result.screenshot_before:
-                                print(f"  - Before: [Binary data, {len(result.screenshot_before)} bytes]")
-                            if result.screenshot_after:
-                                print(f"  - After: [Binary data, {len(result.screenshot_after)} bytes]")
-                            
-                            # If grid screenshot is available in action_result_details
-                            if result.action_result_details:
-                                if hasattr(result.action_result_details, 'grid_screenshot_highlighted') and result.action_result_details.grid_screenshot_highlighted:
-                                    grid_screenshot = result.action_result_details.grid_screenshot_highlighted
-                                    print(f"  - Grid (highlighted): [Binary data, {len(grid_screenshot)} bytes]")
+            # Show critical bugs
+            critical = [b for b in self._test_report.bugs 
+                       if b.severity == BugSeverity.CRITICAL]
+            if critical:
+                print("\nCRITICAL BUGS:")
+                for bug in critical:
+                    print(f"  - {bug.description}")
         
         print("\n" + "="*80 + "\n")
