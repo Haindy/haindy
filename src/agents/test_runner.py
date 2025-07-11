@@ -475,15 +475,30 @@ Recent actions:
 {json.dumps(context['recent_history'], indent=2)}
 
 Break this down into a sequence of specific actions. For each action provide:
-1. type: The action type (navigate, click, type, scroll, wait, assert)
+1. type: The action type - MUST be one of these exact values:
+   - navigate: Go to a URL
+   - click: Click on an element
+   - type: Type text into a field
+   - assert: Verify something on the page
+   - key_press: Press a specific key (Enter, Tab, etc.)
+   - scroll_to_element: Scroll until an element is visible
+   - scroll_by_pixels: Scroll by a specific number of pixels
+   - scroll_to_top: Scroll to top of page
+   - scroll_to_bottom: Scroll to bottom of page
+   - scroll_horizontal: Scroll horizontally
 2. target: What element/location to interact with (be specific)
-3. value: Any value needed (for type actions)
+3. value: Required for certain action types:
+   - For 'type': The text to type
+   - For 'navigate': The URL to navigate to
+   - For 'key_press': The key to press (e.g., "Enter", "Tab")
+   - For 'scroll_by_pixels': Number of pixels (positive for down/right, negative for up/left)
 4. description: Brief description of what this action does
 5. critical: Whether failure should stop remaining actions (true/false)
 
+IMPORTANT: Choose the most appropriate action type from the list above. For dropdown/select elements, use 'click' type.
+
 Consider:
 - Do we need to scroll to make elements visible?
-- Should we wait for page loads or animations?
 - Are there multiple UI interactions needed?
 - Should we verify intermediate states?
 

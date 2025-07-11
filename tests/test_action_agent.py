@@ -1,17 +1,30 @@
 """
-Tests for the Action Agent.
+Tests for the Action Agent with complete action execution lifecycle.
+
+This test file covers the refactored Action Agent that owns the complete
+action execution lifecycle including validation, coordinate determination,
+execution, and result analysis.
 """
 
-import base64
-import json
-from io import BytesIO
+import asyncio
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from uuid import uuid4
 
 import pytest
 from PIL import Image
+from io import BytesIO
 
 from src.agents.action_agent import ActionAgent
-from src.core.types import ActionInstruction, ActionType, GridCoordinate
+from src.browser.driver import BrowserDriver
+from src.core.types import (
+    ActionInstruction, ActionType, GridCoordinate, TestStep,
+    ScrollDirection, VisibilityStatus, TestState
+)
+from src.core.enhanced_types import (
+    EnhancedActionResult, ValidationResult, CoordinateResult,
+    ExecutionResult, BrowserState, AIAnalysis
+)
 
 
 @pytest.fixture
@@ -23,16 +36,27 @@ def mock_settings():
     settings.grid_refinement_enabled = True
     settings.openai_api_key = "test-key"
     settings.openai_model = "gpt-4o-mini"
-    settings.openai_temperature = 0.7
+    settings.openai_temperature = 1.0  # o4-mini only supports default temperature
     settings.openai_max_retries = 3
     return settings
 
 
 @pytest.fixture
-def action_agent(mock_settings):
+def mock_browser_driver():
+    """Mock browser driver for testing."""
+    driver = AsyncMock(spec=BrowserDriver)
+    driver.capture_screenshot.return_value = b"screenshot_data"
+    driver.get_url.return_value = "https://example.com"
+    driver.get_title.return_value = "Example Page"
+    driver.get_viewport_size.return_value = (1920, 1080)
+    return driver
+
+
+@pytest.fixture
+def action_agent(mock_settings, mock_browser_driver):
     """Create an ActionAgent instance for testing."""
     with patch("src.agents.action_agent.get_settings", return_value=mock_settings):
-        agent = ActionAgent()
+        agent = ActionAgent(browser_driver=mock_browser_driver)
         # Mock the OpenAI client
         agent._client = AsyncMock()
         return agent
@@ -41,7 +65,6 @@ def action_agent(mock_settings):
 @pytest.fixture
 def sample_screenshot():
     """Create a sample screenshot for testing."""
-    # Create a simple test image
     image = Image.new('RGB', (1920, 1080), color='white')
     buffer = BytesIO()
     image.save(buffer, format='PNG')
@@ -49,275 +72,500 @@ def sample_screenshot():
 
 
 @pytest.fixture
-def sample_instruction():
-    """Create a sample action instruction."""
-    return ActionInstruction(
-        action_type=ActionType.CLICK,
-        description="Click the login button",
-        target="Login button",
-        expected_outcome="Login form is submitted"
+def test_step():
+    """Create a sample test step."""
+    return TestStep(
+        step_number=1,
+        action="Click the login button",
+        expected_result="Login form is displayed",
+        action_instruction=ActionInstruction(
+            action_type=ActionType.CLICK,
+            description="Click the login button",
+            target="Login button",
+            expected_outcome="Login form is displayed"
+        )
     )
 
 
-class TestActionAgent:
-    """Test cases for ActionAgent."""
+@pytest.fixture
+def test_context():
+    """Create test context."""
+    return {
+        "test_plan_id": str(uuid4()),
+        "test_case_id": str(uuid4()),
+        "test_case_name": "Login Test",
+        "previous_steps": []
+    }
+
+
+class TestActionAgentCore:
+    """Test core functionality of the Action Agent."""
     
     @pytest.mark.asyncio
-    async def test_determine_action_high_confidence(
-        self, action_agent, sample_screenshot, sample_instruction
+    async def test_execute_action_click_workflow(
+        self, action_agent, test_step, test_context, sample_screenshot
     ):
-        """Test action determination with high confidence (no refinement)."""
-        # Mock AI response with high confidence
-        mock_response = {
-            "content": json.dumps({
+        """Test execute_action with click workflow."""
+        # Mock validation response
+        validation_response = {
+            "content": """{
+                "valid": true,
+                "confidence": 0.95,
+                "reasoning": "Login button is visible on the page"
+            }"""
+        }
+        
+        # Mock coordinate response
+        coordinate_response = {
+            "content": """{
                 "cell": "M23",
                 "offset_x": 0.5,
                 "offset_y": 0.5,
-                "confidence": 0.95,
-                "reasoning": "Login button clearly visible in cell M23"
-            })
+                "confidence": 0.9,
+                "reasoning": "Login button found in cell M23"
+            }"""
         }
         
-        action_agent.call_openai = AsyncMock(return_value=mock_response)
+        # Mock analysis response
+        analysis_response = {
+            "content": """{
+                "success": true,
+                "confidence": 0.95,
+                "actual_outcome": "Login form appeared after clicking the button",
+                "matches_expected": true,
+                "ui_changes": ["Login form is now visible", "Background dimmed"],
+                "recommendations": [],
+                "anomalies": []
+            }"""
+        }
         
-        # Execute
-        result = await action_agent.determine_action(
-            sample_screenshot,
-            sample_instruction
+        # Set up mock responses in order
+        action_agent.call_openai_with_debug = AsyncMock(side_effect=[
+            validation_response,
+            coordinate_response,
+            analysis_response
+        ])
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=test_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
         )
         
-        # Verify
-        assert result.instruction == sample_instruction
-        assert result.coordinate.cell == "M23"
-        assert result.coordinate.offset_x == 0.5
-        assert result.coordinate.offset_y == 0.5
-        assert result.coordinate.confidence == 0.95
-        assert not result.coordinate.refined  # No refinement needed
+        # Verify result
+        assert isinstance(result, EnhancedActionResult)
+        assert result.overall_success is True
+        assert result.validation.valid is True
+        assert result.validation.confidence == 0.95
+        assert result.coordinate.grid_cell == "M23"
+        assert result.ai_analysis.success is True
+        assert result.failure_phase is None
         
-        # Verify AI was called once
-        action_agent.call_openai.assert_called_once()
+        # Verify browser interactions
+        action_agent.browser_driver.click.assert_called_once()
+        action_agent.browser_driver.capture_screenshot.assert_called()
     
     @pytest.mark.asyncio
-    async def test_determine_action_low_confidence_triggers_refinement(
-        self, action_agent, sample_screenshot, sample_instruction
+    async def test_execute_action_navigate_workflow(
+        self, action_agent, test_context
     ):
-        """Test that low confidence triggers refinement."""
-        # Mock initial AI response with low confidence
-        initial_response = {
-            "content": json.dumps({
-                "cell": "M23",
+        """Test navigation workflow."""
+        nav_step = TestStep(
+            step_number=1,
+            action="Navigate to login page",
+            expected_result="Login page is loaded",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.NAVIGATE,
+                description="Navigate to login page",
+                target="Login page",
+                value="https://example.com/login",
+                expected_outcome="Login page is loaded"
+            )
+        )
+        
+        # Mock analysis response
+        analysis_response = {
+            "content": """{
+                "success": true,
+                "confidence": 1.0,
+                "actual_outcome": "Successfully navigated to login page",
+                "matches_expected": true,
+                "ui_changes": ["Login page loaded"],
+                "recommendations": [],
+                "anomalies": []
+            }"""
+        }
+        
+        action_agent.call_openai_with_debug = AsyncMock(return_value=analysis_response)
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=nav_step,
+            test_context=test_context
+        )
+        
+        # Verify result
+        assert result.overall_success is True
+        assert result.validation.valid is True  # Navigation doesn't need validation
+        assert result.ai_analysis.success is True
+        
+        # Verify navigation was called
+        action_agent.browser_driver.navigate_to.assert_called_once_with("https://example.com/login")
+    
+    @pytest.mark.asyncio
+    async def test_execute_action_type_workflow(
+        self, action_agent, test_context, sample_screenshot
+    ):
+        """Test type/text input workflow."""
+        type_step = TestStep(
+            step_number=1,
+            action="Enter username",
+            expected_result="Username is entered in the field",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.TYPE,
+                description="Enter username",
+                target="Username field",
+                value="testuser@example.com",
+                expected_outcome="Username is entered"
+            )
+        )
+        
+        # Mock responses
+        validation_response = {
+            "content": """{
+                "valid": true,
+                "confidence": 0.9,
+                "reasoning": "Username field is visible and ready for input"
+            }"""
+        }
+        
+        coordinate_response = {
+            "content": """{
+                "cell": "K15",
                 "offset_x": 0.5,
                 "offset_y": 0.5,
-                "confidence": 0.6,  # Below threshold
-                "reasoning": "Button might be in M23 but not certain"
-            })
+                "confidence": 0.85,
+                "reasoning": "Username input field located"
+            }"""
         }
         
-        # Mock refinement response with higher confidence
-        refined_response = {
-            "content": json.dumps({
-                "refined_x": 7,
-                "refined_y": 4,
-                "confidence": 0.92,
-                "reasoning": "Button clearly visible in refined view"
-            })
-        }
-        
-        action_agent.call_openai = AsyncMock(
-            side_effect=[initial_response, refined_response]
-        )
-        
-        # Execute
-        result = await action_agent.determine_action(
-            sample_screenshot,
-            sample_instruction
-        )
-        
-        # Verify
-        assert result.coordinate.cell == "M23"
-        # GridRefinement adds 0.25 to confidence, so 0.6 + 0.25 = 0.85
-        assert result.coordinate.confidence == 0.85
-        assert result.coordinate.refined  # Refinement was applied
-        
-        # Verify AI was called once (GridRefinement handles its own logic)
-        assert action_agent.call_openai.call_count == 1
-    
-    @pytest.mark.asyncio
-    async def test_determine_action_refinement_disabled(
-        self, action_agent, sample_screenshot, sample_instruction
-    ):
-        """Test action determination with refinement disabled."""
-        # Disable refinement
-        action_agent.refinement_enabled = False
-        
-        # Mock AI response with low confidence
-        mock_response = {
-            "content": json.dumps({
-                "cell": "B7",
-                "offset_x": 0.3,
-                "offset_y": 0.7,
-                "confidence": 0.5,  # Low confidence
-                "reasoning": "Element possibly in B7"
-            })
-        }
-        
-        action_agent.call_openai = AsyncMock(return_value=mock_response)
-        
-        # Execute
-        result = await action_agent.determine_action(
-            sample_screenshot,
-            sample_instruction
-        )
-        
-        # Verify no refinement despite low confidence
-        assert result.coordinate.confidence == 0.5
-        assert not result.coordinate.refined
-        action_agent.call_openai.assert_called_once()
-    
-    def test_parse_coordinate_response_valid(self, action_agent):
-        """Test parsing valid coordinate response."""
-        response = {
-            "content": json.dumps({
-                "cell": "Z45",
-                "offset_x": 0.75,
-                "offset_y": 0.25,
-                "confidence": 0.88,
-                "reasoning": "Element found in top-right of cell"
-            })
-        }
-        
-        coord = action_agent._parse_coordinate_response(response)
-        
-        assert coord.cell == "Z45"
-        assert coord.offset_x == 0.75
-        assert coord.offset_y == 0.25
-        assert coord.confidence == 0.88
-        assert not coord.refined
-    
-    def test_parse_coordinate_response_invalid(self, action_agent):
-        """Test parsing invalid coordinate response."""
-        response = {
-            "content": "invalid json"
-        }
-        
-        coord = action_agent._parse_coordinate_response(response)
-        
-        # Should return default values
-        assert coord.cell == "A1"
-        assert coord.offset_x == 0.5
-        assert coord.offset_y == 0.5
-        assert coord.confidence == 0.1  # Low confidence for error
-        assert not coord.refined
-    
-    def test_parse_coordinate_response_out_of_range(self, action_agent):
-        """Test parsing response with out-of-range values."""
-        response = {
-            "content": json.dumps({
-                "cell": "AA10",
-                "offset_x": 1.5,  # Out of range
-                "offset_y": -0.2,  # Out of range
-                "confidence": 1.2,  # Out of range
-            })
-        }
-        
-        coord = action_agent._parse_coordinate_response(response)
-        
-        # Values should be clamped to valid range
-        assert coord.cell == "AA10"
-        assert coord.offset_x == 1.0  # Clamped to max
-        assert coord.offset_y == 0.0  # Clamped to min
-        assert coord.confidence == 1.0  # Clamped to max
-    
-    def test_build_analysis_prompt(self, action_agent, sample_instruction):
-        """Test building analysis prompt."""
-        prompt = action_agent._build_analysis_prompt(sample_instruction)
-        
-        assert "click" in prompt  # ActionType.CLICK.value is lowercase
-        assert "Login button" in prompt
-        assert "Click the login button" in prompt
-        assert "60x60" in prompt
-        assert "JSON format" in prompt
-    
-    @pytest.mark.asyncio
-    async def test_refine_coordinates(self, action_agent, sample_screenshot):
-        """Test direct coordinate refinement."""
-        initial_coord = GridCoordinate(
-            cell="H15",
-            offset_x=0.5,
-            offset_y=0.5,
-            confidence=0.7,
-            refined=False
-        )
-        
-        # Mock refinement response
-        mock_response = {
-            "content": json.dumps({
-                "refined_x": 6,
-                "refined_y": 3,
+        focus_response = {
+            "content": """{
+                "focused": true,
                 "confidence": 0.95,
-                "reasoning": "Precise location found"
-            })
+                "element_type": "input",
+                "reasoning": "Input field is focused and ready for text"
+            }"""
         }
         
-        action_agent.call_openai = AsyncMock(return_value=mock_response)
+        analysis_response = {
+            "content": """{
+                "success": true,
+                "confidence": 0.9,
+                "actual_outcome": "Username was typed into the field",
+                "matches_expected": true,
+                "ui_changes": ["Input field contains text"],
+                "recommendations": [],
+                "anomalies": []
+            }"""
+        }
         
-        # Execute
-        refined = await action_agent.refine_coordinates(
-            sample_screenshot,
-            initial_coord
+        action_agent.call_openai_with_debug = AsyncMock(side_effect=[
+            validation_response,
+            coordinate_response,
+            focus_response,
+            analysis_response
+        ])
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=type_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
         )
         
-        # Verify
-        assert refined.cell == "H15"  # Same cell
-        assert refined.refined  # Marked as refined
-        assert refined.confidence == 0.95
-        # Check offset calculation (6-1)/9 = 5/9 ≈ 0.556
-        assert 0.55 < refined.offset_x < 0.56
-        assert 0.22 < refined.offset_y < 0.23
-    
-    def test_create_overlay_image(self, action_agent, sample_screenshot):
-        """Test creating overlay image."""
-        # Initialize grid first
-        action_agent.grid_overlay.initialize(1920, 1080)
+        # Verify result
+        assert result.overall_success is True
+        assert result.validation.valid is True
+        assert result.coordinate.grid_cell == "K15"
         
-        # Create overlay
-        overlay_bytes = action_agent._create_overlay_image(sample_screenshot)
-        
-        # Verify it's valid image data
-        assert overlay_bytes is not None
-        assert len(overlay_bytes) > 0
-        
-        # Verify we can load it as an image
-        overlay_image = Image.open(BytesIO(overlay_bytes))
-        assert overlay_image.size == (1920, 1080)
+        # Verify typing was called
+        action_agent.browser_driver.type_text.assert_called_once_with("testuser@example.com")
     
     @pytest.mark.asyncio
-    async def test_apply_refinement_to_region_error_handling(
+    async def test_execute_action_validation_failure(
+        self, action_agent, test_step, test_context, sample_screenshot
+    ):
+        """Test action execution when validation fails."""
+        # Mock validation failure
+        validation_response = {
+            "content": """{
+                "valid": false,
+                "confidence": 0.8,
+                "reasoning": "Login button not found on current page",
+                "concerns": ["Page might not be loaded", "Button might be hidden"],
+                "suggestions": ["Wait for page to load", "Check if login modal needs to be opened"]
+            }"""
+        }
+        
+        action_agent.call_openai_with_debug = AsyncMock(return_value=validation_response)
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=test_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
+        )
+        
+        # Verify result
+        assert result.overall_success is False
+        assert result.validation.valid is False
+        assert result.failure_phase == "validation"
+        assert len(result.validation.concerns) == 2
+        assert len(result.validation.suggestions) == 2
+        
+        # Verify no browser action was taken
+        action_agent.browser_driver.click.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_conversation_history_management(
+        self, action_agent, test_step, test_context, sample_screenshot
+    ):
+        """Test conversation history management across action execution."""
+        # Initial conversation should be empty
+        assert len(action_agent.conversation_history) == 0
+        
+        # Mock responses
+        validation_response = {"content": '{"valid": true, "confidence": 0.9, "reasoning": "OK"}'}
+        coordinate_response = {"content": '{"cell": "A1", "offset_x": 0.5, "offset_y": 0.5, "confidence": 0.9, "reasoning": "Found"}'}
+        analysis_response = {"content": '{"success": true, "confidence": 0.9, "actual_outcome": "Done", "matches_expected": true, "ui_changes": [], "recommendations": [], "anomalies": []}'}
+        
+        action_agent.call_openai_with_debug = AsyncMock(side_effect=[
+            validation_response,
+            coordinate_response,
+            analysis_response
+        ])
+        
+        # Execute action
+        await action_agent.execute_action(test_step, test_context, sample_screenshot)
+        
+        # Conversation history should have messages
+        assert len(action_agent.conversation_history) > 0
+        
+        # Reset conversation
+        action_agent.reset_conversation()
+        assert len(action_agent.conversation_history) == 0
+    
+    @pytest.mark.asyncio
+    async def test_execute_action_unknown_type(self, action_agent, test_context):
+        """Test handling of unknown action type."""
+        unknown_step = TestStep(
+            step_number=1,
+            action="Do something unknown",
+            expected_result="Unknown result",
+            action_instruction=ActionInstruction(
+                action_type="unknown_action",  # Invalid type
+                description="Unknown action",
+                target="Unknown",
+                expected_outcome="Unknown"
+            )
+        )
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=unknown_step,
+            test_context=test_context
+        )
+        
+        # Verify result
+        assert result.overall_success is False
+        assert result.failure_phase == "routing"
+        assert "Unknown action type" in result.execution.error_message
+    
+    @pytest.mark.asyncio
+    async def test_coordinate_refinement(
         self, action_agent, sample_screenshot
     ):
-        """Test refinement error handling."""
-        initial_coord = GridCoordinate(
-            cell="C10",
-            offset_x=0.5,
-            offset_y=0.5,
-            confidence=0.6,
-            refined=False
+        """Test coordinate refinement when confidence is low."""
+        instruction = ActionInstruction(
+            action_type=ActionType.CLICK,
+            description="Click small button",
+            target="Small button",
+            expected_outcome="Button clicked"
         )
         
-        # Mock AI error
-        action_agent.call_openai = AsyncMock(
-            return_value={"content": "malformed response"}
+        # Mock initial low confidence response
+        initial_response = {
+            "content": """{
+                "cell": "B5",
+                "offset_x": 0.5,
+                "offset_y": 0.5,
+                "confidence": 0.6,
+                "reasoning": "Button might be in B5 but hard to see"
+            }"""
+        }
+        
+        # Mock refinement response
+        refined_response = {
+            "content": """{
+                "sub_cell": "B2",
+                "offset_x": 0.3,
+                "offset_y": 0.7,
+                "confidence": 0.95,
+                "reasoning": "Button clearly visible in refined view"
+            }"""
+        }
+        
+        action_agent.call_openai_with_debug = AsyncMock(side_effect=[
+            initial_response,
+            refined_response
+        ])
+        
+        # Execute determine_action
+        result = await action_agent.determine_action(
+            screenshot=sample_screenshot,
+            instruction=instruction
         )
         
-        # Execute
-        result = await action_agent._apply_refinement_to_region(
-            sample_screenshot,
-            initial_coord
+        # Verify refinement was applied
+        assert result.coordinate.confidence == 0.95
+        assert result.coordinate.refined is True
+        
+        # Verify two API calls were made
+        assert action_agent.call_openai_with_debug.call_count == 2
+
+
+class TestActionAgentScrolling:
+    """Test scrolling functionality."""
+    
+    @pytest.mark.asyncio
+    async def test_scroll_to_element_workflow(
+        self, action_agent, test_context, sample_screenshot
+    ):
+        """Test scroll to element workflow."""
+        scroll_step = TestStep(
+            step_number=1,
+            action="Scroll to submit button",
+            expected_result="Submit button is visible",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.SCROLL_TO_ELEMENT,
+                description="Scroll to submit button",
+                target="Submit button",
+                expected_outcome="Submit button is visible on screen"
+            )
         )
         
-        # Should return original coordinates with refined flag
-        assert result.cell == "C10"
-        assert result.offset_x == 0.5
-        assert result.offset_y == 0.5
-        assert result.confidence == 0.6
-        assert result.refined  # Still marked as refined attempt
+        # Mock visibility check responses
+        visibility_responses = [
+            {"content": '{"visible": false, "confidence": 0.9, "location": "below", "reasoning": "Button is below viewport"}'},
+            {"content": '{"visible": true, "confidence": 0.95, "location": "center", "reasoning": "Button is now visible"}'}
+        ]
+        
+        # Mock scroll planning
+        scroll_response = {
+            "content": """{
+                "direction": "down",
+                "distance": 500,
+                "confidence": 0.85,
+                "reasoning": "Need to scroll down to reach submit button"
+            }"""
+        }
+        
+        action_agent.call_openai_with_debug = AsyncMock(side_effect=[
+            visibility_responses[0],  # Initial check - not visible
+            scroll_response,          # Plan scroll
+            visibility_responses[1]   # After scroll - visible
+        ])
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=scroll_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
+        )
+        
+        # Verify result
+        assert result.overall_success is True
+        
+        # Verify scrolling was performed
+        action_agent.browser_driver.scroll.assert_called()
+
+
+class TestActionAgentErrorHandling:
+    """Test error handling scenarios."""
+    
+    @pytest.mark.asyncio
+    async def test_api_error_handling(
+        self, action_agent, test_step, test_context, sample_screenshot
+    ):
+        """Test handling of API errors."""
+        # Mock API error
+        action_agent.call_openai_with_debug = AsyncMock(
+            side_effect=Exception("API rate limit exceeded")
+        )
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=test_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
+        )
+        
+        # Verify error handling
+        assert result.overall_success is False
+        assert "API rate limit exceeded" in str(result.execution.error_message)
+        assert result.execution.error_traceback is not None
+    
+    @pytest.mark.asyncio
+    async def test_browser_error_handling(
+        self, action_agent, test_step, test_context, sample_screenshot
+    ):
+        """Test handling of browser errors."""
+        # Mock successful validation and coordinate determination
+        validation_response = {"content": '{"valid": true, "confidence": 0.9, "reasoning": "OK"}'}
+        coordinate_response = {"content": '{"cell": "M23", "offset_x": 0.5, "offset_y": 0.5, "confidence": 0.9, "reasoning": "Found"}'}
+        
+        action_agent.call_openai_with_debug = AsyncMock(side_effect=[
+            validation_response,
+            coordinate_response
+        ])
+        
+        # Mock browser error
+        action_agent.browser_driver.click.side_effect = Exception("Element not interactable")
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=test_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
+        )
+        
+        # Verify error handling
+        assert result.overall_success is False
+        assert result.failure_phase == "execution"
+        assert "Element not interactable" in result.execution.error_message
+    
+    @pytest.mark.asyncio
+    async def test_invalid_json_response_handling(
+        self, action_agent, test_step, test_context, sample_screenshot
+    ):
+        """Test handling of invalid JSON in AI responses."""
+        # Mock invalid JSON response
+        invalid_response = {
+            "content": "This is not valid JSON {invalid: json}"
+        }
+        
+        action_agent.call_openai_with_debug = AsyncMock(return_value=invalid_response)
+        
+        # Execute action
+        result = await action_agent.execute_action(
+            test_step=test_step,
+            test_context=test_context,
+            screenshot=sample_screenshot
+        )
+        
+        # Verify error handling
+        assert result.overall_success is False
+        assert result.validation.valid is False
+        assert "Failed to parse" in result.validation.reasoning
