@@ -1,10 +1,10 @@
 {
-  "plan_id": "4b69a169-eed7-4e75-a7d4-f2bdbe11b8a5",
+  "plan_id": "95a98e6a-7af2-4f41-b895-8cd2ffcf0b1d",
   "name": "Test",
   "description": "Test",
   "requirements_source": "Test",
   "test_cases": [],
-  "created_at": "2025-07-11T19:55:53.972856+00:00",
+  "created_at": "2025-07-11T20:41:46.688120+00:00",
   "created_by": "HAINDY Test Planner",
   "tags": [],
   "estimated_duration_seconds": null

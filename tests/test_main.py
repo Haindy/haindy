@@ -170,13 +170,14 @@ class TestPlanFileProcessing:
         test_file.write_text("Test requirements")
         
         # Mock AI response
-        mock_response = MagicMock()
-        mock_response.content = json.dumps({
-            "requirements": "Test the login flow",
-            "url": "https://example.com",
-            "name": "Login Test",
-            "description": "Test login functionality"
-        })
+        mock_response = {
+            "content": json.dumps({
+                "requirements": "Test the login flow",
+                "url": "https://example.com",
+                "name": "Login Test",
+                "description": "Test login functionality"
+            })
+        }
         
         with patch("src.agents.test_planner.TestPlannerAgent") as mock_planner_class:
             mock_planner = AsyncMock()
@@ -203,13 +204,14 @@ class TestPlanFileProcessing:
         test_file = tmp_path / "test.md"
         test_file.write_text("Test")
         
-        mock_response = MagicMock()
-        mock_response.content = json.dumps({
-            "requirements": "Test",
-            "url": None,  # No URL in document
-            "name": "Test",
-            "description": "Test"
-        })
+        mock_response = {
+            "content": json.dumps({
+                "requirements": "Test",
+                "url": None,  # No URL in document
+                "name": "Test",
+                "description": "Test"
+            })
+        }
         
         with patch("src.agents.test_planner.TestPlannerAgent") as mock_planner_class:
             mock_planner = AsyncMock()

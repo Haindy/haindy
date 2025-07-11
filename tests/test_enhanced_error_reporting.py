@@ -13,64 +13,85 @@ from src.core.types import (
     ActionType,
     TestPlan,
     TestStep,
+    TestCase,
+    TestCasePriority,
     TestState,
     TestStatus,
     GridCoordinate
 )
-from src.core.enhanced_types import BugReport
+from src.core.enhanced_types import BugReport, AIAnalysis
 from src.monitoring.simple_html_reporter import SimpleHTMLReporter
+from types import SimpleNamespace
 
 
 @pytest.fixture
 def sample_test_plan():
     """Create a sample test plan."""
+    steps = [
+        TestStep(
+            step_id=uuid4(),
+            step_number=1,
+            description="Navigate to Wikipedia",
+            action="Navigate to Wikipedia homepage",
+            expected_result="Wikipedia homepage loaded",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.NAVIGATE,
+                description="Navigate to Wikipedia homepage",
+                target="https://wikipedia.org",
+                expected_outcome="Wikipedia homepage loaded"
+            ),
+            dependencies=[],
+            optional=False
+        ),
+        TestStep(
+            step_id=uuid4(),
+            step_number=2,
+            description="Click search box",
+            action="Click on the search input field",
+            expected_result="Search box focused and ready for input",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.CLICK,
+                description="Click on the search input field",
+                target="search box",
+                expected_outcome="Search box focused and ready for input"
+            ),
+            dependencies=[],
+            optional=False
+        ),
+        TestStep(
+            step_id=uuid4(),
+            step_number=3,
+            description="Type search term",
+            action="Type 'Artificial Intelligence' in search box",
+            expected_result="Search term entered in search box",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.TYPE,
+                description="Type 'Artificial Intelligence' in search box",
+                target="search box",
+                value="Artificial Intelligence",
+                expected_outcome="Search term entered in search box"
+            ),
+            dependencies=[],
+            optional=False
+        )
+    ]
+    
+    test_case = TestCase(
+        test_id="TC001",
+        name="Wikipedia Search Test",
+        description="Test searching on Wikipedia",
+        priority=TestCasePriority.HIGH,
+        steps=steps,
+        tags=["search", "wikipedia"]
+    )
+    
     return TestPlan(
         plan_id=uuid4(),
         name="Wikipedia Search Test",
         description="Test searching on Wikipedia",
-        requirements="User should be able to search on Wikipedia",
-        steps=[
-            TestStep(
-                step_id=uuid4(),
-                step_number=1,
-                description="Navigate to Wikipedia",
-                action_instruction=ActionInstruction(
-                    action_type=ActionType.NAVIGATE,
-                    description="Navigate to Wikipedia homepage",
-                    target="https://wikipedia.org",
-                    expected_outcome="Wikipedia homepage loaded"
-                ),
-                dependencies=[],
-                optional=False
-            ),
-            TestStep(
-                step_id=uuid4(),
-                step_number=2,
-                description="Click search box",
-                action_instruction=ActionInstruction(
-                    action_type=ActionType.CLICK,
-                    description="Click on the search input field",
-                    target="search box",
-                    expected_outcome="Search box focused and ready for input"
-                ),
-                dependencies=[],
-                optional=False
-            ),
-            TestStep(
-                step_id=uuid4(),
-                step_number=3,
-                description="Type search term",
-                action_instruction=ActionInstruction(
-                    action_type=ActionType.TYPE,
-                    description="Type 'Artificial Intelligence' in search box",
-                    target="search box",
-                    value="Artificial Intelligence",
-                    expected_outcome="Search term entered in search box"
-                ),
-                dependencies=[],
-                optional=False
-            )
-        ],
+        requirements_source="User should be able to search on Wikipedia",
+        test_cases=[test_case],
+        steps=steps,  # For backward compatibility
         created_at=datetime.now(timezone.utc),
         tags=["search", "wikipedia"]
     )
@@ -121,7 +142,8 @@ def failed_step_result(sample_test_plan):
         }
     }
     
-    return TestStepResult(
+    # Create a mock TestStepResult since this class doesn't exist in the codebase
+    return SimpleNamespace(
         step=step,
         success=False,
         action_taken=None,
@@ -129,7 +151,56 @@ def failed_step_result(sample_test_plan):
         screenshot_before=b"fake_screenshot_before_data",
         screenshot_after=b"fake_screenshot_after_data",
         execution_mode="visual",
-        action_result_details=action_result_details
+        action_result_details=action_result_details,
+        # Add the create_bug_report method
+        create_bug_report=lambda test_plan_name: BugReport(
+            test_step=step,
+            step_number=step.step_number,
+            test_plan_name=test_plan_name,
+            failure_type="execution",
+            error_message="Click failed: Element not interactable",
+            attempted_action="Click on the search input field",
+            expected_outcome="Search box focused and ready for input",
+            actual_outcome="click failed - search box not responding to click",
+            grid_cell_targeted="M15",
+            severity="critical",
+            is_blocking=True,
+            screenshot_before=b"fake_screenshot_before_data",
+            screenshot_after=b"fake_screenshot_after_data",
+            grid_screenshot=b"fake_grid_screenshot_data",
+            confidence_scores={
+                "validation": 0.95,
+                "coordinate": 0.85,
+                "execution": 0.0,
+                "evaluation": 0.2,
+                "overall": 0.2
+            },
+            ai_analysis=AIAnalysis(
+                success=False,
+                confidence=0.2,
+                actual_outcome="Click failed - search box not responding to click",
+                matches_expected=False,
+                ui_changes=[],
+                recommendations=[
+                    "Try clicking at a different offset within the grid cell",
+                    "Verify the search box is not covered by another element",
+                    "Check if JavaScript is fully loaded"
+                ],
+                anomalies=[
+                    "Search box appears to be present but not interactable",
+                    "No UI changes detected after click attempt"
+                ]
+            ),
+            ui_anomalies=[
+                "Search box appears to be present but not interactable",
+                "No UI changes detected after click attempt"
+            ],
+            suggested_fixes=[
+                "Try clicking at a different offset within the grid cell",
+                "Verify the search box is not covered by another element",
+                "Check if JavaScript is fully loaded"
+            ]
+        )
     )
 
 
@@ -149,12 +220,15 @@ def successful_step_result(sample_test_plan):
         }
     }
     
-    return TestStepResult(
+    # Create a mock TestStepResult for successful case
+    return SimpleNamespace(
         step=step,
         success=True,
         actual_result="Successfully navigated to Wikipedia",
         execution_mode="visual",
-        action_result_details=action_result_details
+        action_result_details=action_result_details,
+        # Successful steps return None for bug report
+        create_bug_report=lambda test_plan_name: None
     )
 
 

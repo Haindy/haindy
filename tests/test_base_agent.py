@@ -33,7 +33,7 @@ class TestBaseAgent:
         agent = BaseAgent(name="TestAgent")
         
         assert agent.name == "TestAgent"
-        assert agent.model == "gpt-4o-mini"
+        assert agent.model == "o4-mini-2025-04-16"
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
@@ -50,7 +50,7 @@ class TestBaseAgent:
         client = agent.client
         
         # Now client should be created
-        mock_client_class.assert_called_once_with(model="gpt-4o-mini")
+        mock_client_class.assert_called_once_with(model="o4-mini-2025-04-16")
         assert client == mock_client_class.return_value
         
         # Second access should return same instance
