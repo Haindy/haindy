@@ -11,7 +11,7 @@ from src.core.enhanced_types import (
     AIAnalysis, BrowserState, EnhancedActionResult,
     ActionPattern
 )
-from src.core.types import TestStep, ActionInstruction, ActionType
+from src.core.types import TestStep, ActionType
 
 
 @pytest.fixture
@@ -20,12 +20,8 @@ def sample_test_step():
     return TestStep(
         step_number=1,
         description="Click the login button",
-        action_instruction=ActionInstruction(
-            action_type=ActionType.CLICK,
-            description="Click the login button",
-            target="Login button",
-            expected_outcome="Login form is submitted"
-        )
+        action="Click the login button",
+        expected_result="Login form is submitted"
     )
 
 

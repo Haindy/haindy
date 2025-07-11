@@ -14,7 +14,6 @@ from uuid import uuid4
 from src.agents.action_agent import ActionAgent
 from src.browser.driver import BrowserDriver
 from src.core.types import (
-    ActionInstruction,
     ActionType,
     TestStep,
     GridCoordinate
@@ -110,13 +109,8 @@ def type_test_step():
         step_id=uuid4(),
         step_number=1,
         description="Type search query",
-        action_instruction=ActionInstruction(
-            action_type=ActionType.TYPE,
-            description="Type 'Artificial Intelligence' in search box",
-            target="search box",
-            value="Artificial Intelligence",
-            expected_outcome="Search term entered"
-        ),
+        action="Type 'Artificial Intelligence' in search box",
+        expected_result="Search term entered",
         dependencies=[],
         optional=False
     )
@@ -452,12 +446,8 @@ class TestClickWithFocus:
             step_id=uuid4(),
             step_number=1,
             description="Click search button",
-            action_instruction=ActionInstruction(
-                action_type=ActionType.CLICK,
-                description="Click the search button",
-                target="search button",
-                expected_outcome="Search initiated"
-            ),
+            action="Click the search button",
+            expected_result="Search initiated",
             dependencies=[],
             optional=False
         )

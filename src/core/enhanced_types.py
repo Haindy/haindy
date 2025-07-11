@@ -171,7 +171,7 @@ class EnhancedActionResult(BaseModel):
         to the new model structure.
         """
         return {
-            "action_type": self.test_step.action_instruction.action_type.value,
+            "action_type": "click",  # Default since we don't have action_type in new structure
             "timestamp": self.timestamp_start.isoformat(),
             "validation_passed": self.validation.valid,
             "validation_reasoning": self.validation.reasoning,

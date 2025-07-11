@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
-from src.core.types import TestPlan, TestStep
+from src.core.types import TestPlan, TestStep, ActionType
 from src.core.enhanced_types import EnhancedActionResult
 from src.journal.models import (
     ActionRecord,
@@ -149,7 +149,7 @@ class JournalManager:
                 execution_mode=execution_mode,
                 execution_time_ms=execution_time_ms,
                 agent_confidence=journal_result.confidence,
-                expected_result=step.action_instruction.expected_outcome,
+                expected_result=step.expected_result,
                 actual_result=journal_result.actual_outcome or "Unknown",
                 success=journal_result.success,
                 error_message=journal_result.error_message,
@@ -188,8 +188,8 @@ class JournalManager:
         # Extract pattern features from step
         pattern_type = self._get_pattern_type(step)
         features = {
-            "action_type": step.action_instruction.action_type,
-            "description": step.action_instruction.description,
+            "action_type": ActionType.CLICK,  # Default since we don't have action type in new structure
+            "description": step.action,
             "element_text": context.get("element_text"),
             "url_pattern": context.get("url"),
             "element_type": context.get("element_type")
@@ -312,8 +312,9 @@ class JournalManager:
     
     def _describe_action(self, step: TestStep, result: JournalActionResult) -> str:
         """Create a human-readable description of the action taken."""
-        action_type = step.action_instruction.action_type
-        description = step.action_instruction.description
+        # Handle new structure without action_instruction
+        action_type = result.action if result.action else ActionType.CLICK
+        description = step.action
         
         if result.grid_coordinates:
             coords = result.grid_coordinates
@@ -326,7 +327,20 @@ class JournalManager:
     
     def _get_pattern_type(self, step: TestStep) -> PatternType:
         """Determine pattern type from test step."""
-        action_type = step.action_instruction.action_type.lower()
+        # Handle new structure - infer from step action text
+        action_text = step.action.lower()
+        
+        # Simple heuristic based on action text
+        if 'click' in action_text:
+            action_type = 'click'
+        elif 'type' in action_text or 'enter' in action_text:
+            action_type = 'type'
+        elif 'navigate' in action_text or 'go to' in action_text:
+            action_type = 'navigate'
+        elif 'scroll' in action_text:
+            action_type = 'scroll'
+        else:
+            action_type = 'click'  # default
         
         mapping = {
             "click": PatternType.CLICK,
@@ -352,8 +366,8 @@ class JournalManager:
         pattern = ActionRecord(
             pattern_type=self._get_pattern_type(step),
             visual_signature={
-                "action_type": step.action_instruction.action_type,
-                "description": step.action_instruction.description,
+                "action_type": result.action if result.action else ActionType.CLICK,
+                "description": step.action,
                 "grid_coordinates": result.grid_coordinates
             },
             playwright_command=result.playwright_command,
