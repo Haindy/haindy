@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from jinja2 import Template
 
-from src.agents.test_runner import TestStepResult
+from src.core.types import StepResult as TestStepResult
 from src.core.types import TestState
 from src.monitoring.logger import get_logger
 

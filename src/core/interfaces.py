@@ -144,25 +144,6 @@ class ActionAgent(Agent):
         pass
 
 
-class EvaluatorAgent(Agent):
-    """Abstract base class for result evaluation agents."""
-
-    @abstractmethod
-    async def evaluate_result(
-        self, screenshot: bytes, expected_outcome: str
-    ) -> EvaluationResult:
-        """
-        Evaluate if the actual result matches expected outcome.
-
-        Args:
-            screenshot: Screenshot of current state
-            expected_outcome: Expected outcome description
-
-        Returns:
-            Evaluation result with confidence score
-        """
-        pass
-
 
 class BrowserDriver(ABC):
     """Abstract interface for browser automation."""

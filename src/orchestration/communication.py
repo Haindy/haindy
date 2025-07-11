@@ -25,14 +25,12 @@ class MessageType(str, Enum):
     
     # Task messages
     EXECUTE_STEP = "execute_step"
-    EVALUATE_RESULT = "evaluate_result"
     DETERMINE_ACTION = "determine_action"
     PLAN_TEST = "plan_test"
     
     # Result messages
     STEP_COMPLETED = "step_completed"
     STEP_FAILED = "step_failed"
-    EVALUATION_COMPLETE = "evaluation_complete"
     ACTION_DETERMINED = "action_determined"
     PLAN_CREATED = "plan_created"
     

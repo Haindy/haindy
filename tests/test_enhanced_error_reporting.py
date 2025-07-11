@@ -7,8 +7,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from src.agents.test_runner import TestStepResult
 from src.core.types import (
+    StepResult,
     ActionInstruction,
     ActionType,
     TestPlan,

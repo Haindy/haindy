@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from src.agents import (
     TestPlannerAgent,
-    TestRunnerAgent,
+    TestRunner,
     ActionAgent,
 )
 from src.browser.driver import BrowserDriver
@@ -81,7 +81,7 @@ class WorkflowCoordinator:
         # Create agents
         self._agents = {
             "test_planner": TestPlannerAgent(name="TestPlanner"),
-            "test_runner": TestRunnerAgent(
+            "test_runner": TestRunner(
                 name="TestRunner",
                 browser_driver=self.browser_driver
             ),
