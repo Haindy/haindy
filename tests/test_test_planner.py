@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from src.agents.test_planner import TestPlannerAgent
-from src.core.types import ActionInstruction, ActionType, TestPlan, TestStep
+from src.agents.formatters import TestPlanFormatter
+from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep
 
 
 class TestTestPlannerAgent:
@@ -27,51 +28,84 @@ class TestTestPlannerAgent:
         """Mock OpenAI response for test plan generation."""
         return {
             "content": json.dumps({
-                "name": "User Login Flow Test",
-                "description": "Test user login functionality",
-                "requirements": "Test the login functionality",
-                "steps": [
+                "name": "User Login Flow Test Plan",
+                "description": "Comprehensive test plan for user login functionality",
+                "requirements_source": "Test the login functionality",
+                "test_cases": [
                     {
-                        "step_number": 1,
-                        "description": "Navigate to login page",
-                        "action": "navigate",
-                        "target": "Login page URL",
-                        "expected_result": "Login page is displayed",
-                        "dependencies": [],
-                        "optional": False
+                        "test_id": "TC001",
+                        "name": "Happy Path Login",
+                        "description": "Test successful login with valid credentials",
+                        "priority": "critical",
+                        "prerequisites": ["Valid test user account exists", "Application is accessible"],
+                        "steps": [
+                            {
+                                "step_number": 1,
+                                "action": "Navigate to login page",
+                                "expected_result": "Login page is displayed with username and password fields",
+                                "dependencies": [],
+                                "optional": False
+                            },
+                            {
+                                "step_number": 2,
+                                "action": "Enter username 'testuser' in the username field",
+                                "expected_result": "Username is entered in the field",
+                                "dependencies": [],
+                                "optional": False
+                            },
+                            {
+                                "step_number": 3,
+                                "action": "Enter password 'password123' in the password field",
+                                "expected_result": "Password is entered in the field (masked)",
+                                "dependencies": [],
+                                "optional": False
+                            },
+                            {
+                                "step_number": 4,
+                                "action": "Click the login button",
+                                "expected_result": "User is logged in and redirected to dashboard",
+                                "dependencies": [],
+                                "optional": False
+                            }
+                        ],
+                        "postconditions": ["User is logged in", "User session is active"],
+                        "tags": ["smoke", "critical-path"]
                     },
                     {
-                        "step_number": 2,
-                        "description": "Enter username",
-                        "action": "type",
-                        "target": "Username field",
-                        "value": "testuser",
-                        "expected_result": "Username is entered in the field",
-                        "dependencies": [1],
-                        "optional": False
-                    },
-                    {
-                        "step_number": 3,
-                        "description": "Enter password",
-                        "action": "type",
-                        "target": "Password field",
-                        "value": "password123",
-                        "expected_result": "Password is entered in the field",
-                        "dependencies": [1],
-                        "optional": False
-                    },
-                    {
-                        "step_number": 4,
-                        "description": "Click login button",
-                        "action": "click",
-                        "target": "Login button",
-                        "expected_result": "User is logged in and redirected",
-                        "dependencies": [2, 3],
-                        "optional": False
+                        "test_id": "TC002",
+                        "name": "Invalid Credentials Login",
+                        "description": "Test login with incorrect password",
+                        "priority": "high",
+                        "prerequisites": ["Application is accessible"],
+                        "steps": [
+                            {
+                                "step_number": 1,
+                                "action": "Navigate to login page",
+                                "expected_result": "Login page is displayed",
+                                "dependencies": [],
+                                "optional": False
+                            },
+                            {
+                                "step_number": 2,
+                                "action": "Enter username 'testuser' and wrong password",
+                                "expected_result": "Credentials are entered",
+                                "dependencies": [],
+                                "optional": False
+                            },
+                            {
+                                "step_number": 3,
+                                "action": "Click login button",
+                                "expected_result": "Error message 'Invalid credentials' is displayed",
+                                "dependencies": [],
+                                "optional": False
+                            }
+                        ],
+                        "postconditions": ["User remains on login page", "Error message is visible"],
+                        "tags": ["negative-test", "error-handling"]
                     }
                 ],
-                "tags": ["functional", "login"],
-                "estimated_duration_seconds": 60
+                "tags": ["functional", "login", "authentication"],
+                "estimated_duration_seconds": 120
             })
         }
 
@@ -91,11 +125,20 @@ class TestTestPlannerAgent:
         test_plan = await agent.create_test_plan(requirements)
 
         assert isinstance(test_plan, TestPlan)
-        assert test_plan.name == "User Login Flow Test"
-        assert test_plan.description == "Test user login functionality"
-        assert test_plan.requirements == "Test the login functionality"
-        assert len(test_plan.steps) == 4
-        assert len(test_plan.tags) == 2
+        assert test_plan.name == "User Login Flow Test Plan"
+        assert test_plan.description == "Comprehensive test plan for user login functionality"
+        assert test_plan.requirements_source == "Test the login functionality"
+        assert len(test_plan.test_cases) == 2
+        assert len(test_plan.tags) == 3
+        
+        # Check first test case
+        tc1 = test_plan.test_cases[0]
+        assert tc1.test_id == "TC001"
+        assert tc1.name == "Happy Path Login"
+        assert tc1.priority == TestCasePriority.CRITICAL
+        assert len(tc1.steps) == 4
+        assert len(tc1.prerequisites) == 2
+        assert len(tc1.postconditions) == 2
 
     @pytest.mark.asyncio
     async def test_create_test_plan_with_context(self, agent, mock_openai_response):
@@ -110,7 +153,8 @@ class TestTestPlannerAgent:
         test_plan = await agent.create_test_plan(requirements, context)
 
         assert isinstance(test_plan, TestPlan)
-        assert test_plan.name == "User Login Flow Test"
+        assert test_plan.name == "User Login Flow Test Plan"
+        assert len(test_plan.test_cases) == 2
 
     @pytest.mark.asyncio
     async def test_test_plan_steps_structure(self, agent, mock_openai_response):
@@ -120,20 +164,26 @@ class TestTestPlannerAgent:
         requirements = "Test the login functionality"
         test_plan = await agent.create_test_plan(requirements)
 
-        # Check first step
-        first_step = test_plan.steps[0]
+        # Check first test case steps
+        tc1 = test_plan.test_cases[0]
+        first_step = tc1.steps[0]
         assert isinstance(first_step, TestStep)
         assert first_step.step_number == 1
-        assert first_step.description == "Navigate to login page"
-        assert first_step.action_instruction.action_type == ActionType.NAVIGATE
-        assert first_step.action_instruction.target == "Login page URL"
+        assert first_step.action == "Navigate to login page"
+        assert first_step.expected_result == "Login page is displayed with username and password fields"
         assert len(first_step.dependencies) == 0
         assert first_step.optional is False
 
-        # Check step with dependencies
-        last_step = test_plan.steps[3]
-        assert last_step.step_number == 4
-        assert len(last_step.dependencies) == 2  # Should have 2 dependencies
+        # Check other steps in first test case
+        assert tc1.steps[1].action == "Enter username 'testuser' in the username field"
+        assert tc1.steps[2].action == "Enter password 'password123' in the password field"
+        assert tc1.steps[3].action == "Click the login button"
+        
+        # Check second test case
+        tc2 = test_plan.test_cases[1]
+        assert tc2.test_id == "TC002"
+        assert len(tc2.steps) == 3
+        assert tc2.priority == TestCasePriority.HIGH
 
     def test_parse_test_plan_response_error(self, agent):
         """Test error handling when parsing invalid response."""
@@ -146,23 +196,27 @@ class TestTestPlannerAgent:
     async def test_refine_test_plan(self, agent):
         """Test refining an existing test plan."""
         # Create initial test plan
-        action_instruction = ActionInstruction(
-            action_type=ActionType.CLICK,
-            description="Click login button",
-            target="Login button",
-            expected_outcome="User logged in"
-        )
-        
         initial_plan = TestPlan(
             name="Basic Login Test",
             description="Simple login test",
-            requirements="Test login",
-            steps=[
-                TestStep(
-                    step_number=1,
-                    description="Login step",
-                    action_instruction=action_instruction,
-                    optional=False
+            requirements_source="Test login",
+            test_cases=[
+                TestCase(
+                    test_id="TC001",
+                    name="Basic Login",
+                    description="Simple login test",
+                    priority=TestCasePriority.HIGH,
+                    prerequisites=[],
+                    steps=[
+                        TestStep(
+                            step_number=1,
+                            action="Login to application",
+                            expected_result="User is logged in",
+                            description="Basic login step"
+                        )
+                    ],
+                    postconditions=[],
+                    tags=["login"]
                 )
             ],
             tags=["login"]
@@ -170,30 +224,62 @@ class TestTestPlannerAgent:
 
         # Mock refined response
         refined_response = json.dumps({
-            "name": "Enhanced Login Test",
+            "name": "Enhanced Login Test Plan",
             "description": "Comprehensive login test with error cases",
-            "requirements": "Test login with error handling",
-            "steps": [
+            "requirements_source": "Test login with error handling",
+            "test_cases": [
                 {
-                    "step_number": 1,
-                    "description": "Navigate to login",
-                    "action": "navigate",
-                    "target": "Login page",
-                    "expected_result": "Login page shown",
-                    "dependencies": [],
-                    "optional": False
+                    "test_id": "TC001",
+                    "name": "Happy Path Login",
+                    "description": "Test successful login",
+                    "priority": "critical",
+                    "prerequisites": ["Valid user exists"],
+                    "steps": [
+                        {
+                            "step_number": 1,
+                            "action": "Navigate to login page",
+                            "expected_result": "Login page shown",
+                            "dependencies": [],
+                            "optional": False
+                        },
+                        {
+                            "step_number": 2,
+                            "action": "Enter valid credentials and login",
+                            "expected_result": "User logged in successfully",
+                            "dependencies": [],
+                            "optional": False
+                        }
+                    ],
+                    "postconditions": ["User is logged in"],
+                    "tags": ["smoke"]
                 },
                 {
-                    "step_number": 2,
-                    "description": "Test invalid login",
-                    "action": "click",
-                    "target": "Login button",
-                    "expected_result": "Error message shown",
-                    "dependencies": [1],
-                    "optional": False
+                    "test_id": "TC002",
+                    "name": "Invalid Login",
+                    "description": "Test login with invalid credentials",
+                    "priority": "high",
+                    "prerequisites": [],
+                    "steps": [
+                        {
+                            "step_number": 1,
+                            "action": "Navigate to login page",
+                            "expected_result": "Login page shown",
+                            "dependencies": [],
+                            "optional": False
+                        },
+                        {
+                            "step_number": 2,
+                            "action": "Enter invalid credentials",
+                            "expected_result": "Error message shown",
+                            "dependencies": [],
+                            "optional": False
+                        }
+                    ],
+                    "postconditions": ["User remains on login page"],
+                    "tags": ["negative"]
                 }
             ],
-            "tags": ["login", "error-handling"],
+            "tags": ["login", "error-handling", "authentication"],
             "estimated_duration_seconds": 120
         })
 
@@ -202,30 +288,33 @@ class TestTestPlannerAgent:
         feedback = "Add error case testing"
         refined_plan = await agent.refine_test_plan(initial_plan, feedback)
 
-        assert refined_plan.name == "Enhanced Login Test"
-        assert len(refined_plan.steps) == 2
-        assert len(refined_plan.tags) == 2
+        assert refined_plan.name == "Enhanced Login Test Plan"
+        assert len(refined_plan.test_cases) == 2
+        assert len(refined_plan.tags) == 3
 
     def test_serialize_test_plan(self, agent):
         """Test serializing a test plan to string."""
-        action_instruction = ActionInstruction(
-            action_type=ActionType.CLICK,
-            description="Click submit button",
-            target="Submit button",
-            value=None,
-            expected_outcome="Form submitted"
-        )
-        
         test_plan = TestPlan(
             name="Test Plan",
             description="A test plan",
-            requirements="Test requirements",
-            steps=[
-                TestStep(
-                    step_number=1,
-                    description="Click submit",
-                    action_instruction=action_instruction,
-                    optional=False
+            requirements_source="Test requirements document",
+            test_cases=[
+                TestCase(
+                    test_id="TC001",
+                    name="Submit Form Test",
+                    description="Test form submission",
+                    priority=TestCasePriority.HIGH,
+                    prerequisites=["Form is loaded"],
+                    steps=[
+                        TestStep(
+                            step_number=1,
+                            action="Click submit button",
+                            expected_result="Form is submitted successfully",
+                            description="Submit the form"
+                        )
+                    ],
+                    postconditions=["Form data is saved"],
+                    tags=["form", "submission"]
                 )
             ],
             tags=["functional", "ui"]
@@ -233,13 +322,15 @@ class TestTestPlannerAgent:
 
         serialized = agent._serialize_test_plan(test_plan)
         
-        assert "Name: Test Plan" in serialized
-        assert "Description: A test plan" in serialized
-        assert "Requirements: Test requirements" in serialized
-        assert "Tags: functional, ui" in serialized
-        assert "1. Click submit" in serialized
-        assert "Action: click - Submit button" in serialized
-        assert "Expected: Form submitted" in serialized
+        # The serialized output should be markdown
+        assert "# Test Plan: Test Plan" in serialized
+        assert "**Description**: A test plan" in serialized
+        assert "**Requirements Source**: Test requirements document" in serialized
+        assert "**Tags**: functional, ui" in serialized
+        assert "### TC001: Submit Form Test" in serialized
+        assert "**Priority**: High" in serialized
+        assert "1. **Click submit button**" in serialized
+        assert "_Expected Result_: Form is submitted successfully" in serialized
 
     @pytest.mark.asyncio
     async def test_extract_test_scenarios(self, agent):
@@ -313,8 +404,8 @@ class TestTestPlannerAgent:
         mock_response = json.dumps({
             "name": "Test",
             "description": "Test",
-            "requirements": "Test",
-            "steps": [],
+            "requirements_source": "Test",
+            "test_cases": [],
             "tags": []
         })
         

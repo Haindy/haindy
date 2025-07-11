@@ -108,30 +108,59 @@ class ActionResult(BaseModel):
 
 
 class TestStep(BaseModel):
-    """A single step in a test plan."""
+    """A single step in a test case."""
 
     step_id: UUID = Field(default_factory=uuid4)
     step_number: int
-    description: str
-    action_instruction: ActionInstruction
-    dependencies: List[UUID] = Field(
-        default_factory=list, description="IDs of steps that must complete first"
+    description: str = Field(..., description="Human-readable description of the step")
+    action: str = Field(..., description="Action to be performed")
+    expected_result: str = Field(..., description="Expected outcome of the action")
+    # Keep action_instruction for backward compatibility during transition
+    action_instruction: Optional[ActionInstruction] = Field(None, description="Detailed action instruction (deprecated)")
+    dependencies: List[int] = Field(
+        default_factory=list, description="Step numbers that must complete first"
     )
     optional: bool = Field(False, description="Whether this step can be skipped")
     max_retries: int = Field(3, description="Maximum retry attempts")
 
 
+class TestCasePriority(str, Enum):
+    """Priority levels for test cases."""
+    
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class TestCase(BaseModel):
+    """A test case containing multiple test steps."""
+    
+    case_id: UUID = Field(default_factory=uuid4)
+    test_id: str = Field(..., description="Human-readable test case ID (e.g., TC001)")
+    name: str = Field(..., description="Test case name")
+    description: str = Field(..., description="Detailed description of what is being tested")
+    priority: TestCasePriority = Field(TestCasePriority.MEDIUM, description="Test case priority")
+    prerequisites: List[str] = Field(default_factory=list, description="Prerequisites for this test case")
+    steps: List[TestStep] = Field(..., description="Ordered list of test steps")
+    postconditions: List[str] = Field(default_factory=list, description="Expected state after test completion")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+
+
 class TestPlan(BaseModel):
-    """A complete test plan generated from requirements."""
+    """A complete test plan containing multiple test cases."""
 
     plan_id: UUID = Field(default_factory=uuid4)
-    name: str
-    description: str
-    requirements: str = Field(..., description="Original requirements text")
-    steps: List[TestStep]
+    name: str = Field(..., description="Test plan name")
+    description: str = Field(..., description="Overall test plan description")
+    requirements_source: str = Field(..., description="Source of requirements (e.g., PRD v1.2, URL)")
+    test_cases: List[TestCase] = Field(..., description="List of test cases in this plan")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    estimated_duration_seconds: Optional[int] = None
-    tags: List[str] = Field(default_factory=list)
+    created_by: str = Field("HAINDY Test Planner", description="Who/what created this plan")
+    tags: List[str] = Field(default_factory=list, description="Overall plan tags")
+    estimated_duration_seconds: Optional[int] = Field(None, description="Total estimated duration")
+    # Keep steps for backward compatibility during transition
+    steps: Optional[List[TestStep]] = Field(None, description="Direct steps (deprecated)")
 
 
 class TestState(BaseModel):
