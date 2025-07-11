@@ -142,11 +142,44 @@ class TestRunner(BaseAgent):
                 await self.browser_driver.navigate(initial_url)
             
             # Execute each test case sequentially
-            for test_case in test_plan.test_cases:
-                await self._execute_test_case(test_case)
+            for i, test_case in enumerate(test_plan.test_cases):
+                case_result = await self._execute_test_case(test_case)
                 
                 # Save report after each test case
                 await self._save_report()
+                
+                # Check if failure should cascade
+                if case_result.status == TestStatus.FAILED:
+                    should_continue = await self._should_continue_after_failure(
+                        test_case, case_result, test_plan, i
+                    )
+                    
+                    if not should_continue:
+                        logger.error("Test case failure blocks further execution", extra={
+                            "failed_test_case": test_case.name,
+                            "remaining_test_cases": len(test_plan.test_cases) - i - 1
+                        })
+                        
+                        # Mark remaining test cases as blocked
+                        for j in range(i + 1, len(test_plan.test_cases)):
+                            blocked_case = test_plan.test_cases[j]
+                            blocked_result = TestCaseResult(
+                                case_id=blocked_case.case_id,
+                                test_id=blocked_case.test_id,
+                                name=blocked_case.name,
+                                status=TestStatus.BLOCKED,
+                                started_at=datetime.now(timezone.utc),
+                                completed_at=datetime.now(timezone.utc),
+                                steps_total=len(blocked_case.steps),
+                                steps_completed=0,
+                                steps_failed=0,
+                                error_message=f"Blocked due to failure of test case: {test_case.name}"
+                            )
+                            self._test_report.test_cases.append(blocked_result)
+                        
+                        # Save report with blocked test cases
+                        await self._save_report()
+                        break
             
             # Finalize report
             self._test_report.completed_at = datetime.now(timezone.utc)
@@ -342,20 +375,35 @@ class TestRunner(BaseAgent):
             # Evaluate overall step result
             if success:
                 # Verify expected outcome is achieved
-                verification = await self._verify_expected_outcome(
-                    step.expected_result,
-                    actual_outcomes
-                )
-                
-                if verification["success"]:
-                    step_result.status = TestStatus.COMPLETED
-                    step_result.actual_result = verification["actual_outcome"]
-                else:
+                try:
+                    verification = await self._verify_expected_outcome(
+                        step.expected_result,
+                        actual_outcomes
+                    )
+                    
+                    if verification["success"]:
+                        step_result.status = TestStatus.COMPLETED
+                        step_result.actual_result = verification["actual_outcome"]
+                    else:
+                        step_result.status = TestStatus.FAILED
+                        step_result.actual_result = verification["actual_outcome"]
+                        step_result.error_message = verification.get("reason", "Verification failed")
+                    
+                    step_result.confidence = verification.get("confidence", 0.0)
+                except Exception as e:
+                    # AI verification failed - this is a fatal error
+                    logger.error("AI verification failed - marking test as failed", extra={
+                        "error": str(e),
+                        "step_number": step.step_number,
+                        "expected": step.expected_result,
+                        "actual_outcomes": actual_outcomes
+                    })
                     step_result.status = TestStatus.FAILED
-                    step_result.actual_result = verification["actual_outcome"]
-                    step_result.error_message = verification.get("reason", "Verification failed")
-                
-                step_result.confidence = verification.get("confidence", 0.0)
+                    step_result.actual_result = "; ".join(actual_outcomes) if actual_outcomes else "Unknown"
+                    step_result.error_message = f"AI verification failed: {str(e)}"
+                    step_result.confidence = 0.0
+                    # Re-raise to trigger the outer exception handler
+                    raise
             else:
                 step_result.status = TestStatus.FAILED
                 step_result.actual_result = "; ".join(actual_outcomes)
@@ -450,9 +498,9 @@ Respond with a JSON object containing an "actions" array."""
             content = json.loads(response.get("content", "{}"))
             actions = content.get("actions", [])
             
-            # Fallback to simple interpretation if AI fails
+            # Ensure AI provided actions
             if not actions:
-                actions = [self._create_simple_action(step)]
+                raise ValueError(f"AI failed to provide actions for step {step.step_number}: {step.action}")
             
             logger.debug("Step interpretation", extra={
                 "step": step.step_number,
@@ -463,43 +511,13 @@ Respond with a JSON object containing an "actions" array."""
             return actions
             
         except Exception as e:
-            logger.warning("Failed to interpret step with AI, using simple action", extra={
+            logger.error("Failed to interpret step with AI", extra={
                 "error": str(e),
-                "step": step.step_number
+                "step": step.step_number,
+                "traceback": traceback.format_exc()
             })
-            return [self._create_simple_action(step)]
-    
-    def _create_simple_action(self, step: TestStep) -> Dict[str, Any]:
-        """Create a simple action from a test step as fallback."""
-        # Map step action to ActionType
-        action_keywords = {
-            "navigate": ActionType.NAVIGATE,
-            "click": ActionType.CLICK,
-            "type": ActionType.TYPE,
-            "enter": ActionType.TYPE,
-            "scroll": ActionType.SCROLL,
-            "verify": ActionType.ASSERT,
-            "check": ActionType.ASSERT,
-            "assert": ActionType.ASSERT,
-            "wait": ActionType.WAIT
-        }
-        
-        # Determine action type from step action text
-        action_lower = step.action.lower()
-        action_type = ActionType.ASSERT  # Default
-        
-        for keyword, atype in action_keywords.items():
-            if keyword in action_lower:
-                action_type = atype
-                break
-        
-        return {
-            "type": action_type.value,
-            "target": step.action,
-            "value": None,
-            "description": step.action,
-            "critical": not step.optional
-        }
+            # Re-raise - no fallback, AI failure is fatal
+            raise
     
     async def _execute_action(
         self,
@@ -659,23 +677,59 @@ Respond in JSON format with keys: success, actual_outcome, confidence, reason"""
         if step_result.status != TestStatus.FAILED:
             return None
         
-        # Determine error type and severity
-        error_type = "unknown_error"
-        severity = BugSeverity.MEDIUM
-        
-        error_lower = (step_result.error_message or "").lower()
-        if "not found" in error_lower or "element" in error_lower:
-            error_type = "element_not_found"
-            severity = BugSeverity.HIGH if not step.optional else BugSeverity.MEDIUM
-        elif "assert" in error_lower or "verification" in error_lower:
-            error_type = "assertion_failed"
-            severity = BugSeverity.HIGH
-        elif "timeout" in error_lower:
-            error_type = "timeout"
-            severity = BugSeverity.MEDIUM
-        elif "navigation" in error_lower:
-            error_type = "navigation_error"
-            severity = BugSeverity.CRITICAL
+        # Use AI to determine error type and severity
+        prompt = f"""Analyze this test failure and determine the bug severity and type:
+
+Failed Step: {step.action}
+Expected Result: {step.expected_result}
+Actual Result: {step_result.actual_result}
+Error Message: {step_result.error_message}
+Step is Optional: {step.optional}
+
+Determine:
+1. error_type: One of (element_not_found, assertion_failed, timeout, navigation_error, api_error, validation_error, unknown_error)
+2. severity: One of (critical, high, medium, low)
+   - critical: Blocks all testing, core functionality broken
+   - high: Major feature broken, blocks test case
+   - medium: Feature partially working, workaround possible
+   - low: Minor issue, cosmetic or edge case
+
+Respond in JSON format with keys: error_type, severity, reasoning"""
+
+        try:
+            response = await self.call_openai(
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.get("content", "{}"))
+            error_type = result.get("error_type", "unknown_error")
+            
+            # Map severity string to enum
+            severity_map = {
+                "critical": BugSeverity.CRITICAL,
+                "high": BugSeverity.HIGH,
+                "medium": BugSeverity.MEDIUM,
+                "low": BugSeverity.LOW
+            }
+            severity = severity_map.get(
+                result.get("severity", "medium").lower(),
+                BugSeverity.MEDIUM
+            )
+            
+            logger.debug("AI bug classification", extra={
+                "error_type": error_type,
+                "severity": severity.value,
+                "reasoning": result.get("reasoning", "")
+            })
+            
+        except Exception as e:
+            logger.error("Failed to classify bug with AI", extra={
+                "error": str(e),
+                "step": step.step_number
+            })
+            # Re-raise - AI failure is fatal
+            raise
         
         # Build reproduction steps
         reproduction_steps = [
@@ -719,6 +773,8 @@ Respond in JSON format with keys: success, actual_outcome, confidence, reason"""
     
     async def _is_blocker_failure(self, step_result: StepResult) -> bool:
         """Determine if a failure should block test case execution."""
+        # TODO: Once navigation actions and validation are fully implemented,
+        # replace this hardcoded logic with AI-based determination
         # Navigation errors are always blockers
         if "navigation" in (step_result.error_message or "").lower():
             return True
@@ -753,6 +809,76 @@ Respond with JSON: {{"is_blocker": true/false, "reasoning": "explanation"}}"""
                 return True
         
         return False
+    
+    async def _should_continue_after_failure(
+        self,
+        failed_test_case: TestCase,
+        case_result: TestCaseResult,
+        test_plan: TestPlan,
+        current_index: int
+    ) -> bool:
+        """
+        Determine if test execution should continue after a test case failure.
+        
+        Uses AI to analyze the failure impact on remaining test cases.
+        """
+        # Get remaining test cases
+        remaining_cases = test_plan.test_cases[current_index + 1:]
+        if not remaining_cases:
+            return True  # No more test cases to run
+        
+        # Build context for AI decision
+        remaining_names = [tc.name for tc in remaining_cases]
+        
+        prompt = f"""Analyze this test case failure and determine if testing should continue:
+
+Failed Test Case: {failed_test_case.name}
+Failure Summary:
+- Steps completed: {case_result.steps_completed}/{case_result.steps_total}
+- Steps failed: {case_result.steps_failed}
+- Error: {case_result.error_message or 'Multiple step failures'}
+
+Failed Test Case Description: {failed_test_case.description}
+
+Remaining Test Cases:
+{chr(10).join(f"- {name}" for name in remaining_names)}
+
+Overall Test Plan: {test_plan.name}
+Test Plan Description: {test_plan.description}
+
+Question: Should we continue executing the remaining test cases, or does this failure block them?
+
+Consider:
+1. Is the failed functionality a prerequisite for other tests?
+2. Can the remaining tests provide value despite this failure?
+3. Would the remaining tests likely fail due to this failure?
+
+Respond with JSON: {{"continue": true/false, "reasoning": "explanation"}}"""
+
+        try:
+            response = await self.call_openai(
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.get("content", "{}"))
+            should_continue = result.get("continue", False)
+            
+            logger.info("Cascade failure decision", extra={
+                "failed_test_case": failed_test_case.name,
+                "decision": "continue" if should_continue else "stop",
+                "reasoning": result.get("reasoning", "")
+            })
+            
+            return should_continue
+            
+        except Exception as e:
+            logger.error("Failed to determine cascade impact", extra={
+                "error": str(e),
+                "failed_test_case": failed_test_case.name
+            })
+            # On AI failure, default to stopping execution (conservative approach)
+            return False
     
     async def _verify_prerequisites(self, prerequisites: List[str]) -> bool:
         """Verify test case prerequisites are met."""

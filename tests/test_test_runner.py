@@ -275,23 +275,32 @@ class TestEnhancedTestRunner:
         # Mock AI responses
         test_runner.call_openai = AsyncMock()
         
-        # Create a list of responses for step interpretations and verifications
+        # Create a list of responses in the order they will be called
+        # The pattern is: interpret step 1, verify step 1, interpret step 2, verify step 2, etc.
         responses = []
         
-        # Step interpretations (6 total - 4 for login case, 2 for logout case)
+        # Login Test Case - Step 1
         responses.append({"content": json.dumps({"actions": [{"type": "navigate", "target": "https://example.com/login", "critical": True, "description": "Navigate to login page"}]})})
-        responses.append({"content": json.dumps({"actions": [{"type": "type", "target": "username field", "value": "testuser", "critical": True, "description": "Type username in the field"}]})})
-        responses.append({"content": json.dumps({"actions": [{"type": "type", "target": "password field", "value": "testpass", "critical": True, "description": "Type password in the field"}]})})
-        responses.append({"content": json.dumps({"actions": [{"type": "click", "target": "login button", "critical": True, "description": "Click the login button"}]})})
-        responses.append({"content": json.dumps({"actions": [{"type": "click", "target": "user profile icon", "critical": True, "description": "Click on the user profile icon"}]})})
-        responses.append({"content": json.dumps({"actions": [{"type": "click", "target": "logout button", "critical": True, "description": "Click the logout option"}]})})
-        
-        # Outcome verifications (6 total - one for each step)
         responses.append({"content": json.dumps({"success": True, "actual_outcome": "Login page is displayed", "confidence": 0.95, "reason": ""})})
+        
+        # Login Test Case - Step 2
+        responses.append({"content": json.dumps({"actions": [{"type": "type", "target": "username field", "value": "testuser", "critical": True, "description": "Type username in the field"}]})})
         responses.append({"content": json.dumps({"success": True, "actual_outcome": "Username is entered", "confidence": 0.95, "reason": ""})})
+        
+        # Login Test Case - Step 3
+        responses.append({"content": json.dumps({"actions": [{"type": "type", "target": "password field", "value": "testpass", "critical": True, "description": "Type password in the field"}]})})
         responses.append({"content": json.dumps({"success": True, "actual_outcome": "Password is entered", "confidence": 0.95, "reason": ""})})
+        
+        # Login Test Case - Step 4
+        responses.append({"content": json.dumps({"actions": [{"type": "click", "target": "login button", "critical": True, "description": "Click the login button"}]})})
         responses.append({"content": json.dumps({"success": True, "actual_outcome": "User is logged in and redirected to dashboard", "confidence": 0.95, "reason": ""})})
+        
+        # Logout Test Case - Step 1
+        responses.append({"content": json.dumps({"actions": [{"type": "click", "target": "user profile icon", "critical": True, "description": "Click on the user profile icon"}]})})
         responses.append({"content": json.dumps({"success": True, "actual_outcome": "User menu dropdown is displayed", "confidence": 0.95, "reason": ""})})
+        
+        # Logout Test Case - Step 2
+        responses.append({"content": json.dumps({"actions": [{"type": "click", "target": "logout button", "critical": True, "description": "Click the logout option"}]})})
         responses.append({"content": json.dumps({"success": True, "actual_outcome": "User is logged out and redirected to home page", "confidence": 0.95, "reason": ""})})
         
         # Create a call counter
@@ -300,8 +309,15 @@ class TestEnhancedTestRunner:
         def mock_call_openai(**kwargs):
             idx = call_count[0]
             call_count[0] += 1
+            # Debug what call is being made
+            messages = kwargs.get('messages', [])
+            if messages:
+                content = messages[0].get('content', '')[:100]  # First 100 chars
+                print(f"DEBUG: AI call {idx}: {content}...")
+            
             if idx < len(responses):
                 response = responses[idx]
+                print(f"DEBUG: Returning response {idx}: {response['content'][:100]}...")
                 return response
             print(f"WARNING: Ran out of mock responses at index {idx}")
             return {"content": json.dumps({"success": False, "error": "No more responses"})}
@@ -453,25 +469,42 @@ class TestEnhancedTestRunner:
         
         mock_action_agent.execute_action = AsyncMock(side_effect=mock_execute_with_failure)
         
-        # Mock AI responses
-        test_runner.call_openai = AsyncMock()
-        test_runner.call_openai.side_effect = [
-            # Step interpretations
+        # Mock AI responses - carefully ordered
+        ai_responses = [
+            # Step 1 - Navigate (interpret & verify)
             {"content": json.dumps({"actions": [{"type": "navigate", "target": "https://example.com/login", "critical": True}]})},
+            {"content": json.dumps({"success": True, "actual_outcome": "Page loaded", "confidence": 0.95})},
+            # Step 2 - Type username (interpret & verify)
             {"content": json.dumps({"actions": [{"type": "type", "target": "username field", "value": "testuser", "critical": True}]})},
+            {"content": json.dumps({"success": True, "actual_outcome": "Username entered", "confidence": 0.95})},
+            # Step 3 - Type password (interpret & verify)
             {"content": json.dumps({"actions": [{"type": "type", "target": "password field", "value": "testpass", "critical": True}]})},
+            {"content": json.dumps({"success": True, "actual_outcome": "Password entered", "confidence": 0.95})},
+            # Step 4 - Click login (interpret only - action will fail)
             {"content": json.dumps({"actions": [{"type": "click", "target": "login button", "critical": True}]})},
-            # Outcome verifications (first 3 succeed)
-            {"content": json.dumps({"success": True, "actual_outcome": "Action completed", "confidence": 0.95})},
-            {"content": json.dumps({"success": True, "actual_outcome": "Action completed", "confidence": 0.95})},
-            {"content": json.dumps({"success": True, "actual_outcome": "Action completed", "confidence": 0.95})},
-            # Blocker analysis for failed step
-            {"content": json.dumps({"is_blocker": True, "reasoning": "Login is critical"})},
-            # Second test case is blocked
+            # Bug classification for failed step 4
+            {"content": json.dumps({"error_type": "element_not_found", "severity": "high", "reasoning": "Login button missing"})},
+            # Blocker analysis for failed step 4
+            {"content": json.dumps({"is_blocker": True, "reasoning": "Cannot proceed without login"})},
+            # Cascade failure decision after test case 1 fails
+            {"content": json.dumps({"continue": False, "reasoning": "Login failure blocks all subsequent tests"})},
         ]
+        
+        # Add extra responses for any additional calls
+        # The test seems to be making more calls than expected
+        for _ in range(10):
+            ai_responses.append({"content": json.dumps({"error": "Unexpected call"})})
+        
+        test_runner.call_openai = AsyncMock(side_effect=ai_responses)
         
         # Execute test plan
         report = await test_runner.execute_test_plan(sample_hierarchical_test_plan)
+        
+        # Debug output
+        print(f"\nDEBUG: Report status: {report.status}")
+        print(f"DEBUG: Test cases: {len(report.test_cases)}")
+        for i, tc in enumerate(report.test_cases):
+            print(f"DEBUG: Test case {i}: {tc.name} - {tc.status} (steps: {tc.steps_completed}/{tc.steps_total}, failed: {tc.steps_failed})")
         
         # Verify failure handling
         assert report.status == TestStatus.FAILED
@@ -855,3 +888,64 @@ class TestEnhancedTestRunner:
         assert summary.medium_bugs == 1
         assert summary.high_bugs == 0
         assert summary.low_bugs == 0
+    
+    @pytest.mark.asyncio  
+    async def test_cascade_failure_handling(self, test_runner, sample_hierarchical_test_plan):
+        """Test that cascade failure handling works correctly."""
+        # Store original method
+        original_execute = test_runner._execute_test_case
+        
+        # Create results
+        failed_result = TestCaseResult(
+            case_id=sample_hierarchical_test_plan.test_cases[0].case_id,
+            test_id="TC001",
+            name="User Login Test",
+            status=TestStatus.FAILED,
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            steps_total=4,
+            steps_completed=3,
+            steps_failed=1,
+            error_message="Login button not found"
+        )
+        
+        # Mock to return our results and add them to the report
+        async def mock_execute_test_case(test_case):
+            if test_case.test_id == "TC001":
+                # Add to report like the real method does
+                test_runner._test_report.test_cases.append(failed_result)
+                return failed_result
+            else:
+                # This shouldn't be called if cascade works
+                raise AssertionError("Second test case should not be executed")
+        
+        test_runner._execute_test_case = mock_execute_test_case
+        
+        # Mock the cascade decision - should NOT continue
+        test_runner.call_openai = AsyncMock(return_value={
+            "content": json.dumps({
+                "continue": False,
+                "reasoning": "Login failure prevents logout test"
+            })
+        })
+        
+        # Execute test plan
+        report = await test_runner.execute_test_plan(sample_hierarchical_test_plan)
+        
+        # Debug output
+        print(f"\nDEBUG: Report has {len(report.test_cases)} test cases")
+        for i, tc in enumerate(report.test_cases):
+            print(f"  {i}: {tc.test_id} - {tc.name} - {tc.status}")
+        
+        # Verify cascade handling
+        assert len(report.test_cases) == 2
+        assert report.status == TestStatus.FAILED
+        
+        # First test case should be failed
+        assert report.test_cases[0].status == TestStatus.FAILED
+        assert report.test_cases[0].test_id == "TC001"
+        
+        # Second test case should be blocked
+        assert report.test_cases[1].status == TestStatus.BLOCKED
+        assert report.test_cases[1].test_id == "TC002"
+        assert "Blocked due to failure" in report.test_cases[1].error_message

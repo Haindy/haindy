@@ -71,20 +71,16 @@ The Test Runner Agent currently executes test steps literally without understand
 
 ### 3. Action Orchestration
 - [ ] Implement sequential action execution
-- [ ] Add action result validation
-- [ ] Create retry mechanisms
-- [ ] Enable helper action injection
+- [ ] Enable helper action injection through AI interpretation
 
 ### 4. Failure Handling
 - [ ] Implement failure classification (blocker vs non-blocker)
-- [ ] Add intelligent recovery strategies
 - [ ] Create test flow decision logic
 - [ ] Implement cascade failure handling
 
 ### 5. Agent Communication
 - [ ] Enhance Action Agent integration
 - [ ] Improve error information gathering
-- [ ] Add detailed action feedback loop
 - [ ] Implement status tracking
 
 ### 6. Testing
@@ -98,7 +94,6 @@ The Test Runner Agent currently executes test steps literally without understand
 - Steps are intelligently decomposed into actions
 - Failures generate detailed bug reports
 - Blocker failures stop execution appropriately
-- Helper actions are injected when needed
 - Test flow decisions are logical and traceable
 
 ## Technical Details
