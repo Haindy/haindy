@@ -89,19 +89,20 @@ class TestRunner(BaseAgent):
     
     async def execute_test_plan(
         self,
-        test_plan: TestPlan,
+        test_state: TestState,
         initial_url: Optional[str] = None
-    ) -> TestReport:
+    ) -> TestState:
         """
         Execute a complete test plan with all test cases.
         
         Args:
-            test_plan: The test plan to execute
+            test_state: The test state containing the test plan
             initial_url: Optional starting URL
             
         Returns:
-            Comprehensive test report
+            Updated test state with comprehensive test report
         """
+        test_plan = test_state.test_plan
         logger.info("Starting enhanced test plan execution", extra={
             "test_plan_id": str(test_plan.plan_id),
             "test_plan_name": test_plan.name,
@@ -111,8 +112,9 @@ class TestRunner(BaseAgent):
         # Initialize execution
         self._current_test_plan = test_plan
         self._initial_url = initial_url
+        self._test_state = test_state
         
-        # Initialize test report
+        # Initialize test report within the test state
         self._test_report = TestReport(
             test_plan_id=test_plan.plan_id,
             test_plan_name=test_plan.name,
@@ -125,12 +127,12 @@ class TestRunner(BaseAgent):
             }
         )
         
-        # Initialize test state for backward compatibility
-        self._test_state = TestState(
-            test_plan=test_plan,
-            status=TestStatus.IN_PROGRESS,
-            start_time=self._test_report.started_at
-        )
+        # Attach the test report to the test state
+        test_state.test_report = self._test_report
+        
+        # Update test state timing and status
+        test_state.status = TestStatus.IN_PROGRESS
+        test_state.start_time = self._test_report.started_at
         
         # Save initial report
         await self._save_report()
@@ -206,7 +208,7 @@ class TestRunner(BaseAgent):
             # Print summary to console
             self._print_summary()
         
-        return self._test_report
+        return self._test_state
     
     async def _execute_test_case(self, test_case: TestCase) -> TestCaseResult:
         """Execute a single test case with all its steps."""
@@ -504,20 +506,50 @@ Consider:
 
 Respond with a JSON object containing an "actions" array."""
 
+        # Log what we're sending to AI
+        logger.info("Interpreting step with AI", extra={
+            "step_number": step.step_number,
+            "action": step.action,
+            "expected_result": step.expected_result,
+            "prompt_length": len(prompt)
+        })
+        
         try:
-            response = await self.call_openai(
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
             
-            content = json.loads(response.get("content", "{}"))
+            try:
+                response = await self.call_openai(
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"}
+                )
+                
+                logger.debug("OpenAI API call successful", extra={
+                    "response_type": type(response).__name__,
+                    "response_keys": list(response.keys()) if isinstance(response, dict) else None
+                })
+                
+            except Exception as api_error:
+                logger.error("OpenAI API call failed", extra={
+                    "api_error": str(api_error),
+                    "api_error_type": type(api_error).__name__,
+                    "traceback": traceback.format_exc()
+                })
+                raise
+            
+            # Parse AI response
+            content = response.get("content", {})
+            
+            # Content should already be a dict when using json_object format
+            if not isinstance(content, dict):
+                error_msg = f"Expected dict content but got {type(content)}"
+                raise TypeError(error_msg)
+            
             actions = content.get("actions", [])
             
             # Ensure AI provided actions
             if not actions:
                 raise ValueError(f"AI failed to provide actions for step {step.step_number}: {step.action}")
             
-            logger.debug("Step interpretation", extra={
+            logger.info("Step interpretation successful", extra={
                 "step": step.step_number,
                 "original_action": step.action,
                 "decomposed_actions": len(actions)
@@ -528,7 +560,9 @@ Respond with a JSON object containing an "actions" array."""
         except Exception as e:
             logger.error("Failed to interpret step with AI", extra={
                 "error": str(e),
+                "error_type": type(e).__name__,
                 "step": step.step_number,
+                "action": step.action,
                 "traceback": traceback.format_exc()
             })
             # Re-raise - no fallback, AI failure is fatal

@@ -601,7 +601,7 @@ class TestReporter:
         
         # Generate the report
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"test_report_{test_state.test_plan.plan_id}_{timestamp}.{format}"
+        filename = f"test_report_{test_state.test_report.test_plan_id}_{timestamp}.{format}"
         output_path = output_dir / filename
         
         if format == "html":
@@ -621,10 +621,11 @@ class TestReporter:
     
     def _convert_to_metrics(self, test_state: TestState) -> TestMetrics:
         """Convert TestState to TestMetrics."""
-        # Calculate metrics from test state
-        total_steps = len(test_state.test_plan.steps)
-        passed_steps = len(test_state.completed_steps)
-        failed_steps = len(test_state.failed_steps)
+        # Calculate metrics from test report
+        test_report = test_state.test_report
+        total_steps = sum(tc.steps_total for tc in test_report.test_cases)
+        passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
+        failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
         
         # Determine overall outcome
         from src.core.types import TestStatus
@@ -650,16 +651,23 @@ class TestReporter:
         else:
             duration = 0.0
         
+        # Get test info from test report
+        test_id = test_state.test_report.test_plan_id
+        test_name = test_state.test_report.test_plan_name
+        start_time = test_state.test_report.started_at
+        end_time = test_state.test_report.completed_at or now
+        skipped_steps = sum(tc.steps_total - tc.steps_completed - tc.steps_failed for tc in test_state.test_report.test_cases)
+        
         return TestMetrics(
-            test_id=test_state.test_plan.plan_id,
-            test_name=test_state.test_plan.name,
-            start_time=test_state.start_time or now,
-            end_time=test_state.end_time or now,
+            test_id=test_id,
+            test_name=test_name,
+            start_time=start_time,
+            end_time=end_time,
             outcome=outcome,
             steps_total=total_steps,
             steps_passed=passed_steps,
             steps_failed=failed_steps,
-            steps_skipped=len(test_state.skipped_steps),
+            steps_skipped=skipped_steps,
             api_calls=0,  # TODO: Track API calls
             browser_actions=0,  # TODO: Track browser actions
             screenshots_taken=0,  # TODO: Track screenshots

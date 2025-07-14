@@ -159,8 +159,6 @@ class TestPlan(BaseModel):
     created_by: str = Field("HAINDY Test Planner", description="Who/what created this plan")
     tags: List[str] = Field(default_factory=list, description="Overall plan tags")
     estimated_duration_seconds: Optional[int] = Field(None, description="Total estimated duration")
-    # Keep steps for backward compatibility during transition
-    steps: Optional[List[TestStep]] = Field(None, description="Direct steps (deprecated)")
 
 
 class TestState(BaseModel):
@@ -177,6 +175,7 @@ class TestState(BaseModel):
     error_count: int = 0
     warning_count: int = 0
     context: Dict[str, Any] = Field(default_factory=dict)
+    test_report: Optional['TestReport'] = Field(None, description="Comprehensive test execution report")  # Will be populated by TestRunner
 
 
 class EvaluationResult(BaseModel):

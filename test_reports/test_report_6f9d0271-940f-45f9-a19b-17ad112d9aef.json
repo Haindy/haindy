@@ -1,0 +1,89 @@
+{
+  "report_id": "6f9d0271-940f-45f9-a19b-17ad112d9aef",
+  "test_plan_id": "9126104b-0642-4e86-81ea-cf9bc7aed950",
+  "test_plan_name": "Wikipedia Search and Article Verification Plan",
+  "started_at": "2025-07-14T12:38:49.721675+00:00",
+  "completed_at": "2025-07-14T12:39:13.227556+00:00",
+  "status": "failed",
+  "test_cases": [
+    {
+      "case_id": "22d7a277-7bda-40d5-88da-c48494f95880",
+      "test_id": "TC001",
+      "name": "Happy Path: Search 'artificial intelligence' and verify article content",
+      "status": "failed",
+      "started_at": "2025-07-14T12:38:50.376127+00:00",
+      "completed_at": "2025-07-14T12:39:04.205282+00:00",
+      "steps_total": 9,
+      "steps_completed": 0,
+      "steps_failed": 1,
+      "step_results": [
+        {
+          "step_id": "784c412a-bac3-43bb-aa68-49233728f31a",
+          "step_number": 1,
+          "status": "failed",
+          "started_at": "2025-07-14T12:38:50.377111+00:00",
+          "completed_at": "2025-07-14T12:38:59.480344+00:00",
+          "action": "Navigate to the URL https://www.wikipedia.org/",
+          "expected_result": "Wikipedia homepage is displayed with a central search input field.",
+          "actual_result": "Error: the JSON object must be str, bytes or bytearray, not dict",
+          "screenshot_before": "test_reports/screenshots/tcTC001_step1_before_20250714_143850.png",
+          "screenshot_after": null,
+          "error_message": "the JSON object must be str, bytes or bytearray, not dict",
+          "confidence": 1.0,
+          "actions_performed": []
+        }
+      ],
+      "bugs": [],
+      "error_message": "the JSON object must be str, bytes or bytearray, not dict"
+    },
+    {
+      "case_id": "b8d5eb0e-566c-46f6-9a00-f33986ce44de",
+      "test_id": "TC002",
+      "name": "Negative: Blank search input and submit",
+      "status": "blocked",
+      "started_at": "2025-07-14T12:39:13.227169+00:00",
+      "completed_at": "2025-07-14T12:39:13.227169+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path: Search 'artificial intelligence' and verify article content"
+    },
+    {
+      "case_id": "db2865d1-ee7e-4c2d-9664-053f7d32e6cf",
+      "test_id": "TC003",
+      "name": "Negative: Search invalid term",
+      "status": "blocked",
+      "started_at": "2025-07-14T12:39:13.227185+00:00",
+      "completed_at": "2025-07-14T12:39:13.227186+00:00",
+      "steps_total": 5,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path: Search 'artificial intelligence' and verify article content"
+    }
+  ],
+  "summary": {
+    "total_test_cases": 3,
+    "completed_test_cases": 0,
+    "failed_test_cases": 1,
+    "total_steps": 17,
+    "completed_steps": 0,
+    "failed_steps": 1,
+    "critical_bugs": 0,
+    "high_bugs": 0,
+    "medium_bugs": 0,
+    "low_bugs": 0,
+    "success_rate": 0.0,
+    "execution_time_seconds": 23.505881
+  },
+  "bugs": [],
+  "environment": {
+    "initial_url": "https://www.wikipedia.org/",
+    "browser": "Chromium",
+    "execution_mode": "enhanced"
+  },
+  "created_by": "HAINDY Test Runner"
+}

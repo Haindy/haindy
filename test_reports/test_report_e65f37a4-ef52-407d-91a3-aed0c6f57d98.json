@@ -1,0 +1,117 @@
+{
+  "report_id": "e65f37a4-ef52-407d-91a3-aed0c6f57d98",
+  "test_plan_id": "7dc1e26f-d490-43f2-ab2c-fd7ef1d5c247",
+  "test_plan_name": "Wikipedia AI Article Search and Validation",
+  "started_at": "2025-07-14T11:40:05.415314+00:00",
+  "completed_at": "2025-07-14T11:40:54.921959+00:00",
+  "status": "failed",
+  "test_cases": [
+    {
+      "case_id": "1dba4bb7-b5b9-4eee-a36a-a3e18834225e",
+      "test_id": "TC001",
+      "name": "Happy Path Search for 'artificial intelligence'",
+      "status": "failed",
+      "started_at": "2025-07-14T11:40:06.075986+00:00",
+      "completed_at": "2025-07-14T11:40:47.775512+00:00",
+      "steps_total": 4,
+      "steps_completed": 0,
+      "steps_failed": 1,
+      "step_results": [
+        {
+          "step_id": "8b0ce94b-2d6b-483a-b3ee-530050213245",
+          "step_number": 1,
+          "status": "failed",
+          "started_at": "2025-07-14T11:40:06.077545+00:00",
+          "completed_at": "2025-07-14T11:40:39.940144+00:00",
+          "action": "Navigate to https://www.wikipedia.org/",
+          "expected_result": "Wikipedia homepage loads and displays the main search input",
+          "actual_result": "Error: the JSON object must be str, bytes or bytearray, not dict",
+          "screenshot_before": "test_reports/screenshots/tcTC001_step1_before_20250714_134006.png",
+          "screenshot_after": null,
+          "error_message": "the JSON object must be str, bytes or bytearray, not dict",
+          "confidence": 1.0,
+          "actions_performed": []
+        }
+      ],
+      "bugs": [],
+      "error_message": "the JSON object must be str, bytes or bytearray, not dict"
+    },
+    {
+      "case_id": "fb4e15c1-bb4f-4df1-9542-b442f0c49906",
+      "test_id": "TC002",
+      "name": "Press Enter with Empty Search Field",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:40:54.921537+00:00",
+      "completed_at": "2025-07-14T11:40:54.921538+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "df5c4709-7260-4e84-8ef5-ca6e7803512e",
+      "test_id": "TC003",
+      "name": "Verify Key Sections in AI Article",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:40:54.921555+00:00",
+      "completed_at": "2025-07-14T11:40:54.921555+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "3693b01f-03e4-42bd-90ad-30215f039c2e",
+      "test_id": "TC004",
+      "name": "Confirm Images and Infobox Presence",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:40:54.921560+00:00",
+      "completed_at": "2025-07-14T11:40:54.921561+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "7921011d-3c0b-403c-941f-08b6a87c9f9d",
+      "test_id": "TC005",
+      "name": "Validate Article Layout and Professional Appearance",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:40:54.921564+00:00",
+      "completed_at": "2025-07-14T11:40:54.921564+00:00",
+      "steps_total": 4,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    }
+  ],
+  "summary": {
+    "total_test_cases": 5,
+    "completed_test_cases": 0,
+    "failed_test_cases": 1,
+    "total_steps": 17,
+    "completed_steps": 0,
+    "failed_steps": 1,
+    "critical_bugs": 0,
+    "high_bugs": 0,
+    "medium_bugs": 0,
+    "low_bugs": 0,
+    "success_rate": 0.0,
+    "execution_time_seconds": 49.506645
+  },
+  "bugs": [],
+  "environment": {
+    "initial_url": "https://www.wikipedia.org/",
+    "browser": "Chromium",
+    "execution_mode": "enhanced"
+  },
+  "created_by": "HAINDY Test Runner"
+}

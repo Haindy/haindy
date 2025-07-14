@@ -373,10 +373,11 @@ class EnhancedReporter:
         Returns:
             Path to the generated report
         """
-        # Calculate metrics
-        total_steps = len(test_state.test_plan.steps)
-        completed_steps = len(test_state.completed_steps)
-        failed_steps = len(test_state.failed_steps)
+        # Calculate metrics from test report
+        test_report = test_state.test_report
+        total_steps = sum(tc.steps_total for tc in test_report.test_cases)
+        completed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
+        failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
         success_rate = (completed_steps / total_steps * 100) if total_steps > 0 else 0
         
         # Calculate duration
