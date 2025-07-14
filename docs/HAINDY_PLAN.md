@@ -179,7 +179,7 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 
 ## 7  Development Phases
 
-### ✅ Completed Phases (19/21)
+### ✅ Completed Phases (20/23)
 
 For detailed information about completed phases, see the individual phase documents:
 
@@ -202,6 +202,7 @@ For detailed information about completed phases, see the individual phase docume
 | **Phase 13** | Conversation-Based AI Interactions | [PHASE_13_CONVERSATION_BASED_AI_INTERACTIONS.md](./phases/PHASE_13_CONVERSATION_BASED_AI_INTERACTIONS.md) |
 | **Phase 14** | Test Planner Agent Refinement | [PHASE_14_TEST_PLANNER_REFINEMENT.md](./phases/PHASE_14_TEST_PLANNER_REFINEMENT.md) |
 | **Phase 15** | Test Runner Agent Enhancement | [PHASE_15_TEST_RUNNER_ENHANCEMENT.md](./phases/PHASE_15_TEST_RUNNER_ENHANCEMENT.md) |
+| **Phase 16** | Evaluator Agent Removal | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
 
 Additional completed work:
 - **Architecture Refactor**: Action Agent owns execution lifecycle
@@ -211,15 +212,15 @@ Additional completed work:
 
 | Phase | Status | Target | Documentation |
 |-------|--------|--------|---------------|
-| **Phase 16** | Evaluator Agent Removal | ✅ Complete | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
-| **Phase 17** | Additional Action Types (PAUSED) | TBD | [PHASE_17_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_17_ADDITIONAL_ACTION_TYPES.md) |
+| **Phase 17** | Usability & Persistence | 3-4 days | [PHASE_17_USABILITY_AND_PERSISTENCE.md](./phases/PHASE_17_USABILITY_AND_PERSISTENCE.md) |
 
 ### 📅 Upcoming Phases
 
 | Phase | Status | ETA | Documentation |
 |-------|--------|-----|---------------|
 | **Phase 12** | Test Scenarios | 1/5 scenarios working | [PHASE_12_TEST_SCENARIOS.md](./phases/PHASE_12_TEST_SCENARIOS.md) |
-| **Phase 18** | Packaging & Documentation | 1-2 days | [PHASE_18_PACKAGING_DOCUMENTATION.md](./phases/PHASE_18_PACKAGING_DOCUMENTATION.md) |
+| **Phase 18** | Additional Action Types | TBD | [PHASE_18_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_18_ADDITIONAL_ACTION_TYPES.md) |
+| **Phase 19** | Packaging & Documentation | 1-2 days | [PHASE_19_PACKAGING_DOCUMENTATION.md](./phases/PHASE_19_PACKAGING_DOCUMENTATION.md) |
 
 ---
 
@@ -251,10 +252,11 @@ Additional completed work:
 ## 10  Immediate Next Steps
 
 1. ~~Complete Phase 16 Evaluator Agent Reassessment~~ ✅ DONE
-2. Resume Phase 17 Additional Action Types
+2. Complete Phase 17 Usability & Persistence Improvements
 3. Complete Phase 12 test scenarios (4 remaining)
-4. Complete Phase 18 Packaging & Documentation
-5. Package and release v0.1.0
+4. Resume Phase 18 Additional Action Types
+5. Complete Phase 19 Packaging & Documentation
+6. Package and release v0.1.0
 
 ---
 
