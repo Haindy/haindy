@@ -153,6 +153,7 @@ reports/
 test_reports/
 test_plans/
 test_artifacts/
+generated_test_plans/
 screenshots/
 debug_screenshots/
 *.log

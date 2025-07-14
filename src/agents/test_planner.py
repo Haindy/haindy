@@ -4,6 +4,7 @@ Test Planner Agent implementation.
 Analyzes requirements/PRDs and creates structured test plans.
 """
 
+from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import UUID
 
@@ -74,16 +75,8 @@ class TestPlannerAgent(BaseAgent):
         # Parse and validate the response
         test_plan = self._parse_test_plan_response(response)
         
-        # Debug: Save test plan in both formats
-        formatter = TestPlanFormatter()
-        
-        # Save as JSON
-        with open("debug_test_plan.json", "w") as f:
-            f.write(formatter.to_json(test_plan))
-        
-        # Save as Markdown
-        with open("debug_test_plan.md", "w") as f:
-            f.write(formatter.to_markdown(test_plan))
+        # Save test plan permanently
+        self._save_test_plan(test_plan)
         
         # Calculate total steps
         total_steps = sum(len(tc.steps) for tc in test_plan.test_cases)
@@ -216,6 +209,36 @@ IMPORTANT:
                 "response": response
             })
             raise ValueError(f"Failed to parse test plan response: {e}")
+    
+    def _save_test_plan(self, test_plan: TestPlan) -> None:
+        """Save test plan to permanent storage."""
+        # Create base directory for all generated test plans
+        base_dir = Path("generated_test_plans")
+        base_dir.mkdir(exist_ok=True)
+        
+        # Create directory for this specific test plan
+        plan_dir = base_dir / str(test_plan.plan_id)
+        plan_dir.mkdir(exist_ok=True)
+        
+        # Use formatter to generate both formats
+        formatter = TestPlanFormatter()
+        
+        # Save as JSON
+        json_path = plan_dir / f"test_plan_{test_plan.plan_id}.json"
+        with open(json_path, "w") as f:
+            f.write(formatter.to_json(test_plan))
+        
+        # Save as Markdown
+        md_path = plan_dir / f"test_plan_{test_plan.plan_id}.md"
+        with open(md_path, "w") as f:
+            f.write(formatter.to_markdown(test_plan))
+        
+        logger.info("Test plan saved permanently", extra={
+            "plan_id": str(test_plan.plan_id),
+            "plan_dir": str(plan_dir),
+            "json_path": str(json_path),
+            "md_path": str(md_path)
+        })
     
     async def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
         """
