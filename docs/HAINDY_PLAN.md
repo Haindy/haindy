@@ -18,7 +18,7 @@
 |-------|------------|-----|--------|
 | Orchestrator | **Python 3.10+** | Best ecosystem for AI & agent coordination. | ✅ |
 | Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. | ✅ |
-| AI Agents | **4x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action, Evaluator agents. | ⚠️ Vision limitations |
+| AI Agents | **3x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action agents. | ⚠️ Vision limitations |
 | Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. | ✅ |
 | Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (60×60 grid). | ✅ |
 | Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. | ✅ |
@@ -97,7 +97,7 @@ autonomous-ai-testing-agent/
 
 ### **4.1 AI Agent System**
 ```python
-# Four specialized AI agents working in coordination
+# Three specialized AI agents working in coordination
 class TestPlannerAgent(BaseAgent):
     """Analyzes requirements/PRDs → Creates structured test plans"""
     def create_test_plan(self, requirements: str) -> TestPlan: pass
@@ -112,9 +112,7 @@ class ActionAgent(BaseAgent):
     def determine_action(self, screenshot: bytes, instruction: str) -> GridAction: pass
     def refine_coordinates(self, cropped_region: bytes, initial_coords: GridCoords) -> RefinedGridAction: pass
 
-class EvaluatorAgent(BaseAgent):
-    """Screenshot + expectation → Success/failure assessment"""
-    def evaluate_result(self, screenshot: bytes, expected_outcome: str) -> EvaluationResult: pass
+# Note: Evaluation is now handled within Action Agent
 ```
 
 ### **4.2 Agent Coordination Workflow**
@@ -130,8 +128,6 @@ ActionAgent: Analyzes screenshot → "Click grid cell B7"
     ↓
 BrowserDriver: Executes action, waits, captures screenshot  
     ↓
-EvaluatorAgent: "Success - product page loaded correctly"
-    ↓
 TestRunnerAgent: Processes result → "Step 2: Add to cart"
     ↓
 [Loop continues until test completion]
@@ -141,7 +137,7 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 - **Test Planner**: Understands business requirements, creates comprehensive test plans
 - **Test Runner**: Maintains test context, coordinates execution, handles branching logic, manages scripted automation fallbacks
 - **Action Agent**: Adaptive grid specialist, visual refinement expert, confidence-based precision targeting
-- **Evaluator**: Result validation, UI state assessment, error detection, confidence scoring
+- **Action Agent**: Also handles result validation, UI state assessment, error detection
 
 ---
 
@@ -215,7 +211,7 @@ Additional completed work:
 
 | Phase | Status | Target | Documentation |
 |-------|--------|--------|---------------|
-| **Phase 16** | Evaluator Agent Reassessment | 1 day | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
+| **Phase 16** | Evaluator Agent Removal | ✅ Complete | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
 | **Phase 17** | Additional Action Types (PAUSED) | TBD | [PHASE_17_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_17_ADDITIONAL_ACTION_TYPES.md) |
 
 ### 📅 Upcoming Phases
@@ -254,7 +250,7 @@ Additional completed work:
 
 ## 10  Immediate Next Steps
 
-1. Complete Phase 16 Evaluator Agent Reassessment
+1. ~~Complete Phase 16 Evaluator Agent Reassessment~~ ✅ DONE
 2. Resume Phase 17 Additional Action Types
 3. Complete Phase 12 test scenarios (4 remaining)
 4. Complete Phase 18 Packaging & Documentation

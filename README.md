@@ -4,11 +4,11 @@ AI-driven autonomous testing agent — Transform requirements into comprehensive
 
 ## Overview
 
-HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs four specialized AI agents coordinating together to plan, execute, and evaluate tests.
+HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs three specialized AI agents coordinating together to plan, execute, and evaluate tests.
 
 ## Key Features
 
-- **Multi-Agent Architecture**: Four specialized AI agents (Test Planner, Test Runner, Action Agent, Evaluator)
+- **Multi-Agent Architecture**: Three specialized AI agents (Test Planner, Test Runner, Action Agent)
 - **DOM-Free Visual Interaction**: Adaptive grid-based interaction with automatic refinement
 - **Just-In-Time Scripted Automation**: Records successful actions for faster replay
 - **Hierarchical Validation**: Multi-layer validation to prevent hallucinations

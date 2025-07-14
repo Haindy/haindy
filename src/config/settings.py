@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(
-        default="o4-mini-2025-04-16", description="Default OpenAI model"
+        default="o4-mini", description="Default OpenAI model"
     )
     openai_temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Default temperature"

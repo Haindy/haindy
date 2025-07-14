@@ -89,19 +89,20 @@ class TestRunner(BaseAgent):
     
     async def execute_test_plan(
         self,
-        test_plan: TestPlan,
+        test_state: TestState,
         initial_url: Optional[str] = None
-    ) -> TestReport:
+    ) -> TestState:
         """
         Execute a complete test plan with all test cases.
         
         Args:
-            test_plan: The test plan to execute
+            test_state: The test state containing the test plan
             initial_url: Optional starting URL
             
         Returns:
-            Comprehensive test report
+            Updated test state with comprehensive test report
         """
+        test_plan = test_state.test_plan
         logger.info("Starting enhanced test plan execution", extra={
             "test_plan_id": str(test_plan.plan_id),
             "test_plan_name": test_plan.name,
@@ -111,8 +112,9 @@ class TestRunner(BaseAgent):
         # Initialize execution
         self._current_test_plan = test_plan
         self._initial_url = initial_url
+        self._test_state = test_state
         
-        # Initialize test report
+        # Initialize test report within the test state
         self._test_report = TestReport(
             test_plan_id=test_plan.plan_id,
             test_plan_name=test_plan.name,
@@ -125,12 +127,12 @@ class TestRunner(BaseAgent):
             }
         )
         
-        # Initialize test state for backward compatibility
-        self._test_state = TestState(
-            test_plan=test_plan,
-            status=TestStatus.IN_PROGRESS,
-            start_time=self._test_report.started_at
-        )
+        # Attach the test report to the test state
+        test_state.test_report = self._test_report
+        
+        # Update test state timing and status
+        test_state.status = TestStatus.IN_PROGRESS
+        test_state.start_time = self._test_report.started_at
         
         # Save initial report
         await self._save_report()
@@ -206,7 +208,7 @@ class TestRunner(BaseAgent):
             # Print summary to console
             self._print_summary()
         
-        return self._test_report
+        return self._test_state
     
     async def _execute_test_case(self, test_case: TestCase) -> TestCaseResult:
         """Execute a single test case with all its steps."""
@@ -475,34 +477,81 @@ Recent actions:
 {json.dumps(context['recent_history'], indent=2)}
 
 Break this down into a sequence of specific actions. For each action provide:
-1. type: The action type (navigate, click, type, scroll, wait, assert)
-2. target: What element/location to interact with (be specific)
-3. value: Any value needed (for type actions)
+1. type: The action type - MUST be one of these exact values:
+   - navigate: Go to a URL
+   - click: Click on an element
+   - type: Type text into a field
+   - assert: Verify something on the page
+   - key_press: Press a specific key (Enter, Tab, etc.)
+   - scroll_to_element: Scroll until an element is visible
+   - scroll_by_pixels: Scroll by a specific number of pixels
+   - scroll_to_top: Scroll to top of page
+   - scroll_to_bottom: Scroll to bottom of page
+   - scroll_horizontal: Scroll horizontally
+2. target: Describe the element in human terms (e.g., "the search input field", "the blue Login button", "the main navigation menu") - DO NOT use CSS selectors, IDs, or any DOM references
+3. value: Required for certain action types:
+   - For 'type': The text to type
+   - For 'navigate': The URL to navigate to
+   - For 'key_press': The key to press (e.g., "Enter", "Tab")
+   - For 'scroll_by_pixels': Number of pixels (positive for down/right, negative for up/left)
 4. description: Brief description of what this action does
 5. critical: Whether failure should stop remaining actions (true/false)
 
+IMPORTANT: Choose the most appropriate action type from the list above. For dropdown/select elements, use 'click' type.
+
 Consider:
 - Do we need to scroll to make elements visible?
-- Should we wait for page loads or animations?
 - Are there multiple UI interactions needed?
 - Should we verify intermediate states?
 
+IMPORTANT: If the step is about typing in a search bar or text box, don't try to click and validate selection. Instead just click and type, then validate the text was typed directly. Some search or text boxes are enabled by default and clicking doesn't produce visible changes.
+
 Respond with a JSON object containing an "actions" array."""
 
+        # Log what we're sending to AI
+        logger.info("Interpreting step with AI", extra={
+            "step_number": step.step_number,
+            "action": step.action,
+            "expected_result": step.expected_result,
+            "prompt_length": len(prompt)
+        })
+        
         try:
-            response = await self.call_openai(
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
             
-            content = json.loads(response.get("content", "{}"))
+            try:
+                response = await self.call_openai(
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"}
+                )
+                
+                logger.debug("OpenAI API call successful", extra={
+                    "response_type": type(response).__name__,
+                    "response_keys": list(response.keys()) if isinstance(response, dict) else None
+                })
+                
+            except Exception as api_error:
+                logger.error("OpenAI API call failed", extra={
+                    "api_error": str(api_error),
+                    "api_error_type": type(api_error).__name__,
+                    "traceback": traceback.format_exc()
+                })
+                raise
+            
+            # Parse AI response
+            content = response.get("content", {})
+            
+            # Content should already be a dict when using json_object format
+            if not isinstance(content, dict):
+                error_msg = f"Expected dict content but got {type(content)}"
+                raise TypeError(error_msg)
+            
             actions = content.get("actions", [])
             
             # Ensure AI provided actions
             if not actions:
                 raise ValueError(f"AI failed to provide actions for step {step.step_number}: {step.action}")
             
-            logger.debug("Step interpretation", extra={
+            logger.info("Step interpretation successful", extra={
                 "step": step.step_number,
                 "original_action": step.action,
                 "decomposed_actions": len(actions)
@@ -513,7 +562,9 @@ Respond with a JSON object containing an "actions" array."""
         except Exception as e:
             logger.error("Failed to interpret step with AI", extra={
                 "error": str(e),
+                "error_type": type(e).__name__,
                 "step": step.step_number,
+                "action": step.action,
                 "traceback": traceback.format_exc()
             })
             # Re-raise - no fallback, AI failure is fatal

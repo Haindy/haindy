@@ -10,7 +10,6 @@ from uuid import uuid4
 import pytest
 
 from src.core.types import (
-    ActionInstruction,
     ActionType,
     TestPlan,
     TestStep
@@ -44,27 +43,22 @@ def sample_test_plan():
         plan_id=uuid4(),
         name="Test Login Flow",
         description="Test user login",
-        requirements="User should be able to login",
+        requirements_source="User should be able to login",
+        test_cases=[],
         steps=[
             TestStep(
                 step_id=uuid4(),
                 step_number=1,
                 description="Navigate to login",
-                action_instruction=ActionInstruction(
-                    action_type=ActionType.NAVIGATE,
-                    description="Go to login page",
-                    expected_outcome="Login page displayed"
-                )
+                action="Go to login page",
+                expected_result="Login page displayed"
             ),
             TestStep(
                 step_id=uuid4(),
                 step_number=2,
                 description="Click login button",
-                action_instruction=ActionInstruction(
-                    action_type=ActionType.CLICK,
-                    description="Click the login button",
-                    expected_outcome="Login form shown"
-                )
+                action="Click the login button",
+                expected_result="Login form shown"
             )
         ]
     )
@@ -295,11 +289,8 @@ class TestJournalManager:
                 step_id=uuid4(),
                 step_number=i+1,
                 description=f"Step {i+1}",
-                action_instruction=ActionInstruction(
-                    action_type=ActionType.CLICK if i < 3 else ActionType.TYPE,
-                    description=f"Action {i+1}",
-                    expected_outcome="Success"
-                )
+                action=f"Click button {i+1}" if i < 3 else f"Type text {i+1}",
+                expected_result="Success"
             )
             
             await journal_manager.record_action(

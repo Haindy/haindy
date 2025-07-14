@@ -76,6 +76,8 @@ def scroll_test_step():
     """Create a test step for scroll to element."""
     return TestStep(
         step_number=1,
+        action="Scroll to the submit button",
+        expected_result="Submit button is visible",
         action_instruction=ActionInstruction(
             action_type=ActionType.SCROLL_TO_ELEMENT,
             description="Scroll to the submit button",
@@ -94,6 +96,8 @@ class TestScrollActions:
         """Test scroll by pixels workflow."""
         test_step = TestStep(
             step_number=1,
+            action="Scroll down 300 pixels",
+            expected_result="Page scrolled down",
             action_instruction=ActionInstruction(
                 action_type=ActionType.SCROLL_BY_PIXELS,
                 description="Scroll down 300 pixels",
@@ -117,6 +121,8 @@ class TestScrollActions:
         """Test scroll to top workflow."""
         test_step = TestStep(
             step_number=1,
+            action="Scroll to top of page",
+            expected_result="At top of page",
             action_instruction=ActionInstruction(
                 action_type=ActionType.SCROLL_TO_TOP,
                 description="Scroll to top of page",
@@ -142,6 +148,8 @@ class TestScrollActions:
         """Test scroll to bottom workflow."""
         test_step = TestStep(
             step_number=1,
+            action="Scroll to bottom of page",
+            expected_result="At bottom of page",
             action_instruction=ActionInstruction(
                 action_type=ActionType.SCROLL_TO_BOTTOM,
                 description="Scroll to bottom of page",
@@ -166,6 +174,8 @@ class TestScrollActions:
         """Test horizontal scroll workflow."""
         test_step = TestStep(
             step_number=1,
+            action="Scroll right 400 pixels",
+            expected_result="Scrolled horizontally",
             action_instruction=ActionInstruction(
                 action_type=ActionType.SCROLL_HORIZONTAL,
                 description="Scroll right 400 pixels",

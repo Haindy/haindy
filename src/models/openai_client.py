@@ -17,7 +17,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "o4-mini-2025-04-16",
+        model: str = "o4-mini",
         api_key: Optional[str] = None,
         max_retries: int = 3,
     ) -> None:

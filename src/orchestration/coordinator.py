@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from src.agents import (
     TestPlannerAgent,
-    TestRunnerAgent,
+    TestRunner,
     ActionAgent,
 )
 from src.browser.driver import BrowserDriver
@@ -81,7 +81,7 @@ class WorkflowCoordinator:
         # Create agents
         self._agents = {
             "test_planner": TestPlannerAgent(name="TestPlanner"),
-            "test_runner": TestRunnerAgent(
+            "test_runner": TestRunner(
                 name="TestRunner",
                 browser_driver=self.browser_driver
             ),
@@ -172,7 +172,7 @@ class WorkflowCoordinator:
             # Phase 3: Execute test
             self._state = CoordinatorState.EXECUTING
             final_state = await self._execute_test_plan(
-                test_plan, 
+                test_state, 
                 initial_url
             )
             
@@ -219,11 +219,11 @@ class WorkflowCoordinator:
     
     async def _execute_test_plan(
         self,
-        test_plan: TestPlan,
+        test_state: TestState,
         initial_url: Optional[str] = None
     ) -> TestState:
         """Execute test plan using Test Runner agent."""
-        logger.info(f"Executing test plan: {test_plan.name}")
+        logger.info(f"Executing test plan: {test_state.test_plan.name}")
         
         runner = self._agents.get("test_runner")
         if not runner:
@@ -231,11 +231,11 @@ class WorkflowCoordinator:
         
         # Create execution task
         test_task = asyncio.create_task(
-            runner.execute_test_plan(test_plan, initial_url)
+            runner.execute_test_plan(test_state, initial_url)
         )
         
         # Track active test
-        self._active_tests[test_plan.plan_id] = test_task
+        self._active_tests[test_state.test_plan.plan_id] = test_task
         
         try:
             # Wait for completion with timeout
@@ -252,7 +252,7 @@ class WorkflowCoordinator:
             
             # Update state to failed
             await self.state_manager.update_test_state(
-                test_plan.plan_id,
+                test_state.test_plan.plan_id,
                 StateTransition.ABORT,
                 {"reason": "timeout"}
             )
@@ -261,7 +261,7 @@ class WorkflowCoordinator:
             
         finally:
             # Remove from active tests
-            self._active_tests.pop(test_plan.plan_id, None)
+            self._active_tests.pop(test_state.test_plan.plan_id, None)
     
     async def pause_test(self, test_id: UUID) -> None:
         """Pause an executing test."""

@@ -127,15 +127,15 @@ The Action Agent is responsible for executing specific browser interactions usin
 - **Reliable Execution**: Built-in retry and validation mechanisms
 - **Performance**: Efficient screenshot analysis and action execution
 
-### 4. Evaluator Agent (Under Review)
+### 4. Evaluator Agent (Removed)
 
-#### Current Status
-The Evaluator Agent is under architectural review as part of Phase 16. Initial analysis suggests that evaluation responsibilities are better distributed among other agents rather than centralized.
+#### Status: REMOVED in Phase 16
+The Evaluator Agent has been removed from the architecture after analysis showed that evaluation responsibilities are better handled by the agents that perform the actions.
 
-#### Proposed Resolution
-- **Visual Evaluation**: Integrate into Action Agent (post-action validation)
-- **Result Evaluation**: Keep within Test Runner Agent (step success/failure)
-- **Assertion Logic**: Distribute based on context and ownership
+#### Where Evaluation Happens Now
+- **Visual Evaluation**: Integrated into Action Agent workflows (post-action validation)
+- **Result Evaluation**: Handled by Test Runner Agent (step success/failure decisions)
+- **Error Detection**: Available as shared utilities in `src/evaluation/` module
 
 ## Inter-Agent Communication
 

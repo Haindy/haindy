@@ -1,0 +1,131 @@
+{
+  "report_id": "e22eb54f-b0c4-471d-99e2-73ac284f8a22",
+  "test_plan_id": "3627a7c9-e624-49c6-9d60-c0da0b64ad59",
+  "test_plan_name": "AI Wikipedia Search and Article Verification",
+  "started_at": "2025-07-14T11:32:01.908171+00:00",
+  "completed_at": "2025-07-14T11:32:23.236058+00:00",
+  "status": "failed",
+  "test_cases": [
+    {
+      "case_id": "3e5b3f5e-6949-45e0-95e9-1473e693578f",
+      "test_id": "TC001",
+      "name": "Happy Path Search for 'artificial intelligence'",
+      "status": "failed",
+      "started_at": "2025-07-14T11:32:02.560310+00:00",
+      "completed_at": "2025-07-14T11:32:17.524089+00:00",
+      "steps_total": 5,
+      "steps_completed": 0,
+      "steps_failed": 1,
+      "step_results": [
+        {
+          "step_id": "8a544acd-8e31-4310-b24b-8042eba8caf9",
+          "step_number": 1,
+          "status": "failed",
+          "started_at": "2025-07-14T11:32:02.560580+00:00",
+          "completed_at": "2025-07-14T11:32:12.234621+00:00",
+          "action": "Open the browser and navigate to https://www.wikipedia.org/",
+          "expected_result": "Wikipedia home page is displayed with the central search box visible",
+          "actual_result": "Error: the JSON object must be str, bytes or bytearray, not dict",
+          "screenshot_before": "test_reports/screenshots/tcTC001_step1_before_20250714_133202.png",
+          "screenshot_after": null,
+          "error_message": "the JSON object must be str, bytes or bytearray, not dict",
+          "confidence": 1.0,
+          "actions_performed": []
+        }
+      ],
+      "bugs": [],
+      "error_message": "the JSON object must be str, bytes or bytearray, not dict"
+    },
+    {
+      "case_id": "730b9e83-75a6-4f2f-aa66-b3aca3ebd0ec",
+      "test_id": "TC002",
+      "name": "Verify Presence of Key Sections",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:32:23.232251+00:00",
+      "completed_at": "2025-07-14T11:32:23.232255+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "18656f87-0aef-4ce3-83f9-e7241df20bbe",
+      "test_id": "TC003",
+      "name": "Verify Presence of Relevant Images",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:32:23.232319+00:00",
+      "completed_at": "2025-07-14T11:32:23.232321+00:00",
+      "steps_total": 2,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "02c5f96e-2482-40df-9036-fa416bc7a82e",
+      "test_id": "TC004",
+      "name": "Verify Infobox Presence",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:32:23.232349+00:00",
+      "completed_at": "2025-07-14T11:32:23.232351+00:00",
+      "steps_total": 1,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "4116581e-8b7a-46de-9843-278e2872eef8",
+      "test_id": "TC005",
+      "name": "Verify Overall Layout and Professional Appearance",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:32:23.232369+00:00",
+      "completed_at": "2025-07-14T11:32:23.232371+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    },
+    {
+      "case_id": "5e846808-7e38-404a-8ccf-9c064d647698",
+      "test_id": "TC006",
+      "name": "Negative Case: Search for Non-Existent Term",
+      "status": "blocked",
+      "started_at": "2025-07-14T11:32:23.232387+00:00",
+      "completed_at": "2025-07-14T11:32:23.232389+00:00",
+      "steps_total": 4,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path Search for 'artificial intelligence'"
+    }
+  ],
+  "summary": {
+    "total_test_cases": 6,
+    "completed_test_cases": 0,
+    "failed_test_cases": 1,
+    "total_steps": 18,
+    "completed_steps": 0,
+    "failed_steps": 1,
+    "critical_bugs": 0,
+    "high_bugs": 0,
+    "medium_bugs": 0,
+    "low_bugs": 0,
+    "success_rate": 0.0,
+    "execution_time_seconds": 21.327887
+  },
+  "bugs": [],
+  "environment": {
+    "initial_url": "https://www.wikipedia.org/",
+    "browser": "Chromium",
+    "execution_mode": "enhanced"
+  },
+  "created_by": "HAINDY Test Runner"
+}

@@ -1,0 +1,192 @@
+{
+  "report_id": "5b2ead9f-4f51-45a1-a689-727472157967",
+  "test_plan_id": "858ea9e4-6b92-4ee6-b146-a7591b97cb84",
+  "test_plan_name": "Wikipedia Artificial Intelligence Search Test Plan",
+  "started_at": "2025-07-14T13:50:07.671359+00:00",
+  "completed_at": "2025-07-14T13:52:19.916924+00:00",
+  "status": "failed",
+  "test_cases": [
+    {
+      "case_id": "8657a36c-8d04-45d2-946b-9918f956d84f",
+      "test_id": "TC001",
+      "name": "Happy Path: Search 'artificial intelligence' and validate article page",
+      "status": "failed",
+      "started_at": "2025-07-14T13:50:08.328753+00:00",
+      "completed_at": "2025-07-14T13:52:10.758952+00:00",
+      "steps_total": 11,
+      "steps_completed": 2,
+      "steps_failed": 1,
+      "step_results": [
+        {
+          "step_id": "0245fed5-9ce1-4b66-b93c-9d1bb4c4eb54",
+          "step_number": 1,
+          "status": "completed",
+          "started_at": "2025-07-14T13:50:08.329057+00:00",
+          "completed_at": "2025-07-14T13:50:45.194537+00:00",
+          "action": "Navigate browser to https://www.wikipedia.org/",
+          "expected_result": "Wikipedia home page loads with central search input field visible",
+          "actual_result": "English Wikipedia main page loaded with the \u201cSearch Wikipedia\u201d input field and Search button visible at the top, along with featured content panels on the main page.",
+          "screenshot_before": "test_reports/screenshots/tcTC001_step1_before_20250714_155008.png",
+          "screenshot_after": "test_reports/screenshots/tcTC001_step1_after_20250714_155041.png",
+          "error_message": null,
+          "confidence": 0.95,
+          "actions_performed": [
+            {
+              "success": true,
+              "action_type": "navigate",
+              "target": "https://www.wikipedia.org/",
+              "outcome": "The screenshot shows the English Wikipedia main page (https://en.wikipedia.org). At the top is the Wikipedia logo and a \u201cSearch Wikipedia\u201d input field with a \u201cSearch\u201d button. Below is a banner (\u201cWiki Loves Earth: Upload photos\u2026\u201d), followed by the \u201cMain Page\u201d tab selected. The content area features \u201cWelcome to Wikipedia,\u201d statistics (active editors, article count), the \u201cToday\u2019s featured article\u201d section with an image of William Hanna and accompanying text, \u201cDid you know\u2026\u201d, \u201cIn the news\u201d, and \u201cOn this day\u201d panels. A right-sidebar \u201cAppearance\u201d toolbox (text size, width, color) is visible.",
+              "confidence": 1.0,
+              "error": null
+            },
+            {
+              "success": true,
+              "action_type": "assert",
+              "target": "#searchInput",
+              "outcome": "A centered search input field at the top of the page with placeholder text \u201cSearch Wikipedia\u201d and an adjacent \u201cSearch\u201d button.",
+              "confidence": 1.0,
+              "error": null
+            }
+          ]
+        },
+        {
+          "step_id": "3ad71ef0-4c3a-45ec-a390-031271108e7d",
+          "step_number": 2,
+          "status": "completed",
+          "started_at": "2025-07-14T13:50:45.195070+00:00",
+          "completed_at": "2025-07-14T13:51:29.251130+00:00",
+          "action": "Locate the search input field in the center of the page",
+          "expected_result": "Search input field is present and empty",
+          "actual_result": "Search input field is visible at the top with placeholder 'Search Wikipedia' and contains no user-entered text.",
+          "screenshot_before": "test_reports/screenshots/tcTC001_step2_before_20250714_155045.png",
+          "screenshot_after": "test_reports/screenshots/tcTC001_step2_after_20250714_155124.png",
+          "error_message": null,
+          "confidence": 0.95,
+          "actions_performed": [
+            {
+              "success": true,
+              "action_type": "scroll_to_element",
+              "target": "#searchInput",
+              "outcome": "Successfully scrolled to #searchInput",
+              "confidence": 0.9,
+              "error": null
+            },
+            {
+              "success": true,
+              "action_type": "assert",
+              "target": "#searchInput",
+              "outcome": "A search input box in the top bar with the placeholder text \u201cSearch Wikipedia,\u201d and no text entered.",
+              "confidence": 1.0,
+              "error": null
+            },
+            {
+              "success": true,
+              "action_type": "assert",
+              "target": "#searchInput",
+              "outcome": "The Wikipedia search input box is visible at the top of the page; it displays its default placeholder text (\u201cSearch Wikipedia\u201d) but contains no user-entered text.",
+              "confidence": 1.0,
+              "error": null
+            }
+          ]
+        },
+        {
+          "step_id": "31c55d41-b5c2-45f4-9c25-8644cd73f1d1",
+          "step_number": 3,
+          "status": "failed",
+          "started_at": "2025-07-14T13:51:29.251729+00:00",
+          "completed_at": "2025-07-14T13:52:04.482203+00:00",
+          "action": "Type the text \"artificial intelligence\" into the search input field",
+          "expected_result": "Search input field displays \"artificial intelligence\"",
+          "actual_result": "Successfully scrolled to css selector: input#searchInput; Failed: Unable to locate dropdown element",
+          "screenshot_before": "test_reports/screenshots/tcTC001_step3_before_20250714_155129.png",
+          "screenshot_after": "test_reports/screenshots/tcTC001_step3_after_20250714_155204.png",
+          "error_message": "One or more actions failed",
+          "confidence": 1.0,
+          "actions_performed": [
+            {
+              "success": true,
+              "action_type": "scroll_to_element",
+              "target": "css selector: input#searchInput",
+              "outcome": "Successfully scrolled to css selector: input#searchInput",
+              "confidence": 0.85,
+              "error": null
+            },
+            {
+              "success": false,
+              "action_type": "click",
+              "target": "css selector: input#searchInput",
+              "outcome": "Action completed",
+              "confidence": 0.0,
+              "error": "Unable to locate dropdown element"
+            }
+          ]
+        }
+      ],
+      "bugs": [],
+      "error_message": "the JSON object must be str, bytes or bytearray, not dict"
+    },
+    {
+      "case_id": "bdb2c49c-65b5-48b0-91df-ff8de8e1d1b9",
+      "test_id": "TC002",
+      "name": "Negative: Press Enter with empty search input",
+      "status": "blocked",
+      "started_at": "2025-07-14T13:52:19.916233+00:00",
+      "completed_at": "2025-07-14T13:52:19.916234+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path: Search 'artificial intelligence' and validate article page"
+    },
+    {
+      "case_id": "d3981d9b-fdfe-46f8-be88-53dd10851936",
+      "test_id": "TC003",
+      "name": "Negative: Search for non-existent term",
+      "status": "blocked",
+      "started_at": "2025-07-14T13:52:19.916254+00:00",
+      "completed_at": "2025-07-14T13:52:19.916254+00:00",
+      "steps_total": 4,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path: Search 'artificial intelligence' and validate article page"
+    },
+    {
+      "case_id": "49fa33c0-ba8a-45ac-a6b4-d2c8d31efd23",
+      "test_id": "TC004",
+      "name": "Medium: Validate article infobox data completeness",
+      "status": "blocked",
+      "started_at": "2025-07-14T13:52:19.916261+00:00",
+      "completed_at": "2025-07-14T13:52:19.916262+00:00",
+      "steps_total": 3,
+      "steps_completed": 0,
+      "steps_failed": 0,
+      "step_results": [],
+      "bugs": [],
+      "error_message": "Blocked due to failure of test case: Happy Path: Search 'artificial intelligence' and validate article page"
+    }
+  ],
+  "summary": {
+    "total_test_cases": 4,
+    "completed_test_cases": 0,
+    "failed_test_cases": 1,
+    "total_steps": 21,
+    "completed_steps": 2,
+    "failed_steps": 1,
+    "critical_bugs": 0,
+    "high_bugs": 0,
+    "medium_bugs": 0,
+    "low_bugs": 0,
+    "success_rate": 0.09523809523809523,
+    "execution_time_seconds": 132.245565
+  },
+  "bugs": [],
+  "environment": {
+    "initial_url": "https://www.wikipedia.org/",
+    "browser": "Chromium",
+    "execution_mode": "enhanced"
+  },
+  "created_by": "HAINDY Test Runner"
+}

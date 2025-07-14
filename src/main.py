@@ -290,25 +290,31 @@ async def run_test(
         status_text = getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown'))
         console.print(f"Status: [{status_color}]{status_text}[/{status_color}]")
         
-        # Handle different TestState structures
-        if hasattr(test_state, 'test_plan') and test_state.test_plan:
-            console.print(f"Total Steps: {len(test_state.test_plan.steps)}")
-        
-        if hasattr(test_state, 'completed_steps'):
-            console.print(f"Completed Steps: [green]{len(test_state.completed_steps)}[/green]")
-        
-        if hasattr(test_state, 'failed_steps'):
-            console.print(f"Failed Steps: [red]{len(test_state.failed_steps)}[/red]")
-        elif hasattr(test_state, 'remaining_steps') and hasattr(test_state, 'completed_steps'):
-            # Calculate failed steps from test runner's TestState
-            total_steps = len(test_state.completed_steps) + len(test_state.remaining_steps)
-            failed_steps = 0  # Test runner doesn't track failed steps separately
+        # Display test execution metrics from test report
+        if test_state.test_report:
+            report = test_state.test_report
+            
+            # Calculate totals from test cases
+            total_test_cases = len(report.test_cases)
+            completed_test_cases = len([tc for tc in report.test_cases if tc.status == "completed"])
+            
+            # Calculate step totals
+            total_steps = sum(tc.steps_total for tc in report.test_cases)
+            completed_steps = sum(tc.steps_completed for tc in report.test_cases)
+            failed_steps = sum(tc.steps_failed for tc in report.test_cases)
+            skipped_steps = total_steps - completed_steps - failed_steps
+            
+            console.print(f"Test Cases: [cyan]{completed_test_cases}/{total_test_cases}[/cyan]")
+            console.print(f"Total Steps: {total_steps}")
+            console.print(f"Completed Steps: [green]{completed_steps}[/green]")
             console.print(f"Failed Steps: [red]{failed_steps}[/red]")
-        
-        if hasattr(test_state, 'skipped_steps'):
-            console.print(f"Skipped Steps: [yellow]{len(test_state.skipped_steps)}[/yellow]")
+            console.print(f"Skipped Steps: [yellow]{skipped_steps}[/yellow]")
+            
+            # Show summary if available
+            if report.summary:
+                console.print(f"Success Rate: [cyan]{report.summary.success_rate:.1f}%[/cyan]")
         else:
-            console.print(f"Skipped Steps: [yellow]0[/yellow]")
+            console.print("[yellow]No test report available[/yellow]")
         
         # Generate report
         if output_dir is None:

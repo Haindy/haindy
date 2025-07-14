@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from jinja2 import Template
 
-from src.agents.test_runner import TestStepResult
+from src.core.types import StepResult as TestStepResult
 from src.core.types import TestState
 from src.monitoring.logger import get_logger
 
@@ -521,10 +521,11 @@ class SimpleHTMLReporter:
         execution_history: List[TestStepResult]
     ) -> dict:
         """Prepare data for template rendering."""
-        # Calculate metrics
-        total_steps = len(test_state.test_plan.steps)
-        passed_steps = len([r for r in execution_history if r.success])
-        failed_steps = len([r for r in execution_history if not r.success])
+        # Calculate metrics from test report
+        test_report = test_state.test_report
+        total_steps = sum(tc.steps_total for tc in test_report.test_cases)
+        passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
+        failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
         success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
         
         # Calculate duration
@@ -540,26 +541,29 @@ class SimpleHTMLReporter:
             "cancelled": "skipped"
         }
         
-        # Prepare step data
+        # Prepare step data from test report
         steps = []
-        for i, result in enumerate(execution_history):
-            step = test_state.test_plan.steps[i] if i < len(test_state.test_plan.steps) else None
-            if step:
+        step_num = 1
+        for test_case in test_state.test_report.test_cases:
+            for step_result in test_case.step_results:
+                status = "passed" if step_result.status == "completed" else "failed"
                 steps.append({
-                    "number": step.step_number,
-                    "description": step.description,
-                    "action": f"{step.action_instruction.action_type.value} {step.action_instruction.target}",
-                    "status": "passed" if result.success else "failed",
-                    "status_class": "passed" if result.success else "failed",
-                    "result": result.actual_result,
-                    "mode": result.execution_mode
+                    "number": step_num,
+                    "description": step_result.step_description,
+                    "action": step_result.action_taken or "N/A",
+                    "status": status,
+                    "status_class": status,
+                    "result": step_result.actual_result or "N/A",
+                    "mode": "enhanced"
                 })
+                step_num += 1
         
-        # Prepare bug reports
+        # Prepare bug reports from test report
         bug_reports = []
-        for result in execution_history:
-            if not result.success:
-                bug = result.create_bug_report(test_state.test_plan.name)
+        test_name = test_state.test_report.test_plan_name
+        
+        # Get bugs from test report
+        for bug in test_state.test_report.bugs:
                 if bug:
                     bug_data = {
                         "step_number": bug.step_number,
@@ -599,10 +603,10 @@ class SimpleHTMLReporter:
                             "data": base64.b64encode(bug.screenshot_after).decode()
                         })
                     
-                    bug_reports.append(bug_data)
+                bug_reports.append(bug_data)
         
         return {
-            "test_name": test_state.test_plan.name,
+            "test_name": test_name,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "duration": duration,
             "status": test_state.status.value,
