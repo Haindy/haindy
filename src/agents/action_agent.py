@@ -3214,7 +3214,7 @@ Respond in JSON format:
                     extra={
                         "status": visibility.status.value,
                         "confidence": visibility.direction_confidence,
-                        "coordinates": visibility.coordinates
+                        "coordinates": visibility.coordinates.dict() if visibility.coordinates else None
                     }
                 )
                 

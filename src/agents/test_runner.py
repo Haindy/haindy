@@ -488,7 +488,7 @@ Break this down into a sequence of specific actions. For each action provide:
    - scroll_to_top: Scroll to top of page
    - scroll_to_bottom: Scroll to bottom of page
    - scroll_horizontal: Scroll horizontally
-2. target: What element/location to interact with (be specific)
+2. target: Describe the element in human terms (e.g., "the search input field", "the blue Login button", "the main navigation menu") - DO NOT use CSS selectors, IDs, or any DOM references
 3. value: Required for certain action types:
    - For 'type': The text to type
    - For 'navigate': The URL to navigate to
@@ -503,6 +503,8 @@ Consider:
 - Do we need to scroll to make elements visible?
 - Are there multiple UI interactions needed?
 - Should we verify intermediate states?
+
+IMPORTANT: If the step is about typing in a search bar or text box, don't try to click and validate selection. Instead just click and type, then validate the text was typed directly. Some search or text boxes are enabled by default and clicking doesn't produce visible changes.
 
 Respond with a JSON object containing an "actions" array."""
 
