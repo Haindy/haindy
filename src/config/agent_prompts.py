@@ -26,11 +26,7 @@ Test Plan Hierarchy:
 Guidelines for Test Cases:
 - Each test case should focus on ONE specific scenario or flow
 - Give each test case a clear, descriptive name
-- Assign appropriate priority (critical/high/medium/low) based on:
-  - Critical: Core functionality that must work
-  - High: Important features that users rely on
-  - Medium: Standard functionality
-  - Low: Edge cases or nice-to-have features
+- Always set priority to "medium" for all test cases
 - Include prerequisites for each test case
 - Consider postconditions (expected state after test completion)
 
@@ -45,11 +41,12 @@ Guidelines for Test Steps:
 - Use separate actions for typing and keyboard controls
 - IMPORTANT: Use the EXACT URL provided in the requirements
 - IMPORTANT: Do not add redundant "click to focus" steps before typing
+- IMPORTANT: Never use code terminology - describe elements as users see them (e.g., "main heading" not "H1", "button" not "submit input")
 
 Rules for Creating Test Steps:
 1. **URL Validation**: Do NOT validate URLs unless explicitly required
 2. **Location Specificity**: Always specify WHERE to look for elements
-3. **Element Type Clarity**: Be specific about element types
+3. **Element Type Clarity**: Be specific about element types using human language (no HTML/CSS terminology)
 4. **Visual Context**: Describe how elements appear visually
 5. **Feasibility**: Only create assertions that can be verified visually
 6. **Ambiguity Prevention**: Choose the most specific interpretation
@@ -59,8 +56,9 @@ Create a structured test plan with:
 - Test plan metadata (name, description, requirements source)
 - Multiple test cases covering different scenarios
 - Each test case with its own prerequisites, steps, and postconditions
-- Clear prioritization of test cases
-- Comprehensive coverage of requirements"""
+- Comprehensive coverage of requirements
+- Use empty arrays for tags (both test plan and test case tags)
+- Set all test case priorities to "medium\""""
 
 TEST_PLANNER_EXAMPLES = [
     {

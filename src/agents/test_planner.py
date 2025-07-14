@@ -109,7 +109,7 @@ class TestPlannerAgent(BaseAgent):
             "test_id": "TC001",
             "name": "Test case name (e.g., 'Happy Path Login')",
             "description": "Detailed description of this specific test scenario",
-            "priority": "critical/high/medium/low",
+            "priority": "medium",
             "prerequisites": ["Prerequisite 1", "Prerequisite 2"],
             "steps": [
                 {
@@ -121,18 +121,17 @@ class TestPlannerAgent(BaseAgent):
                 }
             ],
             "postconditions": ["Expected state after test completion"],
-            "tags": ["tag1", "tag2"]
+            "tags": []
         }
     ],
-    "tags": ["overall", "plan", "tags"],
+    "tags": [],
     "estimated_duration_seconds": 300
 }
 
 IMPORTANT: 
 - Create multiple test cases to cover different scenarios
 - Each test case should test ONE specific flow or scenario
-- Include both positive (happy path) and negative (error) test cases
-- Prioritize test cases appropriately"""
+- Include both positive (happy path) and negative (error) test cases"""
         
         return message
     

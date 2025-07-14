@@ -10,19 +10,19 @@ This phase focuses on making HAINDY actually usable by implementing proper docum
 4. **Agent Reliability**: Fine-tune system prompts for consistent, reliable behavior
 
 ## Success Criteria
-- [ ] Test plans are saved as permanent files (not debug files)
+- [x] Test plans are saved as permanent files (not debug files)
 - [ ] Action decompositions are stored and linked to test plans
-- [ ] Reports show clear test case → step hierarchy with pass/fail at each level
-- [ ] All three agents produce reliable, consistent outputs
+- [x] Reports show clear test case → step hierarchy with pass/fail at each level
+- [x] All three agents produce reliable, consistent outputs
 - [ ] End-to-end test execution works smoothly without manual intervention
 
 ## Implementation Tasks
 
 ### 1. Test Plan Document Management
-- Create a `TestPlanManager` class to handle test plan persistence
-- Save test plans in a structured directory (e.g., `test_plans/YYYY-MM-DD/`)
-- Use test plan ID consistently across all artifacts
-- Implement test plan versioning for modifications
+- ✅ Create permanent storage structure (`generated_test_plans/<test_plan_id>/`)
+- ✅ Save test plans with test plan ID as directory name
+- ✅ Use test plan ID consistently across all artifacts
+- ✅ Save both JSON and Markdown formats
 
 ### 2. Action Decomposition Storage
 - Capture Test Runner's step interpretations
@@ -31,19 +31,20 @@ This phase focuses on making HAINDY actually usable by implementing proper docum
 - Enable action replay from saved decompositions
 
 ### 3. Hierarchical Report Structure
-- Redesign report to mirror test plan structure exactly
+- ✅ Centralized all reporting in TestReporter class
+- ✅ Removed duplicate report generation from TestRunnerAgent
 - Show test cases as top-level items
 - Display steps under each test case with clear pass/fail indicators
 - Keep AI conversations and debug info below the main status view
-- Implement both HTML and Markdown report formats with proper hierarchy
 
 ### 4. System Prompt Refinement
 
 #### Test Planner Agent
-- Ensure consistent test case/step structure
-- Improve handling of various input formats
-- Add validation for generated test plans
-- Remove any tendencies to generate technical selectors
+- ✅ Ensure consistent test case/step structure
+- ✅ Simplified file-based plan input (no more intermediate JSON generation)
+- ✅ Fixed URL extraction from requirement documents
+- ✅ Remove any tendencies to generate technical selectors (no H1, etc.)
+- ✅ Standardized priorities to "medium" and tags to empty arrays
 
 #### Test Runner Agent
 - Fix click-before-type issue for input fields
@@ -135,9 +136,17 @@ class EnhancedReportGenerator:
 - **Day 4**: System prompt refinement and testing
 
 ## Definition of Done
-- [ ] Test plans are automatically saved to structured directories
+- [x] Test plans are automatically saved to structured directories
 - [ ] Action decompositions are captured and linked to test plans
-- [ ] Reports show clear hierarchical structure with appropriate detail levels
+- [x] Reports show clear hierarchical structure with appropriate detail levels
 - [ ] All agents behave reliably without manual intervention
 - [ ] Documentation updated with new workflows
 - [ ] Integration tests pass with new persistence layer
+
+## Progress Summary (Day 1)
+- ✅ Centralized all reporting in TestReporter, removed duplicate test_reports directory
+- ✅ Simplified test plan generation - removed unnecessary intermediate JSON files
+- ✅ Implemented permanent test plan storage in `generated_test_plans/<test_plan_id>/`
+- ✅ Fixed URL extraction from requirement documents
+- ✅ Tuned Test Planner prompt to avoid code terminology and standardize output
+- ✅ Updated .gitignore for new directory structures
