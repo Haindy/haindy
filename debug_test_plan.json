@@ -1,0 +1,301 @@
+{
+  "plan_id": "95cb3bad-68d1-40cb-b176-91b22da18da1",
+  "name": "Wikipedia Search and Article Verification",
+  "description": "Verify that users can search for topics on Wikipedia, navigate to the correct article, and confirm the article contains key sections, images, and infoboxes with a professional layout.",
+  "requirements_source": "User Story #123: Wikipedia Search Functionality",
+  "test_cases": [
+    {
+      "case_id": "7b71f51b-600e-445d-ae0a-6a975664cf86",
+      "test_id": "TC001",
+      "name": "Search for 'artificial intelligence' using Enter key",
+      "description": "Happy path: User searches for the topic 'artificial intelligence' on the Wikipedia home page and navigates to the correct article by pressing Enter.",
+      "priority": "critical",
+      "prerequisites": [
+        "Browser is installed",
+        "User has internet connectivity"
+      ],
+      "steps": [
+        {
+          "step_id": "2780c104-8f32-43ed-b58a-b42205b32678",
+          "step_number": 1,
+          "description": "Navigate to https://www.wikipedia.org/",
+          "action": "Navigate to https://www.wikipedia.org/",
+          "expected_result": "Wikipedia home page loads and displays the central search input with the placeholder 'Search Wikipedia'.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "7bb59f3f-15d1-41e9-a002-86303fcd3368",
+          "step_number": 2,
+          "description": "Type \"artificial intelligence\" into the search input field in the center of the page",
+          "action": "Type \"artificial intelligence\" into the search input field in the center of the page",
+          "expected_result": "The text \"artificial intelligence\" appears in the search input field.",
+          "dependencies": [
+            1
+          ],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "c9c857df-5d3f-4d95-a2b6-99e71ff44d72",
+          "step_number": 3,
+          "description": "Press the Enter key",
+          "action": "Press the Enter key",
+          "expected_result": "Browser navigates to the 'Artificial intelligence – Wikipedia' article page (URL contains '/wiki/Artificial_intelligence').",
+          "dependencies": [
+            2
+          ],
+          "optional": false,
+          "max_retries": 3
+        }
+      ],
+      "postconditions": [
+        "User is on the 'Artificial intelligence' article page"
+      ],
+      "tags": [
+        "search",
+        "happy-path",
+        "enter-key"
+      ]
+    },
+    {
+      "case_id": "5505cfff-1064-4064-8131-19a7fd68367a",
+      "test_id": "TC002",
+      "name": "Verify presence of key article sections",
+      "description": "Ensure that the 'Artificial intelligence' article contains the expected major sections: History, Applications, Ethics, etc.",
+      "priority": "high",
+      "prerequisites": [
+        "User is on the 'Artificial intelligence' article page (TC001 postcondition)"
+      ],
+      "steps": [
+        {
+          "step_id": "29cc69bb-2efd-4a23-b772-e4c48db9dbd0",
+          "step_number": 1,
+          "description": "Locate the table of contents on the article page",
+          "action": "Locate the table of contents on the article page",
+          "expected_result": "Table of contents is visible below the article title.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "4d563b2a-e07a-4fe3-9cb3-4125ad3b98e3",
+          "step_number": 2,
+          "description": "Confirm that a section titled 'History' appears in the table of contents or as an H2 heading in the article body",
+          "action": "Confirm that a section titled 'History' appears in the table of contents or as an H2 heading in the article body",
+          "expected_result": "'History' section heading is present.",
+          "dependencies": [
+            1
+          ],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "5684ae18-be20-44f0-8ec0-8627ddca07d4",
+          "step_number": 3,
+          "description": "Confirm that a section titled 'Applications' appears in the table of contents or as an H2 heading in the article body",
+          "action": "Confirm that a section titled 'Applications' appears in the table of contents or as an H2 heading in the article body",
+          "expected_result": "'Applications' section heading is present.",
+          "dependencies": [
+            1
+          ],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "943b28b4-d2b6-472d-bb6c-6849c231af02",
+          "step_number": 4,
+          "description": "Confirm that a section titled 'Ethics' appears in the table of contents or as an H2 heading in the article body",
+          "action": "Confirm that a section titled 'Ethics' appears in the table of contents or as an H2 heading in the article body",
+          "expected_result": "'Ethics' section heading is present.",
+          "dependencies": [
+            1
+          ],
+          "optional": false,
+          "max_retries": 3
+        }
+      ],
+      "postconditions": [
+        "Key sections are verified as present in the article"
+      ],
+      "tags": [
+        "content",
+        "sections"
+      ]
+    },
+    {
+      "case_id": "c0bdf6d1-291e-45c6-8245-f2f72a8ad0ca",
+      "test_id": "TC003",
+      "name": "Verify presence of images and infobox",
+      "description": "Check that the 'Artificial intelligence' article includes at least one image in the content and an infobox on the right side.",
+      "priority": "high",
+      "prerequisites": [
+        "User is on the 'Artificial intelligence' article page"
+      ],
+      "steps": [
+        {
+          "step_id": "88b2358f-c350-4650-90fc-e84d5249925d",
+          "step_number": 1,
+          "description": "Scroll to the top-right area of the article page",
+          "action": "Scroll to the top-right area of the article page",
+          "expected_result": "An infobox (a bordered box with summary information) is visible beside the article introduction.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "472fc5d5-802d-47e5-9c16-7ea29ace675e",
+          "step_number": 2,
+          "description": "Verify that the infobox contains a title, image thumbnail, and at least one data field",
+          "action": "Verify that the infobox contains a title, image thumbnail, and at least one data field",
+          "expected_result": "Infobox displays a heading (e.g., 'Artificial intelligence'), an image thumbnail, and summary fields such as 'Parent technology' or 'Developed in'.",
+          "dependencies": [
+            1
+          ],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "9d42427e-6a9e-4736-af5d-9c7747cd3086",
+          "step_number": 3,
+          "description": "Scroll down into the article content",
+          "action": "Scroll down into the article content",
+          "expected_result": "Main article content area is visible.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "028468e8-a5b9-43c2-92fc-b9698ac9051f",
+          "step_number": 4,
+          "description": "Verify there is at least one image embedded within the article body",
+          "action": "Verify there is at least one image embedded within the article body",
+          "expected_result": "At least one illustrative image (with caption) is visible within the article content.",
+          "dependencies": [
+            3
+          ],
+          "optional": false,
+          "max_retries": 3
+        }
+      ],
+      "postconditions": [
+        "Images and infobox are confirmed present on the article page"
+      ],
+      "tags": [
+        "media",
+        "layout"
+      ]
+    },
+    {
+      "case_id": "6becdfae-7188-4b3a-99e9-4a7f7d8aa2e8",
+      "test_id": "TC004",
+      "name": "Search for a non-existent topic",
+      "description": "Negative scenario: Verify that searching for a gibberish term shows a search results page or a 'no results' message without errors.",
+      "priority": "medium",
+      "prerequisites": [
+        "User is on the Wikipedia home page"
+      ],
+      "steps": [
+        {
+          "step_id": "6b7ab3fe-dac8-4f2b-b3bf-a6c8709426c1",
+          "step_number": 1,
+          "description": "Navigate to https://www.wikipedia.org/",
+          "action": "Navigate to https://www.wikipedia.org/",
+          "expected_result": "Wikipedia home page loads.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "f6f2f1ec-adb0-4029-8b48-ba157feb2344",
+          "step_number": 2,
+          "description": "Type \"asdfghjklqwerty\" into the search input field",
+          "action": "Type \"asdfghjklqwerty\" into the search input field",
+          "expected_result": "The text \"asdfghjklqwerty\" appears in the search input field.",
+          "dependencies": [
+            1
+          ],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "a47ab610-cb5a-49a9-8bae-c52099eae8f1",
+          "step_number": 3,
+          "description": "Press the Enter key",
+          "action": "Press the Enter key",
+          "expected_result": "A search results page loads, indicating zero or a small number of results and optionally a 'The page \"asdfghjklqwerty\" does not exist' message.",
+          "dependencies": [
+            2
+          ],
+          "optional": false,
+          "max_retries": 3
+        }
+      ],
+      "postconditions": [
+        "Search gracefully handles non-existent topics without errors"
+      ],
+      "tags": [
+        "search",
+        "negative"
+      ]
+    },
+    {
+      "case_id": "d79c9b39-bedd-4c07-bc2e-05679329692f",
+      "test_id": "TC005",
+      "name": "Verify article professional layout and organization",
+      "description": "Validate that the 'Artificial intelligence' article is well-organized, with clear headings, consistent fonts, and a clean professional appearance.",
+      "priority": "medium",
+      "prerequisites": [
+        "User is on the 'Artificial intelligence' article page"
+      ],
+      "steps": [
+        {
+          "step_id": "065a7f97-eed4-4bfb-a967-9e3cb6aa795d",
+          "step_number": 1,
+          "description": "Observe the article title and heading hierarchy (H1, H2, H3)",
+          "action": "Observe the article title and heading hierarchy (H1, H2, H3)",
+          "expected_result": "Title uses large, bold font; section headings use decreasing font sizes in a clear hierarchy.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "e12c9f2f-9740-408f-bd8d-9bf86293a6a6",
+          "step_number": 2,
+          "description": "Verify consistent font style and spacing between paragraphs",
+          "action": "Verify consistent font style and spacing between paragraphs",
+          "expected_result": "Paragraph text is legible, with uniform font and adequate line spacing.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        },
+        {
+          "step_id": "8adea6e1-77b9-428b-87b9-12b1bcbbc1b4",
+          "step_number": 3,
+          "description": "Check alignment of images, tables, and infobox against the text flow",
+          "action": "Check alignment of images, tables, and infobox against the text flow",
+          "expected_result": "All images, tables, and the infobox align properly and do not overlap or cause layout breaks.",
+          "dependencies": [],
+          "optional": false,
+          "max_retries": 3
+        }
+      ],
+      "postconditions": [
+        "Article layout meets professional quality standards"
+      ],
+      "tags": [
+        "layout",
+        "usability"
+      ]
+    }
+  ],
+  "created_at": "2025-07-14T21:05:20.033353+00:00",
+  "created_by": "HAINDY Test Planner",
+  "tags": [
+    "wikipedia",
+    "search",
+    "articles"
+  ],
+  "estimated_duration_seconds": 600
+}

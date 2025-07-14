@@ -56,7 +56,6 @@ class TestRunner(BaseAgent):
         name: str = "TestRunner",
         browser_driver: Optional[BrowserDriver] = None,
         action_agent: Optional[ActionAgent] = None,
-        report_dir: str = "test_reports",
         **kwargs
     ):
         """
@@ -66,15 +65,12 @@ class TestRunner(BaseAgent):
             name: Agent name
             browser_driver: Browser driver instance
             action_agent: Action agent for executing browser actions
-            report_dir: Directory to save test reports
             **kwargs: Additional arguments for BaseAgent
         """
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_RUNNER_SYSTEM_PROMPT
         self.browser_driver = browser_driver
         self.action_agent = action_agent
-        self.report_dir = Path(report_dir)
-        self.report_dir.mkdir(exist_ok=True)
         
         # Current execution state
         self._current_test_plan: Optional[TestPlan] = None
@@ -134,8 +130,7 @@ class TestRunner(BaseAgent):
         test_state.status = TestStatus.IN_PROGRESS
         test_state.start_time = self._test_report.started_at
         
-        # Save initial report
-        await self._save_report()
+        # Initial report will be saved by the caller using TestReporter
         
         try:
             # Navigate to initial URL if provided
@@ -148,7 +143,7 @@ class TestRunner(BaseAgent):
                 case_result = await self._execute_test_case(test_case)
                 
                 # Save report after each test case
-                await self._save_report()
+                # Report updates will be handled by the caller
                 
                 # Check if failure should cascade
                 if case_result.status == TestStatus.FAILED:
@@ -180,7 +175,7 @@ class TestRunner(BaseAgent):
                             self._test_report.test_cases.append(blocked_result)
                         
                         # Save report with blocked test cases
-                        await self._save_report()
+                        # Report updates will be handled by the caller
                         break
             
             # Finalize report
@@ -202,8 +197,7 @@ class TestRunner(BaseAgent):
             raise
         
         finally:
-            # Save final report
-            await self._save_report()
+            # Final report will be saved by the caller using TestReporter
             
             # Print summary to console
             self._print_summary()
@@ -272,7 +266,7 @@ class TestRunner(BaseAgent):
                         break
                 
                 # Save report after each step
-                await self._save_report()
+                # Report updates will be handled by the caller
             
             # Verify postconditions if test case completed
             if case_result.status != TestStatus.FAILED:
@@ -1064,150 +1058,17 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
     
     def _save_screenshot(self, screenshot: bytes, name: str) -> Path:
         """Save screenshot to disk and return path."""
-        screenshots_dir = self.report_dir / "screenshots"
-        screenshots_dir.mkdir(exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{name}_{timestamp}.png"
-        filepath = screenshots_dir / filename
-        
-        with open(filepath, "wb") as f:
+        # Screenshots are now handled by the debug logger
+        from src.monitoring.debug_logger import get_debug_logger
+        debug_logger = get_debug_logger()
+        if debug_logger:
+            return debug_logger.save_screenshot(screenshot, name)
+        # Fallback to temp directory
+        from tempfile import NamedTemporaryFile
+        with NamedTemporaryFile(mode='wb', suffix='.png', delete=False) as f:
             f.write(screenshot)
-        
-        return filepath
+            return Path(f.name)
     
-    async def _save_report(self) -> None:
-        """Save the current test report to disk."""
-        if not self._test_report:
-            return
-        
-        # Save as JSON
-        json_path = self.report_dir / f"test_report_{self._test_report.report_id}.json"
-        with open(json_path, "w") as f:
-            # Convert to dict and handle UUIDs/datetimes
-            report_dict = self._test_report.model_dump()
-            
-            # Custom JSON encoder for UUIDs and datetimes
-            def default(obj):
-                if isinstance(obj, UUID):
-                    return str(obj)
-                elif isinstance(obj, datetime):
-                    return obj.isoformat()
-                return obj
-            
-            json.dump(report_dict, f, indent=2, default=default)
-        
-        # Also save as Markdown for readability
-        md_path = self.report_dir / f"test_report_{self._test_report.report_id}.md"
-        with open(md_path, "w") as f:
-            f.write(self._generate_markdown_report())
-        
-        logger.debug("Report saved", extra={
-            "json_path": str(json_path),
-            "md_path": str(md_path)
-        })
-    
-    def _generate_markdown_report(self) -> str:
-        """Generate a markdown version of the test report."""
-        if not self._test_report:
-            return ""
-        
-        lines = []
-        
-        # Header
-        lines.append(f"# Test Report: {self._test_report.test_plan_name}")
-        lines.append("")
-        lines.append(f"**Report ID**: {self._test_report.report_id}")
-        lines.append(f"**Started**: {self._test_report.started_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        
-        if self._test_report.completed_at:
-            lines.append(f"**Completed**: {self._test_report.completed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        
-        lines.append(f"**Status**: {self._test_report.status.value}")
-        lines.append("")
-        
-        # Summary if available
-        if self._test_report.summary:
-            s = self._test_report.summary
-            lines.append("## Summary")
-            lines.append("")
-            lines.append(f"- **Test Cases**: {s.completed_test_cases}/{s.total_test_cases} completed")
-            lines.append(f"- **Steps**: {s.completed_steps}/{s.total_steps} completed")
-            lines.append(f"- **Success Rate**: {s.success_rate*100:.1f}%")
-            lines.append(f"- **Execution Time**: {s.execution_time_seconds:.1f} seconds")
-            lines.append("")
-            
-            if self._test_report.bugs:
-                lines.append("### Bugs Found")
-                lines.append(f"- Critical: {s.critical_bugs}")
-                lines.append(f"- High: {s.high_bugs}")
-                lines.append(f"- Medium: {s.medium_bugs}")
-                lines.append(f"- Low: {s.low_bugs}")
-                lines.append("")
-        
-        # Test Cases
-        lines.append("## Test Cases")
-        lines.append("")
-        
-        for tc in self._test_report.test_cases:
-            lines.append(f"### {tc.test_id}: {tc.name}")
-            lines.append(f"**Status**: {tc.status.value}")
-            lines.append(f"**Steps**: {tc.steps_completed}/{tc.steps_total} completed")
-            
-            if tc.error_message:
-                lines.append(f"**Error**: {tc.error_message}")
-            
-            lines.append("")
-            
-            # Step details
-            if tc.step_results:
-                lines.append("#### Steps")
-                for sr in tc.step_results:
-                    status_icon = "✅" if sr.status == TestStatus.COMPLETED else "❌"
-                    lines.append(f"{sr.step_number}. {status_icon} {sr.action}")
-                    
-                    if sr.status == TestStatus.FAILED:
-                        lines.append(f"   - Expected: {sr.expected_result}")
-                        lines.append(f"   - Actual: {sr.actual_result}")
-                        if sr.error_message:
-                            lines.append(f"   - Error: {sr.error_message}")
-                    
-                    lines.append("")
-            
-            # Bugs for this test case
-            case_bugs = [b for b in tc.bugs]
-            if case_bugs:
-                lines.append("#### Bugs")
-                for bug in case_bugs:
-                    lines.append(f"- **{bug.severity.value.upper()}**: {bug.description}")
-                    lines.append(f"  - Type: {bug.error_type}")
-                    lines.append(f"  - Step: {bug.step_number}")
-                lines.append("")
-            
-            lines.append("---")
-            lines.append("")
-        
-        # All bugs
-        if self._test_report.bugs:
-            lines.append("## All Bugs")
-            lines.append("")
-            
-            for bug in self._test_report.bugs:
-                lines.append(f"### Bug {bug.bug_id}")
-                lines.append(f"- **Severity**: {bug.severity.value}")
-                lines.append(f"- **Type**: {bug.error_type}")
-                lines.append(f"- **Description**: {bug.description}")
-                lines.append(f"- **Expected**: {bug.expected_result}")
-                lines.append(f"- **Actual**: {bug.actual_result}")
-                
-                if bug.reproduction_steps:
-                    lines.append("- **Reproduction Steps**:")
-                    for step in bug.reproduction_steps:
-                        lines.append(f"  - {step}")
-                
-                lines.append("")
-        
-        return "\n".join(lines)
     
     def _print_summary(self) -> None:
         """Print test execution summary to console."""

@@ -12,7 +12,7 @@ from src.main import (
     async_main,
     create_parser,
     get_interactive_requirements,
-    process_plan_file,
+    read_plan_file,
     show_version,
     test_api_connection,
 )
@@ -150,77 +150,43 @@ class TestInteractiveMode:
             get_interactive_requirements()
 
 
-class TestPlanFileProcessing:
-    """Test plan file processing."""
+class TestPlanFileReading:
+    """Test plan file reading."""
     
     @pytest.mark.asyncio
-    async def test_process_plan_file_not_found(self, capsys):
-        """Test processing non-existent file."""
-        result = await process_plan_file(Path("nonexistent.md"))
+    async def test_read_plan_file_not_found(self, capsys):
+        """Test reading non-existent file."""
+        with pytest.raises(SystemExit):
+            await read_plan_file(Path("nonexistent.md"))
         captured = capsys.readouterr()
-        
-        assert result == 1
         assert "File not found" in captured.out
     
     @pytest.mark.asyncio
-    async def test_process_plan_file_success(self, tmp_path, capsys):
-        """Test successful plan file processing."""
-        # Create test file
+    async def test_read_plan_file_with_url(self, tmp_path):
+        """Test reading plan file with URL on first line."""
+        # Create test file with URL
         test_file = tmp_path / "test_requirements.md"
-        test_file.write_text("Test requirements")
+        test_file.write_text("https://example.com\nTest the login flow\nVerify user can log in")
         
-        # Mock AI response
-        mock_response = {
-            "content": json.dumps({
-                "requirements": "Test the login flow",
-                "url": "https://example.com",
-                "name": "Login Test",
-                "description": "Test login functionality"
-            })
-        }
+        requirements, url = await read_plan_file(test_file)
         
-        with patch("src.agents.test_planner.TestPlannerAgent") as mock_planner_class:
-            mock_planner = AsyncMock()
-            mock_planner._get_completion = AsyncMock(return_value=mock_response)
-            mock_planner_class.return_value = mock_planner
-            
-            # Mock user choosing not to run test
-            with patch("src.main.Prompt.ask", return_value="n"):
-                result = await process_plan_file(test_file)
-        
-        assert result == 0
-        
-        # Check that JSON file was created
-        json_files = list(Path("test_scenarios").glob("generated_*.json"))
-        assert len(json_files) > 0
-        
-        # Cleanup
-        for f in json_files:
-            f.unlink()
+        assert url == "https://example.com"
+        assert "Test the login flow" in requirements
+        assert "Verify user can log in" in requirements
+        assert "https://example.com" not in requirements  # URL should be removed from requirements
     
     @pytest.mark.asyncio
-    async def test_process_plan_file_berserk_mode(self, tmp_path):
-        """Test plan file processing in berserk mode."""
+    async def test_read_plan_file_without_url(self, tmp_path):
+        """Test reading plan file without URL - should prompt."""
         test_file = tmp_path / "test.md"
-        test_file.write_text("Test")
+        test_file.write_text("Test the shopping cart functionality")
         
-        mock_response = {
-            "content": json.dumps({
-                "requirements": "Test",
-                "url": None,  # No URL in document
-                "name": "Test",
-                "description": "Test"
-            })
-        }
+        # Mock user input for URL
+        with patch("src.main.Prompt.ask", return_value="https://shop.example.com"):
+            requirements, url = await read_plan_file(test_file)
         
-        with patch("src.agents.test_planner.TestPlannerAgent") as mock_planner_class:
-            mock_planner = AsyncMock()
-            mock_planner._get_completion = AsyncMock(return_value=mock_response)
-            mock_planner_class.return_value = mock_planner
-            
-            # Should fail because no URL and berserk mode
-            result = await process_plan_file(test_file, berserk=True)
-            assert result == 1
+        assert url == "https://shop.example.com"
+        assert requirements == "Test the shopping cart functionality"
 
 
 class TestMainFlow:
@@ -265,22 +231,27 @@ class TestMainFlow:
     @pytest.mark.asyncio
     async def test_plan_mode(self):
         """Test --plan mode."""
-        with patch("src.main.process_plan_file", new_callable=AsyncMock) as mock_process:
-            mock_process.return_value = 0
-            result = await async_main(["--plan", "test.md"])
-            
-            assert result == 0
-            mock_process.assert_called_once_with(Path("test.md"), berserk=False)
+        with patch("src.main.read_plan_file", new_callable=AsyncMock) as mock_read:
+            mock_read.return_value = ("Test requirements", "https://example.com")
+            with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
+                mock_run.return_value = 0
+                result = await async_main(["--plan", "test.md"])
+                assert result == 0
+                mock_read.assert_called_once()
+                mock_run.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_berserk_mode_flag(self):
         """Test --berserk flag is passed through."""
-        with patch("src.main.process_plan_file", new_callable=AsyncMock) as mock_process:
-            mock_process.return_value = 0
-            result = await async_main(["--plan", "test.md", "--berserk"])
-            
-            assert result == 0
-            mock_process.assert_called_once_with(Path("test.md"), berserk=True)
+        with patch("src.main.read_plan_file", new_callable=AsyncMock) as mock_read:
+            mock_read.return_value = ("Test requirements", "https://example.com")
+            with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
+                mock_run.return_value = 0
+                result = await async_main(["--plan", "test.md", "--berserk"])
+                assert result == 0
+                # Verify berserk flag was passed to run_test
+                call_kwargs = mock_run.call_args.kwargs
+                assert call_kwargs["berserk"] is True
     
     @pytest.mark.asyncio
     async def test_json_test_plan_mode(self):
