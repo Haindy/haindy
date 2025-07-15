@@ -129,8 +129,8 @@ Examples:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=300,
-        help="Test execution timeout in seconds (default: 300)",
+        default=1200,
+        help="Test execution timeout in seconds (default: 1200)",
     )
     parser.add_argument(
         "--max-steps",
@@ -173,7 +173,7 @@ async def run_test(
     headless: bool = True,
     output_dir: Optional[Path] = None,
     report_format: str = "html",
-    timeout: int = 300,
+    timeout: int = 1200,
     max_steps: int = 50,
     berserk: bool = False,
 ) -> int:
@@ -324,14 +324,26 @@ async def run_test(
         
         console.print(f"\n[cyan]Generating {report_format} report...[/cyan]")
         
+        # Get action storage from test runner if available
+        action_storage = None
+        if coordinator and hasattr(coordinator, '_agents') and 'test_runner' in coordinator._agents:
+            test_runner = coordinator._agents['test_runner']
+            if hasattr(test_runner, 'get_action_storage'):
+                action_storage = test_runner.get_action_storage()
+        
         reporter = TestReporter()
-        report_path = await reporter.generate_report(
+        report_path, actions_path = await reporter.generate_report(
             test_state=test_state,
             output_dir=output_dir,
             format=report_format,
+            action_storage=action_storage
         )
         
         console.print(f"[green]Report saved to:[/green] {report_path}")
+        
+        # Print actions file path if it was generated
+        if actions_path:
+            console.print(f"[green]Actions saved to:[/green] {actions_path}")
         
         # Show debug summary
         debug_summary = debug_logger.get_debug_summary()

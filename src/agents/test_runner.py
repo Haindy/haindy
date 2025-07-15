@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from src.agents.action_agent import ActionAgent
 from src.agents.base_agent import BaseAgent
@@ -35,6 +35,7 @@ from src.core.types import (
     TestSummary,
 )
 from src.monitoring.logger import get_logger
+from src.browser.instrumented_driver import InstrumentedBrowserDriver
 
 logger = get_logger(__name__)
 
@@ -82,6 +83,15 @@ class TestRunner(BaseAgent):
         # Execution context
         self._initial_url: Optional[str] = None
         self._execution_history: List[Dict[str, Any]] = []
+        
+        # Action storage for Phase 17
+        self._action_storage: Dict[str, Any] = {
+            "test_plan_id": None,
+            "test_run_timestamp": None,
+            "test_cases": []
+        }
+        self._current_test_case_actions: Optional[Dict[str, Any]] = None
+        self._current_step_actions: Optional[List[Dict[str, Any]]] = None
     
     async def execute_test_plan(
         self,
@@ -109,6 +119,13 @@ class TestRunner(BaseAgent):
         self._current_test_plan = test_plan
         self._initial_url = initial_url
         self._test_state = test_state
+        
+        # Initialize action storage for this test run
+        self._action_storage = {
+            "test_plan_id": str(test_plan.plan_id),
+            "test_run_timestamp": datetime.now(timezone.utc).isoformat(),
+            "test_cases": []
+        }
         
         # Initialize test report within the test state
         self._test_report = TestReport(
@@ -215,6 +232,14 @@ class TestRunner(BaseAgent):
         
         self._current_test_case = test_case
         
+        # Initialize action tracking for this test case
+        self._current_test_case_actions = {
+            "test_case_id": str(test_case.case_id),
+            "test_case_name": test_case.name,
+            "steps": []
+        }
+        self._action_storage["test_cases"].append(self._current_test_case_actions)
+        
         # Initialize test case result
         case_result = TestCaseResult(
             case_id=test_case.case_id,
@@ -303,6 +328,16 @@ class TestRunner(BaseAgent):
         })
         
         self._current_test_step = step
+        
+        # Initialize action tracking for this step
+        self._current_step_actions = []
+        self._current_step_data = {
+            "step_number": step.step_number,
+            "step_id": str(step.step_id),
+            "step_description": step.action,
+            "actions": self._current_step_actions
+        }
+        self._current_test_case_actions["steps"].append(self._current_step_data)
         
         # Initialize step result
         step_result = StepResult(
@@ -498,7 +533,25 @@ Consider:
 - Are there multiple UI interactions needed?
 - Should we verify intermediate states?
 
-IMPORTANT: If the step is about typing in a search bar or text box, don't try to click and validate selection. Instead just click and type, then validate the text was typed directly. Some search or text boxes are enabled by default and clicking doesn't produce visible changes.
+ACTION RULES:
+1. Text Input Fields (search bars, text boxes, input fields):
+   - DO NOT use 'click' followed by 'type' for text input fields
+   - Use 'type' action directly - it will automatically focus the field
+   - Text fields don't provide visual feedback when clicked, so click validation will fail
+   - Example: For "Enter 'Python' in the search box", use only type action, not click+type
+
+2. Navigation:
+   - Always use 'navigate' for going to URLs, not click on address bar + type
+
+3. Scrolling:
+   - ONLY add scroll actions when truly necessary
+   - Use common sense: elements like search bars, main navigation, headers are visible on page load
+   - DO NOT scroll unless:
+     a) The test explicitly mentions scrolling
+     b) The element is logically below the fold (footer, comments, "load more" content)
+     c) Previous actions suggest the element might not be visible
+   - Example: Google's search bar is visible immediately - no scroll needed
+   - Example: "Privacy Policy" link in footer - scroll needed
 
 Respond with a JSON object containing an "actions" array."""
 
@@ -522,6 +575,13 @@ Respond with a JSON object containing an "actions" array."""
                     "response_type": type(response).__name__,
                     "response_keys": list(response.keys()) if isinstance(response, dict) else None
                 })
+                
+                # Store the Test Runner interpretation conversation
+                if hasattr(self, '_current_step_data'):
+                    self._current_step_data["test_runner_interpretation"] = {
+                        "prompt": prompt,
+                        "response": response.get("content", {})
+                    }
                 
             except Exception as api_error:
                 logger.error("OpenAI API call failed", extra={
@@ -569,15 +629,43 @@ Respond with a JSON object containing an "actions" array."""
         action: Dict[str, Any],
         step: TestStep
     ) -> Dict[str, Any]:
-        """Execute a single decomposed action."""
+        """Execute a single decomposed action with comprehensive tracking."""
         action_type = action.get("type", "assert")
+        action_id = str(uuid4())
+        timestamp_start = datetime.now(timezone.utc)
+        
+        # Initialize action storage entry
+        action_data = {
+            "action_id": action_id,
+            "action_type": action_type,
+            "target": action.get("target", ""),
+            "value": action.get("value"),
+            "description": action.get("description", ""),
+            "timestamp_start": timestamp_start.isoformat(),
+            "timestamp_end": None,
+            "ai_conversation": {
+                "test_runner_interpretation": action.copy() if isinstance(action, dict) else None,
+                "action_agent_execution": None
+            },
+            "browser_calls": [],
+            "result": None,
+            "screenshots": {}
+        }
         
         try:
             if not self.action_agent or not self.browser_driver:
-                return {
+                error_result = {
                     "success": False,
                     "error": "Action agent or browser driver not available"
                 }
+                action_data["result"] = error_result
+                action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                self._current_step_actions.append(action_data)
+                return error_result
+            
+            # If browser driver is instrumented, start capturing calls
+            if isinstance(self.browser_driver, InstrumentedBrowserDriver):
+                self.browser_driver.start_capture()
             
             # Create ActionInstruction for the action
             instruction = ActionInstruction(
@@ -607,7 +695,7 @@ Respond with a JSON object containing an "actions" array."""
                 "recent_actions": self._execution_history[-3:]
             }
             
-            # Get screenshot
+            # Get screenshot before action
             screenshot = await self.browser_driver.screenshot()
             
             # Execute via Action Agent
@@ -617,7 +705,44 @@ Respond with a JSON object containing an "actions" array."""
                 screenshot=screenshot
             )
             
-            # Process result
+            # Stop capturing browser calls
+            if isinstance(self.browser_driver, InstrumentedBrowserDriver):
+                action_data["browser_calls"] = self.browser_driver.stop_capture()
+            
+            # Extract AI conversation from Action Agent
+            # The action agent stores conversation history
+            if hasattr(self.action_agent, 'conversation_history'):
+                action_data["ai_conversation"]["action_agent_execution"] = {
+                    "messages": self.action_agent.conversation_history.copy(),
+                    "screenshot_path": None  # Will be filled by debug logger
+                }
+                # Clear conversation history for next action
+                self.action_agent.conversation_history = []
+            
+            # Store comprehensive result
+            action_data["result"] = {
+                "success": (result.validation.valid if result.validation else False) and 
+                          (result.execution.success if result.execution else False),
+                "validation": result.validation.model_dump() if result.validation else None,
+                "coordinates": result.coordinates.model_dump() if result.coordinates else None,
+                "execution": result.execution.model_dump() if result.execution else None,
+                "ai_analysis": result.ai_analysis.model_dump() if result.ai_analysis else None
+            }
+            
+            # Store screenshot paths
+            if result.browser_state_before and result.browser_state_before.screenshot_path:
+                action_data["screenshots"]["before"] = result.browser_state_before.screenshot_path
+            if result.browser_state_after and result.browser_state_after.screenshot_path:
+                action_data["screenshots"]["after"] = result.browser_state_after.screenshot_path
+            if result.grid_screenshot_highlighted:
+                # Get path from debug logger if available
+                from src.monitoring.debug_logger import get_debug_logger
+                debug_logger = get_debug_logger()
+                if debug_logger:
+                    # The highlighted screenshot was likely saved by action agent
+                    action_data["screenshots"]["grid_overlay"] = f"{debug_logger.debug_dir}/grid_highlighted_{action_id}.png"
+            
+            # Process result for compatibility
             success = (
                 result.validation.valid if result.validation else False
             ) and (
@@ -628,7 +753,7 @@ Respond with a JSON object containing an "actions" array."""
             if result.ai_analysis:
                 outcome = result.ai_analysis.actual_outcome
             
-            return {
+            compatibility_result = {
                 "success": success,
                 "action_type": action_type,
                 "target": action.get("target", ""),
@@ -637,16 +762,32 @@ Respond with a JSON object containing an "actions" array."""
                 "error": result.execution.error_message if (result.execution and not success) else None
             }
             
+            action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+            self._current_step_actions.append(action_data)
+            
+            return compatibility_result
+            
         except Exception as e:
             logger.error("Action execution failed", extra={
                 "error": str(e),
                 "action_type": action_type
             })
-            return {
+            
+            # Stop capturing if needed
+            if isinstance(self.browser_driver, InstrumentedBrowserDriver):
+                action_data["browser_calls"] = self.browser_driver.stop_capture()
+            
+            error_result = {
                 "success": False,
                 "action_type": action_type,
                 "error": str(e)
             }
+            
+            action_data["result"] = error_result
+            action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+            self._current_step_actions.append(action_data)
+            
+            return error_result
     
     async def _verify_expected_outcome(
         self,
@@ -747,7 +888,10 @@ Respond in JSON format with keys: error_type, severity, reasoning"""
                 response_format={"type": "json_object"}
             )
             
-            result = json.loads(response.get("content", "{}"))
+            # Content is already a dict when using json_object response format
+            result = response.get("content", {})
+            if isinstance(result, str):
+                result = json.loads(result)
             error_type = result.get("error_type", "unknown_error")
             
             # Map severity string to enum
@@ -846,7 +990,10 @@ Respond with JSON: {{"is_blocker": true/false, "reasoning": "explanation"}}"""
                     messages=[{"role": "user", "content": prompt}],
                     response_format={"type": "json_object"}
                 )
-                result = json.loads(response.get("content", "{}"))
+                # Content is already a dict when using json_object response format
+                result = response.get("content", {})
+                if isinstance(result, str):
+                    result = json.loads(result)
                 return result.get("is_blocker", True)
                 
             except Exception:
@@ -906,7 +1053,10 @@ Respond with JSON: {{"continue": true/false, "reasoning": "explanation"}}"""
                 response_format={"type": "json_object"}
             )
             
-            result = json.loads(response.get("content", "{}"))
+            # Content is already a dict when using json_object response format
+            result = response.get("content", {})
+            if isinstance(result, str):
+                result = json.loads(result)
             should_continue = result.get("continue", False)
             
             logger.info("Cascade failure decision", extra={
@@ -1103,3 +1253,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                     print(f"  - {bug.description}")
         
         print("\n" + "="*80 + "\n")
+    
+    def get_action_storage(self) -> Dict[str, Any]:
+        """Return the captured action storage data."""
+        return self._action_storage

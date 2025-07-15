@@ -42,6 +42,7 @@ Guidelines for Test Steps:
 - IMPORTANT: Use the EXACT URL provided in the requirements
 - IMPORTANT: Do not add redundant "click to focus" steps before typing
 - IMPORTANT: Never use code terminology - describe elements as users see them (e.g., "main heading" not "H1", "button" not "submit input")
+- IMPORTANT: Do not create steps to "locate" or "find" elements - element location is implicit unless requirements explicitly ask for it. Combine the action with its target (e.g., "Type 'Python' in the search field" not "Locate the search field" then "Type 'Python'")
 
 Rules for Creating Test Steps:
 1. **URL Validation**: Do NOT validate URLs unless explicitly required

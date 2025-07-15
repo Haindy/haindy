@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 from uuid import UUID
 
 from jinja2 import Environment, Template
@@ -575,8 +575,9 @@ class TestReporter:
         self,
         test_state: TestState,
         output_dir: Path,
-        format: str = "html"
-    ) -> Path:
+        format: str = "html",
+        action_storage: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Path, Optional[Path]]:
         """
         Generate a test report from TestState.
         
@@ -584,9 +585,10 @@ class TestReporter:
             test_state: The test state containing execution results
             output_dir: Directory to save the report
             format: Report format (html, json, markdown)
+            action_storage: Optional action storage data to save alongside report
             
         Returns:
-            Path to the generated report
+            Tuple of (report_path, actions_path) where actions_path may be None
         """
         # Convert TestState to TestMetrics
         test_metrics = self._convert_to_metrics(test_state)
@@ -617,7 +619,28 @@ class TestReporter:
         output_path.write_text(report_data)
         logger.info(f"Generated {format} report: {output_path}")
         
-        return output_path
+        # Save actions file if provided
+        actions_path = None
+        if action_storage and action_storage.get("test_cases"):
+            # Generate actions filename based on report filename
+            test_plan_id = str(test_state.test_report.test_plan_id)
+            actions_filename = f"{test_plan_id}_{timestamp}-actions.json"
+            actions_path = output_dir / actions_filename
+            
+            # Write actions data with pretty formatting
+            with open(actions_path, 'w') as f:
+                json.dump(action_storage, f, indent=2, default=str)
+            
+            logger.info(f"Generated actions file: {actions_path}")
+            
+            # Log both paths
+            logger.info(f"Test Report: {output_path}")
+            logger.info(f"Actions Log: {actions_path}")
+        else:
+            # Log only report path if no actions
+            logger.info(f"Test Report: {output_path}")
+        
+        return output_path, actions_path
     
     def _convert_to_metrics(self, test_state: TestState) -> TestMetrics:
         """Convert TestState to TestMetrics."""
