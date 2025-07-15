@@ -8,7 +8,7 @@ Please test:
 - Search for "artificial intelligence" 
 - Make sure the search works when you press Enter
 - Verify you get to the AI article page
-- Check that the article is complete with all the important sections (it should have history, applications, ethics, etc.)
+- Check that the article is complete with all the important sections (it should have history, applications, ethics, etc.) and that clicking on a section of the menu jumps to that section.
 - Make sure there are images and useful information boxes
 - The article should look professional and well-organized
 

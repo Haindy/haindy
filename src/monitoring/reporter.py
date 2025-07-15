@@ -650,6 +650,13 @@ class TestReporter:
         Returns:
             Tuple of (report_path, actions_path) where actions_path may be None
         """
+        # Use enhanced reporter for HTML format
+        if format == "html":
+            from src.monitoring.enhanced_reporter import EnhancedReporter
+            enhanced_reporter = EnhancedReporter()
+            return enhanced_reporter.generate_report(test_state, output_dir, action_storage)
+        
+        # For other formats, use the original implementation
         # Convert TestState to TestMetrics
         test_metrics = self._convert_to_metrics(test_state)
         
@@ -669,9 +676,7 @@ class TestReporter:
         filename = f"test_report_{test_state.test_report.test_plan_id}_{timestamp}.{format}"
         output_path = output_dir / filename
         
-        if format == "html":
-            report_data = test_report.to_html()
-        elif format == "json":
+        if format == "json":
             report_data = test_report.to_json()
         elif format == "markdown":
             report_data = test_report.to_markdown()
