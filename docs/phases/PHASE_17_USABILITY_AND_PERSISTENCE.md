@@ -11,10 +11,10 @@ This phase focuses on making HAINDY actually usable by implementing proper docum
 
 ## Success Criteria
 - [x] Test plans are saved as permanent files (not debug files)
-- [ ] Action decompositions are stored and linked to test plans
+- [x] Action decompositions are stored and linked to test plans
 - [x] Reports show clear test case → step hierarchy with pass/fail at each level
 - [x] All three agents produce reliable, consistent outputs
-- [ ] End-to-end test execution works smoothly without manual intervention
+- [x] End-to-end test execution works smoothly without manual intervention
 
 ## Implementation Tasks
 
@@ -25,10 +25,11 @@ This phase focuses on making HAINDY actually usable by implementing proper docum
 - ✅ Save both JSON and Markdown formats
 
 ### 2. Action Decomposition Storage
-- Capture Test Runner's step interpretations
-- Save decomposed actions with the test plan ID
-- Create linkage between original steps and decomposed actions
-- Enable action replay from saved decompositions
+- ✅ Capture Test Runner's step interpretations
+- ✅ Save decomposed actions with comprehensive metadata
+- ✅ Create linkage between original steps and decomposed actions
+- ✅ Store AI conversations, browser calls, and results
+- ✅ Enable action replay from saved decompositions
 
 ### 3. Hierarchical Report Structure
 - ✅ Centralized all reporting in TestReporter class
@@ -47,10 +48,10 @@ This phase focuses on making HAINDY actually usable by implementing proper docum
 - ✅ Standardized priorities to "medium" and tags to empty arrays
 
 #### Test Runner Agent
-- Fix click-before-type issue for input fields
-- Improve step interpretation accuracy
-- Better handling of expected outcomes per action
-- Consistent error categorization
+- ✅ Fix click-before-type issue for input fields (added ACTION RULES)
+- ✅ Improve step interpretation accuracy
+- ✅ Better handling of expected outcomes per action
+- ✅ Consistent error categorization (fixed JSON parsing bugs)
 
 #### Action Agent
 - Improve visual element identification
@@ -137,16 +138,34 @@ class EnhancedReportGenerator:
 
 ## Definition of Done
 - [x] Test plans are automatically saved to structured directories
-- [ ] Action decompositions are captured and linked to test plans
+- [x] Action decompositions are captured and linked to test plans
 - [x] Reports show clear hierarchical structure with appropriate detail levels
-- [ ] All agents behave reliably without manual intervention
-- [ ] Documentation updated with new workflows
-- [ ] Integration tests pass with new persistence layer
+- [x] All agents behave reliably without manual intervention
+- [x] Documentation updated with new workflows
+- [x] Integration tests pass with new persistence layer
 
-## Progress Summary (Day 1)
+## Progress Summary
+
+### Day 1 (Completed)
 - ✅ Centralized all reporting in TestReporter, removed duplicate test_reports directory
 - ✅ Simplified test plan generation - removed unnecessary intermediate JSON files
 - ✅ Implemented permanent test plan storage in `generated_test_plans/<test_plan_id>/`
 - ✅ Fixed URL extraction from requirement documents
 - ✅ Tuned Test Planner prompt to avoid code terminology and standardize output
 - ✅ Updated .gitignore for new directory structures
+
+### Day 2 (Completed)
+- ✅ Implemented comprehensive action storage system
+- ✅ Created InstrumentedBrowserDriver to capture all browser automation calls
+- ✅ Added action tracking in TestRunner with complete metadata:
+  * Action details (type, target, value, description, timestamps)
+  * AI conversations from Test Runner and Action Agent
+  * Browser calls with parameters and timing
+  * Complete action results and screenshot paths
+- ✅ Updated TestReporter to save actions as JSON alongside reports
+- ✅ Fixed JSON parsing bugs in TestRunner (OpenAI response format compatibility)
+- ✅ Enhanced Test Runner prompt with structured ACTION RULES
+- ✅ Updated Test Planner prompt to prevent redundant "locate" steps
+- ✅ Increased default timeout from 5 to 20 minutes
+- ✅ Actions file path now displayed to user alongside test reports
+- ✅ End-to-end test execution working smoothly
