@@ -69,7 +69,6 @@ class WorkflowCoordinator:
         
         # Configuration
         self._max_concurrent_tests = 5
-        self._agent_timeout = 300  # 5 minutes
         self.max_steps = max_steps
         
         logger.info("Workflow coordinator initialized")
@@ -238,11 +237,8 @@ class WorkflowCoordinator:
         self._active_tests[test_state.test_plan.plan_id] = test_task
         
         try:
-            # Wait for completion with timeout
-            final_state = await asyncio.wait_for(
-                test_task,
-                timeout=self._agent_timeout
-            )
+            # Wait for completion
+            final_state = await test_task
             
             return final_state
             

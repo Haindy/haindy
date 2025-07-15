@@ -169,3 +169,12 @@ class EnhancedReportGenerator:
 - ✅ Increased default timeout from 5 to 20 minutes
 - ✅ Actions file path now displayed to user alongside test reports
 - ✅ End-to-end test execution working smoothly
+
+### Day 3 (Completed)
+- ✅ Fixed bug report display in HTML reports
+- ✅ Created `_extract_bug_reports()` method in TestReporter
+- ✅ Added new Bug Reports section to HTML and Markdown templates
+- ✅ Bug reports now properly displayed with severity, error details, and reproduction steps
+- ✅ Fixed syntax error in reporter.py (extra parenthesis)
+- ✅ Removed hardcoded 5-minute timeout in WorkflowCoordinator
+- ✅ Test execution now respects command-line timeout parameter only
