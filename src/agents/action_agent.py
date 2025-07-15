@@ -923,10 +923,30 @@ CONFIDENCE: <0.0-1.0>
                 error_message=error_message
             )
             
+            # Enhance outcome description based on what actually happened
+            actual_outcome = f"Clicked {element_type}"
+            
+            # If URL changed (navigation occurred), describe where we navigated
+            if url_changed and result.browser_state_after:
+                new_title = result.browser_state_after.title
+                new_url = result.browser_state_after.url
+                if new_title:
+                    actual_outcome = f"Clicked {element_type} and navigated to: {new_title}"
+                else:
+                    actual_outcome = f"Clicked {element_type} and navigated to: {new_url}"
+            elif ui_changes:
+                # Describe the most significant UI change
+                if len(ui_changes) == 1:
+                    actual_outcome = f"Clicked {element_type} - {ui_changes[0]}"
+                else:
+                    actual_outcome = f"Clicked {element_type} - {ui_changes[0]} and {len(ui_changes)-1} other changes"
+            else:
+                actual_outcome = f"Clicked {element_type} with no visible changes"
+            
             result.ai_analysis = AIAnalysis(
                 success=success,
                 confidence=validation_confidence,
-                actual_outcome=f"Clicked at {grid_cell}. Changes: {', '.join(ui_changes) if ui_changes else 'No visible changes'}",
+                actual_outcome=actual_outcome,
                 matches_expected=expected_met,
                 ui_changes=ui_changes,
                 recommendations=[] if success else ["Verify the correct element was clicked", "Check if page needs more time to load"],
@@ -1701,18 +1721,24 @@ Compare these before and after screenshots to determine if pressing {key} had th
 
 Expected outcome: {test_step.action_instruction.expected_outcome}
 
-What changed after pressing {key}?
-1. Did the page navigate/reload?
-2. Did a form submit?
-3. Did focus move to another element?
-4. Any other visible changes?
+Analyze what happened after pressing {key}:
+1. Did the page navigate/reload? If yes, where did it navigate to?
+2. Did a form submit? What was the result?
+3. Did focus move to another element? Which element?
+4. Any other visible changes? Describe them.
+
+IMPORTANT: In your reasoning, describe the ACTUAL OUTCOME in terms that relate to the expected outcome.
+For example:
+- If expected is "navigate to Wikipedia article" and navigation occurred, describe what page loaded
+- If expected is "submit search" and form submitted, describe where it went
+- Don't just say "navigation occurred" - describe the destination
 
 Respond in this format:
 SUCCESS: true/false
 CHANGES_DETECTED: none/navigation/form_submit/focus_change/other
 MATCHES_EXPECTED: true/false
 CONFIDENCE: <0.0-1.0>
-REASONING: What happened and why it matches/doesn't match expectations
+REASONING: Describe what actually happened in terms that can be compared to the expected outcome
 """
             
             messages = [
@@ -1775,10 +1801,38 @@ REASONING: What happened and why it matches/doesn't match expectations
                 error_message=None if success else f"Key press did not have expected effect: {reasoning}"
             )
             
+            # Enhance outcome description based on what actually happened
+            actual_outcome = f"Pressed {key}"
+            
+            # If navigation occurred, describe where we navigated to
+            if changes in ["navigation", "form_submit"]:
+                if result.browser_state_after:
+                    new_title = result.browser_state_after.title
+                    new_url = result.browser_state_after.url
+                    # Extract meaningful part of the reasoning that describes what we see
+                    if reasoning and "navigated to" in reasoning.lower():
+                        actual_outcome = reasoning
+                    elif new_title:
+                        actual_outcome = f"Navigated to page: {new_title}"
+                    else:
+                        actual_outcome = f"Navigated to: {new_url}"
+                else:
+                    actual_outcome = f"Pressed {key} and triggered navigation"
+            elif changes == "focus_change":
+                actual_outcome = f"Pressed {key} and moved focus to next element"
+            elif changes == "other":
+                # Try to extract what happened from the reasoning
+                if reasoning:
+                    actual_outcome = reasoning
+                else:
+                    actual_outcome = f"Pressed {key} with visual changes"
+            else:
+                actual_outcome = f"Pressed {key} with no visible changes"
+            
             result.ai_analysis = AIAnalysis(
                 success=success and matches_expected,
                 confidence=confidence,
-                actual_outcome=f"Pressed {key}. Changes: {changes}",
+                actual_outcome=actual_outcome,
                 matches_expected=matches_expected,
                 ui_changes=[f"Changes detected: {changes}"] if changes != "none" else [],
                 recommendations=[] if success else ["Verify the correct key was pressed", "Check if more time is needed for the action"],
