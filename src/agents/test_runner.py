@@ -181,7 +181,7 @@ class TestRunner(BaseAgent):
                                 case_id=blocked_case.case_id,
                                 test_id=blocked_case.test_id,
                                 name=blocked_case.name,
-                                status=TestStatus.BLOCKED,
+                                status=TestStatus.SKIPPED,
                                 started_at=datetime.now(timezone.utc),
                                 completed_at=datetime.now(timezone.utc),
                                 steps_total=len(blocked_case.steps),
@@ -258,9 +258,12 @@ class TestRunner(BaseAgent):
         try:
             # Check prerequisites
             if not await self._verify_prerequisites(test_case.prerequisites):
-                case_result.status = TestStatus.BLOCKED
+                case_result.status = TestStatus.SKIPPED
                 case_result.error_message = "Prerequisites not met"
                 return case_result
+            
+            # Track if any step failed
+            has_failed_steps = False
             
             # Execute each step
             for step in test_case.steps:
@@ -268,10 +271,11 @@ class TestRunner(BaseAgent):
                 case_result.step_results.append(step_result)
                 
                 # Update counters
-                if step_result.status == TestStatus.COMPLETED:
+                if step_result.status == TestStatus.PASSED:
                     case_result.steps_completed += 1
                 elif step_result.status == TestStatus.FAILED:
                     case_result.steps_failed += 1
+                    has_failed_steps = True
                     
                     # Create bug report for failed step
                     bug_report = await self._create_bug_report(
@@ -293,10 +297,14 @@ class TestRunner(BaseAgent):
                 # Save report after each step
                 # Report updates will be handled by the caller
             
-            # Verify postconditions if test case completed
-            if case_result.status != TestStatus.FAILED:
-                if await self._verify_postconditions(test_case.postconditions):
-                    case_result.status = TestStatus.COMPLETED
+            # Determine final test case status
+            if case_result.status != TestStatus.FAILED:  # Not already marked as failed by blocker
+                if has_failed_steps:
+                    case_result.status = TestStatus.FAILED
+                    if not case_result.error_message:
+                        case_result.error_message = f"{case_result.steps_failed} step(s) failed"
+                elif await self._verify_postconditions(test_case.postconditions):
+                    case_result.status = TestStatus.PASSED
                 else:
                     case_result.status = TestStatus.FAILED
                     case_result.error_message = "Postconditions not met"
@@ -413,7 +421,7 @@ class TestRunner(BaseAgent):
                     )
                     
                     if verification["success"]:
-                        step_result.status = TestStatus.COMPLETED
+                        step_result.status = TestStatus.PASSED
                         step_result.actual_result = verification["actual_outcome"]
                     else:
                         step_result.status = TestStatus.FAILED
@@ -928,7 +936,7 @@ Respond in JSON format with keys: error_type, severity, reasoning"""
         
         # Add recent successful steps for context
         for i, result in enumerate(case_result.step_results[-3:]):
-            if result.status == TestStatus.COMPLETED:
+            if result.status == TestStatus.PASSED:
                 reproduction_steps.append(
                     f"{i+3}. Previous step completed: Step {result.step_number}"
                 )
@@ -1128,7 +1136,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                 None
             )
             
-            if not dep_result or dep_result.status != TestStatus.COMPLETED:
+            if not dep_result or dep_result.status != TestStatus.PASSED:
                 logger.warning("Step dependency not met", extra={
                     "step": step.step_number,
                     "dependency": dep_num,
@@ -1150,19 +1158,19 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             return TestStatus.FAILED
         
         # If all completed, overall is completed
-        all_completed = all(tc.status == TestStatus.COMPLETED 
+        all_completed = all(tc.status == TestStatus.PASSED 
                            for tc in self._test_report.test_cases)
         if all_completed:
-            return TestStatus.COMPLETED
+            return TestStatus.PASSED
         
         # Otherwise, partial completion
-        return TestStatus.BLOCKED
+        return TestStatus.SKIPPED
     
     def _calculate_summary(self) -> TestSummary:
         """Calculate test execution summary statistics."""
         total_cases = len(self._test_report.test_cases)
         completed_cases = sum(1 for tc in self._test_report.test_cases 
-                             if tc.status == TestStatus.COMPLETED)
+                             if tc.status == TestStatus.PASSED)
         failed_cases = sum(1 for tc in self._test_report.test_cases 
                           if tc.status == TestStatus.FAILED)
         

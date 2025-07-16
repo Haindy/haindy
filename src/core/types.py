@@ -15,10 +15,9 @@ class TestStatus(str, Enum):
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
+    PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
-    BLOCKED = "blocked"
 
 
 class ActionType(str, Enum):

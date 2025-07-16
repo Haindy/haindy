@@ -286,7 +286,7 @@ async def run_test(
         # Display results summary
         console.print("\n[bold]Test Execution Summary:[/bold]")
         
-        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "completed" else "red"
+        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "passed" else "red"
         status_text = getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown'))
         console.print(f"Status: [{status_color}]{status_text}[/{status_color}]")
         
@@ -296,7 +296,7 @@ async def run_test(
             
             # Calculate totals from test cases
             total_test_cases = len(report.test_cases)
-            completed_test_cases = len([tc for tc in report.test_cases if tc.status == "completed"])
+            completed_test_cases = len([tc for tc in report.test_cases if tc.status == "passed"])
             
             # Calculate step totals
             total_steps = sum(tc.steps_total for tc in report.test_cases)
@@ -354,7 +354,7 @@ async def run_test(
         console.print(f"Screenshots Saved: [green]{debug_summary['screenshots_saved']}[/green]")
         
         # Return appropriate exit code
-        return 0 if test_state.status == "completed" else 1
+        return 0 if test_state.status == "passed" else 1
         
     except asyncio.TimeoutError:
         console.print(f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]")

@@ -77,10 +77,9 @@ ENHANCED_HTML_TEMPLATE = """
         }
         
         /* Status colors */
-        .status-completed { color: #4caf50; }
+        .status-passed { color: #4caf50; }
         .status-failed { color: #f44336; }
         .status-skipped { color: #ff9800; }
-        .status-blocked { color: #ff9800; }
         .status-in-progress { color: #2196f3; }
         
         /* Card styling */
@@ -106,7 +105,7 @@ ENHANCED_HTML_TEMPLATE = """
             background-color: #f5f5f5;
         }
         
-        .card-header.status-completed {
+        .card-header.status-passed {
             border-left: 4px solid #4caf50;
         }
         
@@ -114,8 +113,7 @@ ENHANCED_HTML_TEMPLATE = """
             border-left: 4px solid #f44336;
         }
         
-        .card-header.status-skipped,
-        .card-header.status-blocked {
+        .card-header.status-skipped {
             border-left: 4px solid #ff9800;
         }
         
@@ -163,7 +161,7 @@ ENHANCED_HTML_TEMPLATE = """
             margin-right: 5px;
         }
         
-        .icon-completed { color: #4caf50; }
+        .icon-passed { color: #4caf50; }
         .icon-failed { color: #f44336; }
         .icon-skipped { color: #ff9800; }
         
@@ -479,9 +477,9 @@ ENHANCED_HTML_TEMPLATE = """
                             <div class="card-title">
                                 <span class="expand-icon {% if test_case.status == 'failed' %}expanded{% endif %}" id="case-{{ loop.index }}-icon">▶</span>
                                 <span class="icon icon-{{ test_case.status|lower }}">
-                                    {% if test_case.status == 'completed' %}✓
+                                    {% if test_case.status == 'passed' %}✓
                                     {% elif test_case.status == 'failed' %}✗
-                                    {% elif test_case.status == 'skipped' or test_case.status == 'blocked' %}⊖
+                                    {% elif test_case.status == 'skipped' %}⊖
                                     {% else %}○
                                     {% endif %}
                                 </span>
@@ -523,7 +521,7 @@ ENHANCED_HTML_TEMPLATE = """
                                         <div class="card-title">
                                             <span class="expand-icon {% if step.status == 'failed' %}expanded{% endif %}" id="step-{{ loop.index0 }}-{{ loop.index }}-icon">▶</span>
                                             <span class="icon icon-{{ step.status|lower }}">
-                                                {% if step.status == 'completed' %}✓
+                                                {% if step.status == 'passed' %}✓
                                                 {% elif step.status == 'failed' %}✗
                                                 {% elif step.status == 'skipped' %}⊖
                                                 {% else %}○

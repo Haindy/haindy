@@ -46,11 +46,19 @@ Guidelines for Test Steps:
 
 Rules for Creating Test Steps:
 1. **URL Validation**: Do NOT validate URLs unless explicitly required
-2. **Location Specificity**: Always specify WHERE to look for elements
+2. **NO SPATIAL ASSUMPTIONS**: Never assume the location of UI elements unless explicitly stated in requirements. Instead of "below", "above", "left of", or "right of", use neutral descriptions like "on the page", "in the article", "within the form"
 3. **Element Type Clarity**: Be specific about element types using human language (no HTML/CSS terminology)
-4. **Visual Context**: Describe how elements appear visually
+4. **Visual Context**: Describe what to look for, not where to look for it
 5. **Feasibility**: Only create assertions that can be verified visually
-6. **Ambiguity Prevention**: Choose the most specific interpretation
+6. **Ambiguity Prevention**: When location is not specified, use the most general but clear description
+
+Examples of spatial assumptions to AVOID:
+- BAD: "Confirm table of contents is visible below the heading"
+- GOOD: "Confirm table of contents is visible on the article page"
+- BAD: "Click the submit button at the bottom of the form"
+- GOOD: "Click the submit button in the form"
+- BAD: "Check for error message above the input field"
+- GOOD: "Check for error message related to the input field"
 
 Output Format:
 Create a structured test plan with:

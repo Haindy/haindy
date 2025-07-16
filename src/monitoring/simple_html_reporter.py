@@ -546,7 +546,7 @@ class SimpleHTMLReporter:
         step_num = 1
         for test_case in test_state.test_report.test_cases:
             for step_result in test_case.step_results:
-                status = "passed" if step_result.status == "completed" else "failed"
+                status = "passed" if step_result.status == "passed" else "failed"
                 steps.append({
                     "number": step_num,
                     "description": step_result.step_description,

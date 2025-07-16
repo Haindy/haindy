@@ -720,7 +720,7 @@ class TestReporter:
         
         # Determine overall outcome
         from src.core.types import TestStatus
-        if test_state.status == TestStatus.COMPLETED and failed_steps == 0:
+        if test_state.status == TestStatus.PASSED and failed_steps == 0:
             outcome = TestOutcome.PASSED
         elif test_state.status == TestStatus.FAILED or failed_steps > 0:
             outcome = TestOutcome.FAILED
