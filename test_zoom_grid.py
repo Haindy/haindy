@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -31,7 +32,7 @@ from src.grid.overlay import GridOverlay
 
 
 # Configuration
-COARSE_GRID_SIZE = 8   # 8x8 grid for broader initial identification
+COARSE_GRID_SIZE = 7   # 7x7 grid for broader initial identification
 FINE_GRID_SIZE = 8     # 8x8 grid for zoomed region
 SCALE_FACTOR = 4       # Scale factor for zooming
 PADDING = 0            # No padding - zoom only the exact cell
@@ -228,9 +229,10 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         return cell, response
     
     async def identify_fine_location(self, original_img: Image.Image, coarse_cell: str, 
-                                   target_description: str) -> Tuple[Tuple[int, int], Dict[str, any]]:
+                                   target_description: str, coarse_response: Dict[str, any]) -> Tuple[Tuple[int, int], Dict[str, any]]:
         """
         Second stage: Identify precise location using fine grid on zoomed region.
+        Uses two-image approach with conversational context.
         
         Returns:
             Tuple of ((x, y) coordinates in original image, api_response)
@@ -258,6 +260,12 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         scaled_height = img_cropped.height * SCALE_FACTOR
         img_scaled = img_cropped.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
         
+        # Save scaled image WITHOUT grid
+        img_scaled_no_grid_bytes = io.BytesIO()
+        img_scaled.save(img_scaled_no_grid_bytes, format='PNG')
+        img_scaled_no_grid_bytes = img_scaled_no_grid_bytes.getvalue()
+        img_scaled.save(self.output_dir / "fine_no_grid.png")
+        
         # Apply fine grid to scaled image
         img_with_fine_grid = self.create_grid_overlay_with_contrast(img_scaled, FINE_GRID_SIZE)
         
@@ -265,30 +273,56 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         fine_grid_bytes = io.BytesIO()
         img_with_fine_grid.save(fine_grid_bytes, format='PNG')
         fine_grid_bytes = fine_grid_bytes.getvalue()
-        
-        # Save for debugging
         img_with_fine_grid.save(self.output_dir / "fine_grid.png")
         
-        # Prepare prompt for fine identification
-        prompt = f"""You are looking at a ZOOMED IN section of a screenshot with an {FINE_GRID_SIZE}x{FINE_GRID_SIZE} grid overlay.
-This is a {SCALE_FACTOR}x magnified view of a single cell from the previous coarse grid.
-
-Your task is to identify the precise grid cell containing the CENTER of: {target_description}
-
-IMPORTANT:
-1. This is a ZOOMED view - the element appears larger than normal
-2. Focus on finding the CENTER/MIDDLE of the element
-3. The {FINE_GRID_SIZE}x{FINE_GRID_SIZE} grid provides fine-grained precision
-4. Return ONLY the cell identifier (e.g., "D4")
-5. Choose the cell that best contains the CENTER point where you would click
-
-Respond with just the cell identifier, nothing else."""
-
-        # Call API
-        response = await self.client.analyze_image(fine_grid_bytes, prompt, temperature=0.1)
+        # Build conversation context
+        messages = [
+            {
+                "role": "system",
+                "content": "You are helping identify precise click locations on UI elements."
+            },
+            {
+                "role": "user",
+                "content": f"I'm looking for: {target_description}"
+            },
+            {
+                "role": "assistant", 
+                "content": f"I found it in cell {coarse_cell} of the coarse grid."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Here are 2 screenshots which are a zoom in of the cell you selected.\nOne without a grid and the other has a grid like the screenshot in the past chat.\nPlease identify the '{target_description}' and use the grid to tell me what cell I should click if I wanted to have the most success of clicking the link.\n\nRespond with just the cell identifier, nothing else."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64.b64encode(img_scaled_no_grid_bytes).decode('utf-8')}",
+                            "detail": "high"
+                        }
+                    },
+                    {
+                        "type": "image_url", 
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64.b64encode(fine_grid_bytes).decode('utf-8')}",
+                            "detail": "high"
+                        }
+                    }
+                ]
+            }
+        ]
         
-        # Extract cell identifier
-        fine_cell = response['content'].strip().upper()
+        # Call API with full conversation context
+        response = await self.client.call(messages=messages, temperature=0.1)
+        
+        # Extract cell identifier from response
+        content = response['content']
+        # Look for cell pattern (letter + number)
+        cell_match = re.search(r'\b([A-H][1-8])\b', content)
+        if cell_match:
+            fine_cell = cell_match.group(1).upper()
+        else:
+            # Fallback to stripping and taking first word
+            fine_cell = content.strip().split()[0].upper()
         
         # Calculate coordinates in scaled image
         fine_grid = GridOverlay(FINE_GRID_SIZE)
@@ -337,7 +371,7 @@ Respond with just the cell identifier, nothing else."""
             # Stage 2: Fine identification
             self.logger.info("Stage 2: Fine grid identification...")
             (x, y), fine_response = await self.identify_fine_location(
-                img, coarse_cell, test_case.target_description
+                img, coarse_cell, test_case.target_description, coarse_response
             )
             total_tokens += fine_response['usage']['total_tokens']
             self.logger.info(f"Final coordinates: ({x}, {y})")

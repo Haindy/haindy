@@ -17,16 +17,19 @@ We discovered that the AI vision models have difficulty accurately identifying g
 | Task | Status | Notes |
 |------|--------|-------|
 | Create test script `test_zoom_grid.py` | 🟢 Completed | |
-| Test Wikipedia AI "History" link | 🟢 Completed | Success with A5→D6 |
-| Test Wikipedia "debate" link | ⚠️ Failed | AI misidentified C7 instead of D7 |
-| Add cell labels to all cells | 🟡 In Progress | Top-right corner positioning |
+| Test Wikipedia AI "History" link | 🟢 Completed | Success with 8x8 grid |
+| Fix grid rendering issues | 🟢 Completed | Double inversion, missing lines |
+| Add cell labels to all cells | 🟢 Completed | Top-left with outline text |
+| Improve prompts | 🟢 Completed | "most of the element" approach |
+| Implement two-image fine grid | 🟢 Completed | No-grid + grid with context |
+| Test Wikipedia "debate" link | ⚠️ Partial | 7x7: 40% success (2/5 tests) |
+| Fine-tune coarse reliability | 🔴 Not Started | Need ~100% for D6 selection |
+| Add repeat mode to test script | 🔴 Not Started | Batch testing capability |
+| Add expected cell parameters | 🔴 Not Started | Auto pass/fail detection |
 | Test radio buttons | 🔴 Not Started | |
 | Test toggle switches | 🔴 Not Started | |
 | Test dropdown menus | 🔴 Not Started | |
 | Test small toolbar buttons | 🔴 Not Started | |
-| Test links in dense text | 🔴 Not Started | |
-| Test stacked navigation | 🔴 Not Started | |
-| Fine-tune parameters | 🔴 Not Started | Grid sizes, scale factor |
 | Document results & metrics | 🔴 Not Started | |
 
 ### Phase 2: System Impact Analysis
@@ -173,12 +176,47 @@ original_y = crop_y1 + (scaled_y / SCALE_FACTOR)
 - But much higher accuracy - worth the tradeoff
 
 ### Configuration:
-- Coarse grid: 8x8 (broader cells for general area selection)
+- Coarse grid: 7x7 (current best - balances cell size vs reliability)
 - Fine grid: 8x8 (applied to single zoomed cell for precision)
 - Scale factor: 4x (makes details clear without excessive size)
 - Padding: 0 (zoom only the exact identified cell)
+- Labels: All cells labeled in top-left with outline text
 
 This approach has been tested and shows significant improvement in coordinate accuracy!
+
+## Current Status & Findings
+
+### What We've Learned
+1. **Grid Size Matters**: 
+   - 8x8 was too fine - debate link spans multiple cells (C7, D7, E7)
+   - 6x6 was too coarse - AI selected wrong cells (B5)
+   - 7x7 shows promise - debate link contained in D6, but only 40% reliability
+
+2. **Two-Image Approach Works**: 
+   - Showing zoomed cell without grid first helps AI identify element
+   - Conversational context maintains continuity
+   - AI provides more confident responses
+
+3. **Critical Success Factor**: 
+   - Coarse grid MUST select correct cell (D6 for debate link)
+   - If coarse is wrong, fine grid cannot recover
+   - Need near 100% coarse reliability before fine-tuning matters
+
+### Next Steps
+1. **Fine-tune Coarse Grid Reliability**:
+   - Iterate on prompt engineering
+   - Test different grid sizes (7x7 vs alternatives)
+   - Manual evaluation cycle: modify → test → evaluate
+   
+2. **Add Repeat Mode**:
+   - Batch testing capability (e.g., run 5 tests at once)
+   - Aggregate results showing coarse/fine cells
+   - Faster iteration cycles
+
+3. **Add Expected Cell Parameters**:
+   - Define expected coarse/fine cells in test cases
+   - Automatic pass/fail detection
+   - Remove manual evaluation burden
 
 ### Test Script Structure
 
