@@ -8,6 +8,48 @@ We discovered that the AI vision models have difficulty accurately identifying g
 3. **Issue**: External labels (outside the image) caused confusion - AI was consistently off by 2-3 columns
 4. **Second improvement**: Moved labels back inside cells in checkerboard pattern
 5. **Persistent issue**: AI still struggles with precise coordinate identification in dense grids
+6. **Discovery**: AI can see elements but struggles with spatial mapping to correct grid cells
+7. **Solution**: Label ALL cells (not just checkerboard) with labels in top-right corner for consistent reference
+
+## Progress Tracking
+
+### Phase 1: Validation & Fine-tuning
+| Task | Status | Notes |
+|------|--------|-------|
+| Create test script `test_zoom_grid.py` | 🟢 Completed | |
+| Test Wikipedia AI "History" link | 🟢 Completed | Success with A5→D6 |
+| Test Wikipedia "debate" link | ⚠️ Failed | AI misidentified C7 instead of D7 |
+| Add cell labels to all cells | 🟡 In Progress | Top-right corner positioning |
+| Test radio buttons | 🔴 Not Started | |
+| Test toggle switches | 🔴 Not Started | |
+| Test dropdown menus | 🔴 Not Started | |
+| Test small toolbar buttons | 🔴 Not Started | |
+| Test links in dense text | 🔴 Not Started | |
+| Test stacked navigation | 🔴 Not Started | |
+| Fine-tune parameters | 🔴 Not Started | Grid sizes, scale factor |
+| Document results & metrics | 🔴 Not Started | |
+
+### Phase 2: System Impact Analysis
+| Task | Status | Notes |
+|------|--------|-------|
+| Map component dependencies | 🔴 Not Started | |
+| Analyze reporting system | 🔴 Not Started | Screenshot storage issue |
+| Review coordinate flow | 🔴 Not Started | |
+| Document required changes | 🔴 Not Started | |
+
+### Phase 3: Implementation
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Action Agent updates | 🔴 Not Started | Two-stage analysis |
+| Browser Controller updates | 🔴 Not Started | Direct x,y coordinates |
+| Type definitions | 🔴 Not Started | PixelCoordinate type |
+| Grid system updates | 🔴 Not Started | |
+| Reporting system fixes | 🔴 Not Started | Screenshot links broken |
+| Image storage | 🔴 Not Started | Permanent storage needed |
+| Integration tests | 🔴 Not Started | |
+| Documentation updates | 🔴 Not Started | |
+
+**Legend**: 🔴 Not Started | 🟡 In Progress | 🟢 Completed | ⚠️ Blocked
 
 ## Solution: Two-Stage Zoom Approach
 
@@ -29,15 +71,55 @@ We discovered that the AI vision models have difficulty accurately identifying g
    - No need for grid cell identifiers
    - Can be used directly with Playwright: `await page.click(x=275, y=424)`
 
-### Implementation Files Created:
-- `/home/fkeegan/src/haindy/test_zoom_grid_v2.py` - Working prototype of the zoom approach
-- Grid overlay improvements in `src/grid/overlay.py`:
-  - Pixel inversion for grid lines
-  - Edge-only grid (no filled cells)
-  - Configurable grid size
-  - Internal checkerboard labels
+### Implementation Approach: Test-First Development
 
-### Next Steps:
+#### Phase 1: Validation & Fine-tuning
+
+1. **Create Ad-hoc Test Script**:
+   - Build standalone test script implementing the two-stage grid system
+   - Use existing OpenAI client for validation
+   - Test against real-world scenarios before integration
+   
+2. **Primary Test Case**:
+   - URL: https://en.wikipedia.org/wiki/Artificial_intelligence
+   - Target: "History" link in the table of contents (left sidebar)
+   - Current system failure: Cannot accurately identify this small link
+   
+3. **Extended Test Suite**:
+   - Radio buttons
+   - Toggle switches
+   - Dropdown menus
+   - Small buttons in toolbars
+   - Links within dense text
+   - Stacked navigation items
+   
+4. **Success Criteria**:
+   - Consistent accurate identification across all test cases
+   - Performance metrics acceptable (response time, API costs)
+   - Only proceed to implementation after validation success
+
+#### Phase 2: System Impact Analysis
+
+1. **Architecture Review**:
+   - Identify all components that interact with grid system
+   - Map dependencies and data flow
+   - Document required changes
+   
+2. **Component Updates Required**:
+   - **Action Agent** (`src/agents/action_agent.py`)
+   - **Browser Controller** (`src/browser/controller.py`)
+   - **Grid System** (`src/grid/`)
+   - **Types** (`src/core/types.py`)
+   - **Reporting System** (`src/monitoring/reporter.py`)
+   - **Execution Journaling** (`src/monitoring/`)
+   - **Test Runner Agent** (coordinate handling)
+   
+3. **Critical Issues to Address**:
+   - **Broken Screenshot Links**: Action screenshots not displaying in reports
+   - **Image Storage**: Implement permanent storage for all action images
+   - **Report Integration**: Ensure screenshots appear correctly within action steps
+
+#### Phase 3: Implementation
 
 1. **Update Action Agent** (`src/agents/action_agent.py`):
    - Implement two-stage screenshot analysis
@@ -51,12 +133,17 @@ We discovered that the AI vision models have difficulty accurately identifying g
 
 3. **Update Types** (`src/core/types.py`):
    - Add new types for zoom approach
-   - Maybe create `PixelCoordinate(x: int, y: int)` type
+   - Create `PixelCoordinate(x: int, y: int)` type
 
-4. **Testing**:
-   - Test with various UI densities
-   - Verify accuracy improvement over single-grid approach
-   - Ensure performance is acceptable (2 AI calls vs 1)
+4. **Update Reporting System**:
+   - Fix screenshot storage and linking
+   - Update HTML report templates for new coordinate system
+   - Ensure all action images are preserved and accessible
+
+5. **Testing**:
+   - Integration tests with updated components
+   - Regression testing on existing test scenarios
+   - Performance benchmarking
 
 ### Key Code Snippets:
 
@@ -86,8 +173,45 @@ original_y = crop_y1 + (scaled_y / SCALE_FACTOR)
 - But much higher accuracy - worth the tradeoff
 
 ### Configuration:
-- Coarse grid: 16x16 (good balance of coverage and cell size)
-- Fine grid: 8x8 (readable on scaled image)
+- Coarse grid: 8x8 (broader cells for general area selection)
+- Fine grid: 8x8 (applied to single zoomed cell for precision)
 - Scale factor: 4x (makes details clear without excessive size)
+- Padding: 0 (zoom only the exact identified cell)
 
 This approach has been tested and shows significant improvement in coordinate accuracy!
+
+### Test Script Structure
+
+The ad-hoc test script (`test_zoom_grid.py`) should:
+
+1. **Setup**:
+   - Initialize Playwright browser
+   - Load OpenAI client
+   - Define test cases with expected elements
+
+2. **Test Flow**:
+   ```python
+   # For each test case:
+   # 1. Navigate to test URL
+   # 2. Take screenshot
+   # 3. Apply coarse grid (16x16)
+   # 4. Call AI to identify general area
+   # 5. Crop and zoom identified cell
+   # 6. Apply fine grid (8x8)
+   # 7. Call AI for precise location
+   # 8. Calculate final coordinates
+   # 9. Attempt click and verify success
+   # 10. Log results and accuracy metrics
+   ```
+
+3. **Metrics to Track**:
+   - Success rate per element type
+   - Average time per identification
+   - API token usage
+   - Coordinate accuracy (distance from actual element)
+
+4. **Output**:
+   - Detailed log of each attempt
+   - Screenshots with grid overlays at each stage
+   - Summary statistics
+   - Recommendations for parameter tuning
