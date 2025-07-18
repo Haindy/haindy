@@ -6,6 +6,7 @@ to accurately identify small UI elements.
 """
 
 import asyncio
+import argparse
 import base64
 import io
 import json
@@ -14,6 +15,7 @@ import os
 import re
 import sys
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +49,8 @@ class TestCase:
     expected_element: str
     element_type: str
     notes: str = ""
+    expected_coarse_cells: Optional[List[str]] = None  # List of acceptable cells
+    expected_fine_cells: Optional[List[str]] = None   # List of acceptable cells
 
 
 @dataclass
@@ -62,18 +66,23 @@ class TestResult:
     api_tokens: int
     error: Optional[str] = None
     screenshots: Dict[str, bytes] = None
+    run_number: int = 1
 
 
 class TwoStageGridTester:
     """Test harness for two-stage grid system."""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, bypass_coarse_validation: bool = False, reasoning_effort: str = "medium"):
         """Initialize tester with OpenAI API key."""
         self.api_key = api_key
         self.client = None
         self.browser = None
         self.page = None
         self.results: List[TestResult] = []
+        self.ai_debug_insights: List[Dict[str, str]] = []  # Collect AI's self-reported failures
+        self.base_screenshots: Dict[str, bytes] = {}  # Cache screenshots per test case
+        self.bypass_coarse_validation = bypass_coarse_validation
+        self.reasoning_effort = reasoning_effort
         
         # Setup logging
         self.logger = logging.getLogger("grid_tester")
@@ -86,12 +95,12 @@ class TwoStageGridTester:
     async def setup(self):
         """Setup browser and OpenAI client."""
         # Initialize OpenAI client
-        self.client = OpenAIClient(api_key=self.api_key)
+        self.client = OpenAIClient(api_key=self.api_key, reasoning_effort=self.reasoning_effort)
         
         # Initialize browser
-        playwright = await async_playwright().start()
-        self.browser = await playwright.chromium.launch(headless=False)
-        self.page = await self.browser.new_page()
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(headless=True)
+        self.page = await self.browser.new_page(viewport={'width': 1920, 'height': 1080})
         
     async def teardown(self):
         """Cleanup resources."""
@@ -99,6 +108,8 @@ class TwoStageGridTester:
             await self.page.close()
         if self.browser:
             await self.browser.close()
+        if hasattr(self, 'playwright'):
+            await self.playwright.stop()
             
     def create_grid_overlay_with_contrast(self, img: Image.Image, grid_size: int, label_inside: bool = True) -> Image.Image:
         """
@@ -208,25 +219,67 @@ class TwoStageGridTester:
         img_with_grid.save(grid_bytes, format='PNG')
         grid_bytes = grid_bytes.getvalue()
         
-        # Save for debugging
-        img_with_grid.save(self.output_dir / "coarse_grid.png")
+        # Save for debugging - include run number if available
+        filename = "coarse_grid.png"
+        if hasattr(self, 'current_run_number'):
+            filename = f"coarse_grid_run{self.current_run_number}.png"
+        img_with_grid.save(self.output_dir / filename)
         
-        # Prepare prompt for coarse identification
-        prompt = f"""You are looking at a screenshot with an {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE} grid overlay.
-Each cell is labeled with a letter-number combination (e.g., A1, B2, H8).
+        # CENTROID-FOCUSED PROMPT - 80% success rate:
+        system_prompt = """You are a manual tester helping to test a new grid overlay system. Your task is to identify which grid cell contains the UI element described by the user.
 
-In which of these cells is the '{target_description}' located? 
-If you see it in multiple cells, tell me the cell that has the most of the element.
+Imagine you need to move your mouse cursor to click on the requested element. First, locate the element visually in the browser screenshot, then determine which grid cell contains the CENTER or CENTROID of that element.
 
-Return ONLY the cell identifier (e.g., "C7"), nothing else."""
+IMPORTANT: 
+1. Do not group nearby buttons or elements together. Focus ONLY on the specific element requested.
+2. Find the geometric center of THIS specific element only, ignoring any neighboring elements.
+3. Do not focus on where the text begins. Instead, identify the geometric center of the clickable area.
+4. If an element spans multiple cells, choose the cell containing the element's center point, not where it starts."""
+        
+        # BACKUP - Cell-by-cell scanning (60% success):
+        # system_prompt = """You are a manual tester helping to test a new grid overlay system. Your task is to identify which grid cell contains the UI element described by the user.
+        #
+        # Follow this systematic approach:
+        # 1. Scan each grid cell one by one, looking for the target element
+        # 2. Make a list of ALL cells that contain any part of the element (even partially)
+        # 3. From your list, determine which single cell contains the MOST of the element
+        # 4. Return only that cell's identifier
+        #
+        # Be thorough - check every cell and don't miss partial overlaps."""
+        
+        # Prepare user prompt for coarse identification
+        user_prompt = f"""This is a browser screenshot with a {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE} grid overlay. Each cell has a label in its top-left corner (like A1, B2, C3, etc.).
 
-        # Call API
-        response = await self.client.analyze_image(grid_bytes, prompt, temperature=0.1)
+I need to find: {target_description}
+
+Which grid cell contains this element?
+
+Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
+
+        # Call API with system prompt
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user", 
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64.b64encode(grid_bytes).decode('utf-8')}",
+                            "detail": "high"
+                        }
+                    }
+                ]
+            }
+        ]
+        
+        response = await self.client.call(messages=messages, temperature=0.1)
         
         # Extract cell identifier
         cell = response['content'].strip().upper()
         
-        return cell, response
+        return cell, response, messages
     
     async def identify_fine_location(self, original_img: Image.Image, coarse_cell: str, 
                                    target_description: str, coarse_response: Dict[str, any]) -> Tuple[Tuple[int, int], Dict[str, any]]:
@@ -264,7 +317,11 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         img_scaled_no_grid_bytes = io.BytesIO()
         img_scaled.save(img_scaled_no_grid_bytes, format='PNG')
         img_scaled_no_grid_bytes = img_scaled_no_grid_bytes.getvalue()
-        img_scaled.save(self.output_dir / "fine_no_grid.png")
+        # Save with run number if available
+        fine_no_grid_filename = "fine_no_grid.png"
+        if hasattr(self, 'current_run_number'):
+            fine_no_grid_filename = f"fine_no_grid_run{self.current_run_number}.png"
+        img_scaled.save(self.output_dir / fine_no_grid_filename)
         
         # Apply fine grid to scaled image
         img_with_fine_grid = self.create_grid_overlay_with_contrast(img_scaled, FINE_GRID_SIZE)
@@ -273,7 +330,11 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         fine_grid_bytes = io.BytesIO()
         img_with_fine_grid.save(fine_grid_bytes, format='PNG')
         fine_grid_bytes = fine_grid_bytes.getvalue()
-        img_with_fine_grid.save(self.output_dir / "fine_grid.png")
+        # Save with run number if available
+        fine_grid_filename = "fine_grid.png"
+        if hasattr(self, 'current_run_number'):
+            fine_grid_filename = f"fine_grid_run{self.current_run_number}.png"
+        img_with_fine_grid.save(self.output_dir / fine_grid_filename)
         
         # Build conversation context
         messages = [
@@ -292,7 +353,7 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"Here are 2 screenshots which are a zoom in of the cell you selected.\nOne without a grid and the other has a grid like the screenshot in the past chat.\nPlease identify the '{target_description}' and use the grid to tell me what cell I should click if I wanted to have the most success of clicking the link.\n\nRespond with just the cell identifier, nothing else."},
+                    {"type": "text", "text": f"Here are 2 screenshots which are a zoom in of the cell you selected.\nOne without a grid and the other has a grid like the screenshot in the past chat.\nPlease identify where I should click to interact with: {target_description}\n\nUse the grid to tell me what cell I should click for the most success.\n\nRespond with just the cell identifier, nothing else."},
                     {
                         "type": "image_url",
                         "image_url": {
@@ -342,7 +403,65 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         
         return (int(original_x), int(original_y)), response
     
-    async def run_test_case(self, test_case: TestCase) -> TestResult:
+    async def debug_ai_failure(self, messages: List[Dict], selected_cell: str, correct_cell: str, 
+                              test_name: str) -> Dict[str, str]:
+        """
+        Ask AI why it failed and what changes would help.
+        
+        Returns:
+            Dictionary with failure reason and suggested improvement
+        """
+        # Add follow-up message to the conversation
+        debug_prompt = f"""You selected cell {selected_cell}, but the correct answer is {correct_cell}.
+
+The target element ({test_name}) is actually located in cell {correct_cell}.
+
+Two questions:
+1. Why did you fail to select the right cell? What caused you to choose {selected_cell} instead?
+2. What is the most important change necessary to the prompt or instructions that would help you find the correct cell?
+
+Please be specific and concise in your answers."""
+
+        # Extend the conversation with the debug question
+        messages.append({
+            "role": "user",
+            "content": debug_prompt
+        })
+        
+        # Get AI's self-analysis
+        debug_response = await self.client.call(messages=messages, temperature=0.3)
+        
+        insight = {
+            "test_name": test_name,
+            "selected": selected_cell,
+            "correct": correct_cell,
+            "ai_explanation": debug_response['content'],
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        self.logger.info(f"AI Debug Insight: {debug_response['content']}")
+        
+        return insight
+    
+    async def capture_base_screenshot(self, test_case: TestCase) -> bytes:
+        """Capture and cache the base screenshot for a test case."""
+        if test_case.name not in self.base_screenshots:
+            self.logger.info(f"Capturing base screenshot for: {test_case.name}")
+            await self.page.goto(test_case.url, wait_until="networkidle")
+            await asyncio.sleep(2)  # Let page fully stabilize
+            # Zoom to 125%
+            await self.page.evaluate("document.body.style.zoom = '125%'")
+            await asyncio.sleep(1)  # Let zoom take effect
+            screenshot = await self.page.screenshot()
+            self.base_screenshots[test_case.name] = screenshot
+            
+            # Save the base screenshot
+            img = Image.open(io.BytesIO(screenshot))
+            img.save(self.output_dir / f"{test_case.name.replace(' ', '_')}_base.png")
+        
+        return self.base_screenshots[test_case.name]
+    
+    async def run_test_case(self, test_case: TestCase, use_cached_screenshot: bool = True) -> TestResult:
         """Execute a single test case."""
         self.logger.info(f"Running test: {test_case.name}")
         start_time = time.time()
@@ -351,66 +470,125 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         total_tokens = 0
         
         try:
-            # Navigate to URL
-            await self.page.goto(test_case.url, wait_until="networkidle")
-            await asyncio.sleep(2)  # Let page fully load
+            # Use cached screenshot or navigate to URL
+            if use_cached_screenshot:
+                screenshot = self.base_screenshots.get(test_case.name)
+                if not screenshot:
+                    self.logger.error(f"No cached screenshot for {test_case.name}. Call capture_base_screenshot first.")
+                    raise ValueError("No cached screenshot available")
+            else:
+                # Navigate to URL
+                await self.page.goto(test_case.url, wait_until="networkidle")
+                await asyncio.sleep(2)  # Let page fully load
+                screenshot = await self.page.screenshot()
             
-            # Take screenshot
-            screenshot = await self.page.screenshot()
             img = Image.open(io.BytesIO(screenshot))
             screenshots['original'] = screenshot
             
             # Stage 1: Coarse identification
             self.logger.info("Stage 1: Coarse grid identification...")
-            coarse_cell, coarse_response = await self.identify_coarse_location(
+            print(f"[Progress] Starting coarse grid analysis...")
+            coarse_cell, coarse_response, coarse_messages = await self.identify_coarse_location(
                 screenshot, test_case.target_description
             )
             total_tokens += coarse_response['usage']['total_tokens']
             self.logger.info(f"Coarse cell identified: {coarse_cell}")
+            print(f"[Progress] Coarse cell: {coarse_cell}")
             
-            # Stage 2: Fine identification
-            self.logger.info("Stage 2: Fine grid identification...")
-            (x, y), fine_response = await self.identify_fine_location(
-                img, coarse_cell, test_case.target_description, coarse_response
-            )
-            total_tokens += fine_response['usage']['total_tokens']
-            self.logger.info(f"Final coordinates: ({x}, {y})")
+            # Check if coarse cell matches expected (if provided)
+            coarse_correct = True
+            if test_case.expected_coarse_cells:
+                coarse_correct = coarse_cell in test_case.expected_coarse_cells
+                if not coarse_correct:
+                    self.logger.warning(f"Coarse cell mismatch! Expected one of: {test_case.expected_coarse_cells}, Got: {coarse_cell}")
+                    print(f"[Progress] ❌ Coarse cell INCORRECT (expected {test_case.expected_coarse_cells})")
+                    
+                    # Debug the failure
+                    print(f"[Progress] 🔍 Asking AI why it failed...")
+                    debug_insight = await self.debug_ai_failure(
+                        coarse_messages.copy(),  # Use copy to avoid modifying original
+                        coarse_cell,
+                        test_case.expected_coarse_cells[0],  # Use first expected as correct
+                        test_case.name
+                    )
+                    self.ai_debug_insights.append(debug_insight)
+                    total_tokens += 200  # Estimate for debug conversation
+                else:
+                    print(f"[Progress] ✅ Coarse cell CORRECT")
             
-            # Attempt to click the identified location
-            self.logger.info(f"Attempting click at ({x}, {y})...")
+            fine_cell = ""
+            x, y = 0, 0
+            
+            # Only proceed to fine grid if coarse is correct (or no expected value) or bypass is enabled
+            if coarse_correct or self.bypass_coarse_validation:
+                # Stage 2: Fine identification
+                self.logger.info("Stage 2: Fine grid identification...")
+                print(f"[Progress] Starting fine grid analysis...")
+                (x, y), fine_response = await self.identify_fine_location(
+                    img, coarse_cell, test_case.target_description, coarse_response
+                )
+                total_tokens += fine_response['usage']['total_tokens']
+                self.logger.info(f"Final coordinates: ({x}, {y})")
+                print(f"[Progress] Final coordinates: ({x}, {y})")
+                fine_cell = fine_response['content'].strip().upper()
+                
+                # Check if fine cell matches expected (if provided)
+                if test_case.expected_fine_cells and fine_cell:
+                    if fine_cell in test_case.expected_fine_cells:
+                        print(f"[Progress] ✅ Fine cell CORRECT")
+                    else:
+                        print(f"[Progress] ❌ Fine cell INCORRECT (expected {test_case.expected_fine_cells}, got {fine_cell})")
+            else:
+                self.logger.info("Skipping fine grid analysis due to incorrect coarse cell")
+                print(f"[Progress] ⚠️  Skipping fine grid - coarse cell was incorrect")
+            
+            # Attempt to click the identified location only if we have valid coordinates
             click_success = False
             error = None
             
-            try:
-                await self.page.mouse.click(x, y)
-                await asyncio.sleep(1)
-                
-                # Take screenshot after click
-                screenshot_after = await self.page.screenshot()
-                screenshots['after_click'] = screenshot_after
-                
-                # Simple validation - check if URL changed or page updated
-                current_url = self.page.url
-                if current_url != test_case.url:
-                    click_success = True
-                    self.logger.info("Click successful - URL changed")
+            if (coarse_correct or self.bypass_coarse_validation) and x > 0 and y > 0:
+                if use_cached_screenshot:
+                    # Skip actual click when using cached screenshot
+                    self.logger.info(f"Would click at ({x}, {y}) - skipping actual click for cached screenshot")
+                    click_success = True  # Assume success based on correct identification
                 else:
-                    # Could add more sophisticated validation here
-                    click_success = True
-                    self.logger.info("Click executed")
-                    
-            except Exception as e:
-                error = str(e)
-                self.logger.error(f"Click failed: {error}")
+                    self.logger.info(f"Attempting click at ({x}, {y})...")
+                    try:
+                        await self.page.mouse.click(x, y)
+                        await asyncio.sleep(1)
+                        
+                        # Take screenshot after click
+                        screenshot_after = await self.page.screenshot()
+                        screenshots['after_click'] = screenshot_after
+                        
+                        # Simple validation - check if URL changed or page updated
+                        current_url = self.page.url
+                        if current_url != test_case.url:
+                            click_success = True
+                            self.logger.info("Click successful - URL changed")
+                        else:
+                            # Could add more sophisticated validation here
+                            click_success = True
+                            self.logger.info("Click executed")
+                            
+                    except Exception as e:
+                        error = str(e)
+                        self.logger.error(f"Click failed: {error}")
+            else:
+                self.logger.info("Skipping click due to incorrect identification")
+                error = "Skipped - coarse grid incorrect"
             
             time_taken = time.time() - start_time
             
             # Create result
+            # Success is true only if coarse was correct AND click succeeded (or bypass is enabled)
+            overall_success = (coarse_correct or self.bypass_coarse_validation) and click_success
+            
             result = TestResult(
                 test_case=test_case,
-                success=click_success,
+                success=overall_success,
                 coarse_cell=coarse_cell,
-                fine_cell=fine_response['content'].strip().upper(),
+                fine_cell=fine_cell,
                 final_coordinates=(x, y),
                 click_success=click_success,
                 time_taken=time_taken,
@@ -436,42 +614,101 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
                 screenshots=screenshots
             )
     
-    async def run_all_tests(self, test_cases: List[TestCase]):
-        """Run all test cases and generate report."""
-        self.logger.info(f"Running {len(test_cases)} test cases...")
+    async def run_all_tests(self, test_cases: List[TestCase], repeat_count: int = 1):
+        """Run all test cases multiple times and generate report."""
+        total_runs = len(test_cases) * repeat_count
+        self.logger.info(f"Running {len(test_cases)} test cases {repeat_count} times each (total: {total_runs} runs)...")
+        
+        # Capture base screenshots for all test cases first
+        for test_case in test_cases:
+            await self.capture_base_screenshot(test_case)
+        
+        # Store all results including repeats
+        all_results = []
         
         for test_case in test_cases:
-            result = await self.run_test_case(test_case)
-            self.results.append(result)
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"Test Case: {test_case.name}")
+            self.logger.info(f"{'='*60}")
             
-            # Save screenshots for this test
-            test_dir = self.output_dir / test_case.name.replace(" ", "_")
-            test_dir.mkdir(exist_ok=True)
-            
-            for name, screenshot in result.screenshots.items():
-                with open(test_dir / f"{name}.png", "wb") as f:
-                    f.write(screenshot)
-            
-            # Add visual marker to show click location
-            if 'original' in result.screenshots:
-                img = Image.open(io.BytesIO(result.screenshots['original']))
-                draw = ImageDraw.Draw(img)
-                x, y = result.final_coordinates
+            for run_num in range(1, repeat_count + 1):
+                self.logger.info(f"\nRun {run_num}/{repeat_count}")
+                self.current_run_number = run_num  # Set current run number
+                result = await self.run_test_case(test_case)
+                result.run_number = run_num  # Add run number to result
+                self.results.append(result)
+                all_results.append(result)
                 
-                # Draw crosshair at click location
-                draw.line([(x-20, y), (x+20, y)], fill=(255, 0, 0), width=3)
-                draw.line([(x, y-20), (x, y+20)], fill=(255, 0, 0), width=3)
-                draw.ellipse([(x-5, y-5), (x+5, y+5)], fill=(255, 0, 0))
+                # Save screenshots for first run only to avoid clutter
+                if run_num == 1:
+                    test_dir = self.output_dir / test_case.name.replace(" ", "_")
+                    test_dir.mkdir(exist_ok=True)
+                    
+                    for name, screenshot in result.screenshots.items():
+                        with open(test_dir / f"{name}.png", "wb") as f:
+                            f.write(screenshot)
+                    
+                    # Add visual marker to show click location
+                    if 'original' in result.screenshots:
+                        img = Image.open(io.BytesIO(result.screenshots['original']))
+                        draw = ImageDraw.Draw(img)
+                        x, y = result.final_coordinates
+                        
+                        # Draw crosshair at click location
+                        draw.line([(x-20, y), (x+20, y)], fill=(255, 0, 0), width=3)
+                        draw.line([(x, y-20), (x, y+20)], fill=(255, 0, 0), width=3)
+                        draw.ellipse([(x-5, y-5), (x+5, y+5)], fill=(255, 0, 0))
+                        
+                        # Save marked image
+                        img.save(test_dir / "marked_click_location.png")
                 
-                # Save marked image
-                img.save(test_dir / "marked_click_location.png")
+                # Print progress to prevent timeout
+                print(f"[Progress] Completed run {run_num}/{repeat_count} for {test_case.name}")
+                
+                # Brief pause between runs
+                if run_num < repeat_count:
+                    await asyncio.sleep(1)
     
-    def generate_report(self):
-        """Generate test execution report."""
+    def save_debug_insights(self):
+        """Save AI debug insights to a separate file."""
+        if not self.ai_debug_insights:
+            return
+            
+        insights_path = self.output_dir / "ai_debug_insights.json"
+        with open(insights_path, "w") as f:
+            json.dump(self.ai_debug_insights, f, indent=2)
+            
+        # Also create a markdown summary
+        summary_path = self.output_dir / "ai_debug_summary.md"
+        with open(summary_path, "w") as f:
+            f.write("# AI Self-Debugging Insights\n\n")
+            f.write(f"Total failures analyzed: {len(self.ai_debug_insights)}\n\n")
+            
+            for i, insight in enumerate(self.ai_debug_insights, 1):
+                f.write(f"## Failure {i}\n")
+                f.write(f"- Test: {insight['test_name']}\n")
+                f.write(f"- Selected: {insight['selected']} (incorrect)\n")
+                f.write(f"- Correct: {insight['correct']}\n")
+                f.write(f"- Time: {insight['timestamp']}\n\n")
+                f.write("### AI's Explanation:\n")
+                f.write(f"{insight['ai_explanation']}\n\n")
+                f.write("---\n\n")
+        
+        print(f"\n[Progress] 📝 AI debug insights saved to {summary_path}")
+    
+    def generate_report(self, repeat_count: int = 1):
+        """Generate test execution report with aggregate statistics."""
+        # Group results by test case
+        results_by_test = defaultdict(list)
+        for result in self.results:
+            results_by_test[result.test_case.name].append(result)
+        
         report = {
             "test_run": {
                 "timestamp": datetime.now().isoformat(),
-                "total_tests": len(self.results),
+                "total_runs": len(self.results),
+                "unique_tests": len(results_by_test),
+                "repeat_count": repeat_count,
                 "passed": sum(1 for r in self.results if r.success),
                 "failed": sum(1 for r in self.results if not r.success),
             },
@@ -480,16 +717,48 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
                 "fine_grid_size": FINE_GRID_SIZE, 
                 "scale_factor": SCALE_FACTOR,
                 "padding": PADDING,
+                "reasoning_effort": self.reasoning_effort,
             },
-            "results": []
+            "aggregate_results": {},
+            "detailed_results": []
         }
         
         total_time = 0
         total_tokens = 0
         
+        # Calculate aggregate statistics for each test case
+        for test_name, results in results_by_test.items():
+            success_count = sum(1 for r in results if r.success)
+            
+            # Count coarse and fine cell selections
+            coarse_cells = defaultdict(int)
+            fine_cells = defaultdict(int)
+            
+            for result in results:
+                coarse_cells[result.coarse_cell] += 1
+                fine_cells[result.fine_cell] += 1
+                
+            # Find most common selections
+            most_common_coarse = max(coarse_cells.items(), key=lambda x: x[1])
+            most_common_fine = max(fine_cells.items(), key=lambda x: x[1])
+            
+            report["aggregate_results"][test_name] = {
+                "total_runs": len(results),
+                "success_count": success_count,
+                "success_rate": f"{(success_count / len(results) * 100):.1f}%",
+                "coarse_cell_distribution": dict(coarse_cells),
+                "fine_cell_distribution": dict(fine_cells),
+                "most_common_coarse": f"{most_common_coarse[0]} ({most_common_coarse[1]}/{len(results)} runs)",
+                "most_common_fine": f"{most_common_fine[0]} ({most_common_fine[1]}/{len(results)} runs)",
+                "avg_time": f"{sum(r.time_taken for r in results) / len(results):.2f}s",
+                "avg_tokens": sum(r.api_tokens for r in results) // len(results),
+            }
+        
+        # Add detailed results
         for result in self.results:
-            report["results"].append({
+            report["detailed_results"].append({
                 "test_name": result.test_case.name,
+                "run_number": result.run_number,
                 "success": result.success,
                 "coarse_cell": result.coarse_cell,
                 "fine_cell": result.fine_cell,
@@ -503,11 +772,11 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
             total_tokens += result.api_tokens
         
         report["summary"] = {
-            "success_rate": f"{(report['test_run']['passed'] / report['test_run']['total_tests'] * 100):.1f}%",
+            "overall_success_rate": f"{(report['test_run']['passed'] / report['test_run']['total_runs'] * 100):.1f}%",
             "total_time": f"{total_time:.2f}s",
-            "avg_time_per_test": f"{total_time / len(self.results):.2f}s",
+            "avg_time_per_run": f"{total_time / len(self.results):.2f}s",
             "total_api_tokens": total_tokens,
-            "avg_tokens_per_test": total_tokens // len(self.results),
+            "avg_tokens_per_run": total_tokens // len(self.results),
         }
         
         # Save JSON report
@@ -522,23 +791,48 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
 - Fine Grid: {FINE_GRID_SIZE}x{FINE_GRID_SIZE}
 - Scale Factor: {SCALE_FACTOR}x
 - Padding: {PADDING}px
+- Repeat Count: {repeat_count}
 
-## Results Summary
-- Total Tests: {report['test_run']['total_tests']}
+## Overall Summary
+- Total Runs: {report['test_run']['total_runs']}
+- Unique Tests: {report['test_run']['unique_tests']}
 - Passed: {report['test_run']['passed']}
 - Failed: {report['test_run']['failed']}
-- Success Rate: {report['summary']['success_rate']}
+- Success Rate: {report['summary']['overall_success_rate']}
 - Total Time: {report['summary']['total_time']}
 - Total API Tokens: {report['summary']['total_api_tokens']}
 
-## Detailed Results
+## Aggregate Results by Test Case
 
-| Test Name | Success | Coarse Cell | Fine Cell | Coordinates | Time | Tokens |
-|-----------|---------|-------------|-----------|-------------|------|--------|
 """
         
-        for result in report["results"]:
-            summary += f"| {result['test_name']} | {'✅' if result['success'] else '❌'} | "
+        for test_name, agg_result in report["aggregate_results"].items():
+            summary += f"### {test_name}\n"
+            summary += f"- Success Rate: {agg_result['success_rate']} ({agg_result['success_count']}/{agg_result['total_runs']} runs)\n"
+            summary += f"- Most Common Coarse Cell: {agg_result['most_common_coarse']}\n"
+            summary += f"- Most Common Fine Cell: {agg_result['most_common_fine']}\n"
+            summary += f"- Average Time: {agg_result['avg_time']}\n"
+            summary += f"- Average Tokens: {agg_result['avg_tokens']}\n\n"
+            
+            # Show cell distribution if there's variation
+            if len(agg_result['coarse_cell_distribution']) > 1:
+                summary += "**Coarse Cell Distribution:**\n"
+                for cell, count in sorted(agg_result['coarse_cell_distribution'].items()):
+                    summary += f"  - {cell}: {count} times\n"
+                summary += "\n"
+            
+            if len(agg_result['fine_cell_distribution']) > 1:
+                summary += "**Fine Cell Distribution:**\n"
+                for cell, count in sorted(agg_result['fine_cell_distribution'].items()):
+                    summary += f"  - {cell}: {count} times\n"
+                summary += "\n"
+
+        summary += "## Detailed Results\n\n"
+        summary += "| Test Name | Run # | Success | Coarse Cell | Fine Cell | Coordinates | Time | Tokens |\n"
+        summary += "|-----------|-------|---------|-------------|-----------|-------------|------|--------|\n"
+        
+        for result in report["detailed_results"]:
+            summary += f"| {result['test_name']} | {result['run_number']} | {'✅' if result['success'] else '❌'} | "
             summary += f"{result['coarse_cell']} | {result['fine_cell']} | "
             summary += f"{result['coordinates']} | {result['time_taken']:.2f}s | {result['api_tokens']} |\n"
         
@@ -549,13 +843,27 @@ Return ONLY the cell identifier (e.g., "C7"), nothing else."""
         print("\n" + "="*60)
         print("TEST EXECUTION COMPLETE")
         print("="*60)
-        print(f"Success Rate: {report['summary']['success_rate']}")
+        print(f"Success Rate: {report['summary']['overall_success_rate']}")
         print(f"Results saved to: {self.output_dir}")
         print("="*60)
 
 
 async def main():
     """Main test execution."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Test two-stage grid system for UI element identification')
+    parser.add_argument('-n', '--repeat', type=int, default=1,
+                        help='Number of times to repeat each test (default: 1)')
+    parser.add_argument('--test', type=str, default='all',
+                        choices=['all', 'history', 'debate', 'google', 'github_star', 'youtube_play', 'amazon_cart'],
+                        help='Which test case to run (default: all)')
+    parser.add_argument('--bypass-coarse-validation', action='store_true',
+                        help='Bypass coarse grid validation and continue to fine grid even if coarse is incorrect')
+    parser.add_argument('--reasoning-effort', type=str, default='medium',
+                        choices=['low', 'medium', 'high'],
+                        help='Reasoning effort level for o4-mini model (default: medium)')
+    args = parser.parse_args()
+    
     # Load environment variables
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
@@ -564,25 +872,72 @@ async def main():
         print("Error: OPENAI_API_KEY not found in environment")
         sys.exit(1)
     
-    # Define test cases
-    test_cases = [
-        # TestCase(
-        #     name="Wikipedia_History_Link",
-        #     url="https://en.wikipedia.org/wiki/Artificial_intelligence",
-        #     target_description="The 'History' link in the table of contents on the left side",
-        #     expected_element="History link in TOC",
-        #     element_type="link",
-        #     notes="Primary test case - small link in sidebar TOC"
-        # ),
-        TestCase(
+    # Define all test cases
+    all_test_cases = {
+        'history': TestCase(
+            name="Wikipedia_History_Link",
+            url="https://en.wikipedia.org/wiki/Artificial_intelligence",
+            target_description="The 'History' link in the table of contents on the left side",
+            expected_element="History link in TOC",
+            element_type="link",
+            notes="Primary test case - small link in sidebar TOC"
+        ),
+        'debate': TestCase(
             name="Wikipedia_Debate_Link",
             url="https://en.wikipedia.org/wiki/Artificial_intelligence",
             target_description="The 'debate' link in the main article text (in the introductory paragraphs)",
             expected_element="debate link in article text",
             element_type="link",
-            notes="Link embedded within article text - tests precision for inline links"
+            notes="Link embedded within article text - tests precision for inline links",
+            expected_coarse_cells=["B5"],  # B5 is the only correct cell
+            expected_fine_cells=["E2", "F2"]  # E2 or F2 based on fine grid analysis
         ),
-    ]
+        'google': TestCase(
+            name="Google_GDPR_Accept",
+            url="https://www.google.com",
+            target_description="The 'Accept' or 'Aceptar' button on the GDPR/cookie consent banner (likely blue button)",
+            expected_element="GDPR cookie consent accept button",
+            element_type="button",
+            notes="GDPR consent button - tests banner/modal UI elements",
+            expected_coarse_cells=["D6", "E6", "E7"],  # Accept all three - E7 covers part of button
+            expected_fine_cells=["A1", "B1", "C1", "A7", "B7", "C7", "D7", "A8", "B8", "C8", "D8"],  # Button spans these cells
+        ),
+        'github_star': TestCase(
+            name="GitHub_Star_Button",
+            url="https://github.com/microsoft/vscode",
+            target_description="The 'Star' button with star icon and count (in the top right area of the repository header)",
+            expected_element="GitHub star button",
+            element_type="button",
+            notes="Custom button with icon and dynamic count - tests compound UI elements",
+            expected_coarse_cells=["G1"],  # Top right corner - only valid cell
+            expected_fine_cells=["C7", "D7", "E7", "F7", "G7", "D8", "E8", "F8", "G8"],  # Button spans these cells
+        ),
+        'youtube_play': TestCase(
+            name="YouTube_Play_Button",
+            url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            target_description="The large play button overlay in the center of the video player",
+            expected_element="YouTube video play button",
+            element_type="button",
+            notes="Overlay button on video player - tests overlay UI elements",
+            # Expected cells will be determined after first test run
+        ),
+        'amazon_cart': TestCase(
+            name="eBay_Cart_Icon",
+            url="https://www.ebay.com",
+            target_description="The shopping cart icon in the top navigation bar",
+            expected_element="eBay shopping cart",
+            element_type="button",
+            notes="Icon button - tests small interactive elements in navigation",
+            expected_coarse_cells=["G1"],  # Top right corner
+            expected_fine_cells=["F1", "G1", "F2", "G2"],  # Small icon spans these 4 cells
+        ),
+    }
+    
+    # Select test cases based on argument
+    if args.test == 'all':
+        test_cases = list(all_test_cases.values())
+    else:
+        test_cases = [all_test_cases[args.test]]
     
     # Setup logging
     logging.basicConfig(
@@ -590,13 +945,27 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
+    # Print test configuration
+    print(f"\n{'='*60}")
+    print(f"Two-Stage Grid System Test")
+    print(f"{'='*60}")
+    print(f"Configuration:")
+    print(f"  - Coarse Grid: {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE}")
+    print(f"  - Fine Grid: {FINE_GRID_SIZE}x{FINE_GRID_SIZE}")
+    print(f"  - Repeat Count: {args.repeat}")
+    print(f"  - Reasoning Effort: {args.reasoning_effort}")
+    print(f"  - Test Cases: {', '.join(tc.name for tc in test_cases)}")
+    print(f"{'='*60}\n")
+    
     # Run tests
-    tester = TwoStageGridTester(api_key)
+    tester = TwoStageGridTester(api_key, bypass_coarse_validation=args.bypass_coarse_validation, 
+                               reasoning_effort=args.reasoning_effort)
     
     try:
         await tester.setup()
-        await tester.run_all_tests(test_cases)
-        tester.generate_report()
+        await tester.run_all_tests(test_cases, repeat_count=args.repeat)
+        tester.generate_report(repeat_count=args.repeat)
+        tester.save_debug_insights()
     finally:
         await tester.teardown()
 

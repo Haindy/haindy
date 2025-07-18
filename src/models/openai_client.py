@@ -20,6 +20,7 @@ class OpenAIClient:
         model: str = "o4-mini",
         api_key: Optional[str] = None,
         max_retries: int = 3,
+        reasoning_effort: str = "medium",
     ) -> None:
         """
         Initialize OpenAI client.
@@ -28,9 +29,11 @@ class OpenAIClient:
             model: Model to use for completions
             api_key: Optional API key (defaults to env/config)
             max_retries: Maximum number of retry attempts
+            reasoning_effort: Reasoning effort level for o4-mini models ("low", "medium", "high")
         """
         self.model = model
         self.max_retries = max_retries
+        self.reasoning_effort = reasoning_effort
         self.logger = logging.getLogger("openai_client")
 
         settings = get_settings()
@@ -92,7 +95,7 @@ class OpenAIClient:
                 if max_tokens:
                     kwargs["max_completion_tokens"] = max_tokens
                 # Add reasoning_effort for better accuracy
-                kwargs["reasoning_effort"] = "medium"
+                kwargs["reasoning_effort"] = self.reasoning_effort
             else:
                 # Traditional models use temperature and max_tokens
                 kwargs["temperature"] = temperature
