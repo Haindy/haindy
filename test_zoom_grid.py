@@ -111,6 +111,35 @@ class TwoStageGridTester:
         if hasattr(self, 'playwright'):
             await self.playwright.stop()
             
+    def save_and_compress_image(self, img: Image.Image, path: Path, quality: int = 80) -> bytes:
+        """
+        Save image to disk as JPEG and return compressed bytes for API transmission.
+        
+        Args:
+            img: PIL Image to save
+            path: Path to save the image
+            quality: JPEG quality (1-100, default 90)
+            
+        Returns:
+            Compressed JPEG bytes
+        """
+        # Convert RGBA to RGB if necessary (JPEG doesn't support transparency)
+        if img.mode == 'RGBA':
+            # Create a white background
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+            
+        # Save to disk as JPEG
+        img.save(path.with_suffix('.jpg'), 'JPEG', quality=quality, optimize=True)
+        
+        # Return compressed bytes for API
+        buffer = io.BytesIO()
+        img.save(buffer, 'JPEG', quality=quality, optimize=True)
+        return buffer.getvalue()
+    
     def create_grid_overlay_with_contrast(self, img: Image.Image, grid_size: int, label_inside: bool = True) -> Image.Image:
         """
         Create grid overlay with improved contrast using edge-only drawing and pixel inversion.
@@ -214,16 +243,13 @@ class TwoStageGridTester:
         img = Image.open(io.BytesIO(screenshot))
         img_with_grid = self.create_grid_overlay_with_contrast(img, COARSE_GRID_SIZE)
         
-        # Convert to bytes for API
-        grid_bytes = io.BytesIO()
-        img_with_grid.save(grid_bytes, format='PNG')
-        grid_bytes = grid_bytes.getvalue()
-        
-        # Save for debugging - include run number if available
-        filename = "coarse_grid.png"
+        # Save for debugging and get compressed bytes for API
+        filename = "coarse_grid"
         if hasattr(self, 'current_run_number'):
-            filename = f"coarse_grid_run{self.current_run_number}.png"
-        img_with_grid.save(self.output_dir / filename)
+            filename = f"coarse_grid_run{self.current_run_number}"
+        
+        # Save as JPEG and get compressed bytes
+        grid_bytes = self.save_and_compress_image(img_with_grid, self.output_dir / filename)
         
         # CENTROID-FOCUSED PROMPT - 80% success rate:
         system_prompt = """You are a manual tester helping to test a new grid overlay system. Your task is to identify which grid cell contains the UI element described by the user.
@@ -266,7 +292,7 @@ Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/png;base64,{base64.b64encode(grid_bytes).decode('utf-8')}",
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(grid_bytes).decode('utf-8')}",
                             "detail": "high"
                         }
                     }
@@ -314,27 +340,19 @@ Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
         img_scaled = img_cropped.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
         
         # Save scaled image WITHOUT grid
-        img_scaled_no_grid_bytes = io.BytesIO()
-        img_scaled.save(img_scaled_no_grid_bytes, format='PNG')
-        img_scaled_no_grid_bytes = img_scaled_no_grid_bytes.getvalue()
-        # Save with run number if available
-        fine_no_grid_filename = "fine_no_grid.png"
+        fine_no_grid_filename = "fine_no_grid"
         if hasattr(self, 'current_run_number'):
-            fine_no_grid_filename = f"fine_no_grid_run{self.current_run_number}.png"
-        img_scaled.save(self.output_dir / fine_no_grid_filename)
+            fine_no_grid_filename = f"fine_no_grid_run{self.current_run_number}"
+        img_scaled_no_grid_bytes = self.save_and_compress_image(img_scaled, self.output_dir / fine_no_grid_filename)
         
         # Apply fine grid to scaled image
         img_with_fine_grid = self.create_grid_overlay_with_contrast(img_scaled, FINE_GRID_SIZE)
         
-        # Convert to bytes
-        fine_grid_bytes = io.BytesIO()
-        img_with_fine_grid.save(fine_grid_bytes, format='PNG')
-        fine_grid_bytes = fine_grid_bytes.getvalue()
         # Save with run number if available
-        fine_grid_filename = "fine_grid.png"
+        fine_grid_filename = "fine_grid"
         if hasattr(self, 'current_run_number'):
-            fine_grid_filename = f"fine_grid_run{self.current_run_number}.png"
-        img_with_fine_grid.save(self.output_dir / fine_grid_filename)
+            fine_grid_filename = f"fine_grid_run{self.current_run_number}"
+        fine_grid_bytes = self.save_and_compress_image(img_with_fine_grid, self.output_dir / fine_grid_filename)
         
         # Build conversation context
         messages = [
@@ -357,14 +375,14 @@ Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/png;base64,{base64.b64encode(img_scaled_no_grid_bytes).decode('utf-8')}",
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(img_scaled_no_grid_bytes).decode('utf-8')}",
                             "detail": "high"
                         }
                     },
                     {
                         "type": "image_url", 
                         "image_url": {
-                            "url": f"data:image/png;base64,{base64.b64encode(fine_grid_bytes).decode('utf-8')}",
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(fine_grid_bytes).decode('utf-8')}",
                             "detail": "high"
                         }
                     }
@@ -455,9 +473,10 @@ Please be specific and concise in your answers."""
             screenshot = await self.page.screenshot()
             self.base_screenshots[test_case.name] = screenshot
             
-            # Save the base screenshot
+            # Save the base screenshot as JPEG
             img = Image.open(io.BytesIO(screenshot))
-            img.save(self.output_dir / f"{test_case.name.replace(' ', '_')}_base.png")
+            base_filename = f"{test_case.name.replace(' ', '_')}_base"
+            self.save_and_compress_image(img, self.output_dir / base_filename)
         
         return self.base_screenshots[test_case.name]
     
@@ -644,9 +663,10 @@ Please be specific and concise in your answers."""
                     test_dir = self.output_dir / test_case.name.replace(" ", "_")
                     test_dir.mkdir(exist_ok=True)
                     
-                    for name, screenshot in result.screenshots.items():
-                        with open(test_dir / f"{name}.png", "wb") as f:
-                            f.write(screenshot)
+                    # Save original screenshot as JPEG
+                    if 'original' in result.screenshots:
+                        img = Image.open(io.BytesIO(result.screenshots['original']))
+                        self.save_and_compress_image(img, test_dir / "original")
                     
                     # Add visual marker to show click location
                     if 'original' in result.screenshots:
@@ -659,8 +679,8 @@ Please be specific and concise in your answers."""
                         draw.line([(x, y-20), (x, y+20)], fill=(255, 0, 0), width=3)
                         draw.ellipse([(x-5, y-5), (x+5, y+5)], fill=(255, 0, 0))
                         
-                        # Save marked image
-                        img.save(test_dir / "marked_click_location.png")
+                        # Save marked image as JPEG
+                        self.save_and_compress_image(img, test_dir / "marked_click_location")
                 
                 # Print progress to prevent timeout
                 print(f"[Progress] Completed run {run_num}/{repeat_count} for {test_case.name}")

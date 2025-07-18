@@ -30,6 +30,7 @@ We discovered that the AI vision models have difficulty accurately identifying g
 | Add expected cell parameters | 🟢 Completed | Auto pass/fail detection |
 | AI self-debugging | 🟢 Completed | Identified root cause |
 | Update prompt for centroid | 🟢 Completed | 80% success rate achieved |
+| Implement image compression | 🟢 Completed | JPEG compression for API calls |
 | Test radio buttons | 🔴 Not Started | |
 | Test toggle switches | 🔴 Not Started | |
 | Test dropdown menus | 🔴 Not Started | |
@@ -299,13 +300,31 @@ This approach has been tested and shows significant improvement in coordinate ac
    - Skip fine grid if coarse is wrong (guaranteed failure)
    - Remove manual evaluation burden
 
-4. **AI Self-Debugging for Failed Tests** (NEW):
+4. **AI Self-Debugging for Failed Tests**: ✅ COMPLETED
    - When coarse grid selection is incorrect, ask follow-up questions
    - Tell AI it selected wrong cell and provide correct answer
    - Ask: "Why did you fail to select the right cell?"
    - Ask: "What is the most important change necessary to find the correct cell?"
    - Collect and analyze AI's self-reported failure reasons
    - Use insights to improve prompts iteratively
+
+5. **Image Compression for API Optimization**: ✅ COMPLETED
+   - Convert PNG screenshots to JPEG before API calls
+   - Target: Reduce 256KB PNGs to 80-90KB JPEGs (65%+ reduction)
+   - Benefits:
+     - Faster API response times
+     - Lower bandwidth costs
+     - Better scalability for high-resolution screens
+   - Implementation:
+     - Apply compression after grid overlay
+     - Use high quality (85-95%) to preserve grid lines and text
+     - Compress all images (disk and API) for consistency
+   - Quick win: Can be implemented during current testing phase
+   - **Results with 80% JPEG quality**:
+     - Coarse grid: 419KB → 247KB (41% reduction)
+     - Base screenshot: 402KB → 201KB (50% reduction)
+     - Fine grid: 97KB → 64KB (34% reduction)
+     - AI recognition still 100% successful
 
 ### Test Script Structure
 
