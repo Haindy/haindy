@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     openai_max_retries: int = Field(
         default=3, ge=1, description="Maximum API retry attempts"
     )
+    
+    # Gemini Configuration
+    gemini_api_key: str = Field(default="", description="Google Gemini API key")
 
     # Grid System Configuration
     grid_size: int = Field(

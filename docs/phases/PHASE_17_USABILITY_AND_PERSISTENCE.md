@@ -178,3 +178,11 @@ class EnhancedReportGenerator:
 - ✅ Fixed syntax error in reporter.py (extra parenthesis)
 - ✅ Removed hardcoded 5-minute timeout in WorkflowCoordinator
 - ✅ Test execution now respects command-line timeout parameter only
+
+## Tech Debt Items
+
+### 1. API Client Directory Structure
+- **Issue**: API clients (OpenAIClient, GeminiClient) are currently in `src/models/` directory
+- **Should be**: Create new `src/clients/` directory for all API client wrappers
+- **Reason**: The models folder should contain data models and types, not API clients
+- **Impact**: Better code organization and clarity

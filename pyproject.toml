@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "playwright>=1.45.0",
     "openai>=1.40.0",
+    "google-genai>=0.1.0",
     "rich>=13.7.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.0.0",

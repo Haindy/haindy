@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.models.openai_client import OpenAIClient
+from src.models.gemini_client import GeminiClient
 from src.grid.overlay import GridOverlay
 
 
@@ -72,9 +73,17 @@ class TestResult:
 class TwoStageGridTester:
     """Test harness for two-stage grid system."""
     
-    def __init__(self, api_key: str, bypass_coarse_validation: bool = False, reasoning_effort: str = "medium"):
-        """Initialize tester with OpenAI API key."""
+    def __init__(self, api_key: str, bypass_coarse_validation: bool = False, reasoning_effort: str = "medium", model_type: str = "openai"):
+        """Initialize tester with API key.
+        
+        Args:
+            api_key: API key for the selected model
+            bypass_coarse_validation: Whether to continue with fine grid even if coarse is wrong
+            reasoning_effort: Reasoning effort level (low/medium/high)
+            model_type: Which model to use ('openai' or 'gemini')
+        """
         self.api_key = api_key
+        self.model_type = model_type
         self.client = None
         self.browser = None
         self.page = None
@@ -93,9 +102,16 @@ class TwoStageGridTester:
         self.output_dir.mkdir(exist_ok=True)
         
     async def setup(self):
-        """Setup browser and OpenAI client."""
-        # Initialize OpenAI client
-        self.client = OpenAIClient(api_key=self.api_key, reasoning_effort=self.reasoning_effort)
+        """Setup browser and AI client."""
+        # Initialize AI client based on model type
+        if self.model_type == "openai":
+            self.client = OpenAIClient(api_key=self.api_key, reasoning_effort=self.reasoning_effort)
+            self.logger.info("Using OpenAI model (o4-mini)")
+        elif self.model_type == "gemini":
+            self.client = GeminiClient(api_key=self.api_key, reasoning_effort=self.reasoning_effort)
+            self.logger.info("Using Google Gemini model (2.5 Flash)")
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
         
         # Initialize browser
         self.playwright = await async_playwright().start()
@@ -232,6 +248,54 @@ class TwoStageGridTester:
         
         return img_with_grid
     
+    def _build_fine_grid_content(self, coarse_cell: str, target_description: str, 
+                                 img_no_grid_bytes: bytes, img_grid_bytes: bytes) -> List[Dict]:
+        """Build content for fine grid identification based on model type."""
+        if hasattr(self, 'model_type') and self.model_type == 'gemini':
+            # For Gemini, send both images with clear explanation
+            return [
+                {
+                    "type": "text", 
+                    "text": f"Ok now look at these two images. They are both a 4x zoom of the {coarse_cell} cell you selected before. The first image is the clean screenshot without any grid overlay so you can see the actual content. The second image is the same screenshot but with a finer 8x8 grid overlay. Which cell in this new grid do I need to select to hit the center of the element?\nKeep in mind that I want to hit the center of the element.\nPlease reply just with the cell you have chosen."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64.b64encode(img_no_grid_bytes).decode('utf-8')}",
+                        "detail": "high"
+                    }
+                },
+                {
+                    "type": "image_url", 
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64.b64encode(img_grid_bytes).decode('utf-8')}",
+                        "detail": "high"
+                    }
+                }
+            ]
+        else:
+            # For OpenAI, send both images
+            return [
+                {
+                    "type": "text", 
+                    "text": f"Here are 2 screenshots which are a zoom in of the cell you selected.\nOne without a grid and the other has a grid like the screenshot in the past chat.\nPlease identify where I should click to interact with: {target_description}\n\nUse the grid to tell me what cell I should click for the most success.\n\nRespond with just the cell identifier, nothing else."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64.b64encode(img_no_grid_bytes).decode('utf-8')}",
+                        "detail": "high"
+                    }
+                },
+                {
+                    "type": "image_url", 
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64.b64encode(img_grid_bytes).decode('utf-8')}",
+                        "detail": "high"
+                    }
+                }
+            ]
+    
     async def identify_coarse_location(self, screenshot: bytes, target_description: str) -> Tuple[str, Dict[str, any]]:
         """
         First stage: Identify general location using coarse grid.
@@ -251,8 +315,14 @@ class TwoStageGridTester:
         # Save as JPEG and get compressed bytes
         grid_bytes = self.save_and_compress_image(img_with_grid, self.output_dir / filename)
         
-        # CENTROID-FOCUSED PROMPT - 80% success rate:
-        system_prompt = """You are a manual tester helping to test a new grid overlay system. Your task is to identify which grid cell contains the UI element described by the user.
+        # Use different prompts for different models
+        if hasattr(self, 'model_type') and self.model_type == 'gemini':
+            # GEMINI SIMPLE PROMPT
+            system_prompt = ""
+            user_prompt = f"""What cell do I need to choose in the following screenshot if I were to place my mouse over the {target_description}?\nKeep in mind that I want to hit the center of the element.\nPlease reply just with the cell."""
+        else:
+            # OPENAI CENTROID-FOCUSED PROMPT - 80% success rate:
+            system_prompt = """You are a manual tester helping to test a new grid overlay system. Your task is to identify which grid cell contains the UI element described by the user.
 
 Imagine you need to move your mouse cursor to click on the requested element. First, locate the element visually in the browser screenshot, then determine which grid cell contains the CENTER or CENTROID of that element.
 
@@ -262,19 +332,8 @@ IMPORTANT:
 3. Do not focus on where the text begins. Instead, identify the geometric center of the clickable area.
 4. If an element spans multiple cells, choose the cell containing the element's center point, not where it starts."""
         
-        # BACKUP - Cell-by-cell scanning (60% success):
-        # system_prompt = """You are a manual tester helping to test a new grid overlay system. Your task is to identify which grid cell contains the UI element described by the user.
-        #
-        # Follow this systematic approach:
-        # 1. Scan each grid cell one by one, looking for the target element
-        # 2. Make a list of ALL cells that contain any part of the element (even partially)
-        # 3. From your list, determine which single cell contains the MOST of the element
-        # 4. Return only that cell's identifier
-        #
-        # Be thorough - check every cell and don't miss partial overlaps."""
-        
-        # Prepare user prompt for coarse identification
-        user_prompt = f"""This is a browser screenshot with a {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE} grid overlay. Each cell has a label in its top-left corner (like A1, B2, C3, etc.).
+            # Prepare user prompt for coarse identification
+            user_prompt = f"""This is a browser screenshot with a {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE} grid overlay. Each cell has a label in its top-left corner (like A1, B2, C3, etc.).
 
 I need to find: {target_description}
 
@@ -283,22 +342,40 @@ Which grid cell contains this element?
 Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
 
         # Call API with system prompt
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user", 
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64.b64encode(grid_bytes).decode('utf-8')}",
-                            "detail": "high"
+        if system_prompt:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user", 
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64.b64encode(grid_bytes).decode('utf-8')}",
+                                "detail": "high"
+                            }
                         }
-                    }
-                ]
-            }
-        ]
+                    ]
+                }
+            ]
+        else:
+            # For Gemini with no system prompt
+            messages = [
+                {
+                    "role": "user", 
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64.b64encode(grid_bytes).decode('utf-8')}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ]
         
         response = await self.client.call(messages=messages, temperature=0.1)
         
@@ -355,11 +432,17 @@ Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
         fine_grid_bytes = self.save_and_compress_image(img_with_fine_grid, self.output_dir / fine_grid_filename)
         
         # Build conversation context
-        messages = [
-            {
+        messages = []
+        
+        # Add system message only for non-Gemini models
+        if not (hasattr(self, 'model_type') and self.model_type == 'gemini'):
+            messages.append({
                 "role": "system",
                 "content": "You are helping identify precise click locations on UI elements."
-            },
+            })
+        
+        # Add conversation messages
+        messages.extend([
             {
                 "role": "user",
                 "content": f"I'm looking for: {target_description}"
@@ -370,25 +453,9 @@ Respond with ONLY the cell identifier (e.g., "D6"), nothing else."""
             },
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Here are 2 screenshots which are a zoom in of the cell you selected.\nOne without a grid and the other has a grid like the screenshot in the past chat.\nPlease identify where I should click to interact with: {target_description}\n\nUse the grid to tell me what cell I should click for the most success.\n\nRespond with just the cell identifier, nothing else."},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64.b64encode(img_scaled_no_grid_bytes).decode('utf-8')}",
-                            "detail": "high"
-                        }
-                    },
-                    {
-                        "type": "image_url", 
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64.b64encode(fine_grid_bytes).decode('utf-8')}",
-                            "detail": "high"
-                        }
-                    }
-                ]
+                "content": self._build_fine_grid_content(coarse_cell, target_description, img_scaled_no_grid_bytes, fine_grid_bytes)
             }
-        ]
+        ])
         
         # Call API with full conversation context
         response = await self.client.call(messages=messages, temperature=0.1)
@@ -461,6 +528,21 @@ Please be specific and concise in your answers."""
         
         return insight
     
+    def load_existing_screenshots(self, test_dir: str, test_case: TestCase):
+        """Load screenshots from a previous test run."""
+        test_path = Path(test_dir)
+        if not test_path.exists():
+            raise ValueError(f"Test directory not found: {test_dir}")
+            
+        # Load base screenshot
+        base_path = test_path / f"{test_case.name.replace(' ', '_')}_base.jpg"
+        if base_path.exists():
+            with open(base_path, 'rb') as f:
+                self.base_screenshots[test_case.name] = f.read()
+            self.logger.info(f"Loaded existing base screenshot from: {base_path}")
+        else:
+            raise ValueError(f"Base screenshot not found: {base_path}")
+            
     async def capture_base_screenshot(self, test_case: TestCase) -> bytes:
         """Capture and cache the base screenshot for a test case."""
         if test_case.name not in self.base_screenshots:
@@ -480,9 +562,15 @@ Please be specific and concise in your answers."""
         
         return self.base_screenshots[test_case.name]
     
-    async def run_test_case(self, test_case: TestCase, use_cached_screenshot: bool = True) -> TestResult:
-        """Execute a single test case."""
-        self.logger.info(f"Running test: {test_case.name}")
+    async def run_test_case(self, test_case: TestCase, use_cached_screenshot: bool = True, test_stage: str = 'both') -> TestResult:
+        """Execute a single test case.
+        
+        Args:
+            test_case: The test case to run
+            use_cached_screenshot: Whether to use cached screenshot
+            test_stage: Which stage to test ('coarse', 'fine', or 'both')
+        """
+        self.logger.info(f"Running test: {test_case.name} (stage: {test_stage})")
         start_time = time.time()
         
         screenshots = {}
@@ -504,19 +592,25 @@ Please be specific and concise in your answers."""
             img = Image.open(io.BytesIO(screenshot))
             screenshots['original'] = screenshot
             
-            # Stage 1: Coarse identification
-            self.logger.info("Stage 1: Coarse grid identification...")
-            print(f"[Progress] Starting coarse grid analysis...")
-            coarse_cell, coarse_response, coarse_messages = await self.identify_coarse_location(
-                screenshot, test_case.target_description
-            )
-            total_tokens += coarse_response['usage']['total_tokens']
-            self.logger.info(f"Coarse cell identified: {coarse_cell}")
-            print(f"[Progress] Coarse cell: {coarse_cell}")
+            # Default values for when we skip stages
+            coarse_cell = ""
+            fine_cell = ""
+            x, y = 0, 0
             
-            # Check if coarse cell matches expected (if provided)
+            # Stage 1: Coarse identification (if needed)
+            if test_stage in ['coarse', 'both']:
+                self.logger.info("Stage 1: Coarse grid identification...")
+                print(f"[Progress] Starting coarse grid analysis...")
+                coarse_cell, coarse_response, coarse_messages = await self.identify_coarse_location(
+                    screenshot, test_case.target_description
+                )
+                total_tokens += coarse_response['usage']['total_tokens']
+                self.logger.info(f"Coarse cell identified: {coarse_cell}")
+                print(f"[Progress] Coarse cell: {coarse_cell}")
+            
+            # Check if coarse cell matches expected (if provided) - only when testing coarse
             coarse_correct = True
-            if test_case.expected_coarse_cells:
+            if test_stage in ['coarse', 'both'] and test_case.expected_coarse_cells:
                 coarse_correct = coarse_cell in test_case.expected_coarse_cells
                 if not coarse_correct:
                     self.logger.warning(f"Coarse cell mismatch! Expected one of: {test_case.expected_coarse_cells}, Got: {coarse_cell}")
@@ -535,14 +629,21 @@ Please be specific and concise in your answers."""
                 else:
                     print(f"[Progress] ✅ Coarse cell CORRECT")
             
-            fine_cell = ""
-            x, y = 0, 0
+            # For fine-only testing, use the expected coarse cell
+            if test_stage == 'fine' and test_case.expected_coarse_cells:
+                coarse_cell = test_case.expected_coarse_cells[0]
+                self.logger.info(f"Using expected coarse cell for fine-only testing: {coarse_cell}")
             
-            # Only proceed to fine grid if coarse is correct (or no expected value) or bypass is enabled
-            if coarse_correct or self.bypass_coarse_validation:
+            # Only proceed to fine grid if appropriate
+            if test_stage in ['fine', 'both'] and (coarse_correct or self.bypass_coarse_validation or test_stage == 'fine'):
                 # Stage 2: Fine identification
                 self.logger.info("Stage 2: Fine grid identification...")
                 print(f"[Progress] Starting fine grid analysis...")
+                
+                # For fine-only testing, we need a dummy coarse response
+                if test_stage == 'fine':
+                    coarse_response = {'content': coarse_cell, 'usage': {'total_tokens': 0}}
+                
                 (x, y), fine_response = await self.identify_fine_location(
                     img, coarse_cell, test_case.target_description, coarse_response
                 )
@@ -633,14 +734,15 @@ Please be specific and concise in your answers."""
                 screenshots=screenshots
             )
     
-    async def run_all_tests(self, test_cases: List[TestCase], repeat_count: int = 1):
+    async def run_all_tests(self, test_cases: List[TestCase], repeat_count: int = 1, test_stage: str = 'both'):
         """Run all test cases multiple times and generate report."""
         total_runs = len(test_cases) * repeat_count
         self.logger.info(f"Running {len(test_cases)} test cases {repeat_count} times each (total: {total_runs} runs)...")
         
-        # Capture base screenshots for all test cases first
-        for test_case in test_cases:
-            await self.capture_base_screenshot(test_case)
+        # Capture base screenshots for all test cases first (unless using existing)
+        if not hasattr(self, 'using_existing_screenshots'):
+            for test_case in test_cases:
+                await self.capture_base_screenshot(test_case)
         
         # Store all results including repeats
         all_results = []
@@ -653,7 +755,7 @@ Please be specific and concise in your answers."""
             for run_num in range(1, repeat_count + 1):
                 self.logger.info(f"\nRun {run_num}/{repeat_count}")
                 self.current_run_number = run_num  # Set current run number
-                result = await self.run_test_case(test_case)
+                result = await self.run_test_case(test_case, test_stage=test_stage)
                 result.run_number = run_num  # Add run number to result
                 self.results.append(result)
                 all_results.append(result)
@@ -733,6 +835,7 @@ Please be specific and concise in your answers."""
                 "failed": sum(1 for r in self.results if not r.success),
             },
             "configuration": {
+                "model": self.model_type,
                 "coarse_grid_size": COARSE_GRID_SIZE,
                 "fine_grid_size": FINE_GRID_SIZE, 
                 "scale_factor": SCALE_FACTOR,
@@ -807,11 +910,13 @@ Please be specific and concise in your answers."""
         summary = f"""# Two-Stage Grid System Test Report
 
 ## Configuration
+- Model: {self.model_type.upper()} {'(o4-mini)' if self.model_type == 'openai' else '(Gemini 2.5 Flash)'}
 - Coarse Grid: {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE}
 - Fine Grid: {FINE_GRID_SIZE}x{FINE_GRID_SIZE}
 - Scale Factor: {SCALE_FACTOR}x
 - Padding: {PADDING}px
 - Repeat Count: {repeat_count}
+- Reasoning Effort: {self.reasoning_effort}
 
 ## Overall Summary
 - Total Runs: {report['test_run']['total_runs']}
@@ -881,16 +986,31 @@ async def main():
                         help='Bypass coarse grid validation and continue to fine grid even if coarse is incorrect')
     parser.add_argument('--reasoning-effort', type=str, default='medium',
                         choices=['low', 'medium', 'high'],
-                        help='Reasoning effort level for o4-mini model (default: medium)')
+                        help='Reasoning effort level for AI model (default: medium)')
+    parser.add_argument('--model', type=str, default='openai',
+                        choices=['openai', 'gemini'],
+                        help='Which AI model to use for grid analysis (default: openai)')
+    parser.add_argument('--use-existing-screenshot', type=str, 
+                        help='Path to existing test results directory to reuse screenshots')
+    parser.add_argument('--test-stage', type=str, default='both',
+                        choices=['coarse', 'fine', 'both'],
+                        help='Which stage to test (default: both)')
     args = parser.parse_args()
     
     # Load environment variables
     load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
     
-    if not api_key:
-        print("Error: OPENAI_API_KEY not found in environment")
-        sys.exit(1)
+    # Get appropriate API key based on model selection
+    if args.model == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("Error: OPENAI_API_KEY not found in environment")
+            sys.exit(1)
+    elif args.model == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("Error: GEMINI_API_KEY not found in environment")
+            sys.exit(1)
     
     # Define all test cases
     all_test_cases = {
@@ -905,12 +1025,12 @@ async def main():
         'debate': TestCase(
             name="Wikipedia_Debate_Link",
             url="https://en.wikipedia.org/wiki/Artificial_intelligence",
-            target_description="The 'debate' link in the main article text (in the introductory paragraphs)",
+            target_description="'debate' link" if args.model == "gemini" else "The 'debate' link in the main article text (in the introductory paragraphs)",
             expected_element="debate link in article text",
             element_type="link",
             notes="Link embedded within article text - tests precision for inline links",
             expected_coarse_cells=["B5"],  # B5 is the only correct cell
-            expected_fine_cells=["E2", "F2"]  # E2 or F2 based on fine grid analysis
+            expected_fine_cells=["E3", "F3"]  # E3 or F3 based on fine grid analysis
         ),
         'google': TestCase(
             name="Google_GDPR_Accept",
@@ -935,11 +1055,12 @@ async def main():
         'youtube_play': TestCase(
             name="YouTube_Play_Button",
             url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            target_description="The large play button overlay in the center of the video player",
+            target_description="The play/pause button in the video player control bar at the bottom left of the player",
             expected_element="YouTube video play button",
             element_type="button",
-            notes="Overlay button on video player - tests overlay UI elements",
-            # Expected cells will be determined after first test run
+            notes="Control bar button - tests player controls UI elements",
+            expected_coarse_cells=["A6"],  # Bottom left of player
+            expected_fine_cells=["B2", "C2", "B3", "C3", "B4", "C4"],  # Play button spans these cells
         ),
         'amazon_cart': TestCase(
             name="eBay_Cart_Icon",
@@ -970,24 +1091,48 @@ async def main():
     print(f"Two-Stage Grid System Test")
     print(f"{'='*60}")
     print(f"Configuration:")
+    print(f"  - Model: {args.model.upper()} {'(o4-mini)' if args.model == 'openai' else '(Gemini 2.5 Flash)'}")
+    print(f"  - Test Stage: {args.test_stage.upper()}")
     print(f"  - Coarse Grid: {COARSE_GRID_SIZE}x{COARSE_GRID_SIZE}")
     print(f"  - Fine Grid: {FINE_GRID_SIZE}x{FINE_GRID_SIZE}")
     print(f"  - Repeat Count: {args.repeat}")
     print(f"  - Reasoning Effort: {args.reasoning_effort}")
     print(f"  - Test Cases: {', '.join(tc.name for tc in test_cases)}")
+    if args.use_existing_screenshot:
+        print(f"  - Using screenshots from: {args.use_existing_screenshot}")
     print(f"{'='*60}\n")
     
     # Run tests
     tester = TwoStageGridTester(api_key, bypass_coarse_validation=args.bypass_coarse_validation, 
-                               reasoning_effort=args.reasoning_effort)
+                               reasoning_effort=args.reasoning_effort, model_type=args.model)
     
     try:
-        await tester.setup()
-        await tester.run_all_tests(test_cases, repeat_count=args.repeat)
+        # Setup
+        if args.use_existing_screenshot:
+            # Skip browser setup when using existing screenshots
+            tester.using_existing_screenshots = True
+            tester.output_dir = Path(f"grid_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            tester.output_dir.mkdir(exist_ok=True)
+            # Load existing screenshots
+            for test_case in test_cases:
+                tester.load_existing_screenshots(args.use_existing_screenshot, test_case)
+            # Initialize client only
+            if tester.model_type == "openai":
+                tester.client = OpenAIClient(api_key=tester.api_key, reasoning_effort=tester.reasoning_effort)
+                tester.logger.info("Using OpenAI model (o4-mini)")
+            elif tester.model_type == "gemini":
+                tester.client = GeminiClient(api_key=tester.api_key, reasoning_effort=tester.reasoning_effort)
+                tester.logger.info("Using Google Gemini model (2.5 Flash)")
+        else:
+            await tester.setup()
+            
+        # Run tests
+        await tester.run_all_tests(test_cases, repeat_count=args.repeat, test_stage=args.test_stage)
         tester.generate_report(repeat_count=args.repeat)
         tester.save_debug_insights()
     finally:
-        await tester.teardown()
+        if not args.use_existing_screenshot:
+            await tester.teardown()
 
 
 if __name__ == "__main__":
