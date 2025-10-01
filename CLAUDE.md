@@ -2,8 +2,9 @@
 
 ## Important Rules
 
-1. **No co-author claims**: You are just a tool, not an author. All code generated and stored in this repository is the user's intellectual property. Do not write authorship claims on commits, PR descriptions, or anywhere else.
-2. **No emojis**: Do not use emojis in comments, PR descriptions, commit messages, or any other content.
+1. **No emojis**: Do not use emojis in comments, PR descriptions, commit messages, or any other content.
+2. **No backward compatibility**: This is a new tool and not in prod. There is no reason to require backwards compatibility or to mark things as deprecated. Just replace old code with new code.
+3. **No timeouts on test runs**: NEVER use timeouts when running tests or any long-running operations. This is not a time-sensitive operation and tests are designed to run for extended periods of time.
 
 ## Project Overview
 

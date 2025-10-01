@@ -170,7 +170,7 @@ class StateManager:
                     test_state.current_step = test_state.test_plan.steps[0]
             
             elif transition == StateTransition.PAUSE:
-                test_state.status = TestStatus.BLOCKED
+                test_state.status = TestStatus.SKIPPED
             
             elif transition == StateTransition.RESUME:
                 test_state.status = TestStatus.IN_PROGRESS
@@ -210,7 +210,7 @@ class StateManager:
                 test_state.end_time = datetime.now(timezone.utc)
             
             elif transition == StateTransition.COMPLETE:
-                test_state.status = TestStatus.COMPLETED
+                test_state.status = TestStatus.PASSED
                 test_state.end_time = datetime.now(timezone.utc)
             
             # Record state change
@@ -243,13 +243,9 @@ class StateManager:
                 StateTransition.ABORT,
                 StateTransition.COMPLETE
             ],
-            TestStatus.BLOCKED: [
-                StateTransition.RESUME,
-                StateTransition.ABORT
-            ],
-            TestStatus.COMPLETED: [],
-            TestStatus.FAILED: [],
-            TestStatus.SKIPPED: []
+            TestStatus.SKIPPED: [],
+            TestStatus.PASSED: [],
+            TestStatus.FAILED: []
         }
         
         return transition in valid_transitions.get(current_status, [])

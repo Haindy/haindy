@@ -49,14 +49,18 @@ class TestEndToEndIntegration:
         from src.core.types import TestPlan, TestStep, ActionInstruction, ActionResult, GridAction, GridCoordinate
         
         # Create a test plan
-        test_plan = TestPlan(
-            name="Test Login Flow",
-            description="Testing login functionality",
-            requirements="Test the login flow",
+        from src.core.types import TestCase, TestCasePriority
+        test_case = TestCase(
+            test_id="TC001",
+            name="Login Test",
+            description="Test login functionality",
+            priority=TestCasePriority.HIGH,
             steps=[
                 TestStep(
                     step_number=1,
                     description="Navigate to login page",
+                    action="Navigate to the login page",
+                    expected_result="Login form is visible",
                     action_instruction=ActionInstruction(
                         action_type="navigate",
                         description="Navigate to the login page",
@@ -67,6 +71,8 @@ class TestEndToEndIntegration:
                 TestStep(
                     step_number=2,
                     description="Enter credentials",
+                    action="Enter username and password",
+                    expected_result="Credentials entered",
                     action_instruction=ActionInstruction(
                         action_type="type",
                         description="Enter username and password",
@@ -77,6 +83,8 @@ class TestEndToEndIntegration:
                 TestStep(
                     step_number=3,
                     description="Submit form",
+                    action="Click login button",
+                    expected_result="Login successful",
                     action_instruction=ActionInstruction(
                         action_type="click",
                         description="Click login button",
@@ -87,11 +95,20 @@ class TestEndToEndIntegration:
             ],
         )
         
+        test_plan = TestPlan(
+            name="Test Login Flow",
+            description="Testing login functionality",
+            requirements_source="Test the login flow",
+            test_cases=[test_case],
+            steps=test_case.steps  # For backward compatibility
+        )
+        
         # Create test state
+        all_steps = test_case.steps
         test_state = TestState(
             test_plan=test_plan,
             status=TestStatus.COMPLETED,
-            completed_steps=[step.step_id for step in test_plan.steps],
+            completed_steps=[step.step_id for step in all_steps],
             start_time=datetime.now(timezone.utc),
             end_time=datetime.now(timezone.utc),
         )
@@ -110,12 +127,14 @@ class TestEndToEndIntegration:
             skipped_steps=test_state.skipped_steps,
             start_time=test_state.start_time,
             end_time=test_state.end_time,
+            error_count=0,
+            warning_count=0,
             errors=[],
             step_results={
                 "step_1": ActionResult(
                     success=True,
                     action=GridAction(
-                        instruction=test_plan.steps[0].action_instruction,
+                        instruction=all_steps[0].action_instruction,
                         coordinate=GridCoordinate(cell="M15", offset_x=0.5, offset_y=0.5, confidence=0.95),
                     ),
                     screenshot_after="/tmp/screenshot1.png",
@@ -125,7 +144,7 @@ class TestEndToEndIntegration:
                 "step_2": ActionResult(
                     success=True,
                     action=GridAction(
-                        instruction=test_plan.steps[1].action_instruction,
+                        instruction=all_steps[1].action_instruction,
                         coordinate=GridCoordinate(cell="M15", offset_x=0.5, offset_y=0.5, confidence=0.95),
                     ),
                     screenshot_after="/tmp/screenshot2.png",
@@ -135,7 +154,7 @@ class TestEndToEndIntegration:
                 "step_3": ActionResult(
                     success=True,
                     action=GridAction(
-                        instruction=test_plan.steps[2].action_instruction,
+                        instruction=all_steps[2].action_instruction,
                         coordinate=GridCoordinate(cell="M15", offset_x=0.5, offset_y=0.5, confidence=0.95),
                     ),
                     screenshot_after="/tmp/screenshot3.png",
@@ -269,14 +288,18 @@ class TestEndToEndIntegration:
         from src.core.types import TestPlan, TestStep, ActionInstruction
         
         # Mock test plan
-        mock_plan = TestPlan(
-            name="Test Login Flow",
-            description="Testing login functionality",
-            requirements="Test login",
+        from src.core.types import TestCase, TestCasePriority
+        test_case = TestCase(
+            test_id="TC001",
+            name="Login Test",
+            description="Test login functionality",
+            priority=TestCasePriority.HIGH,
             steps=[
                 TestStep(
                     step_number=1,
                     description="Navigate to login page",
+                    action="Navigate to the login page",
+                    expected_result="Login form is visible",
                     action_instruction=ActionInstruction(
                         action_type="navigate",
                         description="Navigate to the login page",
@@ -287,6 +310,8 @@ class TestEndToEndIntegration:
                 TestStep(
                     step_number=2,
                     description="Enter username",
+                    action="Enter username in the field",
+                    expected_result="Username entered",
                     action_instruction=ActionInstruction(
                         action_type="type",
                         description="Enter username in the field",
@@ -296,6 +321,14 @@ class TestEndToEndIntegration:
                     ),
                 ),
             ],
+        )
+        
+        mock_plan = TestPlan(
+            name="Test Login Flow",
+            description="Testing login functionality",
+            requirements_source="Test login",
+            test_cases=[test_case],
+            steps=test_case.steps  # For backward compatibility
         )
         mock_coordinator.generate_test_plan.return_value = mock_plan
         

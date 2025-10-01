@@ -99,18 +99,15 @@ Enter your test requirements (press Ctrl+D when done):
 > 3. Enter valid credentials
 > 4. Verify successful login
 > ^D
-Generating test scenario...
-Created: test_scenarios/generated_20240115_103045.json
+Enter the application URL: https://example.com
 Executing tests...
 ```
 
 #### Example 2: File Input
 ```bash
 $ python -m src.main --plan docs/requirements/checkout_flow.md
-Reading requirements from file...
-Analyzing document...
-Generated test scenario: test_scenarios/generated_checkout_20240115_103245.json
-Would you like to execute now? [Y/n]: y
+Reading requirements from: docs/requirements/checkout_flow.md
+Enter the application URL: https://shop.example.com
 Starting test execution...
 ```
 

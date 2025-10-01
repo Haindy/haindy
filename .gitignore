@@ -149,10 +149,11 @@ cython_debug/
 data/*.png
 data/*.jpg
 data/*.jsonl
-reports/*.html
-reports/*.pdf
-reports/*.json
-reports/*.md
+reports/
+test_reports/
+test_plans/
+test_artifacts/
+generated_test_plans/
 screenshots/
 debug_screenshots/
 *.log

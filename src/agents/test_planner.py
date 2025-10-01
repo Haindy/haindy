@@ -4,12 +4,14 @@ Test Planner Agent implementation.
 Analyzes requirements/PRDs and creates structured test plans.
 """
 
+from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import UUID
 
 from src.agents.base_agent import BaseAgent
+from src.agents.formatters import TestPlanFormatter
 from src.config.agent_prompts import TEST_PLANNER_SYSTEM_PROMPT
-from src.core.types import ActionInstruction, ActionType, TestPlan, TestStep
+from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -73,21 +75,16 @@ class TestPlannerAgent(BaseAgent):
         # Parse and validate the response
         test_plan = self._parse_test_plan_response(response)
         
-        # Debug: Save test plan
-        import json
-        with open("debug_test_plan.json", "w") as f:
-            plan_dict = test_plan.model_dump()
-            # Convert UUIDs to strings
-            plan_dict["plan_id"] = str(plan_dict["plan_id"])
-            plan_dict["created_at"] = plan_dict["created_at"].isoformat()
-            for step in plan_dict["steps"]:
-                step["step_id"] = str(step["step_id"])
-                step["dependencies"] = [str(d) for d in step["dependencies"]]
-            json.dump(plan_dict, f, indent=2)
+        # Save test plan permanently
+        self._save_test_plan(test_plan)
+        
+        # Calculate total steps
+        total_steps = sum(len(tc.steps) for tc in test_plan.test_cases)
         
         logger.info("Test plan created successfully", extra={
             "plan_name": test_plan.name,
-            "num_steps": len(test_plan.steps),
+            "num_test_cases": len(test_plan.test_cases),
+            "total_steps": total_steps,
             "has_tags": bool(test_plan.tags)
         })
         
@@ -105,23 +102,36 @@ class TestPlannerAgent(BaseAgent):
         message += """\n\nProvide the test plan in the following JSON format:
 {
     "name": "Test plan name",
-    "description": "Brief description of what is being tested",
-    "requirements": "The original requirements being tested",
-    "steps": [
+    "description": "Overall description of what is being tested",
+    "requirements_source": "Source of requirements (e.g., 'PRD v1.2', 'User Story #123', URL)",
+    "test_cases": [
         {
-            "step_number": 1,
-            "description": "Step description",
-            "action": "click/type/navigate/wait/verify/key_press",
-            "target": "Description of what to interact with",
-            "value": "Value to type (if action is 'type') or key name (if action is 'key_press')",
-            "expected_result": "What should happen",
-            "dependencies": [],
-            "optional": false
+            "test_id": "TC001",
+            "name": "Test case name (e.g., 'Happy Path Login')",
+            "description": "Detailed description of this specific test scenario",
+            "priority": "medium",
+            "prerequisites": ["Prerequisite 1", "Prerequisite 2"],
+            "steps": [
+                {
+                    "step_number": 1,
+                    "action": "Clear action description (e.g., 'Navigate to login page')",
+                    "expected_result": "What should happen after this action",
+                    "dependencies": [],
+                    "optional": false
+                }
+            ],
+            "postconditions": ["Expected state after test completion"],
+            "tags": []
         }
     ],
-    "tags": ["functional", "regression", "smoke"],
+    "tags": [],
     "estimated_duration_seconds": 300
-}"""
+}
+
+IMPORTANT: 
+- Create multiple test cases to cover different scenarios
+- Each test case should test ONE specific flow or scenario
+- Include both positive (happy path) and negative (error) test cases"""
         
         return message
     
@@ -138,68 +148,54 @@ class TestPlannerAgent(BaseAgent):
             else:
                 plan_data = content
             
-            # Create test steps
-            steps = []
-            step_dependencies = {}  # Track dependencies by step number
-            
-            for step_data in plan_data.get("steps", []):
-                # Map action string to ActionType
-                action_type_map = {
-                    "click": ActionType.CLICK,
-                    "type": ActionType.TYPE,
-                    "navigate": ActionType.NAVIGATE,
-                    "wait": ActionType.WAIT,
-                    "verify": ActionType.ASSERT,
-                    "assert": ActionType.ASSERT,
-                    "key_press": ActionType.KEY_PRESS,
-                    "press": ActionType.KEY_PRESS  # Alternative name
+            # Parse test cases
+            test_cases = []
+            for case_data in plan_data.get("test_cases", []):
+                # Parse priority
+                priority_map = {
+                    "critical": TestCasePriority.CRITICAL,
+                    "high": TestCasePriority.HIGH,
+                    "medium": TestCasePriority.MEDIUM,
+                    "low": TestCasePriority.LOW
                 }
-                action_type = action_type_map.get(
-                    step_data.get("action", "verify").lower(),
-                    ActionType.ASSERT
+                priority = priority_map.get(
+                    case_data.get("priority", "medium").lower(),
+                    TestCasePriority.MEDIUM
                 )
                 
-                # Create action instruction with required fields
-                action_instruction = ActionInstruction(
-                    action_type=action_type,
-                    description=step_data.get("description", ""),
-                    target=step_data.get("target", ""),
-                    value=step_data.get("value"),
-                    expected_outcome=step_data.get("expected_result", "")
-                )
+                # Parse steps for this test case
+                steps = []
+                for step_data in case_data.get("steps", []):
+                    step = TestStep(
+                        step_number=step_data["step_number"],
+                        description=step_data.get("description", step_data.get("action", "")),
+                        action=step_data.get("action", ""),
+                        expected_result=step_data.get("expected_result", ""),
+                        dependencies=step_data.get("dependencies", []),
+                        optional=step_data.get("optional", False),
+                        max_retries=step_data.get("max_retries", 3)
+                    )
+                    steps.append(step)
                 
-                # Create test step
-                step = TestStep(
-                    step_number=step_data["step_number"],
-                    description=step_data["description"],
-                    action_instruction=action_instruction,
-                    optional=step_data.get("optional", False),
-                    max_retries=step_data.get("max_retries", 3)
+                # Create test case
+                test_case = TestCase(
+                    test_id=case_data.get("test_id", f"TC{len(test_cases)+1:03d}"),
+                    name=case_data.get("name", "Unnamed Test Case"),
+                    description=case_data.get("description", ""),
+                    priority=priority,
+                    prerequisites=case_data.get("prerequisites", []),
+                    steps=steps,
+                    postconditions=case_data.get("postconditions", []),
+                    tags=case_data.get("tags", [])
                 )
-                steps.append(step)
-                
-                # Store dependencies for later resolution
-                step_dependencies[step.step_number] = step_data.get("dependencies", [])
-            
-            # Resolve step dependencies (convert step numbers to UUIDs)
-            step_by_number = {step.step_number: step for step in steps}
-            for step in steps:
-                dep_numbers = step_dependencies.get(step.step_number, [])
-                for dep_num in dep_numbers:
-                    if dep_num in step_by_number:
-                        step.dependencies.append(step_by_number[dep_num].step_id)
+                test_cases.append(test_case)
             
             # Create test plan
-            # Handle requirements as either string or list
-            requirements = plan_data.get("requirements", "")
-            if isinstance(requirements, list):
-                requirements = "\n".join(requirements)
-            
             test_plan = TestPlan(
-                name=plan_data["name"],
-                description=plan_data["description"],
-                requirements=requirements,
-                steps=steps,
+                name=plan_data.get("name", "Unnamed Test Plan"),
+                description=plan_data.get("description", ""),
+                requirements_source=plan_data.get("requirements_source", "Unknown"),
+                test_cases=test_cases,
                 tags=plan_data.get("tags", []),
                 estimated_duration_seconds=plan_data.get("estimated_duration_seconds")
             )
@@ -212,6 +208,36 @@ class TestPlannerAgent(BaseAgent):
                 "response": response
             })
             raise ValueError(f"Failed to parse test plan response: {e}")
+    
+    def _save_test_plan(self, test_plan: TestPlan) -> None:
+        """Save test plan to permanent storage."""
+        # Create base directory for all generated test plans
+        base_dir = Path("generated_test_plans")
+        base_dir.mkdir(exist_ok=True)
+        
+        # Create directory for this specific test plan
+        plan_dir = base_dir / str(test_plan.plan_id)
+        plan_dir.mkdir(exist_ok=True)
+        
+        # Use formatter to generate both formats
+        formatter = TestPlanFormatter()
+        
+        # Save as JSON
+        json_path = plan_dir / f"test_plan_{test_plan.plan_id}.json"
+        with open(json_path, "w") as f:
+            f.write(formatter.to_json(test_plan))
+        
+        # Save as Markdown
+        md_path = plan_dir / f"test_plan_{test_plan.plan_id}.md"
+        with open(md_path, "w") as f:
+            f.write(formatter.to_markdown(test_plan))
+        
+        logger.info("Test plan saved permanently", extra={
+            "plan_id": str(test_plan.plan_id),
+            "plan_dir": str(plan_dir),
+            "json_path": str(json_path),
+            "md_path": str(md_path)
+        })
     
     async def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
         """
@@ -255,38 +281,21 @@ Please provide an updated test plan that addresses the feedback while maintainin
         # Parse the refined plan
         refined_plan = self._parse_test_plan_response(response)
         
+        # Calculate total steps for new structure
+        total_steps = sum(len(tc.steps) for tc in refined_plan.test_cases)
+        
         logger.info("Test plan refined successfully", extra={
             "plan_name": refined_plan.name,
-            "num_steps": len(refined_plan.steps)
+            "num_test_cases": len(refined_plan.test_cases),
+            "total_steps": total_steps
         })
         
         return refined_plan
     
     def _serialize_test_plan(self, test_plan: TestPlan) -> str:
         """Serialize a test plan to a readable string format."""
-        lines = [
-            f"Name: {test_plan.name}",
-            f"Description: {test_plan.description}",
-            f"Requirements: {test_plan.requirements[:100]}..." if len(test_plan.requirements) > 100 else f"Requirements: {test_plan.requirements}",
-            f"Tags: {', '.join(test_plan.tags) if test_plan.tags else 'None'}",
-            "\nSteps:"
-        ]
-        
-        for step in test_plan.steps:
-            lines.append(f"  {step.step_number}. {step.description}")
-            lines.append(f"     Action: {step.action_instruction.action_type.value} - {step.action_instruction.target}")
-            if step.action_instruction.value:
-                lines.append(f"     Value: {step.action_instruction.value}")
-            lines.append(f"     Expected: {step.action_instruction.expected_outcome}")
-            if step.dependencies:
-                lines.append(f"     Dependencies: {len(step.dependencies)} steps")
-            if step.optional:
-                lines.append(f"     Optional: Yes")
-        
-        if test_plan.estimated_duration_seconds:
-            lines.append(f"\nEstimated Duration: {test_plan.estimated_duration_seconds} seconds")
-        
-        return "\n".join(lines)
+        formatter = TestPlanFormatter()
+        return formatter.to_markdown(test_plan)
     
     async def extract_test_scenarios(self, requirements: str) -> List[Dict[str, str]]:
         """

@@ -18,7 +18,7 @@
 |-------|------------|-----|--------|
 | Orchestrator | **Python 3.10+** | Best ecosystem for AI & agent coordination. | ✅ |
 | Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. | ✅ |
-| AI Agents | **4x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action, Evaluator agents. | ⚠️ Vision limitations |
+| AI Agents | **3x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action agents. | ⚠️ Vision limitations |
 | Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. | ✅ |
 | Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (60×60 grid). | ✅ |
 | Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. | ✅ |
@@ -97,7 +97,7 @@ autonomous-ai-testing-agent/
 
 ### **4.1 AI Agent System**
 ```python
-# Four specialized AI agents working in coordination
+# Three specialized AI agents working in coordination
 class TestPlannerAgent(BaseAgent):
     """Analyzes requirements/PRDs → Creates structured test plans"""
     def create_test_plan(self, requirements: str) -> TestPlan: pass
@@ -112,9 +112,7 @@ class ActionAgent(BaseAgent):
     def determine_action(self, screenshot: bytes, instruction: str) -> GridAction: pass
     def refine_coordinates(self, cropped_region: bytes, initial_coords: GridCoords) -> RefinedGridAction: pass
 
-class EvaluatorAgent(BaseAgent):
-    """Screenshot + expectation → Success/failure assessment"""
-    def evaluate_result(self, screenshot: bytes, expected_outcome: str) -> EvaluationResult: pass
+# Note: Evaluation is now handled within Action Agent
 ```
 
 ### **4.2 Agent Coordination Workflow**
@@ -130,8 +128,6 @@ ActionAgent: Analyzes screenshot → "Click grid cell B7"
     ↓
 BrowserDriver: Executes action, waits, captures screenshot  
     ↓
-EvaluatorAgent: "Success - product page loaded correctly"
-    ↓
 TestRunnerAgent: Processes result → "Step 2: Add to cart"
     ↓
 [Loop continues until test completion]
@@ -141,7 +137,7 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 - **Test Planner**: Understands business requirements, creates comprehensive test plans
 - **Test Runner**: Maintains test context, coordinates execution, handles branching logic, manages scripted automation fallbacks
 - **Action Agent**: Adaptive grid specialist, visual refinement expert, confidence-based precision targeting
-- **Evaluator**: Result validation, UI state assessment, error detection, confidence scoring
+- **Action Agent**: Also handles result validation, UI state assessment, error detection
 
 ---
 
@@ -183,7 +179,7 @@ TestRunnerAgent: Processes result → "Step 2: Add to cart"
 
 ## 7  Development Phases
 
-### ✅ Completed Phases (17/21)
+### ✅ Completed Phases (20/23)
 
 For detailed information about completed phases, see the individual phase documents:
 
@@ -204,6 +200,9 @@ For detailed information about completed phases, see the individual phase docume
 | **Phase 11** | End-to-end Integration | [PHASE_11_END_TO_END_INTEGRATION.md](./phases/PHASE_11_END_TO_END_INTEGRATION.md) |
 | **Phase 11b** | CLI Improvements | [PHASE_11B_CLI_IMPROVEMENTS.md](./phases/PHASE_11B_CLI_IMPROVEMENTS.md) |
 | **Phase 13** | Conversation-Based AI Interactions | [PHASE_13_CONVERSATION_BASED_AI_INTERACTIONS.md](./phases/PHASE_13_CONVERSATION_BASED_AI_INTERACTIONS.md) |
+| **Phase 14** | Test Planner Agent Refinement | [PHASE_14_TEST_PLANNER_REFINEMENT.md](./phases/PHASE_14_TEST_PLANNER_REFINEMENT.md) |
+| **Phase 15** | Test Runner Agent Enhancement | [PHASE_15_TEST_RUNNER_ENHANCEMENT.md](./phases/PHASE_15_TEST_RUNNER_ENHANCEMENT.md) |
+| **Phase 16** | Evaluator Agent Removal | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
 
 Additional completed work:
 - **Architecture Refactor**: Action Agent owns execution lifecycle
@@ -213,17 +212,15 @@ Additional completed work:
 
 | Phase | Status | Target | Documentation |
 |-------|--------|--------|---------------|
-| **Phase 14** | Test Planner Agent Refinement | 2 days | [PHASE_14_TEST_PLANNER_REFINEMENT.md](./phases/PHASE_14_TEST_PLANNER_REFINEMENT.md) |
-| **Phase 15** | Test Runner Agent Enhancement | 3 days | [PHASE_15_TEST_RUNNER_ENHANCEMENT.md](./phases/PHASE_15_TEST_RUNNER_ENHANCEMENT.md) |
-| **Phase 16** | Evaluator Agent Reassessment | 1 day | [PHASE_16_EVALUATOR_REASSESSMENT.md](./phases/PHASE_16_EVALUATOR_REASSESSMENT.md) |
-| **Phase 17** | Additional Action Types (PAUSED) | TBD | [PHASE_17_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_17_ADDITIONAL_ACTION_TYPES.md) |
+| **Phase 17** | Usability & Persistence | 3-4 days | [PHASE_17_USABILITY_AND_PERSISTENCE.md](./phases/PHASE_17_USABILITY_AND_PERSISTENCE.md) |
 
 ### 📅 Upcoming Phases
 
 | Phase | Status | ETA | Documentation |
 |-------|--------|-----|---------------|
 | **Phase 12** | Test Scenarios | 1/5 scenarios working | [PHASE_12_TEST_SCENARIOS.md](./phases/PHASE_12_TEST_SCENARIOS.md) |
-| **Phase 18** | Packaging & Documentation | 1-2 days | [PHASE_18_PACKAGING_DOCUMENTATION.md](./phases/PHASE_18_PACKAGING_DOCUMENTATION.md) |
+| **Phase 18** | Additional Action Types | TBD | [PHASE_18_ADDITIONAL_ACTION_TYPES.md](./phases/PHASE_18_ADDITIONAL_ACTION_TYPES.md) |
+| **Phase 19** | Packaging & Documentation | 1-2 days | [PHASE_19_PACKAGING_DOCUMENTATION.md](./phases/PHASE_19_PACKAGING_DOCUMENTATION.md) |
 
 ---
 
@@ -254,11 +251,11 @@ Additional completed work:
 
 ## 10  Immediate Next Steps
 
-1. Complete Phase 14 Test Planner Agent Refinement
-2. Complete Phase 15 Test Runner Agent Enhancement
-3. Complete Phase 16 Evaluator Agent Reassessment
-4. Resume Phase 17 Additional Action Types
-5. Complete Phase 12 test scenarios (4 remaining)
+1. ~~Complete Phase 16 Evaluator Agent Reassessment~~ ✅ DONE
+2. Complete Phase 17 Usability & Persistence Improvements
+3. Complete Phase 12 test scenarios (4 remaining)
+4. Resume Phase 18 Additional Action Types
+5. Complete Phase 19 Packaging & Documentation
 6. Package and release v0.1.0
 
 ---

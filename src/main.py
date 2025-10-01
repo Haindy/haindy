@@ -129,8 +129,8 @@ Examples:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=300,
-        help="Test execution timeout in seconds (default: 300)",
+        default=1200,
+        help="Test execution timeout in seconds (default: 1200)",
     )
     parser.add_argument(
         "--max-steps",
@@ -173,7 +173,7 @@ async def run_test(
     headless: bool = True,
     output_dir: Optional[Path] = None,
     report_format: str = "html",
-    timeout: int = 300,
+    timeout: int = 1200,
     max_steps: int = 50,
     berserk: bool = False,
 ) -> int:
@@ -286,29 +286,35 @@ async def run_test(
         # Display results summary
         console.print("\n[bold]Test Execution Summary:[/bold]")
         
-        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "completed" else "red"
+        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "passed" else "red"
         status_text = getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown'))
         console.print(f"Status: [{status_color}]{status_text}[/{status_color}]")
         
-        # Handle different TestState structures
-        if hasattr(test_state, 'test_plan') and test_state.test_plan:
-            console.print(f"Total Steps: {len(test_state.test_plan.steps)}")
-        
-        if hasattr(test_state, 'completed_steps'):
-            console.print(f"Completed Steps: [green]{len(test_state.completed_steps)}[/green]")
-        
-        if hasattr(test_state, 'failed_steps'):
-            console.print(f"Failed Steps: [red]{len(test_state.failed_steps)}[/red]")
-        elif hasattr(test_state, 'remaining_steps') and hasattr(test_state, 'completed_steps'):
-            # Calculate failed steps from test runner's TestState
-            total_steps = len(test_state.completed_steps) + len(test_state.remaining_steps)
-            failed_steps = 0  # Test runner doesn't track failed steps separately
+        # Display test execution metrics from test report
+        if test_state.test_report:
+            report = test_state.test_report
+            
+            # Calculate totals from test cases
+            total_test_cases = len(report.test_cases)
+            completed_test_cases = len([tc for tc in report.test_cases if tc.status == "passed"])
+            
+            # Calculate step totals
+            total_steps = sum(tc.steps_total for tc in report.test_cases)
+            completed_steps = sum(tc.steps_completed for tc in report.test_cases)
+            failed_steps = sum(tc.steps_failed for tc in report.test_cases)
+            skipped_steps = total_steps - completed_steps - failed_steps
+            
+            console.print(f"Test Cases: [cyan]{completed_test_cases}/{total_test_cases}[/cyan]")
+            console.print(f"Total Steps: {total_steps}")
+            console.print(f"Completed Steps: [green]{completed_steps}[/green]")
             console.print(f"Failed Steps: [red]{failed_steps}[/red]")
-        
-        if hasattr(test_state, 'skipped_steps'):
-            console.print(f"Skipped Steps: [yellow]{len(test_state.skipped_steps)}[/yellow]")
+            console.print(f"Skipped Steps: [yellow]{skipped_steps}[/yellow]")
+            
+            # Show summary if available
+            if report.summary:
+                console.print(f"Success Rate: [cyan]{report.summary.success_rate:.1f}%[/cyan]")
         else:
-            console.print(f"Skipped Steps: [yellow]0[/yellow]")
+            console.print("[yellow]No test report available[/yellow]")
         
         # Generate report
         if output_dir is None:
@@ -318,14 +324,26 @@ async def run_test(
         
         console.print(f"\n[cyan]Generating {report_format} report...[/cyan]")
         
+        # Get action storage from test runner if available
+        action_storage = None
+        if coordinator and hasattr(coordinator, '_agents') and 'test_runner' in coordinator._agents:
+            test_runner = coordinator._agents['test_runner']
+            if hasattr(test_runner, 'get_action_storage'):
+                action_storage = test_runner.get_action_storage()
+        
         reporter = TestReporter()
-        report_path = await reporter.generate_report(
+        report_path, actions_path = await reporter.generate_report(
             test_state=test_state,
             output_dir=output_dir,
             format=report_format,
+            action_storage=action_storage
         )
         
         console.print(f"[green]Report saved to:[/green] {report_path}")
+        
+        # Print actions file path if it was generated
+        if actions_path:
+            console.print(f"[green]Actions saved to:[/green] {actions_path}")
         
         # Show debug summary
         debug_summary = debug_logger.get_debug_summary()
@@ -336,7 +354,7 @@ async def run_test(
         console.print(f"Screenshots Saved: [green]{debug_summary['screenshots_saved']}[/green]")
         
         # Return appropriate exit code
-        return 0 if test_state.status == "completed" else 1
+        return 0 if test_state.status == "passed" else 1
         
     except asyncio.TimeoutError:
         console.print(f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]")
@@ -439,118 +457,35 @@ def show_version() -> int:
     return 0
 
 
-async def process_plan_file(file_path: Path, berserk: bool = False) -> int:
-    """Process a plan file and generate test scenario."""
+async def read_plan_file(file_path: Path) -> tuple[str, str]:
+    """Read requirements from a plan file and extract URL."""
     if not file_path.exists():
         console.print(f"[red]Error: File not found: {file_path}[/red]")
-        return 1
+        sys.exit(1)
     
-    console.print(f"\n[cyan]Processing plan file:[/cyan] {file_path}")
+    console.print(f"\n[cyan]Reading requirements from:[/cyan] {file_path}")
     
     try:
-        from src.agents.test_planner import TestPlannerAgent
-        
-        # Initialize planner
-        planner = TestPlannerAgent()
-        
-        # Read the file contents
-        console.print("[dim]Reading requirements document...[/dim]")
-        try:
-            with open(file_path, 'r') as f:
-                file_contents = f.read()
-        except Exception as e:
-            console.print(f"[red]Error reading file: {e}[/red]")
-            return 1
-        
-        # Create a prompt that includes the file contents
-        analysis_prompt = f"""
-Please analyze the following test requirements document:
-
----
-{file_contents}
----
-
-Extract:
-1. The test requirements or user stories
-2. The application URL if mentioned
-3. Key test scenarios to validate
-
-Format your response as JSON with these fields:
-- requirements: The extracted test requirements as clear instructions
-- url: The application URL (or null if not found)
-- name: A descriptive name for this test
-- description: Brief description of what's being tested
-"""
-        
-        # Get AI analysis
-        response = await planner._get_completion([
-            {"role": "system", "content": "You are a test requirements analyzer. Extract test requirements from documents."},
-            {"role": "user", "content": analysis_prompt}
-        ])
-        
-        # Parse response
-        try:
-            # Extract JSON from response
-            import re
-            response_content = response.get("content", "")
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_content, re.DOTALL)
-            if json_match:
-                extracted = json.loads(json_match.group())
-            else:
-                raise ValueError("No JSON found in response")
-        except Exception as e:
-            console.print(f"[red]Error: Could not parse AI response: {e}[/red]")
-            return 1
-        
-        # Get URL if not provided
-        if not extracted.get("url"):
-            if not berserk:
-                extracted["url"] = Prompt.ask("\n[cyan]Enter the application URL[/cyan]")
-            else:
-                console.print("[red]Error: No URL found in document and running in berserk mode[/red]")
-                return 1
-        
-        # Generate test scenario
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        scenario_name = extracted.get("name", "extracted_test").lower().replace(" ", "_")
-        output_path = Path("test_scenarios") / f"generated_{scenario_name}_{timestamp}.json"
-        output_path.parent.mkdir(exist_ok=True)
-        
-        scenario = {
-            "name": extracted.get("name", "Extracted Test"),
-            "description": extracted.get("description", "Test extracted from document"),
-            "url": extracted["url"],
-            "requirements": extracted["requirements"],
-            "expected_outcomes": [],
-            "tags": ["generated", "from_document"],
-            "timeout": 300,
-            "source_document": str(file_path),
-            "generated_at": datetime.now().isoformat()
-        }
-        
-        # Save scenario
-        with open(output_path, "w") as f:
-            json.dump(scenario, f, indent=2)
-        
-        console.print(f"[green]✓ Generated test scenario:[/green] {output_path}")
-        
-        # Run test if not plan-only
-        if berserk or Prompt.ask("\n[cyan]Run test now?[/cyan]", choices=["y", "n"], default="y") == "y":
-            return await run_test(
-                requirements=scenario["requirements"],
-                url=scenario["url"],
-                headless=True,
-                report_format="html",
-                timeout=scenario["timeout"],
-                max_steps=50,
-                berserk=berserk,
-            )
-        
-        return 0
-        
+        with open(file_path, 'r') as f:
+            file_contents = f.read().strip()
     except Exception as e:
-        console.print(f"[red]Error processing plan file: {e}[/red]")
-        return 1
+        console.print(f"[red]Error reading file: {e}[/red]")
+        sys.exit(1)
+    
+    # Extract URL from the document
+    import re
+    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?\'")\]}]'
+    urls = re.findall(url_pattern, file_contents)
+    
+    if urls:
+        # Use the first URL found
+        url = urls[0]
+        console.print(f"[dim]Found URL in document: {url}[/dim]")
+    else:
+        # Prompt for URL
+        url = Prompt.ask("\n[cyan]Enter the application URL[/cyan]")
+    
+    return file_contents, url
 
 
 async def async_main(args: Optional[list[str]] = None) -> int:
@@ -592,8 +527,8 @@ async def async_main(args: Optional[list[str]] = None) -> int:
         # Interactive mode
         requirements, url = get_interactive_requirements()
     elif parsed_args.plan:
-        # Process plan file
-        return await process_plan_file(parsed_args.plan, berserk=parsed_args.berserk)
+        # Read requirements from plan file
+        requirements, url = await read_plan_file(parsed_args.plan)
     elif parsed_args.json_test_plan:
         # Load from JSON scenario file
         scenario = load_scenario(parsed_args.json_test_plan)

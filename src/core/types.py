@@ -15,10 +15,9 @@ class TestStatus(str, Enum):
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
+    PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
-    BLOCKED = "blocked"
 
 
 class ActionType(str, Enum):
@@ -108,30 +107,57 @@ class ActionResult(BaseModel):
 
 
 class TestStep(BaseModel):
-    """A single step in a test plan."""
+    """A single step in a test case."""
 
     step_id: UUID = Field(default_factory=uuid4)
     step_number: int
-    description: str
-    action_instruction: ActionInstruction
-    dependencies: List[UUID] = Field(
-        default_factory=list, description="IDs of steps that must complete first"
+    description: str = Field(..., description="Human-readable description of the step")
+    action: str = Field(..., description="Action to be performed")
+    expected_result: str = Field(..., description="Expected outcome of the action")
+    # Keep action_instruction for backward compatibility during transition
+    action_instruction: Optional[ActionInstruction] = Field(None, description="Detailed action instruction (deprecated)")
+    dependencies: List[int] = Field(
+        default_factory=list, description="Step numbers that must complete first"
     )
     optional: bool = Field(False, description="Whether this step can be skipped")
     max_retries: int = Field(3, description="Maximum retry attempts")
 
 
+class TestCasePriority(str, Enum):
+    """Priority levels for test cases."""
+    
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class TestCase(BaseModel):
+    """A test case containing multiple test steps."""
+    
+    case_id: UUID = Field(default_factory=uuid4)
+    test_id: str = Field(..., description="Human-readable test case ID (e.g., TC001)")
+    name: str = Field(..., description="Test case name")
+    description: str = Field(..., description="Detailed description of what is being tested")
+    priority: TestCasePriority = Field(TestCasePriority.MEDIUM, description="Test case priority")
+    prerequisites: List[str] = Field(default_factory=list, description="Prerequisites for this test case")
+    steps: List[TestStep] = Field(..., description="Ordered list of test steps")
+    postconditions: List[str] = Field(default_factory=list, description="Expected state after test completion")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+
+
 class TestPlan(BaseModel):
-    """A complete test plan generated from requirements."""
+    """A complete test plan containing multiple test cases."""
 
     plan_id: UUID = Field(default_factory=uuid4)
-    name: str
-    description: str
-    requirements: str = Field(..., description="Original requirements text")
-    steps: List[TestStep]
+    name: str = Field(..., description="Test plan name")
+    description: str = Field(..., description="Overall test plan description")
+    requirements_source: str = Field(..., description="Source of requirements (e.g., PRD v1.2, URL)")
+    test_cases: List[TestCase] = Field(..., description="List of test cases in this plan")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    estimated_duration_seconds: Optional[int] = None
-    tags: List[str] = Field(default_factory=list)
+    created_by: str = Field("HAINDY Test Planner", description="Who/what created this plan")
+    tags: List[str] = Field(default_factory=list, description="Overall plan tags")
+    estimated_duration_seconds: Optional[int] = Field(None, description="Total estimated duration")
 
 
 class TestState(BaseModel):
@@ -148,6 +174,7 @@ class TestState(BaseModel):
     error_count: int = 0
     warning_count: int = 0
     context: Dict[str, Any] = Field(default_factory=dict)
+    test_report: Optional['TestReport'] = Field(None, description="Comprehensive test execution report")  # Will be populated by TestRunner
 
 
 class EvaluationResult(BaseModel):
@@ -277,3 +304,99 @@ class ScrollResult(BaseModel):
     total_scroll_distance: Optional[int] = None
     error: Optional[str] = None
     scroll_history: Optional[List[Dict[str, Any]]] = None
+
+
+class BugSeverity(str, Enum):
+    """Severity levels for bug reports."""
+    
+    CRITICAL = "critical"  # Blocks test execution
+    HIGH = "high"  # Major functionality broken
+    MEDIUM = "medium"  # Minor functionality issue
+    LOW = "low"  # Cosmetic or edge case
+
+
+class StepResult(BaseModel):
+    """Result of executing a single test step."""
+    
+    step_id: UUID
+    step_number: int
+    status: TestStatus
+    started_at: datetime
+    completed_at: datetime
+    action: str
+    expected_result: str
+    actual_result: str
+    screenshot_before: Optional[str] = Field(None, description="Path to screenshot before action")
+    screenshot_after: Optional[str] = Field(None, description="Path to screenshot after action")
+    error_message: Optional[str] = None
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+    actions_performed: List[Dict[str, Any]] = Field(default_factory=list, description="List of sub-actions performed")
+
+
+class BugReport(BaseModel):
+    """Detailed bug report for a failed test step."""
+    
+    bug_id: UUID = Field(default_factory=uuid4)
+    step_id: UUID
+    test_case_id: UUID
+    test_plan_id: UUID
+    step_number: int
+    description: str
+    severity: BugSeverity
+    error_type: str = Field(..., description="Type of error (e.g., 'element_not_found', 'assertion_failed')")
+    expected_result: str
+    actual_result: str
+    screenshot_path: Optional[str] = None
+    error_details: Optional[str] = None
+    reproduction_steps: List[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+
+class TestCaseResult(BaseModel):
+    """Result of executing a test case."""
+    
+    case_id: UUID
+    test_id: str
+    name: str
+    status: TestStatus
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    steps_total: int
+    steps_completed: int
+    steps_failed: int
+    step_results: List[StepResult] = Field(default_factory=list)
+    bugs: List[BugReport] = Field(default_factory=list)
+    error_message: Optional[str] = None
+
+
+class TestSummary(BaseModel):
+    """Summary statistics for test execution."""
+    
+    total_test_cases: int
+    completed_test_cases: int
+    failed_test_cases: int
+    total_steps: int
+    completed_steps: int
+    failed_steps: int
+    critical_bugs: int
+    high_bugs: int
+    medium_bugs: int
+    low_bugs: int
+    success_rate: float = Field(..., ge=0.0, le=1.0)
+    execution_time_seconds: float
+
+
+class TestReport(BaseModel):
+    """Comprehensive test execution report."""
+    
+    report_id: UUID = Field(default_factory=uuid4)
+    test_plan_id: UUID
+    test_plan_name: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: TestStatus
+    test_cases: List[TestCaseResult] = Field(default_factory=list)
+    summary: Optional[TestSummary] = None
+    bugs: List[BugReport] = Field(default_factory=list)
+    environment: Dict[str, Any] = Field(default_factory=dict, description="Test environment details")
+    created_by: str = Field("HAINDY Test Runner", description="Who/what executed the tests")

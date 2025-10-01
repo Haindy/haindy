@@ -40,13 +40,22 @@ class JSONFormatter(logging.Formatter):
             "line": record.lineno,
         }
 
-        # Add extra fields if present
-        if hasattr(record, "agent"):
-            log_data["agent"] = record.agent
-        if hasattr(record, "test_id"):
-            log_data["test_id"] = record.test_id
-        if hasattr(record, "step_id"):
-            log_data["step_id"] = record.step_id
+        # Add all extra fields dynamically
+        # Get all attributes from the record
+        standard_attrs = {
+            'name', 'msg', 'args', 'created', 'msecs', 'relativeCreated',
+            'levelname', 'levelno', 'pathname', 'filename', 'module',
+            'lineno', 'funcName', 'exc_info', 'exc_text', 'stack_info',
+            'thread', 'threadName', 'processName', 'process', 'getMessage',
+            'message', 'asctime'
+        }
+        
+        # Add any extra fields that were passed
+        for attr_name in dir(record):
+            if not attr_name.startswith('_') and attr_name not in standard_attrs:
+                attr_value = getattr(record, attr_name, None)
+                if attr_value is not None and not callable(attr_value):
+                    log_data[attr_name] = attr_value
 
         # Add exception info if present
         if record.exc_info:

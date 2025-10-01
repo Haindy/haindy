@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.browser.driver import PlaywrightDriver
+from src.browser.instrumented_driver import InstrumentedBrowserDriver
 from src.config.settings import get_settings
 from src.core.types import GridCoordinate
 from src.grid.overlay import GridOverlay
@@ -33,7 +34,8 @@ class BrowserController:
         self.logger = get_logger("browser.controller")
 
         # Initialize components
-        self.driver = PlaywrightDriver(headless=headless)
+        # Use InstrumentedBrowserDriver for action tracking
+        self.driver = InstrumentedBrowserDriver(headless=headless)
         self.grid = GridOverlay(grid_size=grid_size)
         self.refinement = GridRefinement(self.grid)
 

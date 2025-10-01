@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 from uuid import UUID
 
 from jinja2 import Environment, Template
@@ -51,6 +51,7 @@ class TestExecutionReport:
         self.journal = journal
         self.config = config or ReportConfig()
         self.generated_at = datetime.now(timezone.utc)
+        self.bug_reports: List[Dict[str, Any]] = []  # Will be populated after initialization
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert report to dictionary."""
@@ -104,6 +105,10 @@ class TestExecutionReport:
                 "entries": len(self.journal.entries),
                 "summary": self.journal.get_summary() if hasattr(self.journal, 'get_summary') else {}
             }
+        
+        # Add bug reports
+        if self.bug_reports:
+            report["bug_reports"] = self.bug_reports
         
         return report
     
@@ -171,6 +176,29 @@ class TestExecutionReport:
                 md += "### Recommendations\n\n"
                 for rec in errors['recommendations']:
                     md += f"- {rec}\n"
+                md += "\n"
+        
+        # Bug Reports
+        if 'bug_reports' in data and data['bug_reports']:
+            md += "## Bug Reports\n\n"
+            md += f"Found {len(data['bug_reports'])} bug(s) during test execution:\n\n"
+            
+            for bug in data['bug_reports']:
+                md += f"### {bug['description']}\n\n"
+                md += f"- **Severity:** {bug['severity'].upper()}\n"
+                md += f"- **Step:** {bug['step_number']}\n"
+                md += f"- **Type:** {bug['error_type']}\n"
+                md += f"- **Expected:** {bug['expected_result']}\n"
+                md += f"- **Actual:** {bug['actual_result']}\n"
+                
+                if bug.get('error_details'):
+                    md += f"- **Error Details:** {bug['error_details']}\n"
+                
+                if bug.get('reproduction_steps'):
+                    md += "\n**Steps to Reproduce:**\n"
+                    for i, step in enumerate(bug['reproduction_steps'], 1):
+                        md += f"{i}. {step}\n"
+                
                 md += "\n"
         
         return md
@@ -538,6 +566,38 @@ HTML_REPORT_TEMPLATE = """
         {% endif %}
         {% endif %}
         
+        {% if report.bug_reports %}
+        <h2>Bug Reports</h2>
+        <p>Found {{ report.bug_reports|length }} bug(s) during test execution:</p>
+        
+        {% for bug in report.bug_reports %}
+        <div class="bug-report">
+            <div class="bug-header">
+                <h3>{{ bug.description }}</h3>
+                <span class="severity-{{ bug.severity }}">{{ bug.severity|upper }}</span>
+            </div>
+            <div class="bug-details">
+                <p><strong>Step:</strong> Step {{ bug.step_number }}</p>
+                <p><strong>Error Type:</strong> {{ bug.error_type }}</p>
+                <p><strong>Expected:</strong> {{ bug.expected_result }}</p>
+                <p><strong>Actual:</strong> {{ bug.actual_result }}</p>
+                {% if bug.error_details %}
+                <p><strong>Error Details:</strong> {{ bug.error_details }}</p>
+                {% endif %}
+                
+                {% if bug.reproduction_steps %}
+                <h4>Steps to Reproduce:</h4>
+                <ol>
+                {% for step in bug.reproduction_steps %}
+                    <li>{{ step }}</li>
+                {% endfor %}
+                </ol>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+        
         <!-- AI Conversations Section -->
         {% if ai_conversations %}
         <h2>🤖 AI Conversations</h2>
@@ -575,8 +635,9 @@ class TestReporter:
         self,
         test_state: TestState,
         output_dir: Path,
-        format: str = "html"
-    ) -> Path:
+        format: str = "html",
+        action_storage: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Path, Optional[Path]]:
         """
         Generate a test report from TestState.
         
@@ -584,10 +645,18 @@ class TestReporter:
             test_state: The test state containing execution results
             output_dir: Directory to save the report
             format: Report format (html, json, markdown)
+            action_storage: Optional action storage data to save alongside report
             
         Returns:
-            Path to the generated report
+            Tuple of (report_path, actions_path) where actions_path may be None
         """
+        # Use enhanced reporter for HTML format
+        if format == "html":
+            from src.monitoring.enhanced_reporter import EnhancedReporter
+            enhanced_reporter = EnhancedReporter()
+            return enhanced_reporter.generate_report(test_state, output_dir, action_storage)
+        
+        # For other formats, use the original implementation
         # Convert TestState to TestMetrics
         test_metrics = self._convert_to_metrics(test_state)
         
@@ -599,14 +668,15 @@ class TestReporter:
             config=self.config
         )
         
+        # Add bug reports to the report data
+        test_report.bug_reports = self._extract_bug_reports(test_state)
+        
         # Generate the report
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"test_report_{test_state.test_plan.plan_id}_{timestamp}.{format}"
+        filename = f"test_report_{test_state.test_report.test_plan_id}_{timestamp}.{format}"
         output_path = output_dir / filename
         
-        if format == "html":
-            report_data = test_report.to_html()
-        elif format == "json":
+        if format == "json":
             report_data = test_report.to_json()
         elif format == "markdown":
             report_data = test_report.to_markdown()
@@ -617,18 +687,40 @@ class TestReporter:
         output_path.write_text(report_data)
         logger.info(f"Generated {format} report: {output_path}")
         
-        return output_path
+        # Save actions file if provided
+        actions_path = None
+        if action_storage and action_storage.get("test_cases"):
+            # Generate actions filename based on report filename
+            test_plan_id = str(test_state.test_report.test_plan_id)
+            actions_filename = f"{test_plan_id}_{timestamp}-actions.json"
+            actions_path = output_dir / actions_filename
+            
+            # Write actions data with pretty formatting
+            with open(actions_path, 'w') as f:
+                json.dump(action_storage, f, indent=2, default=str)
+            
+            logger.info(f"Generated actions file: {actions_path}")
+            
+            # Log both paths
+            logger.info(f"Test Report: {output_path}")
+            logger.info(f"Actions Log: {actions_path}")
+        else:
+            # Log only report path if no actions
+            logger.info(f"Test Report: {output_path}")
+        
+        return output_path, actions_path
     
     def _convert_to_metrics(self, test_state: TestState) -> TestMetrics:
         """Convert TestState to TestMetrics."""
-        # Calculate metrics from test state
-        total_steps = len(test_state.test_plan.steps)
-        passed_steps = len(test_state.completed_steps)
-        failed_steps = len(test_state.failed_steps)
+        # Calculate metrics from test report
+        test_report = test_state.test_report
+        total_steps = sum(tc.steps_total for tc in test_report.test_cases)
+        passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
+        failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
         
         # Determine overall outcome
         from src.core.types import TestStatus
-        if test_state.status == TestStatus.COMPLETED and failed_steps == 0:
+        if test_state.status == TestStatus.PASSED and failed_steps == 0:
             outcome = TestOutcome.PASSED
         elif test_state.status == TestStatus.FAILED or failed_steps > 0:
             outcome = TestOutcome.FAILED
@@ -650,16 +742,23 @@ class TestReporter:
         else:
             duration = 0.0
         
+        # Get test info from test report
+        test_id = test_state.test_report.test_plan_id
+        test_name = test_state.test_report.test_plan_name
+        start_time = test_state.test_report.started_at
+        end_time = test_state.test_report.completed_at or now
+        skipped_steps = sum(tc.steps_total - tc.steps_completed - tc.steps_failed for tc in test_state.test_report.test_cases)
+        
         return TestMetrics(
-            test_id=test_state.test_plan.plan_id,
-            test_name=test_state.test_plan.name,
-            start_time=test_state.start_time or now,
-            end_time=test_state.end_time or now,
+            test_id=test_id,
+            test_name=test_name,
+            start_time=start_time,
+            end_time=end_time,
             outcome=outcome,
             steps_total=total_steps,
             steps_passed=passed_steps,
             steps_failed=failed_steps,
-            steps_skipped=len(test_state.skipped_steps),
+            steps_skipped=skipped_steps,
             api_calls=0,  # TODO: Track API calls
             browser_actions=0,  # TODO: Track browser actions
             screenshots_taken=0,  # TODO: Track screenshots
@@ -687,3 +786,27 @@ class TestReporter:
             recovery_summary={"total_attempts": 0, "successful_recoveries": 0},
             recommendations=[]
         )
+    
+    def _extract_bug_reports(self, test_state: TestState) -> List[Dict[str, Any]]:
+        """Extract bug reports from test state."""
+        if not test_state.test_report or not test_state.test_report.bugs:
+            return []
+        
+        bug_reports = []
+        for bug in test_state.test_report.bugs:
+            bug_reports.append({
+                "bug_id": str(bug.bug_id),
+                "step_id": str(bug.step_id),
+                "test_case_id": str(bug.test_case_id),
+                "step_number": bug.step_number,
+                "description": bug.description,
+                "severity": bug.severity.value,
+                "error_type": bug.error_type,
+                "expected_result": bug.expected_result,
+                "actual_result": bug.actual_result,
+                "screenshot_path": bug.screenshot_path,
+                "error_details": bug.error_details,
+                "reproduction_steps": bug.reproduction_steps
+            })
+        
+        return bug_reports

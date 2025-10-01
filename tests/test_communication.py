@@ -279,8 +279,8 @@ class TestMessageTypes:
         """Test all message types are defined."""
         expected_types = [
             "START_TEST", "STOP_TEST", "PAUSE_TEST", "RESUME_TEST",
-            "EXECUTE_STEP", "EVALUATE_RESULT", "DETERMINE_ACTION", "PLAN_TEST",
-            "STEP_COMPLETED", "STEP_FAILED", "EVALUATION_COMPLETE",
+            "EXECUTE_STEP", "DETERMINE_ACTION", "PLAN_TEST",
+            "STEP_COMPLETED", "STEP_FAILED",
             "ACTION_DETERMINED", "PLAN_CREATED",
             "STATUS_UPDATE", "ERROR", "WARNING", "INFO"
         ]
