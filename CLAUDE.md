@@ -4,6 +4,7 @@
 
 1. **No emojis**: Do not use emojis in comments, PR descriptions, commit messages, or any other content.
 2. **No backward compatibility**: This is a new tool and not in prod. There is no reason to require backwards compatibility or to mark things as deprecated. Just replace old code with new code.
+3. **No timeouts on test runs**: NEVER use timeouts when running tests or any long-running operations. This is not a time-sensitive operation and tests are designed to run for extended periods of time.
 
 ## Project Overview
 
