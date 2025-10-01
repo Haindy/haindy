@@ -33,10 +33,12 @@ class TestBaseAgent:
         agent = BaseAgent(name="TestAgent")
         
         assert agent.name == "TestAgent"
-        assert agent.model == "o4-mini-2025-04-16"
+        assert agent.model == "gpt-5"
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
+        assert agent.reasoning_level == "medium"
+        assert agent.modalities == {"text"}
 
     @patch("src.agents.base_agent.OpenAIClient")
     def test_client_lazy_loading(self, mock_client_class):
@@ -50,7 +52,11 @@ class TestBaseAgent:
         client = agent.client
         
         # Now client should be created
-        mock_client_class.assert_called_once_with(model="o4-mini-2025-04-16")
+        mock_client_class.assert_called_once_with(
+            model="gpt-5",
+            reasoning_level="medium",
+            modalities={"text"},
+        )
         assert client == mock_client_class.return_value
         
         # Second access should return same instance
@@ -160,6 +166,8 @@ class TestBaseAgent:
             temperature=0.8,
             system_prompt=agent.system_prompt,
             response_format=None,
+            reasoning_level="medium",
+            modalities={"text"},
         )
 
     @pytest.mark.asyncio
@@ -188,6 +196,8 @@ class TestBaseAgent:
             temperature=0.3,  # Override temperature
             system_prompt=agent.system_prompt,
             response_format=response_format,
+            reasoning_level="medium",
+            modalities={"text"},
         )
 
     def test_build_messages_simple(self):

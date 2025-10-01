@@ -17,6 +17,7 @@ from src.core.types import AgentMessage, TestPlan, TestState, TestStatus
 from src.orchestration.communication import MessageBus, MessageType
 from src.orchestration.state_manager import StateManager, StateTransition
 from src.monitoring.logger import get_logger
+from src.config.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -76,17 +77,36 @@ class WorkflowCoordinator:
     async def initialize(self) -> None:
         """Initialize the coordinator and create agent instances."""
         logger.info("Initializing workflow coordinator")
-        
+
+        settings = get_settings()
+        planner_cfg = settings.get_agent_model_config("test_planner")
+        runner_cfg = settings.get_agent_model_config("test_runner")
+        action_cfg = settings.get_agent_model_config("action_agent")
+
         # Create agents
         self._agents = {
-            "test_planner": TestPlannerAgent(name="TestPlanner"),
+            "test_planner": TestPlannerAgent(
+                name="TestPlanner",
+                model=planner_cfg.model,
+                temperature=planner_cfg.temperature,
+                reasoning_level=planner_cfg.reasoning_level,
+                modalities=planner_cfg.modalities,
+            ),
             "test_runner": TestRunner(
                 name="TestRunner",
-                browser_driver=self.browser_driver
+                browser_driver=self.browser_driver,
+                model=runner_cfg.model,
+                temperature=runner_cfg.temperature,
+                reasoning_level=runner_cfg.reasoning_level,
+                modalities=runner_cfg.modalities,
             ),
             "action_agent": ActionAgent(
                 name="ActionAgent",
-                browser_driver=self.browser_driver
+                browser_driver=self.browser_driver,
+                model=action_cfg.model,
+                temperature=action_cfg.temperature,
+                reasoning_level=action_cfg.reasoning_level,
+                modalities=action_cfg.modalities,
             )
         }
         

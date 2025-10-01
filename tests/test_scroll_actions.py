@@ -25,7 +25,7 @@ def mock_settings():
     settings.grid_confidence_threshold = 0.8
     settings.grid_refinement_enabled = True
     settings.openai_api_key = "test-key"
-    settings.openai_model = "gpt-4o-mini"
+    settings.openai_model = "gpt-5"
     settings.openai_temperature = 0.7
     settings.openai_max_retries = 3
     settings.browser_headless = True

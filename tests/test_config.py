@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.config.settings import ConfigManager, Settings, get_settings
+from src.config.settings import AgentModelConfig, ConfigManager, Settings, get_settings
 
 
 class TestSettings:
@@ -18,7 +18,7 @@ class TestSettings:
         """Test default settings values."""
         settings = Settings()
         
-        assert settings.openai_model == "gpt-4o-mini"
+        assert settings.openai_model == "gpt-5"
         assert settings.openai_temperature == 0.7
         assert settings.grid_size == 60
         assert settings.grid_refinement_enabled is True
@@ -28,6 +28,11 @@ class TestSettings:
         assert settings.max_test_steps == 100
         assert settings.log_level == "INFO"
         assert settings.debug_mode is False
+        assert settings.openai_request_timeout_seconds == 900
+        assert settings.agent_models["test_planner"].model == "gpt-5"
+        assert settings.agent_models["test_runner"].model == "gpt-5"
+        assert settings.agent_models["action_agent"].model == "gpt-5"
+        assert settings.agent_models["action_agent"].modalities == {"text", "vision"}
 
     def test_settings_from_env(self):
         """Test loading settings from environment variables."""
@@ -37,6 +42,10 @@ class TestSettings:
             "GRID_SIZE": "80",
             "LOG_LEVEL": "DEBUG",
             "DEBUG_MODE": "true",
+            "OPENAI_REQUEST_TIMEOUT_SECONDS": "1200",
+            "HAINDY_TEST_PLANNER_MODEL": "gpt-5",
+            "HAINDY_TEST_RUNNER_MODEL": "gpt-5",
+            "HAINDY_ACTION_AGENT_MODEL": "gpt-5",
         }):
             settings = Settings()
             
@@ -45,6 +54,47 @@ class TestSettings:
             assert settings.grid_size == 80
             assert settings.log_level == "DEBUG"
             assert settings.debug_mode is True
+            assert settings.openai_request_timeout_seconds == 1200
+            assert settings.agent_models["test_planner"].model == "gpt-5"
+            assert settings.agent_models["test_runner"].model == "gpt-5"
+            assert settings.agent_models["action_agent"].model == "gpt-5"
+
+    def test_agent_model_env_overrides(self):
+        """Agent model configuration should respect dedicated env variables."""
+        with patch.dict(os.environ, {
+            "HAINDY_TEST_PLANNER_MODEL": "gpt-5",
+            "HAINDY_TEST_PLANNER_TEMPERATURE": "0.4",
+            "HAINDY_TEST_PLANNER_REASONING_LEVEL": "high",
+            "HAINDY_TEST_RUNNER_MODEL": "gpt-5",
+            "HAINDY_TEST_RUNNER_REASONING_LEVEL": "medium",
+            "HAINDY_ACTION_AGENT_MODEL": "gpt-5",
+            "HAINDY_ACTION_AGENT_MODALITIES": "text,vision",
+        }, clear=True):
+            settings = Settings()
+
+            planner = settings.agent_models["test_planner"]
+            assert planner.model == "gpt-5"
+            assert planner.temperature == 0.4
+            assert planner.reasoning_level == "high"
+
+            runner = settings.agent_models["test_runner"]
+            assert runner.model == "gpt-5"
+            assert runner.reasoning_level == "medium"
+
+            action_agent = settings.agent_models["action_agent"]
+            assert action_agent.modalities == {"text", "vision"}
+
+    def test_openai_env_fallback(self):
+        """OPENAI_* variables should cascade when agent overrides are missing."""
+        with patch.dict(os.environ, {
+            "OPENAI_MODEL": "gpt-4o",
+            "OPENAI_TEMPERATURE": "0.9",
+        }, clear=True):
+            settings = Settings()
+
+            planner = settings.agent_models["test_planner"]
+            assert planner.model == "gpt-4o"
+            assert planner.temperature == 0.9
 
     def test_log_level_validation(self):
         """Test log level validation."""

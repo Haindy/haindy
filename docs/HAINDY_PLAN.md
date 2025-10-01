@@ -18,7 +18,7 @@
 |-------|------------|-----|--------|
 | Orchestrator | **Python 3.10+** | Best ecosystem for AI & agent coordination. | ✅ |
 | Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. | ✅ |
-| AI Agents | **3x OpenAI GPT-4o mini instances** | Multi-agent system: Planner, Runner, Action agents. | ⚠️ Vision limitations |
+| AI Agents | **GPT-5 family** | All agents run on GPT-5 with role-specific reasoning levels and modalities. | ✅ Modern model mix |
 | Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. | ✅ |
 | Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (60×60 grid). | ✅ |
 | Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. | ✅ |
@@ -26,6 +26,17 @@
 | Packaging | `setuptools` + `pyproject.toml` | Simple `pip` distribution. | ✅ |
 
 ---
+
+### Model Configuration (Oct 2025)
+
+| Agent | Model | Reasoning Level | Temperature |
+|-------|-------|-----------------|-------------|
+| Test Planner | `gpt-5` | High | 0.35 |
+| Test Runner | `gpt-5` | Medium | 0.55 |
+| Action Agent | `gpt-5` | Low (vision-enabled, escalates as needed) | 0.25 |
+
+Per-agent overrides live in `.env` (`HAINDY_TEST_*` variables) and fall back to
+global `OPENAI_MODEL`/`OPENAI_TEMPERATURE` for compatibility.
 
 ## 3  Folder Structure
 
@@ -252,11 +263,12 @@ Additional completed work:
 ## 10  Immediate Next Steps
 
 1. ~~Complete Phase 16 Evaluator Agent Reassessment~~ ✅ DONE
-2. Complete Phase 17 Usability & Persistence Improvements
-3. Complete Phase 12 test scenarios (4 remaining)
-4. Resume Phase 18 Additional Action Types
-5. Complete Phase 19 Packaging & Documentation
-6. Package and release v0.1.0
+2. ~~Adopt GPT-5 / GPT-4.1 model configuration for all agents~~ ✅ DONE
+3. Complete Phase 17 Usability & Persistence Improvements
+4. Complete Phase 12 test scenarios (4 remaining)
+5. Resume Phase 18 Additional Action Types
+6. Complete Phase 19 Packaging & Documentation
+7. Package and release v0.1.0
 
 ---
 
@@ -267,4 +279,4 @@ Additional completed work:
 | Test Coverage | 81% | 80%+ ✅ |
 | Code Quality | Zero warnings | Maintained ✅ |
 | Test Success Rate | 20% (1/5 scenarios) | 60%+ (3/5 scenarios) |
-| AI Vision Accuracy | Improved with o4-mini | High |
+| AI Vision Accuracy | Stabilized with GPT-4.1-mini-vision | High |

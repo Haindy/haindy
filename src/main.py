@@ -252,11 +252,25 @@ async def run_test(
             table.add_column("Expected Result", style="white")
             
             for i, step in enumerate(test_plan.steps, 1):
+                instruction = step.action_instruction
+                action_label = None
+                target_label = None
+                expected_label = None
+
+                if instruction is not None:
+                    action_label = (
+                        instruction.action_type.value
+                        if hasattr(instruction.action_type, "value")
+                        else instruction.action_type
+                    )
+                    target_label = instruction.target
+                    expected_label = instruction.expected_outcome
+
                 table.add_row(
                     str(i),
-                    step.action_instruction.action_type,
-                    step.action_instruction.target or "-",
-                    step.description,
+                    action_label or step.action,
+                    target_label or "-",
+                    expected_label or step.expected_result or step.description,
                 )
             
             console.print(table)
@@ -444,7 +458,7 @@ async def test_api_connection() -> int:
         console.print("\n[yellow]Please check:[/yellow]")
         console.print("1. Your OPENAI_API_KEY environment variable is set")
         console.print("2. Your API key has sufficient credits")
-        console.print("3. You have access to the gpt-4o-mini model")
+        console.print("3. Your account is enabled for the GPT-4.1 or GPT-5 models")
         return 1
 
 

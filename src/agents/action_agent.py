@@ -93,7 +93,8 @@ class ActionAgent(BaseAgent):
         step_number: Optional[int] = None,
         temperature: Optional[float] = None,
         response_format: Optional[Dict[str, Any]] = None,
-        screenshot_path: Optional[str] = None
+        screenshot_path: Optional[str] = None,
+        reasoning_level: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Conversation-aware OpenAI API call with debug logging.
@@ -125,10 +126,12 @@ class ActionAgent(BaseAgent):
         prompt_text = self._extract_prompt_text(messages)
         
         # Make the API call with full conversation context
-        # o4-mini only supports default temperature (1.0)
         response = await self.call_openai(
             messages=full_messages,
-            response_format=response_format
+            response_format=response_format,
+            temperature=temperature or self.temperature,
+            reasoning_level=reasoning_level or self.reasoning_level,
+            modalities=self.modalities,
         )
         
         # Add assistant response to conversation history
@@ -150,6 +153,7 @@ class ActionAgent(BaseAgent):
                     "step_number": step_number,
                     "temperature": temperature,
                     "response_format": response_format,
+                    "reasoning_level": reasoning_level or self.reasoning_level,
                     "conversation_length": len(self.conversation_history)
                 }
             )
@@ -164,12 +168,12 @@ class ActionAgent(BaseAgent):
             List of messages that fit within token limit
         """
         # Get encoding for token counting
-        # o4-mini uses the same tokenizer as gpt-4
-        model_for_encoding = "gpt-4" if "o4-mini" in self.model else self.model
+        # GPT-4.1 and legacy o-series share the GPT-4 tokenizer
+        model_for_encoding = "gpt-4" if "o4" in self.model else self.model
         encoding = tiktoken.encoding_for_model(model_for_encoding)
-        
+
         # Token limits (leaving room for response)
-        max_tokens = 200000  # o4-mini context window
+        max_tokens = 200000  # Large context window for GPT-4.1 vision models
         response_buffer = 4000  # Reserve tokens for response
         max_context_tokens = max_tokens - response_buffer
         

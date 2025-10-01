@@ -82,7 +82,7 @@ class TestUtilityCommands:
         """Test successful API connection test."""
         mock_response = {
             "content": "API test successful",
-            "model": "gpt-4o-mini",
+            "model": "gpt-5",
             "usage": {"total_tokens": 10}
         }
         
@@ -96,7 +96,7 @@ class TestUtilityCommands:
             
             assert result == 0
             assert "OpenAI API connection successful" in captured.out
-            assert "Model: gpt-4o-mini" in captured.out
+            assert "Model: gpt-5" in captured.out
     
     @pytest.mark.asyncio
     async def test_api_connection_failure(self, capsys):
