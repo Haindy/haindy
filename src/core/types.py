@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TestStatus(str, Enum):
@@ -154,10 +154,53 @@ class TestPlan(BaseModel):
     description: str = Field(..., description="Overall test plan description")
     requirements_source: str = Field(..., description="Source of requirements (e.g., PRD v1.2, URL)")
     test_cases: List[TestCase] = Field(..., description="List of test cases in this plan")
+    steps: List[TestStep] = Field(
+        default_factory=list,
+        description="Flattened list of all steps for legacy consumers",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_by: str = Field("HAINDY Test Planner", description="Who/what created this plan")
     tags: List[str] = Field(default_factory=list, description="Overall plan tags")
     estimated_duration_seconds: Optional[int] = Field(None, description="Total estimated duration")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _synchronize_steps(cls, data: Any) -> Any:
+        """Ensure legacy `steps` access works regardless of input structure."""
+        if not isinstance(data, dict):
+            return data
+
+        test_cases = data.get("test_cases")
+        steps = data.get("steps")
+
+        if test_cases:
+            aggregated_steps: List[Any] = []
+            for case in test_cases:
+                if isinstance(case, TestCase):
+                    aggregated_steps.extend(case.steps)
+                elif isinstance(case, dict):
+                    aggregated_steps.extend(case.get("steps", []))
+            if aggregated_steps and not steps:
+                data["steps"] = aggregated_steps
+        elif steps:
+            default_case = {
+                "test_id": "TC001",
+                "name": data.get("name", "Legacy Test Case"),
+                "description": data.get(
+                    "description", "Test case generated from legacy steps"
+                ),
+                "priority": TestCasePriority.MEDIUM,
+                "prerequisites": [],
+                "steps": steps,
+                "postconditions": [],
+                "tags": [],
+            }
+            data["test_cases"] = data.get("test_cases") or [default_case]
+        else:
+            data.setdefault("test_cases", [])
+            data.setdefault("steps", [])
+
+        return data
 
 
 class TestState(BaseModel):

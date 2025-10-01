@@ -1,17 +1,64 @@
-"""
-Configuration management for the HAINDY framework.
-"""
+"""Configuration management for the HAINDY framework."""
 
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from dotenv import load_dotenv
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.interfaces import ConfigProvider
+
+
+AGENT_ENV_PREFIX: Dict[str, str] = {
+    "test_planner": "HAINDY_TEST_PLANNER",
+    "test_runner": "HAINDY_TEST_RUNNER",
+    "action_agent": "HAINDY_ACTION_AGENT",
+}
+
+
+class AgentModelConfig(BaseModel):
+    """Per-agent model configuration."""
+
+    model: str
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    reasoning_level: str = Field(default="medium")
+    modalities: Set[str] = Field(default_factory=lambda: {"text"})
+
+    @model_validator(mode="after")
+    def validate_reasoning_level(cls, values: "AgentModelConfig") -> "AgentModelConfig":
+        """Ensure reasoning level is valid."""
+        allowed = {"low", "medium", "high"}
+        if values.reasoning_level not in allowed:
+            raise ValueError(
+                f"Invalid reasoning level: {values.reasoning_level}. "
+                f"Allowed values: {sorted(allowed)}"
+            )
+        if not values.modalities:
+            raise ValueError("Agent modalities cannot be empty")
+        return values
+
+
+DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
+    "test_planner": AgentModelConfig(
+        model="gpt-5",
+        temperature=0.35,
+        reasoning_level="high",
+    ),
+    "test_runner": AgentModelConfig(
+        model="gpt-5",
+        temperature=0.55,
+        reasoning_level="medium",
+    ),
+    "action_agent": AgentModelConfig(
+        model="gpt-5",
+        temperature=0.25,
+        reasoning_level="low",
+        modalities={"text", "vision"},
+    ),
+}
 
 
 class Settings(BaseSettings):
@@ -21,18 +68,28 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(
-        default="o4-mini", description="Default OpenAI model"
+        default="gpt-5", description="Default OpenAI model"
     )
     openai_temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Default temperature"
     )
     openai_max_retries: int = Field(
         default=3, ge=1, description="Maximum API retry attempts"
+    )
+    openai_request_timeout_seconds: int = Field(
+        default=900,
+        ge=60,
+        description="Request timeout for OpenAI API calls in seconds",
+    )
+    agent_models: Dict[str, AgentModelConfig] = Field(
+        default_factory=dict,
+        description="Per-agent OpenAI model configuration",
     )
 
     # Grid System Configuration
@@ -147,6 +204,72 @@ class Settings(BaseSettings):
             self.cache_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
+
+    @model_validator(mode="after")
+    def populate_agent_models(self) -> "Settings":
+        """Populate agent model configurations from defaults and environment."""
+        env = os.environ
+
+        configured_models: Dict[str, AgentModelConfig] = {}
+        openai_model_env_set = "OPENAI_MODEL" in env
+        openai_temperature_env_set = "OPENAI_TEMPERATURE" in env
+
+        # Preserve user supplied mapping while ensuring defaults exist
+        existing_models = self.agent_models.copy()
+
+        for agent_name, prefix in AGENT_ENV_PREFIX.items():
+            base_config = existing_models.get(agent_name, DEFAULT_AGENT_MODELS[agent_name])
+            config_payload = base_config.model_dump()
+
+            model_override = env.get(f"{prefix}_MODEL")
+            if model_override:
+                config_payload["model"] = model_override
+            elif openai_model_env_set:
+                config_payload["model"] = self.openai_model
+
+            temperature_override = env.get(f"{prefix}_TEMPERATURE")
+            if temperature_override:
+                try:
+                    config_payload["temperature"] = float(temperature_override)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid temperature for {agent_name}: {temperature_override}"
+                    ) from exc
+            elif openai_temperature_env_set:
+                config_payload["temperature"] = self.openai_temperature
+
+            reasoning_override = env.get(f"{prefix}_REASONING_LEVEL")
+            if reasoning_override:
+                config_payload["reasoning_level"] = reasoning_override.lower()
+
+            modalities_override = env.get(f"{prefix}_MODALITIES")
+            if modalities_override:
+                config_payload["modalities"] = {
+                    modality.strip().lower()
+                    for modality in modalities_override.split(",")
+                    if modality.strip()
+                }
+
+            configured_models[agent_name] = AgentModelConfig(**config_payload)
+
+        # Include any extra agent configs supplied directly
+        for agent_name, config in existing_models.items():
+            if agent_name not in configured_models:
+                configured_models[agent_name] = config
+
+        self.agent_models = configured_models
+        return self
+
+    def get_agent_model_config(self, agent_name: str) -> AgentModelConfig:
+        """Return agent-specific model configuration."""
+        if agent_name in self.agent_models:
+            return self.agent_models[agent_name]
+
+        return AgentModelConfig(
+            model=self.openai_model,
+            temperature=self.openai_temperature,
+            reasoning_level="medium",
+        )
 
 
 class ConfigManager(ConfigProvider):

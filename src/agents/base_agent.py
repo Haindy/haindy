@@ -1,9 +1,7 @@
-"""
-Base implementation for AI agents in the HAINDY framework.
-"""
+"""Base implementation for AI agents in the HAINDY framework."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from src.core.interfaces import Agent
 from src.core.types import AgentMessage, ConfidenceLevel
@@ -16,9 +14,11 @@ class BaseAgent(Agent):
     def __init__(
         self,
         name: str,
-        model: str = "o4-mini",
+        model: str = "gpt-5",
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
+        reasoning_level: str = "medium",
+        modalities: Optional[Set[str]] = None,
     ) -> None:
         """
         Initialize the base agent.
@@ -33,6 +33,8 @@ class BaseAgent(Agent):
         self.logger = logging.getLogger(f"agent.{name}")
         self.system_prompt = system_prompt or self._get_default_system_prompt()
         self.temperature = temperature
+        self.reasoning_level = reasoning_level
+        self.modalities = modalities or {"text"}
         self._client: Optional[OpenAIClient] = None
 
     def _get_default_system_prompt(self) -> str:
@@ -47,7 +49,11 @@ class BaseAgent(Agent):
     def client(self) -> OpenAIClient:
         """Lazy-load OpenAI client."""
         if self._client is None:
-            self._client = OpenAIClient(model=self.model)
+            self._client = OpenAIClient(
+                model=self.model,
+                reasoning_level=self.reasoning_level,
+                modalities=self.modalities,
+            )
         return self._client
 
     async def process(self, message: AgentMessage) -> Optional[AgentMessage]:
@@ -150,6 +156,8 @@ class BaseAgent(Agent):
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         response_format: Optional[Dict[str, Any]] = None,
+        reasoning_level: Optional[str] = None,
+        modalities: Optional[Set[str]] = None,
     ) -> Dict[str, Any]:
         """
         Make a call to OpenAI API.
@@ -167,7 +175,15 @@ class BaseAgent(Agent):
             temperature=temperature or self.temperature,
             system_prompt=self.system_prompt,
             response_format=response_format,
+            reasoning_level=reasoning_level or self.reasoning_level,
+            modalities=modalities or self.modalities,
         )
+
+    def update_reasoning_level(self, level: str) -> None:
+        """Update reasoning level for future calls."""
+        self.reasoning_level = level
+        if self._client:
+            self._client.reasoning_level = level
 
     def build_messages(
         self,

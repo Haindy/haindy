@@ -34,7 +34,7 @@ Create 5 comprehensive test scenarios, measure success rates.
 
 ### Known Issues
 - GPT-4o-mini has limitations with multiple image analysis
-- Typing validation issues have been resolved with o4-mini model
+- Typing validation issues have been resolved with GPT-5 (vision-enabled configuration)
 - Complex scenarios may require conversation-based AI interactions (Phase 13)
 
 ### Success Criteria
