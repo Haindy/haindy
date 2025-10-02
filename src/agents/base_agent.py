@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from src.core.interfaces import Agent
 from src.core.types import AgentMessage, ConfidenceLevel
-from src.models.openai_client import OpenAIClient
+from src.models.openai_client import OpenAIClient, ResponseStreamObserver
 
 
 class BaseAgent(Agent):
@@ -158,6 +158,8 @@ class BaseAgent(Agent):
         response_format: Optional[Dict[str, Any]] = None,
         reasoning_level: Optional[str] = None,
         modalities: Optional[Set[str]] = None,
+        stream: bool = False,
+        stream_observer: Optional[ResponseStreamObserver] = None,
     ) -> Dict[str, Any]:
         """
         Make a call to OpenAI API.
@@ -166,6 +168,8 @@ class BaseAgent(Agent):
             messages: List of message dictionaries
             temperature: Override default temperature
             response_format: Optional response format specification
+            stream: Enable streaming Responses API integration
+            stream_observer: Optional observer for streaming events
 
         Returns:
             API response
@@ -177,6 +181,8 @@ class BaseAgent(Agent):
             response_format=response_format,
             reasoning_level=reasoning_level or self.reasoning_level,
             modalities=modalities or self.modalities,
+            stream=stream,
+            stream_observer=stream_observer,
         )
 
     def update_reasoning_level(self, level: str) -> None:

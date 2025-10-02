@@ -9,7 +9,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -20,6 +20,7 @@ from rich.table import Table
 from src.browser.controller import BrowserController
 from src.agents.test_planner import TestPlannerAgent
 from src.config.settings import get_settings
+from src.models.openai_client import ResponseStreamObserver
 from src.monitoring.logger import get_logger, setup_logging
 from src.monitoring.reporter import TestReporter
 from src.monitoring.debug_logger import initialize_debug_logger
@@ -33,6 +34,146 @@ console = Console()
 logger = get_logger("main")
 
 
+class PlanGenerationStreamObserver(ResponseStreamObserver):
+    """Update the CLI while the Responses API streams tokens."""
+
+    def __init__(self, progress: Progress, task_id: int) -> None:
+        self.progress = progress
+        self.task_id = task_id
+        self.output_tokens = 0
+        self.total_tokens = 0
+        self.prompt_tokens = 0
+        self._had_usage_delta = False
+        self._final_usage: Optional[Dict[str, int]] = None
+        self._saw_error = False
+        self.estimated_tokens = 0
+        self._last_delta_tokens = 0
+        self._last_delta_chars = 0
+        self._has_stream_activity = False
+
+    def on_stream_start(self) -> None:
+        self._safe_update("[cyan]GPT-5 thinking…[/cyan]")
+
+    def on_text_delta(self, delta: str) -> None:
+        # Text deltas are not displayed to avoid noisy console output.
+        return
+
+    def on_token_progress(
+        self, total_tokens: int, delta_tokens: int, delta_chars: int
+    ) -> None:
+        self.estimated_tokens = max(self.estimated_tokens, total_tokens)
+        self._last_delta_tokens = delta_tokens
+        self._last_delta_chars = delta_chars
+        self._has_stream_activity = True
+        descriptor = self._format_progress_label()
+        self._safe_update(descriptor)
+
+    def on_usage_delta(self, delta: Dict[str, int]) -> None:
+        self._had_usage_delta = True
+        self._has_stream_activity = True
+        self.output_tokens += int(delta.get("output_tokens", 0))
+        self.total_tokens = max(self.total_tokens, int(delta.get("total_tokens", 0)))
+        self.prompt_tokens = max(self.prompt_tokens, int(delta.get("input_tokens", 0)))
+        self._safe_update(
+            f"[cyan]GPT-5 planning… {self.output_tokens} output tokens[/cyan]"
+        )
+
+    def on_usage_total(self, totals: Dict[str, int]) -> None:
+        self._final_usage = {
+            "input_tokens": int(totals.get("input_tokens", 0)),
+            "output_tokens": int(totals.get("output_tokens", 0)),
+            "total_tokens": int(totals.get("total_tokens", 0)),
+        }
+        self.output_tokens = max(self.output_tokens, self._final_usage["output_tokens"])
+        self.total_tokens = max(self.total_tokens, self._final_usage["total_tokens"])
+        self.prompt_tokens = max(self.prompt_tokens, self._final_usage["input_tokens"])
+        self.estimated_tokens = max(self.estimated_tokens, self._final_usage["output_tokens"])
+
+    def on_error(self, error: object) -> None:
+        self._saw_error = True
+        self._safe_update(
+            "[yellow]Streaming interrupted, retrying with fallback...[/yellow]"
+        )
+
+    def on_stream_end(self) -> None:
+        if (
+            not self._saw_error
+            and not self._had_usage_delta
+            and self.estimated_tokens == 0
+            and not self._has_stream_activity
+        ):
+            self._safe_update("[cyan]Awaiting final response…[/cyan]")
+
+    def mark_complete(self) -> None:
+        if self._final_usage:
+            message = (
+                "[green]Test plan generated"
+                f" ({self._final_usage['output_tokens']} output tokens)[/green]"
+            )
+        elif self._had_usage_delta or self.output_tokens:
+            message = (
+                "[green]Test plan generated"
+                f" ({self.output_tokens} output tokens)[/green]"
+            )
+        elif self.estimated_tokens:
+            message = (
+                "[green]Test plan generated"
+                f" (~{self.estimated_tokens} output tokens)[/green]"
+            )
+        else:
+            label = (
+                "fallback (usage metrics unavailable)"
+                if self._saw_error
+                else "usage metrics unavailable"
+            )
+            message = (
+                "[green]Test plan generated[/green] "
+                f"[yellow]({label})[/yellow]"
+            )
+
+        self._safe_update(message)
+
+    def has_usage_data(self) -> bool:
+        return (
+            bool(self._final_usage and any(self._final_usage.values()))
+            or self._had_usage_delta
+            or self.estimated_tokens > 0
+        )
+
+    def get_usage_totals(self) -> Optional[Dict[str, int]]:
+        if self._final_usage:
+            return dict(self._final_usage)
+
+        if self._had_usage_delta or self.output_tokens:
+            return {
+                "input_tokens": self.prompt_tokens,
+                "output_tokens": self.output_tokens,
+                "total_tokens": self.total_tokens or self.output_tokens,
+            }
+
+        if self.estimated_tokens:
+            return {
+                "input_tokens": 0,
+                "output_tokens": self.estimated_tokens,
+                "total_tokens": self.estimated_tokens,
+            }
+
+        return None
+
+    def _safe_update(self, description: str) -> None:
+        try:
+            self.progress.update(self.task_id, description=description)
+        except Exception:  # pragma: no cover - defensive UI update guard
+            return
+
+    def _format_progress_label(self) -> str:
+        if self._last_delta_tokens and self._last_delta_chars:
+            return (
+                "[cyan]GPT-5 planning… "
+                f"{self.estimated_tokens} tokens (+{self._last_delta_tokens} | "
+                f"{self._last_delta_chars} chars)[/cyan]"
+            )
+        return f"[cyan]GPT-5 planning… {self.estimated_tokens} tokens[/cyan]"
 def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser."""
     parser = argparse.ArgumentParser(
@@ -385,10 +526,53 @@ async def _generate_plan_only_plan(requirements: str):
             "[cyan]Waiting for GPT-5 to craft the test plan...[/cyan]",
             total=None,
         )
-        test_plan = await planner.create_test_plan(requirements)
-        progress.update(task, completed=True)
+        stream_observer = PlanGenerationStreamObserver(progress, task)
+        test_plan = await planner.create_test_plan(
+            requirements,
+            stream_observer=stream_observer,
+        )
+        stream_observer.mark_complete()
+        progress.stop_task(task)
+
+    usage_totals = stream_observer.get_usage_totals()
+    _print_plan_stats(test_plan, usage_totals, stream_observer.has_usage_data())
 
     return test_plan
+
+
+def _print_plan_stats(
+    test_plan,
+    usage_totals: Optional[Dict[str, int]],
+    usage_available: bool,
+) -> None:
+    """Render a concise stats block for the generated plan."""
+    num_cases = len(getattr(test_plan, "test_cases", []))
+    total_steps = sum(len(case.steps) for case in getattr(test_plan, "test_cases", []))
+    duration_seconds = getattr(test_plan, "estimated_duration_seconds", None)
+
+    console.print("\n[bold cyan]Test Plan Stats[/bold cyan]")
+    console.print(f"Test cases: [green]{num_cases}[/green]")
+    console.print(f"Total steps: [green]{total_steps}[/green]")
+
+    if duration_seconds is not None:
+        minutes = duration_seconds / 60
+        console.print(
+            "Estimated duration: "
+            f"[green]{duration_seconds}s[/green] (~{minutes:.1f} min)"
+        )
+    else:
+        console.print("Estimated duration: [yellow]not provided[/yellow]")
+
+    if usage_totals and (usage_totals.get("output_tokens") or usage_totals.get("total_tokens")):
+        console.print(
+            "LLM tokens: "
+            f"[green]{usage_totals.get('output_tokens', 0)} output[/green] / "
+            f"[green]{usage_totals.get('total_tokens', 0)} total[/green]"
+        )
+    elif usage_available:
+        console.print("LLM tokens: [yellow]usage metrics unavailable[/yellow]")
+    else:
+        console.print("LLM tokens: [yellow]not reported[/yellow]")
 
 
 def _render_plan_table(test_plan) -> None:
