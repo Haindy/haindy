@@ -69,7 +69,6 @@ class TestPlanFormatter:
         
         # Metadata
         lines.append(f"**Description**: {test_plan.description}")
-        lines.append(f"**Created**: {test_plan.created_at.strftime('%Y-%m-%d %H:%M UTC')}")
         lines.append(f"**Requirements Source**: {test_plan.requirements_source}")
         if test_plan.tags:
             lines.append(f"**Tags**: {', '.join(test_plan.tags)}")
