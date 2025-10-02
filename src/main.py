@@ -18,6 +18,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from src.browser.controller import BrowserController
+from src.agents.test_planner import TestPlannerAgent
 from src.config.settings import get_settings
 from src.monitoring.logger import get_logger, setup_logging
 from src.monitoring.reporter import TestReporter
@@ -205,7 +206,18 @@ async def run_test(
         if berserk:
             console.print("\n[bold red]BERSERK MODE ACTIVATED[/bold red]")
             console.print("[yellow]Running in fully autonomous mode - no confirmations![/yellow]\n")
-        
+
+        if plan_only:
+            console.print("\n[dim]Skipping browser startup (--plan-only mode). Only the Test Planner will run.[/dim]")
+            console.print("\n[yellow]Generating test plan...[/yellow]")
+
+            test_plan = await _generate_plan_only_plan(requirements)
+
+            _render_plan_table(test_plan)
+            _print_plan_storage_locations(test_plan)
+
+            return 0
+
         # Initialize core components
         with Progress(
             SpinnerColumn(),
@@ -238,43 +250,6 @@ async def run_test(
         # Navigate to initial URL
         console.print(f"\n[cyan]Navigating to:[/cyan] {url}")
         await browser_controller.navigate(url)
-        
-        if plan_only:
-            # Generate test plan only
-            console.print("\n[yellow]Generating test plan...[/yellow]")
-            test_plan = await coordinator.generate_test_plan(requirements)
-            
-            # Display test plan
-            table = Table(title="Test Plan", show_lines=True)
-            table.add_column("Step", style="cyan", width=6)
-            table.add_column("Action", style="green")
-            table.add_column("Target", style="yellow")
-            table.add_column("Expected Result", style="white")
-            
-            for i, step in enumerate(test_plan.steps, 1):
-                instruction = step.action_instruction
-                action_label = None
-                target_label = None
-                expected_label = None
-
-                if instruction is not None:
-                    action_label = (
-                        instruction.action_type.value
-                        if hasattr(instruction.action_type, "value")
-                        else instruction.action_type
-                    )
-                    target_label = instruction.target
-                    expected_label = instruction.expected_outcome
-
-                table.add_row(
-                    str(i),
-                    action_label or step.action,
-                    target_label or "-",
-                    expected_label or step.expected_result or step.description,
-                )
-            
-            console.print(table)
-            return 0
         
         # Execute test
         console.print(f"\n[green]Executing test:[/green] {requirements[:100]}...")
@@ -388,6 +363,96 @@ async def run_test(
             await browser_controller.stop()
 
 
+async def _generate_plan_only_plan(requirements: str):
+    """Create a test plan using only the Test Planner agent."""
+    settings = get_settings()
+    planner_cfg = settings.get_agent_model_config("test_planner")
+
+    planner = TestPlannerAgent(
+        name="TestPlanner",
+        model=planner_cfg.model,
+        temperature=planner_cfg.temperature,
+        reasoning_level=planner_cfg.reasoning_level,
+        modalities=planner_cfg.modalities,
+    )
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(
+            "[cyan]Waiting for GPT-5 to craft the test plan...[/cyan]",
+            total=None,
+        )
+        test_plan = await planner.create_test_plan(requirements)
+        progress.update(task, completed=True)
+
+    return test_plan
+
+
+def _render_plan_table(test_plan) -> None:
+    """Render the generated test plan as a table in the console."""
+    if not getattr(test_plan, "steps", None):
+        console.print("[yellow]No steps were generated for this plan.[/yellow]")
+        return
+
+    table = Table(title="Test Plan", show_lines=True)
+    table.add_column("Step", style="cyan", width=6)
+    table.add_column("Action", style="green")
+    table.add_column("Target", style="yellow")
+    table.add_column("Expected Result", style="white")
+
+    for i, step in enumerate(test_plan.steps, 1):
+        instruction = getattr(step, "action_instruction", None)
+        action_label = None
+        target_label = None
+        expected_label = None
+
+        if instruction is not None:
+            action_type = getattr(instruction, "action_type", None)
+            action_label = getattr(action_type, "value", None) or action_type
+            target_label = getattr(instruction, "target", None)
+            expected_label = getattr(instruction, "expected_outcome", None)
+
+        table.add_row(
+            str(i),
+            action_label or getattr(step, "action", ""),
+            target_label or "-",
+            expected_label
+            or getattr(step, "expected_result", None)
+            or getattr(step, "description", ""),
+        )
+
+    console.print(table)
+
+
+def _print_plan_storage_locations(test_plan) -> None:
+    """Print the directory and filenames where the plan was saved."""
+    plan_dir = Path("generated_test_plans") / str(test_plan.plan_id)
+    json_path = plan_dir / f"test_plan_{test_plan.plan_id}.json"
+    md_path = plan_dir / f"test_plan_{test_plan.plan_id}.md"
+
+    console.print(
+        f"\n[green]Plan saved to:[/green] {plan_dir.resolve()}",
+        soft_wrap=True,
+    )
+
+    files_output = []
+    if json_path.exists():
+        files_output.append(f" - {json_path.name}")
+    else:
+        files_output.append(f" - {json_path.name} [yellow](not found)[/yellow]")
+
+    if md_path.exists():
+        files_output.append(f" - {md_path.name}")
+    else:
+        files_output.append(f" - {md_path.name} [yellow](not found)[/yellow]")
+
+    for line in files_output:
+        console.print(line, soft_wrap=True)
+
+
 def get_interactive_requirements() -> tuple[str, str]:
     """Get test requirements interactively from user."""
     console.print("\n[bold cyan]HAINDY Interactive Mode[/bold cyan]")
@@ -491,15 +556,19 @@ async def read_plan_file(file_path: Path) -> tuple[str, str]:
     url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?\'")\]}]'
     urls = re.findall(url_pattern, file_contents)
     
+    requirements_text = file_contents
+
     if urls:
         # Use the first URL found
         url = urls[0]
         console.print(f"[dim]Found URL in document: {url}[/dim]")
+        requirements_text = requirements_text.replace(url, "", 1).strip()
     else:
         # Prompt for URL
         url = Prompt.ask("\n[cyan]Enter the application URL[/cyan]")
+        requirements_text = requirements_text.strip()
     
-    return file_contents, url
+    return requirements_text, url
 
 
 async def async_main(args: Optional[list[str]] = None) -> int:

@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -13,9 +14,11 @@ from src.main import (
     create_parser,
     get_interactive_requirements,
     read_plan_file,
+    run_test,
     show_version,
     test_api_connection,
 )
+from src.core.types import TestCase, TestCasePriority, TestPlan, TestStep
 
 
 class TestCLIParser:
@@ -261,7 +264,7 @@ class TestMainFlow:
             "requirements": "Test requirements",
             "url": "https://example.com"
         }
-        
+
         with patch("src.main.load_scenario") as mock_load:
             mock_load.return_value = test_scenario
             
@@ -276,7 +279,89 @@ class TestMainFlow:
                 call_kwargs = mock_run.call_args.kwargs
                 assert call_kwargs["requirements"] == "Test requirements"
                 assert call_kwargs["url"] == "https://example.com"
-    
+
+    @pytest.mark.asyncio
+    async def test_plan_only_skips_browser_and_reports_storage(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Plan-only mode should avoid browser startup and report saved files."""
+        monkeypatch.chdir(tmp_path)
+
+        step = TestStep(
+            step_number=1,
+            description="Navigate to home page",
+            action="navigate",
+            expected_result="Home page is displayed",
+        )
+        case = TestCase(
+            test_id="TC001",
+            name="Sample Case",
+            description="Test description",
+            priority=TestCasePriority.MEDIUM,
+            prerequisites=[],
+            steps=[step],
+            postconditions=[],
+            tags=[],
+        )
+
+        plan_id = uuid4()
+        test_plan = TestPlan(
+            plan_id=plan_id,
+            name="Sample Plan",
+            description="Plan description",
+            requirements_source="Test requirements",
+            test_cases=[case],
+        )
+
+        plan_dir = Path("generated_test_plans") / str(plan_id)
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / f"test_plan_{plan_id}.json").write_text("{}")
+        (plan_dir / f"test_plan_{plan_id}.md").write_text("# Plan")
+
+        planner_instance = MagicMock()
+        planner_instance.create_test_plan = AsyncMock(return_value=test_plan)
+
+        class DummyProgress:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def add_task(self, *args, **kwargs):
+                return "task"
+
+            def update(self, *args, **kwargs):
+                return None
+
+        with patch("src.main.TestPlannerAgent", return_value=planner_instance) as mock_planner, \
+             patch("src.main.BrowserController") as mock_browser, \
+             patch("src.main.Progress", DummyProgress):
+            result = await run_test(
+                requirements="Look up Wikipedia",
+                url="https://example.com",
+                plan_only=True,
+                headless=True,
+                output_dir=None,
+                report_format="html",
+                timeout=1200,
+                max_steps=50,
+                berserk=False,
+            )
+
+        assert result == 0
+        mock_browser.assert_not_called()
+        mock_planner.assert_called_once()
+
+        captured = capsys.readouterr()
+        assert "generated_test_plans" in captured.out
+        assert str(plan_id) in captured.out
+        assert f"test_plan_{plan_id}.json" in captured.out
+        assert f"test_plan_{plan_id}.md" in captured.out
+
     @pytest.mark.asyncio
     async def test_no_input_shows_help(self, capsys):
         """Test that no input shows help."""
