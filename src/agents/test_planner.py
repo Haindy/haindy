@@ -1,9 +1,9 @@
-"""
-Test Planner Agent implementation.
+"""Test Planner Agent implementation.
 
 Analyzes requirements/PRDs and creates structured test plans.
 """
 
+import inspect
 from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import UUID
@@ -12,6 +12,7 @@ from src.agents.base_agent import BaseAgent
 from src.agents.formatters import TestPlanFormatter
 from src.config.agent_prompts import TEST_PLANNER_SYSTEM_PROMPT
 from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep
+from src.models.openai_client import ResponseStreamObserver
 from src.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,23 +31,48 @@ class TestPlannerAgent(BaseAgent):
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_PLANNER_SYSTEM_PROMPT
     
-    async def _get_completion(self, messages: List[Dict[str, str]], **kwargs) -> Dict:
+    async def _get_completion(
+        self,
+        messages: List[Dict[str, str]],
+        stream_observer: Optional[ResponseStreamObserver] = None,
+        **kwargs,
+    ) -> Dict:
         """Get completion from OpenAI."""
         response = await self.call_openai(
             messages=messages,
             temperature=kwargs.get("temperature", self.temperature),
             response_format=kwargs.get("response_format"),
+            stream=True,
+            stream_observer=stream_observer,
         )
-        
+
+        if stream_observer is not None:
+            usage = response.get("usage")
+            if isinstance(usage, dict):
+                normalized_usage = {
+                    "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                    "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+                    "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                }
+                maybe = stream_observer.on_usage_total(normalized_usage)
+                if inspect.isawaitable(maybe):
+                    await maybe
+
         return response
-    
-    async def create_test_plan(self, requirements: str, context: Optional[Dict] = None) -> TestPlan:
+
+    async def create_test_plan(
+        self,
+        requirements: str,
+        context: Optional[Dict] = None,
+        stream_observer: Optional[ResponseStreamObserver] = None,
+    ) -> TestPlan:
         """
         Create a structured test plan from requirements.
-        
+
         Args:
             requirements: High-level requirements, user story, or PRD
             context: Optional context about the application or domain
+            stream_observer: Optional observer for streaming updates
             
         Returns:
             TestPlan: Structured test plan with steps and expected outcomes
@@ -69,25 +95,34 @@ class TestPlannerAgent(BaseAgent):
         response = await self._get_completion(
             messages=messages,
             response_format={"type": "json_object"},
-            temperature=0.3  # Lower temperature for more consistent planning
+            temperature=0.3,  # Lower temperature for more consistent planning
+            stream_observer=stream_observer,
         )
-        
+
         # Parse and validate the response
         test_plan = self._parse_test_plan_response(response)
-        
+
         # Save test plan permanently
         self._save_test_plan(test_plan)
-        
+
         # Calculate total steps
         total_steps = sum(len(tc.steps) for tc in test_plan.test_cases)
-        
+
+        usage = response.get("usage", {}) if isinstance(response, dict) else {}
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
+
         logger.info("Test plan created successfully", extra={
             "plan_name": test_plan.name,
             "num_test_cases": len(test_plan.test_cases),
             "total_steps": total_steps,
-            "has_tags": bool(test_plan.tags)
+            "has_tags": bool(test_plan.tags),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
         })
-        
+
         return test_plan
     
     def _build_requirements_message(self, requirements: str, context: Optional[Dict] = None) -> str:
