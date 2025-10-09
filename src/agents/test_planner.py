@@ -144,7 +144,6 @@ class TestPlannerAgent(BaseAgent):
             "test_id": "TC001",
             "name": "Test case name (e.g., 'Happy Path Login')",
             "description": "Detailed description of this specific test scenario",
-            "priority": "medium",
             "prerequisites": ["Prerequisite 1", "Prerequisite 2"],
             "steps": [
                 {
@@ -166,7 +165,10 @@ class TestPlannerAgent(BaseAgent):
 IMPORTANT: 
 - Create multiple test cases to cover different scenarios
 - Each test case should test ONE specific flow or scenario
-- Include both positive (happy path) and negative (error) test cases"""
+- Ignore non-functional or infrastructure rules that are not user-facing functionality
+- Include both positive (happy path) and realistic negative (user-observable) test cases only
+- Assign test case IDs sequentially without gaps (TC001, TC002, ...)
+- Do NOT assign or output priority fields"""
         
         return message
     
