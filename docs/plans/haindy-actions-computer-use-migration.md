@@ -14,7 +14,7 @@ October 9, 2025 (Europe/Madrid)
 ## Constraints & Non-Goals
 - **Must** remain DOM-independent; all clicks/scrolls use screen coordinates derived from screenshots.
 - **Must** keep Playwright for action execution and screenshot capture across Chromium, Firefox, WebKit, headful CI containers, and developer laptops.
-- **Must** handle `pending_safety_checks` with human-in-the-loop confirmation before proceeding.
+- **Must** detect `pending_safety_checks` and fail fast without continuing automated execution.
 - **Must not** rely on hosted Agent Mode, hosted Operator, or MCP connectors.
 - **Non-goals:** redesigning Planner/Runner logic, adopting DOM selectors, or adding new third-party automation frameworks.
 
@@ -60,7 +60,7 @@ October 9, 2025 (Europe/Madrid)
   - Sequence of `ComputerCall` actions (type, coordinates, args, timestamps, execution status, Playwright result).
   - Final reasoning summary/message from model when available.
   - All screenshots (before/after, per-turn) persisted to `debug_screenshots/` with trace IDs.
-  - Safety events (pending checks, acknowledgements, human approvals).
+- Safety events (pending checks, automatic failures).
   - Failure metadata (API errors, execution errors, fallback usage).
 
 ## Execution Loop
@@ -78,11 +78,10 @@ October 9, 2025 (Europe/Madrid)
 8. Collate final model message or status; return aggregated result to Runner.
 
 ## Safety & Confirmation Handling
-- Surface any `pending_safety_check` items (codes `malicious_instructions`, `irrelevant_domain`, `sensitive_domain`) via Runner UI/logs.
-- Pause loop and request explicit human confirmation before acknowledging checks; require double opt-in in CI (e.g., config flag) to proceed automatically.
-- Enforce allowlist/blocklist for domains, keystrokes, clipboard use per doc guidance; abort if violation.
-- Require manual approval for credential entry, destructive actions (delete, purchase), or when model asks to type free-form sensitive data.
-- Log all acknowledged checks with operator identity in audit trail.
+- Surface any `pending_safety_check` items (codes `malicious_instructions`, `irrelevant_domain`, `sensitive_domain`) via Runner logs; automatically treat them as hard failures unless configuration explicitly allows acknowledgement.
+- Runner enforces allowlist/blocklist for domains, keystrokes, clipboard use per doc guidance; abort if violation.
+- When `computer-use-preview` suggests sensitive operations (credential entry, destructive actions), Runner marks the step failed and short-circuits remaining actions.
+- Record safety check metadata alongside step results for auditability even without human intervention.
 
 ## Observability & Artifacts
 - Persist per-turn screenshots, annotated with attempted action and response IDs, under `debug_screenshots/<test_run>/<step>/turn_<n>.png`.
@@ -90,8 +89,7 @@ October 9, 2025 (Europe/Madrid)
   - Request/response metadata (response IDs, latency, tokens, action payloads, safety flags).
   - Playwright execution outcome (success, exceptions, durations).
   - Network/console logs (via Playwright tracing) when enabled.
-- Summaries stored in `reports/` linking to screenshots, actions, and safety approvals.
-- Optional integration with OpenAI Trace IDs if organization enables Observability APIs.
+- Summaries stored in `reports/` linking to screenshots, actions, and safety outcomes.
 
 ## Error Handling & Retries
 - **API failures (HTTP, rate limits):** exponential backoff with jitter, bounded retries; if persistent, fall back to legacy grid planner and tag result as degraded.
@@ -132,7 +130,7 @@ October 9, 2025 (Europe/Madrid)
 
 ## Rollout Plan
 - **Phase 0 (Spike):** isolated prototype behind feature flag, manual runs only.
-- **Phase 1 (Pilot):** enable for select scenarios (Wikipedia, smoke tests) with on-call human oversight; capture metrics, tune timeouts.
+- **Phase 1 (Pilot):** enable for select scenarios (Wikipedia, smoke tests) with enhanced monitoring; capture metrics, tune timeouts.
 - **Phase 2 (Beta rollout):** expand to broader scenario set once pilot meets SLA; run side-by-side with legacy planner to compare outcomes.
 - **Phase 3 (Full migration):** default to Computer Use for all actions; retain legacy fallback flag for one release cycle before deprecation.
 - **Phase 4 (Retrospective):** document learnings in `GRID_TEST_PROGRESS.md`, update docs, and tune Playwright instrumentation.
@@ -141,9 +139,9 @@ October 9, 2025 (Europe/Madrid)
 - **Model availability / rate limits (preview status):** Monitor quota dashboards; implement graceful degradation to legacy planner.
 - **Coordinate drift due to viewport mismatch:** Enforce single source of truth for viewport (Playwright `page.viewport_size`), update request payload each turn.
 - **Latency & cost increase:** Track per-turn tokens/actions; add caching for static instructions; consider summarizing loops via `reasoning.summary="concise"` to debug without extra turns.
-- **Prompt injection / unsafe actions:** Strict domain allowlist, manual approvals, carry `safety_identifier` per user run, leverage safety checks.
+- **Prompt injection / unsafe actions:** Strict domain allowlist, automatic failure on suspicious actions, carry `safety_identifier` per user run, leverage safety checks.
 - **Browser compatibility gaps:** Pre-flight cross-browser tests; add per-browser overrides if model struggles (e.g., Firefox UI differences).
-- **Human confirmation bottlenecks:** Build lightweight approval UI/CLI prompts; allow auto-approval in non-sensitive CI via config.
+- **Automated shutdown on safety events:** Because we skip manual approvals, ensure Runner clearly reports failed steps so humans can review afterwards.
 
 ## Fallback & Revert
 - Feature flag (`HAINDY_ACTIONS_USE_COMPUTER_TOOL=true/false`) toggles between Computer Use loop and legacy grid planner at runtime.
@@ -151,15 +149,12 @@ October 9, 2025 (Europe/Madrid)
 - Revert procedure: set flag false, redeploy; if recovery requires code revert, roll back commit introducing Computer Use integration (documented in PR) using standard git revert.
 
 ## Open Questions
-- Do we need additional account configuration (e.g., project-level feature enablement) for `computer-use-preview` beyond default access?
+- **Do we need additional account configuration (e.g., project-level feature enablement) for `computer-use-preview` beyond default access?** (Resolved: no extra configuration required.)
 - Should we stream Responses API events for realtime UI, or poll per turn?
-- Can we leverage OpenAI Observability APIs during preview, or do we need custom tracing only?
-- What thresholds trigger automatic escalation to human reviewer (action count, elapsed time, safety check frequency)?
-- How do we store large screenshot histories without bloating repos (consider S3/minio integration)?
+- What automated heuristics should trigger Runner to abort future actions within the same test case?
 
 ## Next Steps
-1. Confirm account-level availability/quota for `computer-use-preview` and update secrets management.
+1. Confirm account-level availability/quota for `computer-use-preview` and update secrets management (no additional configuration needed, but verify quotas).
 2. Build minimal Phase 0 prototype with feature flag and logging.
-3. Design approval UX for safety checks (CLI prompt + optional webhook).
-4. Implement stubbed integration tests for computer-action loop.
-5. Prepare rollout dashboards (actions per step, success rate, token usage) to track pilot.
+3. Implement stubbed integration tests for computer-action loop.
+4. Prepare rollout dashboards (actions per step, success rate, token usage) to track pilot.
