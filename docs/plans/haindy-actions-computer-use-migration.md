@@ -31,6 +31,7 @@ October 9, 2025 (Europe/Madrid)
 - Provide PNG screenshots encoded as `data:image/png;base64,...` (RGB) in both initial `input_image` and follow-up `computer_call_output`.
 - `environment` parameter must be `"browser"` to align with Playwright context; set optional `current_url` each turn to improve safety checks.
 - Supply stable `safety_identifier` per Responses API guidance; enforce action budgets to stay within preview quotas and monitor x-ratelimit headers for throttling.
+- Launch Playwright browsers in sandboxed mode (e.g., `chromium_sandbox=True`, `env={}`, `--disable-extensions`, `--disable-file-system`) to match OpenAI’s recommended safe execution environment.
 
 ## Architecture
 ### Current
@@ -73,9 +74,10 @@ October 9, 2025 (Europe/Madrid)
    - Execute via Playwright (cursor move, click, keyboard type, scroll).
    - Capture Playwright artifacts (DOM snapshot optional, network/console logs if configured).
 5. Sleep configurable stabilization delay; take fresh screenshot (PNG).
-6. Post screenshot back via `computer_call_output`, including `current_url`, optional text status (e.g., detected validation error), and any `acknowledged_safety_checks`.
+6. Post screenshot back via `computer_call_output` with `type":"computer_screenshot"`, including `current_url`, optional text status (e.g., detected validation error), and any `acknowledged_safety_checks`.
 7. Repeat until model response lacks `computer_call` or exceeds budget.
 8. Collate final model message or status; return aggregated result to Runner.
+9. Maintain turn history via `previous_response_id`; if degraded into stateless mode, re-send prior `computer_call` and `reasoning` items to keep the model context aligned.
 
 ## Safety & Confirmation Handling
 - Surface any `pending_safety_check` items (codes `malicious_instructions`, `irrelevant_domain`, `sensitive_domain`) via Runner logs; automatically treat them as hard failures unless configuration explicitly allows acknowledgement.
@@ -138,10 +140,10 @@ October 9, 2025 (Europe/Madrid)
 ## Risks & Mitigations
 - **Model availability / rate limits (preview status):** Monitor quota dashboards; implement graceful degradation to legacy planner.
 - **Coordinate drift due to viewport mismatch:** Enforce single source of truth for viewport (Playwright `page.viewport_size`), update request payload each turn.
-- **Latency & cost increase:** Track per-turn tokens/actions; add caching for static instructions; consider summarizing loops via `reasoning.summary="concise"` to debug without extra turns.
+- **Latency & cost increase:** Track per-turn tokens/actions; add caching for static instructions; rely on default reasoning output for debugging despite higher verbosity.
 - **Prompt injection / unsafe actions:** Strict domain allowlist, automatic failure on suspicious actions, carry `safety_identifier` per user run, leverage safety checks.
 - **Browser compatibility gaps:** Pre-flight cross-browser tests; add per-browser overrides if model struggles (e.g., Firefox UI differences).
-- **Automated shutdown on safety events:** Because we skip manual approvals, ensure Runner clearly reports failed steps so humans can review afterwards.
+- **Automated shutdown on safety events:** Because we skip manual approvals (diverging from OpenAI’s recommendation to insert a human reviewer), ensure Runner clearly reports failed steps so humans can review afterwards.
 
 ## Fallback & Revert
 - Feature flag (`HAINDY_ACTIONS_USE_COMPUTER_TOOL=true/false`) toggles between Computer Use loop and legacy grid planner at runtime.
