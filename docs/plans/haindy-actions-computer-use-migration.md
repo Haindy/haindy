@@ -131,11 +131,10 @@ October 9, 2025 (Europe/Madrid)
    - Recorded performance metrics (avg actions/step, latency) to baseline future tuning.
 
 ## Rollout Plan
-- **Phase 0 (Spike):** isolated prototype behind feature flag, manual runs only.
-- **Phase 1 (Pilot):** enable for select scenarios (Wikipedia, smoke tests) with enhanced monitoring; capture metrics, tune timeouts.
-- **Phase 2 (Beta rollout):** expand to broader scenario set once pilot meets SLA; run side-by-side with legacy planner to compare outcomes.
-- **Phase 3 (Full migration):** default to Computer Use for all actions; retain legacy fallback flag for one release cycle before deprecation.
-- **Phase 4 (Retrospective):** document learnings in `GRID_TEST_PROGRESS.md`, update docs, and tune Playwright instrumentation.
+- Execute Phase 0 spike, pilot validation, and full migration sequentially on the feature branch before merge—no staged production rollout.
+- Phase 0 spike work (outlined above) feeds directly into the complete implementation; once exit criteria pass, expand coverage immediately to the agreed scenario set.
+- Treat this as feature-branch work: after automated and manual checks succeed, flip the runtime flag to prefer Computer Use by default while keeping the legacy path as a fallback toggle.
+- Capture a brief retrospective in `GRID_TEST_PROGRESS.md` after merge to document lessons learned for downstream contributors.
 
 ## Risks & Mitigations
 - **Model availability / rate limits (preview status):** Monitor quota dashboards; implement graceful degradation to legacy planner.
