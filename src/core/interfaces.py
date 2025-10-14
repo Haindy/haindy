@@ -154,8 +154,14 @@ class BrowserDriver(ABC):
         pass
 
     @abstractmethod
-    async def click(self, x: int, y: int) -> None:
-        """Click at absolute coordinates."""
+    async def click(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+    ) -> None:
+        """Click at absolute coordinates with optional button and count."""
         pass
 
     @abstractmethod
@@ -164,8 +170,20 @@ class BrowserDriver(ABC):
         pass
 
     @abstractmethod
+    async def press_key(self, key: str) -> None:
+        """Press a keyboard key."""
+        pass
+
+    @abstractmethod
     async def scroll(self, direction: str, amount: int) -> None:
         """Scroll in given direction."""
+        pass
+
+    @abstractmethod
+    async def scroll_by_pixels(
+        self, x: int = 0, y: int = 0, smooth: bool = True
+    ) -> None:
+        """Scroll by a specific number of pixels."""
         pass
 
     @abstractmethod
@@ -181,6 +199,16 @@ class BrowserDriver(ABC):
     @abstractmethod
     async def get_viewport_size(self) -> Tuple[int, int]:
         """Get current viewport dimensions."""
+        pass
+
+    @abstractmethod
+    async def get_page_url(self) -> str:
+        """Get the current page URL."""
+        pass
+
+    @abstractmethod
+    async def get_page_title(self) -> str:
+        """Get the current page title."""
         pass
 
 

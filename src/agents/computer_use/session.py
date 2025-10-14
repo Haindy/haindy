@@ -1,0 +1,557 @@
+"""Computer Use tool orchestration for the Action Agent."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from openai import AsyncOpenAI
+
+from src.config.settings import Settings
+from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
+from src.core.interfaces import BrowserDriver
+from src.monitoring.debug_logger import DebugLogger
+
+
+logger = logging.getLogger(__name__)
+
+
+class ComputerUseExecutionError(RuntimeError):
+    """Raised when the Computer Use orchestration fails irrecoverably."""
+
+
+@dataclass
+class ComputerUseSessionResult:
+    """Result of executing a Computer Use session."""
+
+    actions: List[ComputerToolTurn] = field(default_factory=list)
+    safety_events: List[SafetyEvent] = field(default_factory=list)
+    final_output: Optional[str] = None
+    response_ids: List[str] = field(default_factory=list)
+    last_response: Optional[Dict[str, Any]] = None
+
+
+class ComputerUseSession:
+    """Wraps the OpenAI Computer Use tool and orchestrates action execution."""
+
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        browser: BrowserDriver,
+        settings: Settings,
+        debug_logger: Optional[DebugLogger] = None,
+        model: str = "computer-use-preview",
+    ) -> None:
+        self._client = client
+        self._browser = browser
+        self._settings = settings
+        self._debug_logger = debug_logger
+        self._model = model
+
+    async def run(
+        self,
+        goal: str,
+        initial_screenshot: Optional[bytes],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> ComputerUseSessionResult:
+        """
+        Execute a Computer Use loop until completion or failure.
+
+        Args:
+            goal: Natural language instruction for the model.
+            initial_screenshot: Screenshot bytes representing the current state.
+            metadata: Optional context (step number, plan/case names).
+
+        Returns:
+            ComputerUseSessionResult with action traces and final output.
+        """
+        metadata = metadata or {}
+        result = ComputerUseSessionResult()
+
+        await self._ensure_browser_ready()
+
+        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        screenshot = initial_screenshot or await self._browser.screenshot()
+        screenshot_b64 = encode_png_base64(screenshot)
+
+        request_payload = self._build_initial_request(
+            goal=goal,
+            screenshot_b64=screenshot_b64,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            metadata=metadata,
+        )
+
+        response = await self._create_response(request_payload)
+        response_dict = normalize_response(response)
+        result.response_ids.append(response_dict.get("id", ""))
+
+        turn_counter = 0
+        previous_response_id = response_dict.get("id")
+
+        while True:
+            computer_calls = extract_computer_calls(response_dict)
+            assistant_message = extract_assistant_text(response_dict)
+            result.final_output = assistant_message or result.final_output
+            result.last_response = response_dict
+
+            if not computer_calls:
+                break
+
+            turn_counter += 1
+            if turn_counter > self._settings.actions_computer_tool_max_turns:
+                logger.warning(
+                    "Computer Use max turns exceeded",
+                    extra={"max_turns": self._settings.actions_computer_tool_max_turns},
+                )
+                break
+
+            call = computer_calls[0]
+            turn = ComputerToolTurn(
+                call_id=call.get("call_id", ""),
+                action_type=call.get("action", {}).get("type", "unknown"),
+                parameters=call.get("action", {}),
+                response_id=response_dict.get("id"),
+                pending_safety_checks=call.get("pending_safety_checks", []) or [],
+            )
+
+            _inject_context_metadata(turn, metadata)
+
+            if turn.pending_safety_checks and self._settings.actions_computer_tool_fail_fast_on_safety:
+                safety_event = SafetyEvent(
+                    call_id=turn.call_id,
+                    code=turn.pending_safety_checks[0].get("code", "unknown"),
+                    message=turn.pending_safety_checks[0].get("message", ""),
+                    acknowledged=False,
+                    response_id=response_dict.get("id"),
+                )
+                result.safety_events.append(safety_event)
+                turn.status = "failed"
+                turn.error_message = (
+                    "Safety check triggered; action halted (fail-fast enabled)."
+                )
+                result.actions.append(turn)
+                logger.warning(
+                    "Computer Use safety check triggered; aborting action execution",
+                    extra={
+                        "call_id": turn.call_id,
+                        "code": safety_event.code,
+                        "safety_message": safety_event.message,
+                    },
+                )
+                return result
+
+            try:
+                await self._execute_tool_action(turn, metadata, turn_counter)
+            except Exception as exc:
+                turn.status = "failed"
+                turn.error_message = str(exc)
+                logger.exception("Computer Use action execution failed", extra={"call_id": turn.call_id})
+
+            result.actions.append(turn)
+
+            follow_up_payload = await self._build_follow_up_request(
+                previous_response_id=previous_response_id,
+                call=turn,
+                metadata=metadata,
+            )
+
+            response = await self._create_response(follow_up_payload)
+            response_dict = normalize_response(response)
+            result.response_ids.append(response_dict.get("id", ""))
+            previous_response_id = response_dict.get("id")
+
+        return result
+
+    async def _execute_tool_action(
+        self,
+        turn: ComputerToolTurn,
+        metadata: Dict[str, Any],
+        turn_index: int,
+    ) -> None:
+        """Execute a single Computer Use tool action via the browser driver."""
+        action = turn.parameters
+        action_type = action.get("type")
+        start = time.perf_counter()
+
+        viewport_width, viewport_height = await self._browser.get_viewport_size()
+
+        try:
+            if action_type == "click":
+                await self._execute_click(action, viewport_width, viewport_height)
+            elif action_type in {"double_click", "right_click"}:
+                await self._execute_special_click(action, viewport_width, viewport_height)
+            elif action_type == "scroll":
+                await self._execute_scroll(action)
+            elif action_type == "type":
+                await self._browser.type_text(action.get("text", ""))
+            elif action_type == "keypress":
+                for key in action.get("keys", []):
+                    normalized = normalize_key_sequence(key)
+                    await self._browser.press_key(normalized)
+            elif action_type == "wait":
+                duration = int(
+                    action.get("duration_ms")
+                    or self._settings.actions_computer_tool_stabilization_wait_ms
+                )
+                await self._browser.wait(duration)
+            elif action_type == "screenshot":
+                # No-op; screenshot captured after execution
+                logger.debug("Computer Use requested screenshot action; no browser operation executed.")
+            else:
+                raise ComputerUseExecutionError(f"Unsupported computer action type: {action_type}")
+
+            await self._post_action_wait()
+
+            screenshot_bytes = await self._browser.screenshot()
+            turn.screenshot_path = self._save_turn_screenshot(
+                screenshot_bytes,
+                suffix=f"{turn.action_type}_{turn_index}",
+                step_number=metadata.get("step_number"),
+            )
+
+            turn.metadata.update(
+                {
+                    "screenshot_base64": encode_png_base64(screenshot_bytes),
+                    "current_url": await self._maybe_get_current_url(),
+                }
+            )
+
+            turn.status = "executed"
+
+        except Exception:
+            raise
+        finally:
+            turn.latency_ms = (time.perf_counter() - start) * 1000
+
+    async def _execute_click(
+        self, action: Dict[str, Any], viewport_width: int, viewport_height: int
+    ) -> None:
+        """Execute a primary click event."""
+        x, y = normalize_coordinates(
+            action.get("x"), action.get("y"), viewport_width, viewport_height
+        )
+        button = action.get("button", "left")
+        click_count = int(action.get("click_count", 1))
+        await asyncio.wait_for(
+            self._browser.click(x, y, button=button, click_count=click_count),
+            timeout=self._action_timeout_seconds,
+        )
+
+    async def _execute_special_click(
+        self, action: Dict[str, Any], viewport_width: int, viewport_height: int
+    ) -> None:
+        """Execute double or right click events."""
+        x, y = normalize_coordinates(
+            action.get("x"), action.get("y"), viewport_width, viewport_height
+        )
+        action_type = action.get("type")
+        if action_type == "double_click":
+            await asyncio.wait_for(
+                self._browser.click(x, y, button="left", click_count=2),
+                timeout=self._action_timeout_seconds,
+            )
+        elif action_type == "right_click":
+            await asyncio.wait_for(
+                self._browser.click(x, y, button="right", click_count=1),
+                timeout=self._action_timeout_seconds,
+            )
+
+    async def _execute_scroll(self, action: Dict[str, Any]) -> None:
+        """Execute a scroll event via pixel deltas."""
+        scroll_x = int(action.get("scroll_x", 0))
+        scroll_y = int(action.get("scroll_y", 0))
+        await asyncio.wait_for(
+            self._browser.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+            timeout=self._action_timeout_seconds,
+        )
+
+    async def _build_follow_up_request(
+        self,
+        previous_response_id: Optional[str],
+        call: ComputerToolTurn,
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build the payload for a follow-up request after executing an action."""
+        screenshot_b64 = call.metadata.get("screenshot_base64")
+        if not screenshot_b64:
+            screenshot_bytes = await self._browser.screenshot()
+            screenshot_b64 = encode_png_base64(screenshot_bytes)
+
+        viewport_width, viewport_height = await self._browser.get_viewport_size()
+
+        payload: Dict[str, Any] = {
+            "model": self._model,
+            "previous_response_id": previous_response_id,
+            "tools": [
+                {
+                    "type": "computer_use_preview",
+                    "display_width": viewport_width,
+                    "display_height": viewport_height,
+                    "environment": "browser",
+                }
+            ],
+            "input": [
+                {
+                    "type": "computer_call_output",
+                    "call_id": call.call_id,
+                    "output": {
+                        "type": "computer_screenshot",
+                        "image_url": f"data:image/png;base64,{screenshot_b64}",
+                    },
+                    "current_url": call.metadata.get("current_url"),
+                    "acknowledged_safety_checks": [],
+                }
+            ],
+            "truncation": "auto",
+        }
+
+        if call.status != "executed" and call.error_message:
+            payload["input"].append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": f"Execution error: {call.error_message}",
+                        }
+                    ],
+                }
+            )
+
+        # Remove base64 payload after use to keep metadata lightweight
+        call.metadata.pop("screenshot_base64", None)
+
+        return payload
+
+    def _build_initial_request(
+        self,
+        goal: str,
+        screenshot_b64: str,
+        viewport_width: int,
+        viewport_height: int,
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build the payload for the initial Computer Use request."""
+        context_lines = []
+        if metadata.get("test_plan_name"):
+            context_lines.append(f"Test plan: {metadata['test_plan_name']}")
+        if metadata.get("test_case_name"):
+            context_lines.append(f"Test case: {metadata['test_case_name']}")
+        if metadata.get("step_number") is not None:
+            context_lines.append(f"Step number: {metadata['step_number']}")
+        if metadata.get("target"):
+            context_lines.append(f"Target description: {metadata['target']}")
+        if metadata.get("value"):
+            context_lines.append(f"Associated value: {metadata['value']}")
+
+        context_text = goal
+        if context_lines:
+            context_text = f"{goal}\n\nContext:\n" + "\n".join(f"- {line}" for line in context_lines)
+
+        payload: Dict[str, Any] = {
+            "model": self._model,
+            "tools": [
+                {
+                    "type": "computer_use_preview",
+                    "display_width": viewport_width,
+                    "display_height": viewport_height,
+                    "environment": "browser",
+                }
+            ],
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": context_text,
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{screenshot_b64}",
+                        },
+                    ],
+                }
+            ],
+            "truncation": "auto",
+        }
+
+        return payload
+
+    async def _create_response(self, payload: Dict[str, Any]) -> Any:
+        """Call the OpenAI Responses API with the provided payload."""
+        timeout = float(self._settings.openai_request_timeout_seconds)
+        logger.debug("Calling OpenAI Responses API", extra={"model": payload.get("model")})
+        return await self._client.responses.create(timeout=timeout, **payload)
+
+    async def _ensure_browser_ready(self) -> None:
+        """Ensure the browser session is started before execution."""
+        if getattr(self._browser, "page", None) is None:
+            await self._browser.start()
+
+    async def _post_action_wait(self) -> None:
+        """Wait for the configured stabilization interval."""
+        wait_ms = self._settings.actions_computer_tool_stabilization_wait_ms
+        if wait_ms > 0:
+            await self._browser.wait(wait_ms)
+
+    async def _maybe_get_current_url(self) -> Optional[str]:
+        """Attempt to retrieve the current page URL from the browser driver."""
+        get_url = getattr(self._browser, "get_page_url", None)
+        if callable(get_url):
+            try:
+                return await get_url()
+            except Exception:
+                logger.debug("Failed to retrieve current URL from browser driver", exc_info=True)
+        return None
+
+    def _save_turn_screenshot(
+        self, screenshot_bytes: bytes, suffix: str, step_number: Optional[int]
+    ) -> Optional[str]:
+        """Persist a screenshot for observability if a debug logger is available."""
+        if not self._debug_logger:
+            return None
+        name = f"computer_use_turn_{suffix}"
+        return self._debug_logger.save_screenshot(
+            screenshot_bytes, name=name, step_number=step_number
+        )
+
+    @property
+    def _action_timeout_seconds(self) -> float:
+        return max(self._settings.actions_computer_tool_action_timeout_ms / 1000.0, 0.5)
+
+
+def encode_png_base64(data: bytes) -> str:
+    """Encode PNG bytes to base64 string."""
+    return base64.b64encode(data).decode("utf-8")
+
+
+def normalize_response(response: Any) -> Dict[str, Any]:
+    """Normalize OpenAI response objects into standard dictionaries."""
+    if response is None:
+        return {}
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if isinstance(response, dict):
+        return response
+    raise ComputerUseExecutionError(f"Unsupported response type: {type(response)}")
+
+
+def normalize_key_sequence(key: str) -> str:
+    """
+    Convert Computer Use key strings to Playwright-compatible sequences.
+
+    The model commonly emits uppercase tokens (e.g., "ENTER") or modifier
+    combinations like "CTRL+ENTER". Playwright expects specific casing, so we
+    normalize each segment before execution.
+    """
+    if not key:
+        return key
+
+    def normalize_single(token: str) -> str:
+        mapping = {
+            "ENTER": "Enter",
+            "RETURN": "Enter",
+            "ESC": "Escape",
+            "ESCAPE": "Escape",
+            "TAB": "Tab",
+            "SPACE": "Space",
+            "BACKSPACE": "Backspace",
+            "DELETE": "Delete",
+            "DEL": "Delete",
+            "HOME": "Home",
+            "END": "End",
+            "PAGEUP": "PageUp",
+            "PAGEDOWN": "PageDown",
+            "ARROWUP": "ArrowUp",
+            "ARROWDOWN": "ArrowDown",
+            "ARROWLEFT": "ArrowLeft",
+            "ARROWRIGHT": "ArrowRight",
+            "LEFT": "ArrowLeft",
+            "RIGHT": "ArrowRight",
+            "UP": "ArrowUp",
+            "DOWN": "ArrowDown",
+            "CTRL": "Control",
+            "CONTROL": "Control",
+            "ALT": "Alt",
+            "OPTION": "Alt",
+            "SHIFT": "Shift",
+            "META": "Meta",
+            "CMD": "Meta",
+            "COMMAND": "Meta",
+            "CAPSLOCK": "CapsLock",
+            "NUMLOCK": "NumLock",
+            "SCROLLLOCK": "ScrollLock",
+        }
+        token_upper = token.upper()
+        if token_upper in mapping:
+            return mapping[token_upper]
+
+        if token_upper.startswith("F") and token_upper[1:].isdigit():
+            return token_upper  # Playwright expects F-keys uppercase.
+
+        if len(token) == 1:
+            return token
+
+        return token.capitalize()
+
+    if "+" in key:
+        parts = [part.strip() for part in key.split("+") if part.strip()]
+        normalized_parts = [normalize_single(part) for part in parts]
+        return "+".join(normalized_parts)
+
+    return normalize_single(key.strip())
+
+
+def extract_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract computer_call items from a response."""
+    return [
+        item
+        for item in response_dict.get("output", [])
+        if item.get("type") == "computer_call"
+    ]
+
+
+def extract_assistant_text(response_dict: Dict[str, Any]) -> Optional[str]:
+    """Extract assistant text output from a response."""
+    messages = [
+        item
+        for item in response_dict.get("output", [])
+        if item.get("type") == "message"
+    ]
+    texts: List[str] = []
+    for message in messages:
+        for content in message.get("content", []):
+            if content.get("type") == "output_text":
+                texts.append(content.get("text", ""))
+    combined = "\n".join(texts).strip()
+    return combined or None
+
+
+def _inject_context_metadata(turn: ComputerToolTurn, metadata: Dict[str, Any]) -> None:
+    """Copy high-level context into the turn metadata for observability."""
+    if not isinstance(turn.metadata, dict):
+        return
+    for key in ("step_number", "test_plan_name", "test_case_name", "target", "value"):
+        if metadata.get(key) is not None:
+            turn.metadata[key] = metadata[key]
+
+
+def normalize_coordinates(
+    x: Optional[float],
+    y: Optional[float],
+    viewport_width: int,
+    viewport_height: int,
+) -> tuple[int, int]:
+    """Normalize coordinates into the viewport bounds."""
+    def _clamp(value: float, maximum: int) -> int:
+        return max(0, min(int(round(value)), max(0, maximum - 1)))
+
+    if x is None or y is None:
+        return viewport_width // 2, viewport_height // 2
+    return _clamp(x, viewport_width), _clamp(y, viewport_height)

@@ -63,12 +63,16 @@ class InstrumentedBrowserDriver(PlaywrightDriver):
         duration_ms = (time.time() - start_time) * 1000
         self._capture_call("page.goto", {"url": url}, duration_ms)
     
-    async def click(self, x: int, y: int) -> None:
+    async def click(self, x: int, y: int, button: str = "left", click_count: int = 1) -> None:
         """Click at absolute coordinates."""
         start_time = time.time()
-        await super().click(x, y)
+        await super().click(x, y, button=button, click_count=click_count)
         duration_ms = (time.time() - start_time) * 1000
-        self._capture_call("page.mouse.click", {"x": x, "y": y}, duration_ms)
+        self._capture_call(
+            "page.mouse.click",
+            {"x": x, "y": y, "button": button, "click_count": click_count},
+            duration_ms,
+        )
     
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""

@@ -8,7 +8,7 @@ comprehensive HTML reports with bug details.
 import base64
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from jinja2 import Template
 
@@ -521,90 +521,165 @@ class SimpleHTMLReporter:
         execution_history: List[TestStepResult]
     ) -> dict:
         """Prepare data for template rendering."""
-        # Calculate metrics from test report
+
+        def _encode_image(image_bytes: Optional[bytes]) -> Optional[str]:
+            if not image_bytes:
+                return None
+            return base64.b64encode(image_bytes).decode()
+
+        def _build_bug_entry(bug: Optional[Any]) -> Optional[dict]:
+            if bug is None:
+                return None
+
+            bug_data = {
+                "step_number": getattr(bug, "step_number", None),
+                "error_message": getattr(bug, "error_message", "Unknown error"),
+                "attempted_action": getattr(bug, "attempted_action", "N/A"),
+                "expected_outcome": getattr(bug, "expected_outcome", "N/A"),
+                "actual_outcome": getattr(bug, "actual_outcome", "N/A"),
+                "severity": getattr(bug, "severity", "medium"),
+                "failure_type": getattr(bug, "failure_type", "unknown"),
+                "detailed_error": getattr(bug, "detailed_error", None),
+                "confidence_scores": getattr(bug, "confidence_scores", {}) or {},
+                "grid_cell_targeted": getattr(bug, "grid_cell_targeted", None),
+                "coordinates_used": getattr(bug, "coordinates_used", None),
+                "ui_anomalies": getattr(bug, "ui_anomalies", []) or [],
+                "suggested_fixes": getattr(bug, "suggested_fixes", []) or [],
+                "url_before": getattr(bug, "url_before", None),
+                "url_after": getattr(bug, "url_after", None),
+                "page_title_before": getattr(bug, "page_title_before", None),
+                "page_title_after": getattr(bug, "page_title_after", None),
+                "screenshots": [],
+            }
+
+            screenshots = [
+                ("Grid Screenshot (Highlighted)", getattr(bug, "grid_screenshot", None)),
+                ("Before Action", getattr(bug, "screenshot_before", None)),
+                ("After Action", getattr(bug, "screenshot_after", None)),
+            ]
+            for label, image in screenshots:
+                encoded = _encode_image(image)
+                if encoded:
+                    bug_data["screenshots"].append({"label": label, "data": encoded})
+
+            return bug_data
+
+        status_class_map = {
+            "pending": "in-progress",
+            "in_progress": "in-progress",
+            "passed": "passed",
+            "completed": "passed",
+            "failed": "failed",
+            "skipped": "skipped",
+            "blocked": "skipped",
+        }
+
         test_report = test_state.test_report
-        total_steps = sum(tc.steps_total for tc in test_report.test_cases)
-        passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
-        failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
-        success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
-        
-        # Calculate duration
         duration = 0
         if test_state.start_time and test_state.end_time:
             duration = round((test_state.end_time - test_state.start_time).total_seconds(), 2)
-        
-        # Status mapping
-        status_class_map = {
-            "completed": "passed",
-            "failed": "failed",
-            "in_progress": "in-progress",
-            "cancelled": "skipped"
-        }
-        
-        # Prepare step data from test report
-        steps = []
-        step_num = 1
-        for test_case in test_state.test_report.test_cases:
-            for step_result in test_case.step_results:
-                status = "passed" if step_result.status == "passed" else "failed"
-                steps.append({
-                    "number": step_num,
-                    "description": step_result.step_description,
-                    "action": step_result.action_taken or "N/A",
-                    "status": status,
-                    "status_class": status,
-                    "result": step_result.actual_result or "N/A",
-                    "mode": "enhanced"
-                })
-                step_num += 1
-        
-        # Prepare bug reports from test report
-        bug_reports = []
-        test_name = test_state.test_report.test_plan_name
-        
-        # Get bugs from test report
-        for bug in test_state.test_report.bugs:
-                if bug:
-                    bug_data = {
-                        "step_number": bug.step_number,
-                        "error_message": bug.error_message,
-                        "attempted_action": bug.attempted_action,
-                        "expected_outcome": bug.expected_outcome,
-                        "actual_outcome": bug.actual_outcome,
-                        "severity": bug.severity,
-                        "failure_type": bug.failure_type,
-                        "detailed_error": bug.detailed_error,
-                        "confidence_scores": bug.confidence_scores,
-                        "grid_cell_targeted": bug.grid_cell_targeted,
-                        "coordinates_used": bug.coordinates_used,
-                        "ui_anomalies": bug.ui_anomalies,
-                        "suggested_fixes": bug.suggested_fixes,
-                        "url_before": bug.url_before,
-                        "url_after": bug.url_after,
-                        "page_title_before": bug.page_title_before,
-                        "page_title_after": bug.page_title_after,
-                        "screenshots": []
+
+        if test_report:
+            total_steps = sum(tc.steps_total for tc in test_report.test_cases)
+            passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
+            failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
+            success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
+
+            steps: List[dict] = []
+            for test_case in test_report.test_cases:
+                for step_result in test_case.step_results:
+                    status_value = getattr(step_result, "status", "in_progress")
+                    if hasattr(status_value, "value"):
+                        status_value = status_value.value
+                    if status_value in {"passed", "success", "completed"}:
+                        status = "passed"
+                    elif status_value in {"failed", "error", "blocked"}:
+                        status = "failed"
+                    else:
+                        status = "in-progress"
+
+                    steps.append(
+                        {
+                            "number": getattr(step_result, "step_number", len(steps) + 1),
+                            "description": getattr(
+                                step_result, "step_description", getattr(test_case, "name", "Step")
+                            ),
+                            "action": getattr(step_result, "action_taken", "N/A"),
+                            "status": status,
+                            "status_class": status,
+                            "result": getattr(step_result, "actual_result", "N/A") or "N/A",
+                            "mode": getattr(step_result, "execution_mode", "enhanced"),
+                        }
+                    )
+
+            bug_reports = []
+            for bug in test_report.bugs:
+                bug_entry = _build_bug_entry(bug)
+                if bug_entry:
+                    bug_reports.append(bug_entry)
+
+            test_name = test_report.test_plan_name
+
+        else:
+            total_steps = len(getattr(test_state.test_plan, "steps", []))
+            passed_steps = len(getattr(test_state, "completed_steps", []))
+            failed_steps = len(getattr(test_state, "failed_steps", []))
+            success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
+
+            steps: List[dict] = []
+            for index, step_result in enumerate(execution_history, start=1):
+                step = getattr(step_result, "step", None)
+                step_number = getattr(step, "step_number", index)
+                description = getattr(step, "description", f"Step {step_number}")
+                action_taken = getattr(step_result, "action_taken", None)
+                action = action_taken or getattr(step, "action", "N/A")
+                success = getattr(step_result, "success", False)
+                status = "passed" if success else "failed"
+
+                steps.append(
+                    {
+                        "number": step_number,
+                        "description": description,
+                        "action": action,
+                        "status": status,
+                        "status_class": status,
+                        "result": getattr(step_result, "actual_result", "N/A") or "N/A",
+                        "mode": getattr(step_result, "execution_mode", "unknown"),
                     }
-                    
-                    # Add screenshots
-                    if bug.grid_screenshot:
-                        bug_data["screenshots"].append({
-                            "label": "Grid Screenshot (Highlighted)",
-                            "data": base64.b64encode(bug.grid_screenshot).decode()
-                        })
-                    if bug.screenshot_before:
-                        bug_data["screenshots"].append({
-                            "label": "Before Action",
-                            "data": base64.b64encode(bug.screenshot_before).decode()
-                        })
-                    if bug.screenshot_after:
-                        bug_data["screenshots"].append({
-                            "label": "After Action",
-                            "data": base64.b64encode(bug.screenshot_after).decode()
-                        })
-                    
-                bug_reports.append(bug_data)
-        
+                )
+
+            if not steps and getattr(test_state.test_plan, "steps", []):
+                for index, step in enumerate(test_state.test_plan.steps, start=1):
+                    steps.append(
+                        {
+                            "number": getattr(step, "step_number", index),
+                            "description": getattr(step, "description", f"Step {index}"),
+                            "action": getattr(step, "action", "N/A"),
+                            "status": "skipped",
+                            "status_class": "skipped",
+                            "result": "Not executed",
+                            "mode": "unknown",
+                        }
+                    )
+
+            bug_reports = []
+            for entry in execution_history:
+                bug = None
+                creator = getattr(entry, "create_bug_report", None)
+                if callable(creator):
+                    try:
+                        bug = creator(test_state.test_plan.name)
+                    except TypeError:
+                        bug = creator()
+                elif hasattr(entry, "bug_report"):
+                    bug = getattr(entry, "bug_report")
+
+                bug_entry = _build_bug_entry(bug)
+                if bug_entry:
+                    bug_reports.append(bug_entry)
+
+            test_name = getattr(test_state.test_plan, "name", "Test Plan")
+
         return {
             "test_name": test_name,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

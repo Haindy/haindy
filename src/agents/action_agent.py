@@ -11,22 +11,27 @@ Refactored to own the complete action execution lifecycle:
 import asyncio
 import base64
 import json
+import os
 import re
 import traceback
 import io
+import time
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Dict, Optional, Tuple, Any, List
 
 from PIL import Image, ImageDraw
-import tiktoken
 
 from src.agents.base_agent import BaseAgent
+from src.agents.computer_use import (
+    ComputerUseExecutionError,
+    ComputerUseSession,
+)
 from src.browser.driver import BrowserDriver
 from src.config.agent_prompts import ACTION_AGENT_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.types import (
-    ActionInstruction, GridAction, GridCoordinate, TestStep,
+    ActionInstruction, ActionType, GridAction, GridCoordinate, TestStep,
     ScrollDirection, VisibilityStatus, ScrollParameters, 
     VisibilityResult, ScrollAction, ScrollState, ScrollResult
 )
@@ -74,14 +79,27 @@ class ActionAgent(BaseAgent):
         self.system_prompt = ACTION_AGENT_SYSTEM_PROMPT
         self.browser_driver = browser_driver
         
-        # Initialize grid components
+        # Initialize grid components and configuration
         settings = get_settings()
+        self.settings = settings
         self.grid_overlay = GridOverlay(grid_size=settings.grid_size)
         self.grid_refinement = GridRefinement(base_grid=self.grid_overlay)
         
         # Configuration
         self.confidence_threshold = settings.grid_confidence_threshold
         self.refinement_enabled = settings.grid_refinement_enabled
+        self.use_computer_tool = settings.actions_use_computer_tool
+        env_override = os.getenv("HAINDY_ACTIONS_USE_COMPUTER_TOOL")
+        if env_override is None:
+            env_override = os.getenv("ACTIONS_USE_COMPUTER_TOOL")
+        if env_override is not None:
+            self.use_computer_tool = env_override.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        self._computer_use_model = "computer-use-preview"
         
         # Conversation state - one conversation per action
         self.conversation_history: List[Dict[str, Any]] = []
@@ -162,70 +180,26 @@ class ActionAgent(BaseAgent):
     
     def _build_conversation_messages(self) -> List[Dict[str, Any]]:
         """
-        Build conversation messages with token-based sliding window.
-        
-        Returns:
-            List of messages that fit within token limit
-        """
-        # Get encoding for token counting
-        # GPT-4.1 and legacy o-series share the GPT-4 tokenizer
-        model_for_encoding = "gpt-4" if "o4" in self.model else self.model
-        encoding = tiktoken.encoding_for_model(model_for_encoding)
+        Return a recent slice of conversation history without token counting.
 
-        # Token limits (leaving room for response)
-        max_tokens = 200000  # Large context window for GPT-4.1 vision models
-        response_buffer = 4000  # Reserve tokens for response
-        max_context_tokens = max_tokens - response_buffer
-        
-        # Count tokens in conversation history (reverse order to prioritize recent)
-        messages_to_include = []
-        total_tokens = 0
-        
-        # Always include system prompt tokens
-        system_tokens = len(encoding.encode(self.system_prompt))
-        total_tokens += system_tokens
-        
-        # Add messages from most recent to oldest
-        for msg in reversed(self.conversation_history):
-            msg_tokens = self._count_message_tokens(msg, encoding)
-            if total_tokens + msg_tokens <= max_context_tokens:
-                messages_to_include.insert(0, msg)
-                total_tokens += msg_tokens
-            else:
-                # Token limit reached
-                logger.debug(f"Token limit reached, truncating conversation history. "
-                           f"Including {len(messages_to_include)} of {len(self.conversation_history)} messages")
-                break
-        
-        return messages_to_include
-    
-    def _count_message_tokens(self, message: Dict[str, Any], encoding) -> int:
+        The Responses API supports very large contexts, so for now we retain a
+        modest window of the latest exchanges to keep behavior predictable
+        without relying on tokenizer lookups that may not exist for preview
+        models like GPT-5.
         """
-        Count tokens in a message, handling multimodal content.
-        
-        Args:
-            message: Message dictionary
-            encoding: Tiktoken encoding
-            
-        Returns:
-            Token count
-        """
-        token_count = 4  # Role and message structure overhead
-        
-        content = message.get("content", "")
-        if isinstance(content, str):
-            token_count += len(encoding.encode(content))
-        elif isinstance(content, list):
-            # Handle multimodal content
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        token_count += len(encoding.encode(item.get("text", "")))
-                    elif item.get("type") == "image_url":
-                        # Rough estimate for image tokens
-                        token_count += 85  # Base64 encoded images use ~85 tokens
-        
-        return token_count
+        if not self.conversation_history:
+            return []
+
+        max_messages = 20
+        if len(self.conversation_history) > max_messages:
+            logger.debug(
+                "Truncating conversation history",
+                extra={
+                    "total_messages": len(self.conversation_history),
+                    "kept_messages": max_messages,
+                },
+            )
+        return list(self.conversation_history[-max_messages:])
     
     def _extract_prompt_text(self, messages: List[Dict[str, Any]]) -> str:
         """
@@ -258,6 +232,250 @@ class ActionAgent(BaseAgent):
         self.conversation_history = []
         logger.debug("Conversation history reset for new action")
     
+    def _should_use_computer_tool(self, action_type: Optional[ActionType]) -> bool:
+        """Determine whether to execute the action via the Computer Use tool."""
+        if not self.browser_driver:
+            return False
+        if not self.use_computer_tool:
+            return False
+        return True
+
+    def _build_computer_use_goal(
+        self,
+        instruction: ActionInstruction,
+        test_step: TestStep,
+    ) -> str:
+        """Construct a goal prompt for the Computer Use tool."""
+        description = instruction.description or test_step.description
+        components = []
+        if description:
+            components.append(description.strip())
+        if instruction.target:
+            components.append(f"Target element description: {instruction.target}")
+        if instruction.action_type == ActionType.TYPE and instruction.value:
+            components.append(f"Text to input: {instruction.value}")
+        elif instruction.action_type == ActionType.KEY_PRESS and instruction.value:
+            components.append(f"Key to press: {instruction.value}")
+        elif instruction.value:
+            components.append(f"Associated value: {instruction.value}")
+        expected = instruction.expected_outcome or test_step.expected_result
+        if expected:
+            components.append(f"Expected outcome: {expected}")
+        components.append(
+            "Use the current screenshot to understand the UI. "
+            "If the action cannot be completed exactly, describe why."
+        )
+        return "\n".join(components)
+
+    async def _capture_browser_state(
+        self,
+        screenshot: Optional[bytes],
+        debug_logger,
+        step_number: Optional[int],
+        label: str,
+    ) -> BrowserState:
+        """Capture the current browser state for debugging."""
+        if not self.browser_driver:
+            raise ComputerUseExecutionError("Browser driver is not available.")
+
+        url = ""
+        title = ""
+        get_url = getattr(self.browser_driver, "get_page_url", None)
+        get_title = getattr(self.browser_driver, "get_page_title", None)
+
+        if callable(get_url):
+            try:
+                url = await get_url()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Unable to retrieve page URL during browser state capture", exc_info=True)
+        if callable(get_title):
+            try:
+                title = await get_title()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Unable to retrieve page title during browser state capture", exc_info=True)
+
+        viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+
+        screenshot_path = None
+        if screenshot and debug_logger:
+            screenshot_path = debug_logger.save_screenshot(
+                screenshot,
+                name=f"computer_use_{label}",
+                step_number=step_number,
+            )
+
+        return BrowserState(
+            url=url or "",
+            title=title or "",
+            viewport_size=(viewport_width, viewport_height),
+            screenshot=screenshot,
+            screenshot_path=screenshot_path,
+        )
+
+    def _new_computer_use_session(self, debug_logger) -> ComputerUseSession:
+        """Create a Computer Use session bound to the current driver and client."""
+        if not self.browser_driver:
+            raise ComputerUseExecutionError("Browser driver is not available.")
+
+        return ComputerUseSession(
+            client=self.client.client,
+            browser=self.browser_driver,
+            settings=self.settings,
+            debug_logger=debug_logger,
+            model=self._computer_use_model,
+        )
+
+    async def _execute_computer_tool_workflow(
+        self,
+        test_step: TestStep,
+        test_context: Dict[str, Any],
+        screenshot: Optional[bytes] = None,
+    ) -> EnhancedActionResult:
+        """Execute an action using the Computer Use tool and return a rich result."""
+        if not test_step.action_instruction:
+            raise ComputerUseExecutionError("Missing action instruction for Computer Use workflow.")
+
+        debug_logger = get_debug_logger()
+        initial_screenshot = screenshot
+        if initial_screenshot is None and self.browser_driver:
+            initial_screenshot = await self.browser_driver.screenshot()
+
+        browser_state_before = await self._capture_browser_state(
+            initial_screenshot,
+            debug_logger,
+            test_step.step_number,
+            "before",
+        )
+
+        instruction = test_step.action_instruction
+        goal = self._build_computer_use_goal(instruction, test_step)
+
+        if hasattr(test_context, "get"):
+            context_lookup = test_context
+        else:
+            context_lookup = {}
+
+        try:
+            context_for_result = dict(test_context)
+        except Exception:
+            context_for_result = test_context
+
+        session_metadata = {
+            "step_number": test_step.step_number,
+            "test_plan_name": context_lookup.get("test_plan_name") or context_lookup.get("plan_name"),
+            "test_case_name": context_lookup.get("test_case_name") or context_lookup.get("case_name"),
+            "target": instruction.target,
+            "value": instruction.value,
+        }
+
+        session = self._new_computer_use_session(debug_logger)
+
+        # Track goal in conversation history for downstream tooling
+        self.conversation_history.append({"role": "user", "content": goal})
+
+        start_ts = time.perf_counter()
+        try:
+            session_result = await session.run(goal, initial_screenshot, session_metadata)
+        except Exception as exc:
+            raise ComputerUseExecutionError(str(exc)) from exc
+
+        duration_ms = (time.perf_counter() - start_ts) * 1000
+
+        after_screenshot = await self.browser_driver.screenshot()
+        browser_state_after = await self._capture_browser_state(
+            after_screenshot,
+            debug_logger,
+            test_step.step_number,
+            "after",
+        )
+
+        failing_action = next(
+            (action for action in session_result.actions if action.status != "executed"),
+            None,
+        )
+
+        execution_error = None
+        if failing_action and failing_action.error_message:
+            execution_error = failing_action.error_message
+        elif failing_action:
+            execution_error = (
+                f"Computer action '{failing_action.action_type}' did not complete successfully."
+            )
+        elif session_result.safety_events:
+            execution_error = session_result.safety_events[0].message or "Safety check prevented action execution."
+
+        success = execution_error is None
+
+        execution_result = ExecutionResult(
+            success=success,
+            execution_time_ms=duration_ms,
+            error_message=execution_error,
+        )
+
+        concerns: List[str] = []
+        validation_reason = "Computer Use tool executed the requested action."
+        if execution_error:
+            concerns.append(execution_error)
+            validation_reason = execution_error
+        if session_result.safety_events:
+            safety_message = session_result.safety_events[0].message
+            if safety_message and safety_message not in concerns:
+                concerns.append(safety_message)
+            validation_reason = safety_message or validation_reason
+
+        validation = ValidationResult(
+            valid=success and not session_result.safety_events,
+            confidence=0.75 if success else 0.25,
+            reasoning=validation_reason,
+            concerns=concerns,
+        )
+
+        ai_analysis: Optional[AIAnalysis] = None
+        if session_result.final_output:
+            ai_analysis = AIAnalysis(
+                success=success,
+                confidence=0.6 if success else 0.4,
+                actual_outcome=session_result.final_output,
+                matches_expected=success,
+            )
+
+        if session_result.final_output:
+            self.conversation_history.append(
+                {"role": "assistant", "content": session_result.final_output}
+            )
+
+        if debug_logger:
+            debug_logger.log_ai_interaction(
+                agent_name=self.name,
+                action_type="computer_use",
+                prompt=goal,
+                response=session_result.final_output or "",
+                screenshot_path=browser_state_after.screenshot_path,
+                additional_context={
+                    "step_number": test_step.step_number,
+                    "response_ids": session_result.response_ids,
+                },
+            )
+
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=context_for_result,
+            validation=validation,
+            execution=execution_result,
+            browser_state_before=browser_state_before,
+            browser_state_after=browser_state_after,
+            ai_analysis=ai_analysis,
+            overall_success=success,
+            failure_phase=None if success else "execution",
+            computer_actions=session_result.actions,
+            safety_events=session_result.safety_events,
+            final_model_output=session_result.final_output,
+            response_ids=session_result.response_ids,
+        )
+        result.timestamp_end = datetime.now(timezone.utc)
+        return result
+
     async def execute_action(
         self,
         test_step: TestStep,
@@ -280,13 +498,37 @@ class ActionAgent(BaseAgent):
         # Reset conversation for new action
         self.reset_conversation()
         
-        logger.info("Executing action with multi-step workflow", extra={
-            "step_number": test_step.step_number,
-            "action_type": test_step.action_instruction.action_type.value,
-            "description": test_step.description
-        })
-        
-        action_type = test_step.action_instruction.action_type.value
+        instruction = test_step.action_instruction
+        action_type_enum = instruction.action_type if instruction else None
+        action_type = action_type_enum.value if action_type_enum else "unknown"
+
+        logger.info(
+            "Executing action with multi-step workflow",
+            extra={
+                "step_number": test_step.step_number,
+                "action_type": action_type,
+                "description": test_step.description,
+            },
+        )
+
+        if self._should_use_computer_tool(action_type_enum):
+            try:
+                return await self._execute_computer_tool_workflow(
+                    test_step=test_step,
+                    test_context=test_context,
+                    screenshot=screenshot,
+                )
+            except ComputerUseExecutionError as exc:
+                logger.error(
+                    "Computer Use workflow failed; aborting action",
+                    extra={
+                        "step_number": test_step.step_number,
+                        "action_type": action_type,
+                        "error": str(exc),
+                    },
+                    exc_info=True,
+                )
+                raise
         
         # Route to appropriate workflow based on action type
         if action_type == "navigate":

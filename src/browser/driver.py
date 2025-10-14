@@ -3,6 +3,7 @@ Playwright browser driver implementation.
 """
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -57,9 +58,18 @@ class PlaywrightDriver(BrowserDriver):
                     "viewport": f"{self.viewport_width}x{self.viewport_height}",
                 },
             )
+            launch_args = [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--disable-file-system",
+            ]
+
             self._browser = await self._playwright.chromium.launch(
                 headless=self.headless,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                args=launch_args,
+                env=os.environ,
+                chromium_sandbox=True,
             )
 
         if self._context is None:
@@ -111,13 +121,25 @@ class PlaywrightDriver(BrowserDriver):
         elapsed_ms = (asyncio.get_event_loop().time() - start_time) * 1000
         log_performance_metric("page_navigation", elapsed_ms, context={"url": url})
 
-    async def click(self, x: int, y: int) -> None:
+    async def click(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+    ) -> None:
         """Click at absolute coordinates."""
         if not self._page:
             raise RuntimeError("Browser not started. Call start() first.")
 
-        self.logger.debug("Clicking at coordinates", extra={"x": x, "y": y})
-        await self._page.mouse.click(x, y)
+        if button not in {"left", "right", "middle"}:
+            button = "left"
+
+        self.logger.debug(
+            "Clicking at coordinates",
+            extra={"x": x, "y": y, "button": button, "click_count": click_count},
+        )
+        await self._page.mouse.click(x, y, button=button, click_count=click_count)
 
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""

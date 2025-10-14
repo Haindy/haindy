@@ -416,32 +416,42 @@ async def run_test(
         # Display results summary
         console.print("\n[bold]Test Execution Summary:[/bold]")
         
-        status_color = "green" if getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown')) == "passed" else "red"
-        status_text = getattr(test_state, 'status', getattr(test_state, 'test_status', 'unknown'))
-        console.print(f"Status: [{status_color}]{status_text}[/{status_color}]")
+        raw_status = getattr(test_state, "status", getattr(test_state, "test_status", "unknown"))
+        status_value = raw_status.value if hasattr(raw_status, "value") else raw_status
+        success_statuses = {"passed", "completed"}
+        status_color = "green" if status_value in success_statuses else "red"
+        console.print(f"Status: [{status_color}]{status_value}[/{status_color}]")
         
         # Display test execution metrics from test report
-        if test_state.test_report:
-            report = test_state.test_report
-            
-            # Calculate totals from test cases
-            total_test_cases = len(report.test_cases)
-            completed_test_cases = len([tc for tc in report.test_cases if tc.status == "passed"])
-            
-            # Calculate step totals
-            total_steps = sum(tc.steps_total for tc in report.test_cases)
-            completed_steps = sum(tc.steps_completed for tc in report.test_cases)
-            failed_steps = sum(tc.steps_failed for tc in report.test_cases)
-            skipped_steps = total_steps - completed_steps - failed_steps
-            
+        report = getattr(test_state, "test_report", None)
+        if report:
+            test_cases = getattr(report, "test_cases", [])
+            total_test_cases = len(test_cases)
+            completed_test_cases = len(
+                [
+                    tc
+                    for tc in test_cases
+                    if (
+                        getattr(tc, "status", None).value
+                        if hasattr(getattr(tc, "status", None), "value")
+                        else getattr(tc, "status", None)
+                    )
+                    in success_statuses
+                ]
+            )
+
+            total_steps = sum(getattr(tc, "steps_total", 0) for tc in test_cases)
+            completed_steps = sum(getattr(tc, "steps_completed", 0) for tc in test_cases)
+            failed_steps = sum(getattr(tc, "steps_failed", 0) for tc in test_cases)
+            skipped_steps = max(total_steps - completed_steps - failed_steps, 0)
+
             console.print(f"Test Cases: [cyan]{completed_test_cases}/{total_test_cases}[/cyan]")
             console.print(f"Total Steps: {total_steps}")
             console.print(f"Completed Steps: [green]{completed_steps}[/green]")
             console.print(f"Failed Steps: [red]{failed_steps}[/red]")
             console.print(f"Skipped Steps: [yellow]{skipped_steps}[/yellow]")
-            
-            # Show summary if available
-            if report.summary:
+
+            if getattr(report, "summary", None):
                 console.print(f"Success Rate: [cyan]{report.summary.success_rate:.1f}%[/cyan]")
         else:
             console.print("[yellow]No test report available[/yellow]")
@@ -484,7 +494,7 @@ async def run_test(
         console.print(f"Screenshots Saved: [green]{debug_summary['screenshots_saved']}[/green]")
         
         # Return appropriate exit code
-        return 0 if test_state.status == "passed" else 1
+        return 0 if status_value in success_statuses else 1
         
     except asyncio.TimeoutError:
         console.print(f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]")
@@ -532,7 +542,8 @@ async def _generate_plan_only_plan(requirements: str):
             stream_observer=stream_observer,
         )
         stream_observer.mark_complete()
-        progress.stop_task(task)
+        if hasattr(progress, "stop_task"):
+            progress.stop_task(task)
 
     usage_totals = stream_observer.get_usage_totals()
     _print_plan_stats(test_plan, usage_totals, stream_observer.has_usage_data())

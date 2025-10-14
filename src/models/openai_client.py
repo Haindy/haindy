@@ -396,6 +396,21 @@ class OpenAIClient:
         )
 
         content_text = self._extract_output_text(response)
+        content_value: Any = content_text
+
+        format_type = response_format.get("type") if response_format else None
+        if format_type in {"json_object", "json_schema"}:
+            if not content_text:
+                content_value = {}
+            else:
+                try:
+                    content_value = json.loads(content_text)
+                except json.JSONDecodeError:
+                    self.logger.error(
+                        "Failed to parse JSON response",
+                        exc_info=True,
+                    )
+                    raise
         usage = getattr(response, "usage", None)
 
         usage_dict = {
@@ -407,7 +422,7 @@ class OpenAIClient:
         finish_reason = getattr(response, "status", None)
 
         return {
-            "content": content_text,
+            "content": content_value,
             "usage": usage_dict,
             "model": getattr(response, "model", self.model),
             "finish_reason": finish_reason,
@@ -505,6 +520,7 @@ class OpenAIClient:
             raise RuntimeError("Streaming response did not return a final result")
 
         content_text = self._extract_output_text(final_response)
+        content_value: Any = content_text
         usage = getattr(final_response, "usage", None)
 
         combined_usage = dict(usage_totals)
@@ -530,17 +546,21 @@ class OpenAIClient:
             "total_tokens": combined_usage.get("total_tokens", 0),
         }
 
-        if response_format and response_format.get("type") == "json_object":
-            try:
-                content_text = json.loads(content_text)
-            except json.JSONDecodeError as exc:
-                self.logger.error(f"Failed to parse JSON response: {exc}")
-                content_text = {"error": "Invalid JSON response", "raw": content_text}
+        format_type = response_format.get("type") if response_format else None
+        if format_type in {"json_object", "json_schema"}:
+            if not content_text:
+                content_value = {}
+            else:
+                try:
+                    content_value = json.loads(content_text)
+                except json.JSONDecodeError:
+                    self.logger.error("Failed to parse JSON response", exc_info=True)
+                    raise
 
         finish_reason = getattr(final_response, "status", None)
 
         return {
-            "content": content_text,
+            "content": content_value,
             "usage": usage_dict,
             "model": getattr(final_response, "model", self.model),
             "finish_reason": finish_reason,
@@ -593,9 +613,27 @@ class OpenAIClient:
                             normalized["type"] = default_type
                         content_items.append(normalized)
                     elif item_type in {"image_url", "input_image"}:
-                        image_url = item.get("image_url") or item.get("url")
+                        image_data = item.get("image_url")
+                        detail = item.get("detail")
+
+                        if isinstance(image_data, dict):
+                            detail = detail or image_data.get("detail")
+                            image_url = image_data.get("url") or image_data.get("image_url")
+                        else:
+                            image_url = image_data
+
+                        if not image_url:
+                            image_url = item.get("url")
+
+                        if isinstance(image_url, dict):
+                            detail = detail or image_url.get("detail")
+                            image_url = image_url.get("url")
+
                         if image_url:
-                            content_items.append({"type": "input_image", "image_url": image_url})
+                            image_item = {"type": "input_image", "image_url": image_url}
+                            if detail:
+                                image_item["detail"] = detail
+                            content_items.append(image_item)
                     else:
                         content_items.append({"type": default_type, "text": json.dumps(item)})
                 else:

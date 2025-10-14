@@ -168,6 +168,8 @@ class TestBaseAgent:
             response_format=None,
             reasoning_level="medium",
             modalities={"text"},
+            stream=False,
+            stream_observer=None,
         )
 
     @pytest.mark.asyncio
@@ -198,6 +200,8 @@ class TestBaseAgent:
             response_format=response_format,
             reasoning_level="medium",
             modalities={"text"},
+            stream=False,
+            stream_observer=None,
         )
 
     def test_build_messages_simple(self):

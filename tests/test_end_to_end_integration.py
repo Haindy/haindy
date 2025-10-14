@@ -46,7 +46,17 @@ class TestEndToEndIntegration:
         """Create a sample test state."""
         from uuid import uuid4
         from datetime import datetime, timezone
-        from src.core.types import TestPlan, TestStep, ActionInstruction, ActionResult, GridAction, GridCoordinate
+        from src.core.types import (
+            TestPlan,
+            TestStep,
+            ActionInstruction,
+            ActionResult,
+            GridAction,
+            GridCoordinate,
+            TestCaseResult,
+            TestReport,
+            TestSummary,
+        )
         
         # Create a test plan
         from src.core.types import TestCase, TestCasePriority
@@ -112,6 +122,45 @@ class TestEndToEndIntegration:
             start_time=datetime.now(timezone.utc),
             end_time=datetime.now(timezone.utc),
         )
+
+        test_case_result = TestCaseResult(
+            case_id=uuid4(),
+            test_id=test_case.test_id,
+            name=test_case.name,
+            status=TestStatus.COMPLETED,
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            steps_total=len(all_steps),
+            steps_completed=len(all_steps),
+            steps_failed=0,
+            step_results=[],
+            bugs=[],
+        )
+
+        test_summary = TestSummary(
+            total_test_cases=1,
+            completed_test_cases=1,
+            failed_test_cases=0,
+            total_steps=len(all_steps),
+            completed_steps=len(all_steps),
+            failed_steps=0,
+            critical_bugs=0,
+            high_bugs=0,
+            medium_bugs=0,
+            low_bugs=0,
+            success_rate=1.0,
+            execution_time_seconds=1.0,
+        )
+
+        test_report = TestReport(
+            test_plan_id=test_plan.plan_id,
+            test_plan_name=test_plan.name,
+            started_at=test_state.start_time or datetime.now(timezone.utc),
+            completed_at=test_state.end_time,
+            status=TestStatus.COMPLETED,
+            test_cases=[test_case_result],
+            summary=test_summary,
+        )
         
         # For compatibility with reporter that expects different structure
         # Create a mock object that has the expected attributes
@@ -120,7 +169,7 @@ class TestEndToEndIntegration:
         mock_state = SimpleNamespace(
             test_id=test_plan.plan_id,
             plan_id=test_plan.plan_id,
-            status="completed",  # Use string instead of enum
+            status=TestStatus.COMPLETED,
             test_plan=test_state.test_plan,
             completed_steps=test_state.completed_steps,
             failed_steps=test_state.failed_steps,
@@ -162,6 +211,7 @@ class TestEndToEndIntegration:
                     confidence=0.98,
                 ),
             })
+        mock_state.test_report = test_report
         
         return mock_state
     
@@ -330,7 +380,8 @@ class TestEndToEndIntegration:
             test_cases=[test_case],
             steps=test_case.steps  # For backward compatibility
         )
-        mock_coordinator.generate_test_plan.return_value = mock_plan
+        planner_instance = MagicMock()
+        planner_instance.create_test_plan = AsyncMock(return_value=mock_plan)
         
         # Mock interactive input
         with patch("src.main.get_interactive_requirements") as mock_get_req:
@@ -338,17 +389,19 @@ class TestEndToEndIntegration:
             
             with patch("src.main.BrowserController", return_value=mock_browser_controller):
                 with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    # Run main in plan-only mode
-                    exit_code = await async_main([
-                        "--requirements",
-                        "--plan-only",
-                    ])
+                    with patch("src.main.TestPlannerAgent", return_value=planner_instance):
+                        # Run main in plan-only mode
+                        exit_code = await async_main([
+                            "--requirements",
+                            "--plan-only",
+                        ])
         
         # Verify success
         assert exit_code == 0
         
         # Verify only plan was generated, not executed
-        mock_coordinator.generate_test_plan.assert_called_once()
+        planner_instance.create_test_plan.assert_awaited_once()
+        mock_coordinator.generate_test_plan.assert_not_called()
         mock_coordinator.execute_test_from_requirements.assert_not_called()
     
     @pytest.mark.asyncio
@@ -383,7 +436,7 @@ class TestEndToEndIntegration:
         reporter = TestReporter()
         
         # Generate HTML report
-        html_path = await reporter.generate_report(
+        html_path, _ = await reporter.generate_report(
             test_state=sample_test_state,
             output_dir=tmp_path,
             format="html",
@@ -399,7 +452,7 @@ class TestEndToEndIntegration:
         assert "passed" in html_content.lower()
         
         # Generate JSON report
-        json_path = await reporter.generate_report(
+        json_path, actions_path = await reporter.generate_report(
             test_state=sample_test_state,
             output_dir=tmp_path,
             format="json",
