@@ -95,6 +95,9 @@ python -m src.main -j test_scenarios/wikipedia_search.json
 
 # With debug output for detailed logging
 python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
+
+# Emit structured JSON logs (suitable for automation)
+python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --verbose
 ```
 
 #### Interactive Mode

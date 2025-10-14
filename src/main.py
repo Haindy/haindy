@@ -253,6 +253,11 @@ Examples:
         action="store_true",
         help="Enable debug mode with verbose logging",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose structured logging output (JSON)",
+    )
     
     # Output options
     parser.add_argument(
@@ -785,6 +790,11 @@ async def async_main(args: Optional[list[str]] = None) -> int:
     if parsed_args.debug:
         settings.debug_mode = True
         settings.log_level = "DEBUG"
+    
+    if parsed_args.verbose:
+        settings.log_format = "json"
+    else:
+        settings.log_format = "text"
     
     if parsed_args.headless is not None:
         settings.browser_headless = parsed_args.headless

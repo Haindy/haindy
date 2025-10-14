@@ -4,16 +4,70 @@ Logging configuration and utilities for the HAINDY framework.
 
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
-
-from rich.console import Console
-from rich.logging import RichHandler
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 from src.config.settings import get_settings
 from src.security.sanitizer import DataSanitizer
+
+
+STANDARD_LOG_RECORD_ATTRS = {
+    "name",
+    "msg",
+    "args",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "lineno",
+    "funcName",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "getMessage",
+    "message",
+    "asctime",
+}
+
+HUMAN_LOG_EXTRA_FIELD_ORDER = [
+    "taskName",
+    "test_case",
+    "step_number",
+    "action",
+    "description",
+    "action_type",
+    "expected_result",
+    "verdict",
+    "confidence",
+    "is_blocker",
+    "prompt_length",
+    "decomposed_actions",
+    "screenshot",
+    "screenshot_path",
+]
+
+HUMAN_LOG_FIELD_LABELS = {
+    "taskName": "Task",
+    "step_number": "Step",
+    "test_case": "Test Case",
+    "action": "Action",
+    "expected_result": "Expected Result",
+    "prompt_length": "Prompt Length",
+    "decomposed_actions": "Decomposed Actions",
+    "is_blocker": "Blocker",
+    "screenshot_path": "Screenshot",
+}
 
 
 class JSONFormatter(logging.Formatter):
@@ -42,17 +96,9 @@ class JSONFormatter(logging.Formatter):
 
         # Add all extra fields dynamically
         # Get all attributes from the record
-        standard_attrs = {
-            'name', 'msg', 'args', 'created', 'msecs', 'relativeCreated',
-            'levelname', 'levelno', 'pathname', 'filename', 'module',
-            'lineno', 'funcName', 'exc_info', 'exc_text', 'stack_info',
-            'thread', 'threadName', 'processName', 'process', 'getMessage',
-            'message', 'asctime'
-        }
-        
         # Add any extra fields that were passed
         for attr_name in dir(record):
-            if not attr_name.startswith('_') and attr_name not in standard_attrs:
+            if not attr_name.startswith('_') and attr_name not in STANDARD_LOG_RECORD_ATTRS:
                 attr_value = getattr(record, attr_name, None)
                 if attr_value is not None and not callable(attr_value):
                     log_data[attr_name] = attr_value
@@ -86,6 +132,74 @@ class SanitizingHandler(logging.Handler):
             self.handler.emit(sanitized_record)
         except Exception:
             self.handleError(record)
+
+
+class HumanReadableFormatter(logging.Formatter):
+    """Render log lines in a compact human-friendly layout."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
+        level = record.levelname
+        logger_name = self._format_logger_name(record.name)
+        message = record.getMessage()
+        segments = [f"[{level}]", timestamp, logger_name, message]
+
+        for label, value in self._iter_extra_fields(record):
+            segments.append(f"{label}: {value}")
+
+        formatted = " | ".join(segments)
+
+        if record.exc_info:
+            formatted = f"{formatted}\n{self.formatException(record.exc_info)}"
+
+        if record.stack_info:
+            formatted = f"{formatted}\n{self.formatStack(record.stack_info)}"
+
+        return formatted
+
+    def _iter_extra_fields(self, record: logging.LogRecord) -> Iterable[Tuple[str, str]]:
+        seen = set()
+
+        for field in HUMAN_LOG_EXTRA_FIELD_ORDER:
+            if hasattr(record, field):
+                value = getattr(record, field)
+                if value is not None:
+                    seen.add(field)
+                    yield self._label_for(field), self._stringify(value)
+
+        for key, value in sorted(record.__dict__.items()):
+            if key in seen or key in STANDARD_LOG_RECORD_ATTRS or key.startswith("_"):
+                continue
+            if value is None or callable(value):
+                continue
+            yield self._label_for(key), self._stringify(value)
+
+    @staticmethod
+    def _format_logger_name(logger_path: str) -> str:
+        friendly = logger_path.split(".")[-1]
+        friendly = friendly.replace("__", "_")
+        if "_" in friendly:
+            return friendly.replace("_", " ").title()
+        return HumanReadableFormatter._title_case(friendly)
+
+    @staticmethod
+    def _label_for(field_name: str) -> str:
+        if field_name in HUMAN_LOG_FIELD_LABELS:
+            return HUMAN_LOG_FIELD_LABELS[field_name]
+        return HumanReadableFormatter._title_case(field_name)
+
+    @staticmethod
+    def _title_case(raw: str) -> str:
+        if "_" in raw:
+            return raw.replace("_", " ").title()
+        spaced = re.sub(r"(?<!^)(?=[A-Z])", " ", raw).replace("-", " ")
+        return spaced.strip().title()
+
+    @staticmethod
+    def _stringify(value: Any) -> str:
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=True)
+        return str(value)
 
 
 class AgentLogAdapter(logging.LoggerAdapter):
@@ -139,13 +253,8 @@ def setup_logging(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(JSONFormatter(sanitize=sanitize_logs))
     else:
-        # Use Rich handler for pretty text output
-        console = Console(stderr=True)
-        console_handler = RichHandler(
-            console=console,
-            rich_tracebacks=True,
-            tracebacks_show_locals=True,
-        )
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(HumanReadableFormatter())
 
     console_handler.setLevel(numeric_level)
     
