@@ -9,7 +9,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -27,6 +27,7 @@ from src.monitoring.debug_logger import initialize_debug_logger
 from src.orchestration.communication import MessageBus
 from src.orchestration.coordinator import WorkflowCoordinator
 from src.orchestration.state_manager import StateManager
+from src.core.types import TestState
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
 
@@ -333,6 +334,8 @@ async def run_test(
     # Initialize components
     browser_controller = None
     coordinator = None
+    settings = get_settings()
+    use_progress = settings.log_format == "json"
     
     try:
         # Generate test run ID
@@ -365,58 +368,56 @@ async def run_test(
             return 0
 
         # Initialize core components
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            init_task = progress.add_task("[cyan]Initializing components...", total=None)
-            
-            # Create browser controller
-            browser_controller = BrowserController(headless=headless)
-            await browser_controller.start()
-            
-            # Create orchestration components
-            message_bus = MessageBus()
-            state_manager = StateManager()
-            
-            # Create coordinator
-            coordinator = WorkflowCoordinator(
-                message_bus=message_bus,
-                state_manager=state_manager,
-                browser_driver=browser_controller.driver,
+        if use_progress:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                init_task = progress.add_task("[cyan]Initializing components...", total=None)
+                browser_controller, coordinator = await _create_coordinator_stack(
+                    headless=headless,
+                    max_steps=max_steps,
+                )
+                progress.update(init_task, completed=True)
+        else:
+            console.print("[cyan]Initializing components...[/cyan]")
+            browser_controller, coordinator = await _create_coordinator_stack(
+                headless=headless,
                 max_steps=max_steps,
             )
-            
-            # Initialize agents
-            await coordinator.initialize()
-            
-            progress.update(init_task, completed=True)
+            console.print("[green]Components initialized.[/green]")
         
         # Navigate to initial URL
         console.print(f"\n[cyan]Navigating to:[/cyan] {url}")
         await browser_controller.navigate(url)
         
         # Execute test
-        console.print(f"\n[green]Executing test:[/green] {requirements[:100]}...")
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            exec_task = progress.add_task("[cyan]Running test...", total=None)
-            
-            # Execute test with timeout
-            test_state = await asyncio.wait_for(
-                coordinator.execute_test_from_requirements(
+        if use_progress:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                exec_task = progress.add_task("[cyan]Running test...", total=None)
+                
+                test_state = await _run_with_timeout(
+                    coordinator=coordinator,
                     requirements=requirements,
-                    initial_url=url,
-                ),
+                    url=url,
+                    timeout=timeout,
+                )
+                
+                progress.update(exec_task, completed=True)
+        else:
+            console.print("[cyan]Running test...[/cyan]")
+            test_state = await _run_with_timeout(
+                coordinator=coordinator,
+                requirements=requirements,
+                url=url,
                 timeout=timeout,
             )
-            
-            progress.update(exec_task, completed=True)
+            console.print("[green]Test run completed.[/green]")
         
         # Display results summary
         console.print("\n[bold]Test Execution Summary:[/bold]")
@@ -519,6 +520,44 @@ async def run_test(
             await browser_controller.stop()
 
 
+async def _create_coordinator_stack(
+    headless: bool,
+    max_steps: int,
+) -> Tuple[BrowserController, WorkflowCoordinator]:
+    """Build and initialize the browser/controller/coordinator stack."""
+    browser_controller = BrowserController(headless=headless)
+    await browser_controller.start()
+
+    message_bus = MessageBus()
+    state_manager = StateManager()
+
+    coordinator = WorkflowCoordinator(
+        message_bus=message_bus,
+        state_manager=state_manager,
+        browser_driver=browser_controller.driver,
+        max_steps=max_steps,
+    )
+
+    await coordinator.initialize()
+    return browser_controller, coordinator
+
+
+async def _run_with_timeout(
+    coordinator: WorkflowCoordinator,
+    requirements: str,
+    url: str,
+    timeout: int,
+) -> TestState:
+    """Execute the coordinator run with a timeout guard."""
+    return await asyncio.wait_for(
+        coordinator.execute_test_from_requirements(
+            requirements=requirements,
+            initial_url=url,
+        ),
+        timeout=timeout,
+    )
+
+
 async def _generate_plan_only_plan(requirements: str):
     """Create a test plan using only the Test Planner agent."""
     settings = get_settings()
@@ -532,26 +571,34 @@ async def _generate_plan_only_plan(requirements: str):
         modalities=planner_cfg.modalities,
     )
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(
-            "[cyan]Waiting for GPT-5 to craft the test plan...[/cyan]",
-            total=None,
-        )
-        stream_observer = PlanGenerationStreamObserver(progress, task)
-        test_plan = await planner.create_test_plan(
-            requirements,
-            stream_observer=stream_observer,
-        )
-        stream_observer.mark_complete()
-        if hasattr(progress, "stop_task"):
-            progress.stop_task(task)
+    use_progress = settings.log_format == "json"
 
-    usage_totals = stream_observer.get_usage_totals()
-    _print_plan_stats(test_plan, usage_totals, stream_observer.has_usage_data())
+    if use_progress:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                "[cyan]Waiting for GPT-5 to craft the test plan...[/cyan]",
+                total=None,
+            )
+            stream_observer = PlanGenerationStreamObserver(progress, task)
+            test_plan = await planner.create_test_plan(
+                requirements,
+                stream_observer=stream_observer,
+            )
+            stream_observer.mark_complete()
+            if hasattr(progress, "stop_task"):
+                progress.stop_task(task)
+
+        usage_totals = stream_observer.get_usage_totals()
+        _print_plan_stats(test_plan, usage_totals, stream_observer.has_usage_data())
+    else:
+        console.print("[cyan]Generating test plan…[/cyan]")
+        test_plan = await planner.create_test_plan(requirements)
+        console.print("[green]Test plan ready.[/green]")
+        _print_plan_stats(test_plan, None, False)
 
     return test_plan
 
@@ -694,20 +741,12 @@ async def test_api_connection() -> int:
     try:
         from src.models.openai_client import OpenAIClient
         
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("[cyan]Testing API key...", total=None)
-            
-            client = OpenAIClient()
-            # Test with a simple prompt
-            response = await client.call(
-                messages=[{"role": "user", "content": "Say 'API test successful' and nothing else."}],
-            )
-            
-            progress.update(task, completed=True)
+        console.print("[cyan]Testing API key...[/cyan]")
+        client = OpenAIClient()
+        # Test with a simple prompt
+        response = await client.call(
+            messages=[{"role": "user", "content": "Say 'API test successful' and nothing else."}],
+        )
         
         if "API test successful" in response["content"]:
             console.print("[green]✓ OpenAI API connection successful![/green]")

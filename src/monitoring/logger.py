@@ -140,14 +140,24 @@ class HumanReadableFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
         level = record.levelname
-        logger_name = self._format_logger_name(record.name)
+        logger_name, consumed_key = self._resolve_component(record)
+        if not logger_name:
+            logger_name = self._format_logger_name(record.name)
         message = record.getMessage()
-        segments = [f"[{level}]", timestamp, logger_name, message]
+        message_lines = message.splitlines() or [message]
+        primary_message = message_lines[0] if message_lines else ""
+        segments = [f"[{level}]", timestamp, logger_name, primary_message]
 
-        for label, value in self._iter_extra_fields(record):
+        consumed_fields = {consumed_key} if consumed_key else set()
+
+        for label, value in self._iter_extra_fields(record, consumed_fields):
             segments.append(f"{label}: {value}")
 
         formatted = " | ".join(segments)
+
+        if len(message_lines) > 1:
+            continuation = "\n".join(f"    {line}" for line in message_lines[1:])
+            formatted = f"{formatted}\n{continuation}"
 
         if record.exc_info:
             formatted = f"{formatted}\n{self.formatException(record.exc_info)}"
@@ -157,22 +167,38 @@ class HumanReadableFormatter(logging.Formatter):
 
         return formatted
 
-    def _iter_extra_fields(self, record: logging.LogRecord) -> Iterable[Tuple[str, str]]:
-        seen = set()
+    def _iter_extra_fields(
+        self,
+        record: logging.LogRecord,
+        consumed: Optional[set[str]] = None,
+    ) -> Iterable[Tuple[str, str]]:
+        seen = set(consumed or ())
 
         for field in HUMAN_LOG_EXTRA_FIELD_ORDER:
             if hasattr(record, field):
+                if field == "taskName":
+                    continue
                 value = getattr(record, field)
                 if value is not None:
                     seen.add(field)
                     yield self._label_for(field), self._stringify(value)
 
         for key, value in sorted(record.__dict__.items()):
+            if key == "taskName":
+                continue
             if key in seen or key in STANDARD_LOG_RECORD_ATTRS or key.startswith("_"):
                 continue
             if value is None or callable(value):
                 continue
             yield self._label_for(key), self._stringify(value)
+
+    @staticmethod
+    def _resolve_component(record: logging.LogRecord) -> Tuple[Optional[str], Optional[str]]:
+        for candidate in ("component", "agent_name", "agent", "source"):
+            value = getattr(record, candidate, None)
+            if value:
+                return HumanReadableFormatter._title_case(str(value)), candidate
+        return None, None
 
     @staticmethod
     def _format_logger_name(logger_path: str) -> str:
@@ -256,7 +282,10 @@ def setup_logging(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(HumanReadableFormatter())
 
-    console_handler.setLevel(numeric_level)
+    if format_type == "json":
+        console_handler.setLevel(numeric_level)
+    else:
+        console_handler.setLevel(max(numeric_level, logging.INFO))
     
     # Wrap with sanitizing handler if needed
     if sanitize_logs and format_type != "json":  # JSON formatter already sanitizes

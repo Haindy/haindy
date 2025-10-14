@@ -76,11 +76,37 @@ class DebugLogger:
             f.write(json.dumps(interaction) + '\n')
         
         # Also log to console with formatting
-        logger.info(f"[AI INTERACTION - {agent_name}] Action: {action_type}")
-        logger.info(f"[PROMPT] {prompt[:200]}..." if len(prompt) > 200 else f"[PROMPT] {prompt}")
-        logger.info(f"[RESPONSE] {response[:200]}..." if len(response) > 200 else f"[RESPONSE] {response}")
+        base_extra: Dict[str, Any] = {
+            "agent_name": agent_name,
+            "action_type": action_type,
+        }
+        if additional_context:
+            base_extra.update(additional_context)
+
+        response_ids = base_extra.pop("response_ids", None)
+
+        truncated_prompt = (
+            f"{prompt[:200]}..." if len(prompt) > 200 else prompt
+        )
+        truncated_response = (
+            f"{response[:200]}..." if len(response) > 200 else response
+        )
+
+        logger.info("Action: %s", action_type, extra=dict(base_extra))
+        logger.info("Prompt: %s", truncated_prompt, extra=dict(base_extra))
+        logger.info("Response: %s", truncated_response, extra=dict(base_extra))
         if screenshot_path:
-            logger.info(f"[SCREENSHOT] Saved to: {screenshot_path}")
+            logger.debug(
+                "Screenshot saved: %s",
+                screenshot_path,
+                extra={**base_extra, "screenshot_path": screenshot_path},
+            )
+        if response_ids:
+            logger.debug(
+                "Response IDs: %s",
+                response_ids,
+                extra={**base_extra, "response_ids": response_ids},
+            )
     
     def save_screenshot(
         self,
@@ -115,7 +141,15 @@ class DebugLogger:
         with open(filepath, 'wb') as f:
             f.write(screenshot_bytes)
         
-        logger.info(f"Screenshot saved: {filepath}")
+        logger.debug(
+            "Screenshot saved: %s",
+            filepath,
+            extra={
+                "step_number": step_number,
+                "with_grid": with_grid,
+                "screenshot_path": str(filepath),
+            },
+        )
         return str(filepath)
     
     def save_grid_overlay(

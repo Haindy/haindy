@@ -60,6 +60,9 @@ class WorkflowCoordinator:
         self.state_manager = state_manager or StateManager()
         self.browser_driver = browser_driver
         
+        # Register the coordinator itself for message bus diagnostics
+        self.message_bus.register_agent("coordinator")
+        
         # Agent instances
         self._agents: Dict[str, Any] = {}
         self._agent_tasks: Dict[str, asyncio.Task] = {}
@@ -132,21 +135,21 @@ class WorkflowCoordinator:
         if agent_name == "test_planner":
             self.message_bus.subscribe(
                 MessageType.PLAN_TEST,
-                lambda msg: asyncio.create_task(self._handle_plan_request(msg)),
+                self._handle_plan_request,
                 agent_name
             )
         
         elif agent_name == "test_runner":
             self.message_bus.subscribe(
                 MessageType.EXECUTE_STEP,
-                lambda msg: asyncio.create_task(self._handle_execute_step(msg)),
+                self._handle_execute_step,
                 agent_name
             )
         
         elif agent_name == "action_agent":
             self.message_bus.subscribe(
                 MessageType.DETERMINE_ACTION,
-                lambda msg: asyncio.create_task(self._handle_determine_action(msg)),
+                self._handle_determine_action,
                 agent_name
             )
         
