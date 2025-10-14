@@ -37,6 +37,12 @@ def mock_settings():
     settings.openai_model = "gpt-5"
     settings.openai_temperature = 1.0
     settings.openai_max_retries = 3
+    settings.openai_request_timeout_seconds = 900
+    settings.actions_use_computer_tool = False
+    settings.actions_computer_tool_max_turns = 12
+    settings.actions_computer_tool_action_timeout_ms = 7000
+    settings.actions_computer_tool_stabilization_wait_ms = 1000
+    settings.actions_computer_tool_fail_fast_on_safety = True
     return settings
 
 
@@ -51,8 +57,11 @@ def mock_browser_driver():
     driver.navigate_to = AsyncMock()
     driver.click = AsyncMock()
     driver.type_text = AsyncMock()
+    driver.press_key = AsyncMock()
     driver.scroll = AsyncMock()
+    driver.scroll_by_pixels = AsyncMock()
     driver.wait_for_load = AsyncMock()
+    driver.wait = AsyncMock()
     return driver
 
 

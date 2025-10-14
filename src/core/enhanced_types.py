@@ -91,6 +91,65 @@ class BrowserState(BaseModel):
     active_element: Optional[str] = Field(None, description="Currently focused element")
 
 
+class ComputerToolTurn(BaseModel):
+    """Record of a single Computer Use tool action and its execution details."""
+
+    call_id: str = Field(..., description="OpenAI computer_call identifier")
+    action_type: str = Field(..., description="Type of action requested by the model")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Raw action payload supplied by the model",
+    )
+    status: str = Field(
+        "pending",
+        description="Execution status (pending|executed|failed|skipped)",
+    )
+    error_message: Optional[str] = Field(
+        None, description="Error captured during execution or validation"
+    )
+    screenshot_path: Optional[str] = Field(
+        None, description="Path to screenshot captured after this action"
+    )
+    response_id: Optional[str] = Field(
+        None, description="Response ID that produced this action"
+    )
+    pending_safety_checks: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Safety checks returned alongside this action",
+    )
+    acknowledged: bool = Field(
+        False, description="Whether pending safety checks were acknowledged"
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp when the action was processed",
+    )
+    latency_ms: Optional[float] = Field(
+        None, description="Latency of executing the action in milliseconds"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata for observability"
+    )
+
+
+class SafetyEvent(BaseModel):
+    """Represents a safety check event encountered during Computer Use execution."""
+
+    call_id: str = Field(..., description="Call ID associated with the safety event")
+    code: str = Field(..., description="Safety check code")
+    message: str = Field(..., description="Safety check message")
+    acknowledged: bool = Field(
+        False, description="Whether the event was acknowledged by the system"
+    )
+    response_id: Optional[str] = Field(
+        None, description="Response ID where the safety event originated"
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp when the safety event was recorded",
+    )
+
+
 class EnhancedActionResult(BaseModel):
     """
     Comprehensive result of action execution with full debugging information.
@@ -152,6 +211,22 @@ class EnhancedActionResult(BaseModel):
         None, 
         description="AI analysis of results"
     )
+    computer_actions: List[ComputerToolTurn] = Field(
+        default_factory=list,
+        description="Sequence of Computer Use tool actions executed",
+    )
+    safety_events: List[SafetyEvent] = Field(
+        default_factory=list,
+        description="Safety check events encountered during execution",
+    )
+    final_model_output: Optional[str] = Field(
+        None,
+        description="Final assistant message returned by the model after completion",
+    )
+    response_ids: List[str] = Field(
+        default_factory=list,
+        description="OpenAI response IDs involved in this action loop",
+    )
     
     # Overall status
     overall_success: bool = Field(
@@ -194,7 +269,13 @@ class EnhancedActionResult(BaseModel):
             "grid_screenshot_before": self.grid_screenshot_before,
             "grid_screenshot_highlighted": self.grid_screenshot_highlighted,
             "test_context": self.test_context,
-            "ai_analysis": self.ai_analysis.model_dump() if self.ai_analysis else {}
+            "ai_analysis": self.ai_analysis.model_dump() if self.ai_analysis else {},
+            "computer_actions": [
+                action.model_dump() for action in self.computer_actions
+            ],
+            "safety_events": [event.model_dump() for event in self.safety_events],
+            "final_model_output": self.final_model_output,
+            "response_ids": self.response_ids,
         }
 
 

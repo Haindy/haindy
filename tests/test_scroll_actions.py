@@ -28,6 +28,12 @@ def mock_settings():
     settings.openai_model = "gpt-5"
     settings.openai_temperature = 0.7
     settings.openai_max_retries = 3
+    settings.openai_request_timeout_seconds = 900
+    settings.actions_use_computer_tool = False
+    settings.actions_computer_tool_max_turns = 12
+    settings.actions_computer_tool_action_timeout_ms = 7000
+    settings.actions_computer_tool_stabilization_wait_ms = 1000
+    settings.actions_computer_tool_fail_fast_on_safety = True
     settings.browser_headless = True
     settings.browser_viewport_width = 1920
     settings.browser_viewport_height = 1080
@@ -57,6 +63,8 @@ def mock_browser_driver():
     driver.get_viewport_size = AsyncMock(return_value=(1920, 1080))
     driver.get_scroll_position = AsyncMock(return_value=(0, 0))
     driver.get_page_dimensions = AsyncMock(return_value=(1920, 1080, 1920, 3000))
+    driver.press_key = AsyncMock()
+    driver.wait = AsyncMock()
     return driver
 
 

@@ -131,6 +131,36 @@ class Settings(BaseSettings):
         default=80, ge=1, le=100, description="Screenshot JPEG quality"
     )
 
+    # Computer Use Configuration
+    actions_use_computer_tool: bool = Field(
+        default=False,
+        description="Enable OpenAI Computer Use tool for action execution",
+        env="HAINDY_ACTIONS_USE_COMPUTER_TOOL",
+    )
+    actions_computer_tool_max_turns: int = Field(
+        default=12,
+        ge=1,
+        description="Maximum tool turns per action when using Computer Use",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS",
+    )
+    actions_computer_tool_action_timeout_ms: int = Field(
+        default=7000,
+        ge=500,
+        description="Timeout in milliseconds for executing a single computer action",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS",
+    )
+    actions_computer_tool_stabilization_wait_ms: int = Field(
+        default=1000,
+        ge=0,
+        description="Delay after executing an action before capturing the next screenshot",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS",
+    )
+    actions_computer_tool_fail_fast_on_safety: bool = Field(
+        default=True,
+        description="Abort immediately when Computer Use returns pending safety checks",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
+    )
+
     # Logging Configuration
     log_level: str = Field(
         default="INFO",
