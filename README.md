@@ -173,8 +173,8 @@ python -m src.main -j test_scenarios/login_test.json --output custom_reports/
 
 #### Timeouts and Limits
 ```bash
-# Set execution timeout (default: 300 seconds)
-python -m src.main -j test_scenarios/complex_test.json --timeout 600
+# Set execution timeout (default: 7200 seconds)
+python -m src.main -j test_scenarios/complex_test.json --timeout 3600
 
 # Set maximum steps (default: 50)
 python -m src.main -j test_scenarios/long_test.json --max-steps 100

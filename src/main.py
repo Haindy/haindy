@@ -277,8 +277,8 @@ Examples:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1200,
-        help="Test execution timeout in seconds (default: 1200)",
+        default=7200,
+        help="Test execution timeout in seconds (default: 7200)",
     )
     parser.add_argument(
         "--max-steps",
@@ -321,7 +321,7 @@ async def run_test(
     headless: bool = True,
     output_dir: Optional[Path] = None,
     report_format: str = "html",
-    timeout: int = 1200,
+    timeout: int = 7200,
     max_steps: int = 50,
     berserk: bool = False,
 ) -> int:

@@ -154,8 +154,8 @@ python -m src.main --plan-only -j test_scenarios/wikipedia_search.json
 # Browser runs headless by default
 # To show browser, set BROWSER_HEADLESS=false in .env file
 
-# Custom timeout (default: 300 seconds)
-python -m src.main -j test_scenarios/complex_test.json --timeout 600
+# Custom timeout (default: 7200 seconds)
+python -m src.main -j test_scenarios/complex_test.json --timeout 3600
 
 # Custom output directory
 python -m src.main -j test_scenarios/login_test.json --output custom_reports/
