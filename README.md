@@ -95,6 +95,9 @@ python -m src.main -j test_scenarios/wikipedia_search.json
 
 # With debug output for detailed logging
 python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
+
+# Emit structured JSON logs (suitable for automation)
+python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --verbose
 ```
 
 #### Interactive Mode
@@ -170,8 +173,8 @@ python -m src.main -j test_scenarios/login_test.json --output custom_reports/
 
 #### Timeouts and Limits
 ```bash
-# Set execution timeout (default: 300 seconds)
-python -m src.main -j test_scenarios/complex_test.json --timeout 600
+# Set execution timeout (default: 7200 seconds)
+python -m src.main -j test_scenarios/complex_test.json --timeout 3600
 
 # Set maximum steps (default: 50)
 python -m src.main -j test_scenarios/long_test.json --max-steps 100

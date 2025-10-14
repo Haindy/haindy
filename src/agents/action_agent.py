@@ -502,7 +502,7 @@ class ActionAgent(BaseAgent):
         action_type_enum = instruction.action_type if instruction else None
         action_type = action_type_enum.value if action_type_enum else "unknown"
 
-        logger.info(
+        logger.debug(
             "Executing action with multi-step workflow",
             extra={
                 "step_number": test_step.step_number,
