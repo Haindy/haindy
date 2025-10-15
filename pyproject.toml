@@ -26,30 +26,30 @@ classifiers = [
 ]
 
 dependencies = [
-    "playwright>=1.45.0",
+    "playwright>=1.55.0",
     "openai>=2.3.0",
-    "rich>=13.7.0",
-    "pydantic>=2.5.0",
-    "pydantic-settings>=2.0.0",
-    "python-dotenv>=1.0.0",
-    "pillow>=10.2.0",
-    "numpy>=1.24.0",
-    "aiofiles>=23.2.1",
+    "rich>=14.2.0",
+    "pydantic>=2.12.2",
+    "pydantic-settings>=2.11.0",
+    "python-dotenv>=1.1.1",
+    "pillow>=11.3.0",
+    "numpy>=2.3.3",
+    "aiofiles>=25.1.0",
     "jsonlines>=4.0.0",
-    "jinja2>=3.1.0",
-    "tiktoken>=0.5.1",
+    "jinja2>=3.1.6",
+    "tiktoken>=0.12.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.7.0",
-    "isort>=5.12.0",
-    "mypy>=1.5.0",
-    "ruff>=0.1.0",
-    "pre-commit>=3.3.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=7.0.0",
+    "black>=25.9.0",
+    "isort>=7.0.0",
+    "mypy>=1.18.2",
+    "ruff>=0.14.0",
+    "pre-commit>=4.3.0",
 ]
 
 [project.scripts]

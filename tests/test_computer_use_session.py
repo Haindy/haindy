@@ -29,6 +29,8 @@ def session_settings():
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_fail_fast_on_safety=True,
+        actions_computer_tool_allowed_domains=[],
+        actions_computer_tool_blocked_domains=[],
     )
 
 
@@ -122,6 +124,71 @@ async def test_computer_use_session_executes_actions_successfully(
 
 
 @pytest.mark.asyncio
+async def test_computer_use_session_blocks_actions_in_observe_mode(
+    mock_client, mock_browser, session_settings
+):
+    """Ensure observe-only mode prevents the Computer Use tool from mutating state."""
+    initial_response = DummyResponse(
+        {
+            "id": "resp_obs_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_obs",
+                    "action": {"type": "click", "x": 10, "y": 20},
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_obs_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Policy rejection acknowledged."}
+                    ],
+                }
+            ],
+        }
+    )
+
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    metadata = {
+        "step_number": 2,
+        "test_plan_name": "Plan Observe",
+        "test_case_name": "Case Observe",
+        "safety_identifier": "test-observe-mode",
+    }
+
+    result = await session.run(
+        goal="Verify state without interaction.",
+        initial_screenshot=b"initial_bytes",
+        metadata=metadata,
+        allowed_actions={"screenshot"},
+    )
+
+    assert len(result.actions) == 1
+    turn = result.actions[0]
+    assert turn.status == "failed"
+    assert "observe-only" in (turn.error_message or "")
+    assert turn.metadata.get("policy") == "observe_only"
+    mock_browser.click.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_computer_use_session_fail_fast_on_safety(
     mock_client, mock_browser, session_settings
 ):
@@ -169,6 +236,65 @@ async def test_computer_use_session_fail_fast_on_safety(
     assert result.safety_events
     assert mock_browser.click.await_count == 0
     mock_client.responses.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_enforces_domain_allowlist(
+    mock_client, mock_browser, session_settings
+):
+    """Validate that stateful actions are rejected outside the configured allowlist."""
+    session_settings.actions_computer_tool_allowed_domains = ["example.com"]
+    mock_browser.get_page_url.return_value = "https://unauthorized.org/page"
+
+    initial_response = DummyResponse(
+        {
+            "id": "resp_domain",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_domain",
+                    "action": {"type": "click", "x": 0, "y": 0},
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_domain_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Domain policy acknowledged."}
+                    ],
+                }
+            ],
+        }
+    )
+
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Attempt action on unauthorized domain.",
+        initial_screenshot=b"initial",
+        metadata={"safety_identifier": "domain-test"},
+    )
+
+    turn = result.actions[0]
+    assert turn.status == "failed"
+    assert "allowlist" in (turn.error_message or "")
+    assert turn.metadata.get("policy") == "rejected"
+    mock_browser.click.assert_not_called()
 
 
 @pytest.mark.asyncio
