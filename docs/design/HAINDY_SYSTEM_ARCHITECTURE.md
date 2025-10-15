@@ -62,6 +62,7 @@ sequenceDiagram
     participant Runner as TestRunner
     participant Action as ActionAgent
     participant CU as ComputerUseSession
+    participant API as OpenAI Responses
     participant Browser as Playwright/Instrumented Driver
     participant Reporter as TestReporter
 
@@ -75,8 +76,8 @@ sequenceDiagram
             Action->>CU: run(goal, screenshot, metadata)
             CU->>Browser: start() / screenshot()
             loop computer_use turns
-                CU->>OpenAI: responses.create(...)
-                CU<--OpenAI: computer_call output
+                CU->>API: responses.create(...)
+                API-->>CU: computer_call output
                 CU->>Browser: click / type / press / scroll
                 Browser-->>CU: state snapshots
             end
@@ -183,4 +184,3 @@ stateDiagram-v2
 
 ## Summary
 HAINDY fuses orchestration, AI planning, and browser automation into a layered system. The coordinator and message bus keep agents loosely coupled; the Action Agent and Computer Use session enforce safe, deterministic interactions; monitoring components guarantee traceability. Developers can extend the system by adding agents, refining prompts, or swapping execution backends while relying on the established architecture.
-
