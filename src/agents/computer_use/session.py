@@ -614,16 +614,14 @@ class ComputerUseSession:
         metadata: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
-        screenshot_bytes = await self._browser.screenshot()
-        screenshot_b64 = encode_png_base64(screenshot_bytes)
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
-
         confirmation_text = (
             "Yes, proceed. Execute the requested action now without asking for additional confirmation."
         )
         target_text = metadata.get("target")
         if target_text:
             confirmation_text += f" Focus on: {target_text}."
+
+        viewport_width, viewport_height = await self._browser.get_viewport_size()
 
         payload: Dict[str, Any] = {
             "model": self._model,
@@ -640,11 +638,7 @@ class ComputerUseSession:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": confirmation_text},
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/png;base64,{screenshot_b64}",
-                        },
+                        {"type": "input_text", "text": confirmation_text}
                     ],
                 }
             ],
