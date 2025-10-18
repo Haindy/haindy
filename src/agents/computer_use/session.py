@@ -7,7 +7,8 @@ import base64
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlparse
 
 from openai import AsyncOpenAI
 
@@ -51,12 +52,29 @@ class ComputerUseSession:
         self._settings = settings
         self._debug_logger = debug_logger
         self._model = model
+        self._allowed_actions: Optional[Set[str]] = None
+        self._allowed_domains: Set[str] = self._normalize_domain_set(
+            settings.actions_computer_tool_allowed_domains
+        )
+        self._blocked_domains: Set[str] = self._normalize_domain_set(
+            settings.actions_computer_tool_blocked_domains
+        )
+        self._stateful_actions: Set[str] = {
+            "click",
+            "double_click",
+            "right_click",
+            "type",
+            "keypress",
+            "drag",
+            "navigate",
+        }
 
     async def run(
         self,
         goal: str,
         initial_screenshot: Optional[bytes],
         metadata: Optional[Dict[str, Any]] = None,
+        allowed_actions: Optional[Set[str]] = None,
     ) -> ComputerUseSessionResult:
         """
         Execute a Computer Use loop until completion or failure.
@@ -70,6 +88,7 @@ class ComputerUseSession:
             ComputerUseSessionResult with action traces and final output.
         """
         metadata = metadata or {}
+        self._allowed_actions = allowed_actions
         result = ComputerUseSessionResult()
 
         await self._ensure_browser_ready()
@@ -98,6 +117,35 @@ class ComputerUseSession:
             assistant_message = extract_assistant_text(response_dict)
             result.final_output = assistant_message or result.final_output
             result.last_response = response_dict
+
+            interaction_mode = metadata.get("interaction_mode") or "execute"
+            if (
+                interaction_mode != "observe_only"
+                and assistant_message
+                and not computer_calls
+                and self._looks_like_confirmation_request(assistant_message)
+            ):
+                attempts = metadata.setdefault("_auto_confirmation_attempts", 0)
+                if attempts >= 2:
+                    logger.debug(
+                        "Auto-confirmation limit reached; returning control to caller.",
+                        extra={"response_id": response_dict.get("id")},
+                    )
+                    break
+                metadata["_auto_confirmation_attempts"] = attempts + 1
+                logger.debug(
+                    "Computer Use model requested confirmation; auto-affirming continuation.",
+                    extra={"response_id": response_dict.get("id")},
+                )
+                confirmation_payload = await self._build_confirmation_request(
+                    previous_response_id=previous_response_id,
+                    metadata=metadata,
+                )
+                response = await self._create_response(confirmation_payload)
+                response_dict = normalize_response(response)
+                result.response_ids.append(response_dict.get("id", ""))
+                previous_response_id = response_dict.get("id")
+                continue
 
             if not computer_calls:
                 break
@@ -153,6 +201,7 @@ class ComputerUseSession:
                 logger.exception("Computer Use action execution failed", extra={"call_id": turn.call_id})
 
             result.actions.append(turn)
+            metadata["_auto_confirmation_attempts"] = 0
 
             follow_up_payload = await self._build_follow_up_request(
                 previous_response_id=previous_response_id,
@@ -165,6 +214,7 @@ class ComputerUseSession:
             result.response_ids.append(response_dict.get("id", ""))
             previous_response_id = response_dict.get("id")
 
+        self._allowed_actions = None
         return result
 
     async def _execute_tool_action(
@@ -175,58 +225,104 @@ class ComputerUseSession:
     ) -> None:
         """Execute a single Computer Use tool action via the browser driver."""
         action = turn.parameters
-        action_type = action.get("type")
+        raw_action_type = action.get("type")
+        action_type = self._canonicalize_action_type(raw_action_type)
+        if action_type and action_type != raw_action_type:
+            turn.metadata["normalized_action_type"] = action_type
+            turn.action_type = action_type
         start = time.perf_counter()
 
         viewport_width, viewport_height = await self._browser.get_viewport_size()
+        allow_action, deny_reason = self._is_action_allowed(action_type)
 
         try:
-            if action_type == "click":
-                await self._execute_click(action, viewport_width, viewport_height)
-            elif action_type in {"double_click", "right_click"}:
-                await self._execute_special_click(action, viewport_width, viewport_height)
-            elif action_type == "scroll":
-                await self._execute_scroll(action)
-            elif action_type == "type":
-                await self._browser.type_text(action.get("text", ""))
-            elif action_type == "keypress":
-                for key in action.get("keys", []):
-                    normalized = normalize_key_sequence(key)
-                    await self._browser.press_key(normalized)
-            elif action_type == "wait":
-                duration = int(
-                    action.get("duration_ms")
-                    or self._settings.actions_computer_tool_stabilization_wait_ms
-                )
-                await self._browser.wait(duration)
-            elif action_type == "screenshot":
-                # No-op; screenshot captured after execution
-                logger.debug("Computer Use requested screenshot action; no browser operation executed.")
+            if not allow_action:
+                turn.status = "failed"
+                turn.error_message = deny_reason or "Action blocked by policy."
+                turn.metadata["policy"] = "observe_only"
             else:
-                raise ComputerUseExecutionError(f"Unsupported computer action type: {action_type}")
+                await self._enforce_domain_policy(action_type)
 
-            await self._post_action_wait()
+                if action_type == "click":
+                    await self._execute_click(action, viewport_width, viewport_height)
+                elif action_type in {"double_click", "right_click"}:
+                    await self._execute_special_click(action, viewport_width, viewport_height)
+                elif action_type == "scroll":
+                    await self._execute_scroll(action)
+                elif action_type == "type":
+                    text_payload = action.get("text")
+                    if not text_payload:
+                        text_payload = action.get("value") or action.get("input") or metadata.get("value")
+                        if text_payload:
+                            turn.metadata["synthetic_text_payload"] = text_payload
+                    if not text_payload:
+                        raise ComputerUseExecutionError("Type action missing text payload.")
+                    await self._browser.type_text(text_payload)
+                elif action_type == "keypress":
+                    key_sequence = self._resolve_key_sequence(action, metadata)
+                    if not key_sequence:
+                        raise ComputerUseExecutionError("Key press action missing key payload.")
+                    if not action.get("keys"):
+                        turn.metadata["synthetic_key_sequence"] = key_sequence
+                    for key in key_sequence:
+                        normalized = normalize_key_sequence(key)
+                        await self._browser.press_key(normalized)
+                elif action_type == "wait":
+                    duration = int(
+                        action.get("duration_ms")
+                        or self._settings.actions_computer_tool_stabilization_wait_ms
+                    )
+                    await self._browser.wait(duration)
+                elif action_type == "screenshot":
+                    # No-op; screenshot captured after execution
+                    logger.debug("Computer Use requested screenshot action; no browser operation executed.")
+                elif action_type == "navigate":
+                    raise ComputerUseExecutionError(
+                        "Direct navigation actions are not supported by the browser driver."
+                    )
+                else:
+                    raise ComputerUseExecutionError(f"Unsupported computer action type: {action_type}")
 
-            screenshot_bytes = await self._browser.screenshot()
-            turn.screenshot_path = self._save_turn_screenshot(
-                screenshot_bytes,
-                suffix=f"{turn.action_type}_{turn_index}",
-                step_number=metadata.get("step_number"),
+                turn.status = "executed"
+
+        except ComputerUseExecutionError as policy_error:
+            turn.status = "failed"
+            turn.error_message = str(policy_error)
+            turn.metadata["policy"] = "rejected"
+            logger.warning(
+                "Computer Use action rejected",
+                extra={
+                    "call_id": turn.call_id,
+                    "action_type": action_type,
+                    "reason": turn.error_message,
+                },
             )
-
-            turn.metadata.update(
-                {
-                    "screenshot_base64": encode_png_base64(screenshot_bytes),
-                    "current_url": await self._maybe_get_current_url(),
-                }
-            )
-
-            turn.status = "executed"
-
-        except Exception:
-            raise
         finally:
             turn.latency_ms = (time.perf_counter() - start) * 1000
+            if turn.status == "executed":
+                await self._post_action_wait()
+            await self._record_turn_snapshot(turn, metadata, turn_index)
+
+    async def _record_turn_snapshot(
+        self,
+        turn: ComputerToolTurn,
+        metadata: Dict[str, Any],
+        turn_index: int,
+    ) -> None:
+        """Capture screenshot and update metadata after action execution."""
+        screenshot_bytes = await self._browser.screenshot()
+        turn.screenshot_path = self._save_turn_screenshot(
+            screenshot_bytes,
+            suffix=f"{turn.action_type}_{turn_index}",
+            step_number=metadata.get("step_number"),
+        )
+
+        turn.metadata.update(
+            {
+                "screenshot_base64": encode_png_base64(screenshot_bytes),
+                "current_url": await self._maybe_get_current_url(),
+            }
+        )
 
     async def _execute_click(
         self, action: Dict[str, Any], viewport_width: int, viewport_height: int
@@ -310,6 +406,29 @@ class ComputerUseSession:
             "truncation": "auto",
         }
 
+        safety_identifier = metadata.get("safety_identifier")
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
+
+        interaction_mode = metadata.get("interaction_mode")
+        if interaction_mode:
+            reminder = (
+                "Reminder: You are in observe-only mode—analyze the UI and report findings without interacting."
+                if interaction_mode == "observe_only"
+                else "Reminder: You have approval to execute the requested action directly. Do not pause for confirmation; complete the interaction."
+            )
+            payload["input"].append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": reminder,
+                        }
+                    ],
+                }
+            )
+
         if call.status != "executed" and call.error_message:
             payload["input"].append(
                 {
@@ -348,6 +467,10 @@ class ComputerUseSession:
             context_lines.append(f"Target description: {metadata['target']}")
         if metadata.get("value"):
             context_lines.append(f"Associated value: {metadata['value']}")
+        if metadata.get("current_url"):
+            context_lines.append(f"Current URL: {metadata['current_url']}")
+        if metadata.get("interaction_mode"):
+            context_lines.append(f"Interaction mode: {metadata['interaction_mode']}")
 
         context_text = goal
         if context_lines:
@@ -381,6 +504,10 @@ class ComputerUseSession:
             "truncation": "auto",
         }
 
+        safety_identifier = metadata.get("safety_identifier")
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
+
         return payload
 
     async def _create_response(self, payload: Dict[str, Any]) -> Any:
@@ -410,6 +537,165 @@ class ComputerUseSession:
                 logger.debug("Failed to retrieve current URL from browser driver", exc_info=True)
         return None
 
+    @staticmethod
+    def _canonicalize_action_type(action_type: Optional[str]) -> Optional[str]:
+        """Normalize OpenAI action types to the browser driver's expectations."""
+        if not action_type:
+            return action_type
+
+        normalized = action_type.replace("-", "_").lower()
+        alias_map = {
+            "key_press": "keypress",
+            "keypress": "keypress",
+            "press_key": "keypress",
+            "press": "keypress",
+            "type_text": "type",
+            "input": "type",
+            "doubleclick": "double_click",
+            "rightclick": "right_click",
+            "scroll_to_element": "scroll",
+            "scroll_vertical": "scroll",
+        }
+        return alias_map.get(normalized, normalized)
+
+    def _resolve_key_sequence(
+        self,
+        action: Dict[str, Any],
+        metadata: Dict[str, Any],
+    ) -> List[str]:
+        """Resolve keyboard keys to press from the tool payload or fallback metadata."""
+        keys = action.get("keys")
+        if isinstance(keys, list) and keys:
+            return [str(key) for key in keys if isinstance(key, str) and key.strip()]
+        if isinstance(keys, str) and keys.strip():
+            return [keys.strip()]
+
+        candidate_fields = [
+            action.get("key"),
+            action.get("value"),
+            action.get("text"),
+            metadata.get("value"),
+        ]
+        for candidate in candidate_fields:
+            if isinstance(candidate, str) and candidate.strip():
+                return [candidate.strip()]
+
+        combination = action.get("key_combination") or action.get("shortcut")
+        if isinstance(combination, str) and combination.strip():
+            return [combination.strip()]
+
+        return []
+
+    @staticmethod
+    def _looks_like_confirmation_request(message: str) -> bool:
+        """Detect if the assistant is asking for permission to continue."""
+        text = message.strip().lower()
+        if not text.endswith("?"):
+            return False
+
+        confirmation_markers = [
+            "should i",
+            "should we",
+            "would you like",
+            "want me to",
+            "do you want",
+            "shall i",
+            "ok to",
+            "is it okay",
+            "proceed",
+            "continue",
+            "ready to",
+        ]
+        return any(marker in text for marker in confirmation_markers)
+
+    async def _build_confirmation_request(
+        self,
+        previous_response_id: Optional[str],
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Construct a follow-up request that confirms execution should proceed."""
+        confirmation_text = (
+            "Yes, proceed. Execute the requested action now without asking for additional confirmation."
+        )
+        target_text = metadata.get("target")
+        if target_text:
+            confirmation_text += f" Focus on: {target_text}."
+
+        viewport_width, viewport_height = await self._browser.get_viewport_size()
+
+        payload: Dict[str, Any] = {
+            "model": self._model,
+            "previous_response_id": previous_response_id,
+            "tools": [
+                {
+                    "type": "computer_use_preview",
+                    "display_width": viewport_width,
+                    "display_height": viewport_height,
+                    "environment": "browser",
+                }
+            ],
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": confirmation_text}
+                    ],
+                }
+            ],
+            "truncation": "auto",
+        }
+
+        safety_identifier = metadata.get("safety_identifier")
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
+
+        return payload
+
+    def _is_action_allowed(self, action_type: Optional[str]) -> tuple[bool, Optional[str]]:
+        """Determine if the requested action type is permitted in the current mode."""
+        if not action_type:
+            return False, "Computer Use response omitted action type information."
+        if self._allowed_actions is None:
+            return True, None
+        if action_type in self._allowed_actions:
+            return True, None
+
+        return False, (
+            f"Action '{action_type}' is not permitted in observe-only mode."
+        )
+
+    async def _enforce_domain_policy(self, action_type: Optional[str]) -> None:
+        """Prevent interactions with domains outside defined allow/block lists."""
+        if (not self._allowed_domains and not self._blocked_domains) or not action_type:
+            return
+
+        if action_type not in self._stateful_actions:
+            return
+
+        current_url = await self._maybe_get_current_url()
+        if not current_url:
+            return
+
+        hostname = urlparse(current_url).hostname or ""
+        if not hostname:
+            return
+
+        normalized_host = hostname.lower()
+
+        if self._allowed_domains and not any(
+            self._domain_matches(normalized_host, domain) for domain in self._allowed_domains
+        ):
+            raise ComputerUseExecutionError(
+                f"Current domain '{hostname}' is not in the allowlist."
+            )
+
+        if self._blocked_domains and any(
+            self._domain_matches(normalized_host, domain) for domain in self._blocked_domains
+        ):
+            raise ComputerUseExecutionError(
+                f"Current domain '{hostname}' is blocked by policy."
+            )
+
     def _save_turn_screenshot(
         self, screenshot_bytes: bytes, suffix: str, step_number: Optional[int]
     ) -> Optional[str]:
@@ -420,6 +706,23 @@ class ComputerUseSession:
         return self._debug_logger.save_screenshot(
             screenshot_bytes, name=name, step_number=step_number
         )
+
+    @staticmethod
+    def _normalize_domain_set(domains: List[str]) -> Set[str]:
+        normalized: Set[str] = set()
+        for domain in domains or []:
+            if not domain:
+                continue
+            value = domain.strip().lower().lstrip(".")
+            if value:
+                normalized.add(value)
+        return normalized
+
+    @staticmethod
+    def _domain_matches(hostname: str, domain: str) -> bool:
+        hostname = hostname.strip().lower()
+        domain = domain.strip().lower()
+        return hostname == domain or hostname.endswith(f".{domain}")
 
     @property
     def _action_timeout_seconds(self) -> float:
@@ -540,6 +843,10 @@ def _inject_context_metadata(turn: ComputerToolTurn, metadata: Dict[str, Any]) -
     for key in ("step_number", "test_plan_name", "test_case_name", "target", "value"):
         if metadata.get(key) is not None:
             turn.metadata[key] = metadata[key]
+    if metadata.get("safety_identifier") is not None:
+        turn.metadata["safety_identifier"] = metadata["safety_identifier"]
+    if metadata.get("interaction_mode") is not None:
+        turn.metadata["interaction_mode"] = metadata["interaction_mode"]
 
 
 def normalize_coordinates(

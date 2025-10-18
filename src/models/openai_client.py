@@ -347,13 +347,11 @@ class OpenAIClient:
                 self.logger.error(f"Failed to parse JSON response: {exc}")
                 content = {"error": "Invalid JSON response", "raw": content}
 
+        usage_payload = self._normalize_chat_usage(response.usage)
+
         return {
             "content": content,
-            "usage": {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            },
+            "usage": usage_payload,
             "model": response.model,
             "finish_reason": response.choices[0].finish_reason,
         }
@@ -789,6 +787,66 @@ class OpenAIClient:
                 continue
 
         return payload
+
+    def _normalize_chat_usage(self, usage: Any) -> Dict[str, int]:
+        """
+        Normalize chat completion usage payloads across SDK versions.
+
+        OpenAI 1.x returns prompt/completion tokens, while 2.x may expose
+        input/output tokens. This helper maps both to a consistent schema.
+        """
+
+        prompt_tokens = self._lookup_usage_with_aliases(
+            usage, ("prompt_tokens", "input_tokens")
+        )
+        completion_tokens = self._lookup_usage_with_aliases(
+            usage, ("completion_tokens", "output_tokens")
+        )
+        total_tokens = self._lookup_usage_with_aliases(
+            usage, ("total_tokens",)
+        )
+
+        # Derive totals if missing
+        if total_tokens == 0 and prompt_tokens and completion_tokens:
+            total_tokens = prompt_tokens + completion_tokens
+
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    def _lookup_usage_with_aliases(self, usage: Any, aliases: Sequence[str]) -> int:
+        for key in aliases:
+            value = self._extract_usage_value(usage, key)
+            if value is not None:
+                return value
+        return 0
+
+    def _extract_usage_value(self, usage: Any, key: str) -> Optional[int]:
+        if usage is None:
+            return None
+
+        raw_value: Optional[Any]
+        if isinstance(usage, dict):
+            if key not in usage:
+                return None
+            raw_value = usage.get(key)
+        else:
+            if not hasattr(usage, key):
+                return None
+            raw_value = getattr(usage, key)
+
+        if raw_value is None:
+            return None
+
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            self.logger.debug(
+                "Unable to coerce usage value '%s' for key '%s' to int", raw_value, key
+            )
+            return None
 
     def _resolve_text_delta(self, delta: Any) -> str:
         if delta is None:

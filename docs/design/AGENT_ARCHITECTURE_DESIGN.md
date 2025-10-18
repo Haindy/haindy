@@ -62,11 +62,13 @@ The Test Runner Agent orchestrates test execution, maintains test state, generat
 - **Understand Intent**: Comprehend what each test step aims to achieve
 - **Action Planning**: Break down high-level steps into executable actions
 - **Dynamic Adaptation**: Inject helper actions (scroll, wait) when needed
+- **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, and decomposed instructions so Computer Use has all necessary signals.
 
 ##### C. Report Management
 - **Living Documentation**: Maintain real-time test execution reports
 - **Evidence Collection**: Gather screenshots, logs, and execution details
 - **Bug Reporting**: Generate detailed bug reports for failures
+- **Computer Use Traceability**: Persist the conversation transcript, response IDs, and instrumented browser calls for each step.
 
 ##### D. Intelligent Decision Making
 - **Failure Analysis**: Determine if failures are blockers or can be continued
@@ -104,38 +106,46 @@ The Test Runner Agent orchestrates test execution, maintains test state, generat
 ### 3. Action Agent
 
 #### Purpose
-The Action Agent is responsible for executing specific browser interactions using visual recognition and grid-based coordinate systems.
+The Action Agent executes browser interactions on behalf of the Test Runner. It combines visual analysis, grid-based coordinate refinement, and the OpenAI Computer Use tool to deliver human-like actions while enforcing project safety policies.
 
 #### Core Responsibilities
-- **Visual Analysis**: Analyze screenshots to locate UI elements
-- **Coordinate Mapping**: Convert visual elements to grid coordinates
-- **Action Execution**: Perform browser actions (click, type, scroll, etc.)
-- **Result Verification**: Confirm actions completed successfully
-- **Adaptive Refinement**: Use grid refinement for precision when needed
+- **Computer Use Orchestration**: Drive the OpenAI computer-use model with rich context, manage multi-turn tool loops, and translate model output into concrete browser operations.
+- **Visual Analysis & Grid Mapping**: When direct coordinate work is required, analyze screenshots to localise targets on the 60x60 grid and refine positions as needed.
+- **Action Execution**: Issue clicks, key presses, typing, scrolls, waits, and assertions through the browser driver, falling back to manual execution if the model omits critical payloads.
+- **Mode Management**: Distinguish between execution steps and observe-only assertions, setting the appropriate policy before invoking the computer-use model.
+- **Result Packaging**: Capture pre/post states, validation results, AI analysis, and raw computer-use turns for downstream reporting.
 
 #### Supported Actions
-1. **Navigation**: URL navigation, back/forward
-2. **Interaction**: Click, double-click, right-click
-3. **Input**: Type text, key combinations
-4. **Scrolling**: Vertical/horizontal scroll, scroll to element
-5. **Validation**: Visual element presence/absence
-6. **Advanced**: Drag-drop, hover, file upload
+1. **Navigation**: URL navigation, back/forward (performed directly without Computer Use).
+2. **Computer Use-Driven Interactions**: Click, double-click, right-click, drag, hover, type, key press, wait, screenshot.
+3. **Scrolling**: Vertical/horizontal scroll, scroll to element/by pixels.
+4. **Validation**: Visual assertions, including observe-only confirmation steps.
+5. **Advanced**: Composite flows that stitch together multiple computer-use turns with context reminders.
 
 #### Key Design Principles
-- **Visual-First**: No dependency on DOM or CSS selectors
-- **Adaptive Precision**: Grid refinement for accurate targeting
-- **Reliable Execution**: Built-in retry and validation mechanisms
-- **Performance**: Efficient screenshot analysis and action execution
+- **Computer Use First**: Default to the OpenAI model for stateful UI work, supplementing with synthetic payloads only when the model response is incomplete.
+- **Safety by Construction**: Apply domain allowlists/blocklists, enforce observe-only modes, propagate safety identifiers, and stop on fail-fast safety checks.
+- **Confirmation Avoidance**: Auto-resolve clarification questions from the model and remind it of the current interaction mode to keep execution progressing without human babysitting.
+- **Visual-First**: Maintain the grid/cv toolchain for fallback scenarios and coordinate verification.
+- **High Observability**: Persist conversation history, screenshots, and computer-use turn metadata to support debugging.
 
-### 4. Evaluator Agent (Removed)
+#### Computer Use Workflow
+1. **Goal Construction** – The Action Agent builds a natural-language goal describing the step, target, expected outcome, and an explicit interaction mode (`execute` vs `observe-only`). This message is combined with the fresh screenshot and a context block (plan/case names, step number, current URL, safety identifier).
+2. **Model Turn Handling** – Each computer_call is converted into a `ComputerToolTurn`. The agent canonicalises action types, enforces the allowed-action set for the current mode, and rejects unsupported navigation attempts.
+3. **Policy Enforcement** – Stateful actions consult the configured allow/block domain lists and respect test-run safety identifiers. Assertion steps supply an observe-only allowlist so the model cannot mutate page state.
+4. **Execution & Fallbacks** – If the model omits required payloads (e.g., `keys` for a keypress or `text` for typing), the agent synthesises the missing data from test instructions to ensure the browser command executes or fails loudly.
+5. **Clarification Guardrails** – When the model replies with confirmation questions during execute mode, the Action Agent automatically acknowledges with a generic “Yes, proceed” follow-up and resubmits the screenshot, keeping the loop moving.
+6. **Trace Capture** – After every turn the agent records screenshots, current URL, latency, metadata, and aggregated response IDs for audit trails and reporting.
 
-#### Status: REMOVED in Phase 16
-The Evaluator Agent has been removed from the architecture after analysis showed that evaluation responsibilities are better handled by the agents that perform the actions.
+#### Safety & Observation Modes
+- **Execute Mode** – Used for interaction steps. All stateful actions are permitted unless blocked by domain policy. The agent injects reminders that the model must perform the action without pausing for approval.
+- **Observe-Only Mode** – Applied automatically to assertion steps. Only passive actions (`screenshot`, `wait`, `scroll`) are allowed; any attempt to click or type is rejected and logged as policy violations.
+- **Safety Identifiers** – Stable identifiers (derived from run/test/case context) are forwarded with every request so OpenAI safety systems can correlate the session.
+- **Fail-Fast Safety** – Pending safety checks returned by the model abort the loop immediately, logging the event and surfacing it to the Test Runner.
 
-#### Where Evaluation Happens Now
-- **Visual Evaluation**: Integrated into Action Agent workflows (post-action validation)
-- **Result Evaluation**: Handled by Test Runner Agent (step success/failure decisions)
-- **Error Detection**: Available as shared utilities in `src/evaluation/` module
+#### Reporting & Telemetry
+- The Action Agent streams conversation history, response IDs, and AI analysis back to the Test Runner, which embeds them in action logs, reports, and bug artifacts.
+- Instrumented browser calls (screenshots, key presses, scrolls) are captured per action, enabling replay-style diagnostics alongside the computer-use transcript.
 
 ## Inter-Agent Communication
 
@@ -175,25 +185,3 @@ Every decision and action is logged and traceable.
 
 ### 6. Extensibility
 New agents or capabilities can be added without major refactoring.
-
-## Future Considerations
-
-### Potential New Agents
-1. **Test Data Agent**: Manage test data generation and cleanup
-2. **Environment Agent**: Handle test environment setup and configuration
-3. **Analytics Agent**: Provide insights from test execution history
-4. **Healing Agent**: Auto-fix broken tests using ML/pattern recognition
-
-### Scalability Patterns
-1. **Agent Pooling**: Multiple instances of agents for parallel execution
-2. **Distributed Execution**: Agents running on different machines
-3. **Queue-Based Communication**: For high-volume test execution
-
-## Implementation Timeline
-1. **Phase 14**: Test Planner Agent Refinement (2 days)
-2. **Phase 15**: Test Runner Agent Enhancement (3 days)
-3. **Phase 16**: Evaluator Agent Reassessment (1 day)
-4. **Phase 17**: Additional Action Types (Previously Phase 14)
-
-## Conclusion
-This architecture provides a clear separation of concerns while enabling sophisticated test automation capabilities. By defining clear boundaries and responsibilities, we ensure that each agent can evolve independently while maintaining system cohesion.

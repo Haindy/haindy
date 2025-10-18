@@ -18,7 +18,7 @@ import io
 import time
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Optional, Tuple, Any, List, Set
 
 from PIL import Image, ImageDraw
 
@@ -39,6 +39,8 @@ from src.core.enhanced_types import (
     EnhancedActionResult, ValidationResult, CoordinateResult,
     ExecutionResult, BrowserState, AIAnalysis
 )
+
+OBSERVE_ONLY_ALLOWED_ACTIONS: Set[str] = frozenset({"screenshot", "wait", "scroll"})
 from src.grid.overlay import GridOverlay
 from src.grid.refinement import GridRefinement
 from src.monitoring.logger import get_logger
@@ -244,6 +246,7 @@ class ActionAgent(BaseAgent):
         self,
         instruction: ActionInstruction,
         test_step: TestStep,
+        interaction_mode: str,
     ) -> str:
         """Construct a goal prompt for the Computer Use tool."""
         description = instruction.description or test_step.description
@@ -261,11 +264,59 @@ class ActionAgent(BaseAgent):
         expected = instruction.expected_outcome or test_step.expected_result
         if expected:
             components.append(f"Expected outcome: {expected}")
+        if interaction_mode == "observe_only":
+            components.append(
+                "You are in observe-only mode. Do not interact with the page; inspect the UI and describe what you see."
+            )
+        else:
+            components.append(
+                "You must perform this action yourself. Do not ask for confirmation—execute the interaction directly."
+            )
         components.append(
-            "Use the current screenshot to understand the UI. "
-            "If the action cannot be completed exactly, describe why."
+            "Use the current screenshot to understand the UI. If the action cannot be completed exactly, describe why."
         )
         return "\n".join(components)
+
+    @staticmethod
+    def _slugify_identifier(value: str, max_length: int = 32) -> str:
+        """Create a filesystem and API friendly slug from arbitrary text."""
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
+        slug = slug.strip("-")
+        if max_length and len(slug) > max_length:
+            slug = slug[:max_length]
+        return slug
+
+    def _resolve_safety_identifier(
+        self,
+        test_step: TestStep,
+        test_context: Dict[str, Any],
+    ) -> str:
+        """Derive a stable safety identifier for Computer Use requests."""
+        components: List[str] = []
+        debug_logger = get_debug_logger()
+        if debug_logger and getattr(debug_logger, "test_run_id", None):
+            components.append(self._slugify_identifier(debug_logger.test_run_id, max_length=24))
+
+        plan_name = (
+            test_context.get("test_plan_name")
+            or test_context.get("plan_name")
+            or ""
+        )
+        if isinstance(plan_name, str) and plan_name.strip():
+            components.append(self._slugify_identifier(plan_name))
+
+        case_name = (
+            test_context.get("test_case_name")
+            or test_context.get("case_name")
+            or ""
+        )
+        if isinstance(case_name, str) and case_name.strip():
+            components.append(self._slugify_identifier(case_name))
+
+        components.append(f"step{test_step.step_number}")
+
+        identifier = "-".join(filter(None, components)) or f"haindy-step-{test_step.step_number}"
+        return identifier[:64]
 
     async def _capture_browser_state(
         self,
@@ -348,7 +399,9 @@ class ActionAgent(BaseAgent):
         )
 
         instruction = test_step.action_instruction
-        goal = self._build_computer_use_goal(instruction, test_step)
+        is_assert_step = instruction.action_type == ActionType.ASSERT
+        interaction_mode = "observe_only" if is_assert_step else "execute"
+        goal = self._build_computer_use_goal(instruction, test_step, interaction_mode)
 
         if hasattr(test_context, "get"):
             context_lookup = test_context
@@ -367,15 +420,34 @@ class ActionAgent(BaseAgent):
             "target": instruction.target,
             "value": instruction.value,
         }
+        session_metadata["interaction_mode"] = interaction_mode
+
+        safety_identifier = self._resolve_safety_identifier(test_step, context_lookup)
+        session_metadata["safety_identifier"] = safety_identifier
+        if browser_state_before.url:
+            session_metadata["current_url"] = browser_state_before.url
+
+        if isinstance(context_for_result, dict):
+            context_for_result["safety_identifier"] = safety_identifier
+            context_for_result["interaction_mode"] = interaction_mode
 
         session = self._new_computer_use_session(debug_logger)
 
         # Track goal in conversation history for downstream tooling
         self.conversation_history.append({"role": "user", "content": goal})
 
+        allowed_actions: Optional[Set[str]] = None
+        if is_assert_step:
+            allowed_actions = OBSERVE_ONLY_ALLOWED_ACTIONS
+
         start_ts = time.perf_counter()
         try:
-            session_result = await session.run(goal, initial_screenshot, session_metadata)
+            session_result = await session.run(
+                goal,
+                initial_screenshot,
+                session_metadata,
+                allowed_actions=allowed_actions,
+            )
         except Exception as exc:
             raise ComputerUseExecutionError(str(exc)) from exc
 

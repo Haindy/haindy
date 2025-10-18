@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -27,18 +27,23 @@ class AgentModelConfig(BaseModel):
     reasoning_level: str = Field(default="medium")
     modalities: Set[str] = Field(default_factory=lambda: {"text"})
 
-    @model_validator(mode="after")
-    def validate_reasoning_level(cls, values: "AgentModelConfig") -> "AgentModelConfig":
+    @field_validator("reasoning_level")
+    @classmethod
+    def validate_reasoning_level(cls, value: str) -> str:
         """Ensure reasoning level is valid."""
         allowed = {"low", "medium", "high"}
-        if values.reasoning_level not in allowed:
+        if value not in allowed:
             raise ValueError(
-                f"Invalid reasoning level: {values.reasoning_level}. "
-                f"Allowed values: {sorted(allowed)}"
+                f"Invalid reasoning level: {value}. Allowed values: {sorted(allowed)}"
             )
-        if not values.modalities:
+        return value
+
+    @field_validator("modalities")
+    @classmethod
+    def validate_modalities(cls, value: Set[str]) -> Set[str]:
+        if not value:
             raise ValueError("Agent modalities cannot be empty")
-        return values
+        return value
 
 
 DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
@@ -160,6 +165,16 @@ class Settings(BaseSettings):
         description="Abort immediately when Computer Use returns pending safety checks",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
     )
+    actions_computer_tool_allowed_domains: List[str] = Field(
+        default_factory=list,
+        description="Domains the Computer Use tool is permitted to interact with",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS",
+    )
+    actions_computer_tool_blocked_domains: List[str] = Field(
+        default_factory=list,
+        description="Domains the Computer Use tool must never interact with",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS",
+    )
 
     # Logging Configuration
     log_level: str = Field(
@@ -224,6 +239,37 @@ class Settings(BaseSettings):
         if v not in ["json", "text"]:
             raise ValueError(f"Invalid log format: {v}")
         return v
+
+    @model_validator(mode="after")
+    def normalize_domain_settings(self) -> "Settings":
+        """Coerce allow/block domain lists into normalized string lists."""
+        self.actions_computer_tool_allowed_domains = self._coerce_domain_list(
+            self.actions_computer_tool_allowed_domains
+        )
+        self.actions_computer_tool_blocked_domains = self._coerce_domain_list(
+            self.actions_computer_tool_blocked_domains
+        )
+        return self
+
+    @staticmethod
+    def _coerce_domain_list(raw: Any) -> List[str]:
+        """Normalize various list inputs (list, tuple, comma-separated string)."""
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            if not raw.strip():
+                return []
+            return [item.strip() for item in raw.split(",") if item.strip()]
+        if isinstance(raw, (list, tuple, set)):
+            coerced: List[str] = []
+            for item in raw:
+                if item is None:
+                    continue
+                text = str(item).strip()
+                if text:
+                    coerced.append(text)
+            return coerced
+        return []
 
     def create_directories(self) -> None:
         """Create required directories if they don't exist."""
