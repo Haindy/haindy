@@ -93,6 +93,17 @@ class TestRunner(BaseAgent):
         }
         self._current_test_case_actions: Optional[Dict[str, Any]] = None
         self._current_step_actions: Optional[List[Dict[str, Any]]] = None
+
+    @staticmethod
+    def _severity_rank(severity: BugSeverity) -> int:
+        """Return an integer rank for comparing bug severities."""
+        severity_order = {
+            BugSeverity.CRITICAL: 0,
+            BugSeverity.HIGH: 1,
+            BugSeverity.MEDIUM: 2,
+            BugSeverity.LOW: 3,
+        }
+        return severity_order.get(severity, 99)
     
     async def execute_test_plan(
         self,
@@ -1013,6 +1024,85 @@ Respond with JSON:
             })
             # Raise the exception - don't fallback
             raise
+
+    async def _evaluate_bug_plan_context(
+        self,
+        bug_report: BugReport,
+        test_case: TestCase,
+        step: TestStep,
+        verification_result: Dict[str, Any],
+        initial_severity: BugSeverity,
+    ) -> Optional[Dict[str, Any]]:
+        """Ask the model to evaluate bug impact using full test plan context."""
+        if not self._current_test_plan:
+            return None
+
+        plan_payload = self._current_test_plan.model_dump(mode="json")
+        plan_json = json.dumps(plan_payload, indent=2)
+
+        bug_payload = bug_report.model_dump(mode="json")
+        bug_payload["severity"] = bug_report.severity.value
+        bug_payload["initial_severity"] = initial_severity.value
+
+        test_case_context = {
+            "test_case_id": test_case.test_id,
+            "name": test_case.name,
+            "description": test_case.description,
+            "priority": test_case.priority.value,
+            "prerequisites": test_case.prerequisites,
+            "postconditions": test_case.postconditions,
+        }
+
+        step_context = {
+            "step_number": step.step_number,
+            "action": step.action,
+            "expected_result": step.expected_result,
+            "optional": step.optional,
+        }
+
+        verification_context = {
+            "verdict": verification_result.get("verdict"),
+            "reasoning": verification_result.get("reasoning"),
+            "actual_result": verification_result.get("actual_result"),
+            "confidence": verification_result.get("confidence"),
+            "is_blocker": verification_result.get("is_blocker"),
+            "blocker_reasoning": verification_result.get("blocker_reasoning"),
+        }
+
+        prompt = (
+            "You are a senior QA lead reviewing an automated test failure. "
+            "Use the complete test plan to reason about downstream impact. "
+            "If the failure prevents any remaining test cases from achieving their purpose, "
+            "treat it as blocking.\n\n"
+            "Test Plan (JSON):\n"
+            f"{plan_json}\n\n"
+            "Failed Test Case Context:\n"
+            f"{json.dumps(test_case_context, indent=2)}\n\n"
+            "Failed Step Context:\n"
+            f"{json.dumps(step_context, indent=2)}\n\n"
+            "Existing Bug Report:\n"
+            f"{json.dumps(bug_payload, indent=2)}\n\n"
+            "Verification Summary:\n"
+            f"{json.dumps(verification_context, indent=2)}\n\n"
+            "Respond with JSON using this schema:\n"
+            "{\n"
+            '  "severity": "critical|high|medium|low",\n'
+            '  "should_block": true|false,\n'
+            '  "blocker_reason": "Why later cases cannot proceed (or empty)",\n'
+            '  "notes": "Additional context for the report",\n'
+            '  "recommended_actions": ["Optional suggestions"]\n'
+            "}"
+        )
+
+        response = await self.call_openai(
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+
+        content = response.get("content", "{}")
+        if isinstance(content, str):
+            return json.loads(content)
+        return content
     
     async def _create_bug_report(
         self,
@@ -1140,13 +1230,82 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
             error_details="\n".join(error_details_parts),
             reproduction_steps=reproduction_steps
         )
-        
+
+        # Enrich bug report with plan-level evaluation
+        plan_assessment: Optional[Dict[str, Any]] = None
+        try:
+            plan_assessment = await self._evaluate_bug_plan_context(
+                bug_report=bug_report,
+                test_case=test_case,
+                step=step,
+                verification_result=verification_result,
+                initial_severity=severity,
+            )
+        except Exception as e:
+            logger.error("Plan-level bug assessment failed", extra={
+                "error": str(e),
+                "bug_id": str(bug_report.bug_id),
+            })
+
+        if plan_assessment:
+            self._current_step_data["plan_level_assessment"] = plan_assessment
+
+            plan_severity = plan_assessment.get("severity")
+            if isinstance(plan_severity, str):
+                plan_severity_enum = severity_map.get(plan_severity.lower())
+                if plan_severity_enum:
+                    bug_report.plan_recommended_severity = plan_severity_enum
+                    if self._severity_rank(plan_severity_enum) < self._severity_rank(bug_report.severity):
+                        bug_report.severity = plan_severity_enum
+                else:
+                    logger.warning(
+                        "Plan-level assessment returned unknown severity",
+                        extra={"severity": plan_severity},
+                    )
+
+            blocker_flag = plan_assessment.get("should_block")
+            if blocker_flag is not None:
+                bug_report.plan_blocker = bool(blocker_flag)
+                if bug_report.plan_blocker:
+                    reasoning = plan_assessment.get("blocker_reason") or "Plan-level assessment marked this failure as blocking."
+                    bug_report.plan_blocker_reason = reasoning
+                    self._current_step_data["is_blocker"] = True
+                    self._current_step_data["blocker_reasoning"] = reasoning
+                    bug_report.error_details = (
+                        f"{bug_report.error_details}\nPlan-level blocker reasoning: {reasoning}"
+                        if bug_report.error_details
+                        else f"Plan-level blocker reasoning: {reasoning}"
+                    )
+                else:
+                    non_block_reason = plan_assessment.get("blocker_reason")
+                    if non_block_reason:
+                        bug_report.plan_blocker_reason = non_block_reason
+                        bug_report.error_details = (
+                            f"{bug_report.error_details}\nPlan-level blocker reasoning: {non_block_reason}"
+                            if bug_report.error_details
+                            else f"Plan-level blocker reasoning: {non_block_reason}"
+                        )
+
+            notes = plan_assessment.get("notes")
+            if isinstance(notes, str):
+                bug_report.plan_assessment_notes = notes
+                bug_report.error_details = (
+                    f"{bug_report.error_details}\nPlan-level notes: {notes}"
+                    if bug_report.error_details
+                    else f"Plan-level notes: {notes}"
+                )
+
+            recommendations = plan_assessment.get("recommended_actions")
+            if isinstance(recommendations, list):
+                bug_report.plan_recommendations = [str(item) for item in recommendations]
+
         logger.info("Bug report created", extra={
             "bug_id": str(bug_report.bug_id),
-            "severity": severity.value,
-            "error_type": error_type
+            "severity": bug_report.severity.value,
+            "error_type": error_type,
+            "plan_blocker": bug_report.plan_blocker
         })
-        
+
         return bug_report
     
     

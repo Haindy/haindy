@@ -395,6 +395,26 @@ class BugReport(BaseModel):
     error_details: Optional[str] = None
     reproduction_steps: List[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    plan_blocker: Optional[bool] = Field(
+        None,
+        description="Whether plan-level evaluation marked this issue as blocking",
+    )
+    plan_blocker_reason: Optional[str] = Field(
+        None,
+        description="Plan-level rationale for blocking determination",
+    )
+    plan_recommended_severity: Optional[BugSeverity] = Field(
+        None,
+        description="Severity suggested by plan-level analysis",
+    )
+    plan_assessment_notes: Optional[str] = Field(
+        None,
+        description="Additional notes captured during plan-level assessment",
+    )
+    plan_recommendations: List[str] = Field(
+        default_factory=list,
+        description="Suggested follow-up actions from plan-level assessment",
+    )
     
 
 class TestCaseResult(BaseModel):
