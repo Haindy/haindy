@@ -29,6 +29,7 @@ from src.core.types import (
     TestCase,
     TestCaseResult,
     TestPlan,
+    StepIntent,
     TestReport,
     TestState,
     TestStatus,
@@ -365,7 +366,8 @@ class TestRunner(BaseAgent):
             "step_number": step.step_number,
             "step_id": str(step.step_id),
             "step_description": step.action,
-            "actions": self._current_step_actions
+            "actions": self._current_step_actions,
+            "step_intent": step.intent.value,
         }
         self._current_test_case_actions["steps"].append(self._current_step_data)
         
@@ -458,17 +460,22 @@ class TestRunner(BaseAgent):
                 if current_idx is not None and current_idx < len(self._current_test_plan.test_cases) - 1:
                     next_test_case = self._current_test_plan.test_cases[current_idx + 1]
             
-            # Always verify the step outcome, regardless of action success
+            # Always produce a verification decision for reporting
             try:
-                verification = await self._verify_expected_outcome(
-                    test_case=test_case,
-                    step=step,
-                    action_results=action_results,
-                    screenshot_before=screenshot_before,
-                    screenshot_after=screenshot_after,
-                    execution_history=execution_history,
-                    next_test_case=next_test_case
-                )
+                if step.intent == StepIntent.SETUP:
+                    verification = self._evaluate_setup_step(success, action_results)
+                    self._current_step_data["verification_mode"] = "runner_short_circuit"
+                else:
+                    verification = await self._verify_expected_outcome(
+                        test_case=test_case,
+                        step=step,
+                        action_results=action_results,
+                        screenshot_before=screenshot_before,
+                        screenshot_after=screenshot_after,
+                        execution_history=execution_history,
+                        next_test_case=next_test_case
+                    )
+                    self._current_step_data["verification_mode"] = "ai"
                 
                 # Store verification result for bug reporting
                 self._current_step_data["verification_result"] = verification
@@ -525,6 +532,42 @@ class TestRunner(BaseAgent):
         
         return step_result
     
+    @staticmethod
+    def _evaluate_setup_step(
+        success: bool,
+        action_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Derive a verification verdict for setup-intent steps without AI calls."""
+        if success:
+            return {
+                "verdict": "PASS",
+                "reasoning": "Setup-only step completed without additional verification.",
+                "actual_result": "Setup actions executed successfully.",
+                "confidence": 1.0,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+            }
+        
+        failure_reason = "Critical setup action failed."
+        for action_payload in action_results:
+            result_payload = action_payload.get("result", {})
+            if not result_payload.get("success", True):
+                failure_reason = (
+                    result_payload.get("error")
+                    or result_payload.get("outcome")
+                    or failure_reason
+                )
+                break
+        
+        return {
+            "verdict": "FAIL",
+            "reasoning": failure_reason,
+            "actual_result": failure_reason,
+            "confidence": 0.4,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+        }
+    
     async def _interpret_step(
         self,
         step: TestStep,
@@ -553,6 +596,7 @@ class TestRunner(BaseAgent):
             "step_number": step.step_number,
             "action": step.action,
             "expected_result": step.expected_result,
+            "intent": step.intent.value,
             "recent_history": recent_history,
             "current_url": self._initial_url
         }
@@ -563,9 +607,15 @@ class TestRunner(BaseAgent):
 Test Case: {context['test_case']}
 Step {context['step_number']}: {context['action']}
 Expected Result: {context['expected_result']}
+Step Intent: {context['intent']}
 
 Recent actions:
 {json.dumps(context['recent_history'], indent=2)}
+
+Intent Guidance:
+- setup: Provide only the minimum interactions needed to reach the state. Do NOT include 'assert' actions unless absolutely required to proceed.
+- validation: Follow standard behavior by pairing key actions with targeted assertions.
+- group_assert: Combine related validations into a single, well-described 'assert' action so evidence and verification happen together.
 
 Break this down into a sequence of specific actions. For each action provide:
 1. type: The action type - MUST be one of these exact values:
@@ -622,6 +672,7 @@ Respond with a JSON object containing an "actions" array."""
             "step_number": step.step_number,
             "action": step.action,
             "expected_result": step.expected_result,
+            "intent": step.intent.value,
             "prompt_length": len(prompt)
         })
         
@@ -745,7 +796,8 @@ Respond with a JSON object containing an "actions" array."""
                 action=action.get("description", step.action),
                 expected_result=action.get("expected_outcome", step.expected_result),
                 action_instruction=instruction,
-                optional=not action.get("critical", True)
+                optional=not action.get("critical", True),
+                intent=step.intent,
             )
             
             # Build context
@@ -754,7 +806,8 @@ Respond with a JSON object containing an "actions" array."""
                 "test_case_name": self._current_test_case.name,
                 "step_number": step.step_number,
                 "action_description": action.get("description", ""),
-                "recent_actions": self._execution_history[-3:]
+                "recent_actions": self._execution_history[-3:],
+                "step_intent": step.intent.value,
             }
             
             # Get screenshot before action

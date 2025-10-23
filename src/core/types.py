@@ -108,6 +108,14 @@ class ActionResult(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class StepIntent(str, Enum):
+    """Describes the goal of a test step for execution-time heuristics."""
+
+    SETUP = "setup"  # prepare state without heavy validation
+    VALIDATION = "validation"  # default expectation-driven check
+    GROUP_ASSERT = "group_assert"  # combined assertions captured together
+
+
 class TestStep(BaseModel):
     """A single step in a test case."""
 
@@ -122,6 +130,10 @@ class TestStep(BaseModel):
         default_factory=list, description="Step numbers that must complete first"
     )
     optional: bool = Field(False, description="Whether this step can be skipped")
+    intent: StepIntent = Field(
+        StepIntent.VALIDATION,
+        description="Execution intent that guides runner heuristics",
+    )
     max_retries: int = Field(3, description="Maximum retry attempts")
 
 

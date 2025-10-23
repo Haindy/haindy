@@ -11,7 +11,7 @@ from uuid import UUID
 from src.agents.base_agent import BaseAgent
 from src.agents.formatters import TestPlanFormatter
 from src.config.agent_prompts import TEST_PLANNER_SYSTEM_PROMPT
-from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep
+from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep, StepIntent
 from src.models.openai_client import ResponseStreamObserver
 from src.monitoring.logger import get_logger
 
@@ -150,6 +150,7 @@ class TestPlannerAgent(BaseAgent):
                     "step_number": 1,
                     "action": "Clear action description (e.g., 'Navigate to login page')",
                     "expected_result": "What should happen after this action",
+                    "intent": "validation",
                     "dependencies": [],
                     "optional": false
                 }
@@ -168,6 +169,7 @@ IMPORTANT:
 - Ignore non-functional or infrastructure rules that are not user-facing functionality
 - Include both positive (happy path) and realistic negative (user-observable) test cases only
 - Assign test case IDs sequentially without gaps (TC001, TC002, ...)
+- Tag each step with an 'intent': use 'setup' for preparatory actions with minimal verification, 'validation' for standard checks, and 'group_assert' when bundling multiple related assertions into one step
 - Do NOT assign or output priority fields"""
         
         return message
@@ -203,6 +205,12 @@ IMPORTANT:
                 # Parse steps for this test case
                 steps = []
                 for step_data in case_data.get("steps", []):
+                    intent_value = step_data.get("intent")
+                    try:
+                        intent = StepIntent(intent_value) if intent_value else StepIntent.VALIDATION
+                    except ValueError:
+                        intent = StepIntent.VALIDATION
+                    
                     step = TestStep(
                         step_number=step_data["step_number"],
                         description=step_data.get("description", step_data.get("action", "")),
@@ -210,6 +218,7 @@ IMPORTANT:
                         expected_result=step_data.get("expected_result", ""),
                         dependencies=step_data.get("dependencies", []),
                         optional=step_data.get("optional", False),
+                        intent=intent,
                         max_retries=step_data.get("max_retries", 3)
                     )
                     steps.append(step)

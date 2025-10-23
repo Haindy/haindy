@@ -17,6 +17,7 @@ The Test Planner Agent is responsible for understanding high-level requirements 
 - **Requirement Analysis**: Parse and understand various input formats (PRDs, user stories, URLs, natural language descriptions)
 - **Test Plan Generation**: Create hierarchical test plans with clear structure
 - **Coverage Determination**: Ensure comprehensive test coverage based on requirements
+- **Step Intent Tagging**: Label each test step as setup, validation, or group assertion so the runner can apply the right execution heuristics
 - **Priority Assignment**: Determine test case priorities based on criticality
 
 #### Data Model Hierarchy
@@ -29,9 +30,9 @@ Test Plan
     │   ├── Priority (Critical/High/Medium/Low)
     │   ├── Prerequisites
     │   ├── Test Steps
-    │   │   ├── Step 1 (action, expected result)
-    │   │   ├── Step 2 (action, expected result)
-    │   │   └── Step N (action, expected result)
+    │   │   ├── Step 1 (action, expected result, intent)
+    │   │   ├── Step 2 (action, expected result, intent)
+    │   │   └── Step N (action, expected result, intent)
     │   └── Post-conditions
     └── Test Case N
 ```
@@ -43,6 +44,7 @@ Test Plan
 #### Key Design Principles
 - **Completeness**: Every requirement should map to at least one test case
 - **Clarity**: Each step should be unambiguous and actionable
+- **Intent-Driven Output**: Every step encodes its execution intent so downstream agents can tailor effort (setup vs. validation vs. grouped assertions)
 - **Independence**: Test cases should be executable independently when possible
 - **Traceability**: Clear linkage between requirements and test cases
 
@@ -62,6 +64,7 @@ The Test Runner Agent orchestrates test execution, maintains test state, generat
 - **Understand Intent**: Comprehend what each test step aims to achieve
 - **Action Planning**: Break down high-level steps into executable actions
 - **Dynamic Adaptation**: Inject helper actions (scroll, wait) when needed
+- **Intent-Aware Execution**: Skip heavy verification for `setup` steps and consolidate `group_assert` validations into a single evidence-gathering prompt
 - **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, and decomposed instructions so Computer Use has all necessary signals.
 
 ##### C. Report Management
