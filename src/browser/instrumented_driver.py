@@ -73,7 +73,18 @@ class InstrumentedBrowserDriver(PlaywrightDriver):
             {"x": x, "y": y, "button": button, "click_count": click_count},
             duration_ms,
         )
-    
+
+    async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
+        """Move the mouse pointer without clicking."""
+        start_time = time.time()
+        await super().move_mouse(x, y, steps=steps)
+        duration_ms = (time.time() - start_time) * 1000
+        self._capture_call(
+            "page.mouse.move",
+            {"x": x, "y": y, "steps": steps},
+            duration_ms,
+        )
+
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""
         start_time = time.time()

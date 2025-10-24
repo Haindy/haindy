@@ -165,6 +165,11 @@ class BrowserDriver(ABC):
         pass
 
     @abstractmethod
+    async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
+        """Move the mouse pointer to absolute coordinates without clicking."""
+        pass
+
+    @abstractmethod
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""
         pass

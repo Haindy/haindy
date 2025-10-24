@@ -63,6 +63,7 @@ class ComputerUseSession:
             "click",
             "double_click",
             "right_click",
+            "move",
             "type",
             "keypress",
             "drag",
@@ -247,6 +248,26 @@ class ComputerUseSession:
                     await self._execute_click(action, viewport_width, viewport_height)
                 elif action_type in {"double_click", "right_click"}:
                     await self._execute_special_click(action, viewport_width, viewport_height)
+                elif action_type == "move":
+                    x, y = normalize_coordinates(
+                        action.get("x"),
+                        action.get("y"),
+                        viewport_width,
+                        viewport_height,
+                    )
+                    raw_steps = action.get("steps") or action.get("step_count")
+                    steps = 1
+                    if raw_steps is not None:
+                        try:
+                            steps = int(float(raw_steps))
+                        except (TypeError, ValueError):
+                            steps = 1
+                    if steps <= 0:
+                        steps = 1
+                    await asyncio.wait_for(
+                        self._browser.move_mouse(x, y, steps=steps),
+                        timeout=self._action_timeout_seconds,
+                    )
                 elif action_type == "scroll":
                     await self._execute_scroll(action)
                 elif action_type == "type":
@@ -555,6 +576,9 @@ class ComputerUseSession:
             "rightclick": "right_click",
             "scroll_to_element": "scroll",
             "scroll_vertical": "scroll",
+            "pointer_move": "move",
+            "mouse_move": "move",
+            "hover": "move",
         }
         return alias_map.get(normalized, normalized)
 

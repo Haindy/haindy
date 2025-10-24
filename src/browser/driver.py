@@ -141,6 +141,21 @@ class PlaywrightDriver(BrowserDriver):
         )
         await self._page.mouse.click(x, y, button=button, click_count=click_count)
 
+    async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
+        """Move mouse pointer to absolute coordinates without clicking."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        try:
+            normalized_steps = max(1, int(steps))
+        except (TypeError, ValueError):
+            normalized_steps = 1
+        self.logger.debug(
+            "Moving mouse",
+            extra={"x": x, "y": y, "steps": normalized_steps},
+        )
+        await self._page.mouse.move(x, y, steps=normalized_steps)
+
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""
         if not self._page:
