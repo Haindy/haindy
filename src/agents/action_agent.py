@@ -719,8 +719,13 @@ class ActionAgent(BaseAgent):
                 raise RuntimeError("Browser driver not initialized")
             await self.browser_driver.navigate(url)
             
-            # Wait for page load
-            await asyncio.sleep(2)
+            # Wait briefly for the page to stabilize before capturing the after-state
+            stabilization_seconds = max(
+                self.settings.actions_computer_tool_stabilization_wait_ms / 1000.0,
+                0.0,
+            )
+            if stabilization_seconds:
+                await asyncio.sleep(stabilization_seconds)
             
             # Capture after state
             screenshot_after = await self.browser_driver.screenshot()
