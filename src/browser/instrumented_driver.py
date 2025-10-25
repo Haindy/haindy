@@ -85,6 +85,30 @@ class InstrumentedBrowserDriver(PlaywrightDriver):
             duration_ms,
         )
 
+    async def drag_mouse(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        steps: int = 1,
+    ) -> None:
+        """Drag the mouse pointer."""
+        start_time = time.time()
+        await super().drag_mouse(start_x, start_y, end_x, end_y, steps=steps)
+        duration_ms = (time.time() - start_time) * 1000
+        self._capture_call(
+            "page.mouse.drag",
+            {
+                "start_x": start_x,
+                "start_y": start_y,
+                "end_x": end_x,
+                "end_y": end_y,
+                "steps": steps,
+            },
+            duration_ms,
+        )
+
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""
         start_time = time.time()

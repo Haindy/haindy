@@ -275,6 +275,9 @@ class ActionAgent(BaseAgent):
         components.append(
             "Use the current screenshot to understand the UI. If the action cannot be completed exactly, describe why."
         )
+        components.append(
+            "If the same approach fails three times in a row, switch to a different method (e.g., typing the value, using keyboard shortcuts, or selecting a more reliable control). Avoid looping on ineffective interactions."
+        )
         return "\n".join(components)
 
     @staticmethod

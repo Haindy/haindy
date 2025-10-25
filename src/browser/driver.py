@@ -156,6 +156,39 @@ class PlaywrightDriver(BrowserDriver):
         )
         await self._page.mouse.move(x, y, steps=normalized_steps)
 
+    async def drag_mouse(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        steps: int = 1,
+    ) -> None:
+        """Drag mouse pointer from start coordinates to end coordinates."""
+        if not self._page:
+            raise RuntimeError("Browser not started. Call start() first.")
+
+        try:
+            normalized_steps = max(1, int(steps))
+        except (TypeError, ValueError):
+            normalized_steps = 1
+
+        self.logger.debug(
+            "Dragging mouse",
+            extra={
+                "start_x": start_x,
+                "start_y": start_y,
+                "end_x": end_x,
+                "end_y": end_y,
+                "steps": normalized_steps,
+            },
+        )
+
+        await self._page.mouse.move(start_x, start_y, steps=1)
+        await self._page.mouse.down(button="left")
+        await self._page.mouse.move(end_x, end_y, steps=normalized_steps)
+        await self._page.mouse.up(button="left")
+
     async def type_text(self, text: str) -> None:
         """Type text at current focus."""
         if not self._page:

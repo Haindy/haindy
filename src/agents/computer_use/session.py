@@ -268,6 +268,85 @@ class ComputerUseSession:
                         self._browser.move_mouse(x, y, steps=steps),
                         timeout=self._action_timeout_seconds,
                     )
+                elif action_type == "drag":
+                    def _coerce_float(value: Any) -> Optional[float]:
+                        if value is None:
+                            return None
+                        try:
+                            return float(value)
+                        except (TypeError, ValueError):
+                            return None
+
+                    start_x_raw = _coerce_float(
+                        action.get("start_x")
+                        or action.get("from_x")
+                        or action.get("x")
+                    )
+                    start_y_raw = _coerce_float(
+                        action.get("start_y")
+                        or action.get("from_y")
+                        or action.get("y")
+                    )
+
+                    end_x_raw = _coerce_float(
+                        action.get("end_x") or action.get("to_x")
+                    )
+                    end_y_raw = _coerce_float(
+                        action.get("end_y") or action.get("to_y")
+                    )
+
+                    path_points = action.get("path") or action.get("points")
+                    if isinstance(path_points, list) and len(path_points) >= 2:
+                        first_point = path_points[0]
+                        last_point = path_points[-1]
+
+                        if start_x_raw is None:
+                            start_x_raw = _coerce_float(first_point.get("x"))
+                        if start_y_raw is None:
+                            start_y_raw = _coerce_float(first_point.get("y"))
+                        if end_x_raw is None:
+                            end_x_raw = _coerce_float(last_point.get("x"))
+                        if end_y_raw is None:
+                            end_y_raw = _coerce_float(last_point.get("y"))
+
+                    if start_x_raw is None or start_y_raw is None:
+                        raise ComputerUseExecutionError("Drag action missing start coordinates.")
+
+                    delta_x_raw = _coerce_float(action.get("dx") or action.get("delta_x"))
+                    delta_y_raw = _coerce_float(action.get("dy") or action.get("delta_y"))
+
+                    if end_x_raw is None and delta_x_raw is not None:
+                        end_x_raw = start_x_raw + delta_x_raw
+                    if end_y_raw is None and delta_y_raw is not None:
+                        end_y_raw = start_y_raw + delta_y_raw
+
+                    if end_x_raw is None or end_y_raw is None:
+                        raise ComputerUseExecutionError("Drag action missing destination coordinates.")
+
+                    start_x, start_y = normalize_coordinates(
+                        start_x_raw, start_y_raw, viewport_width, viewport_height
+                    )
+                    end_x, end_y = normalize_coordinates(
+                        end_x_raw, end_y_raw, viewport_width, viewport_height
+                    )
+
+                    raw_steps = action.get("steps") or action.get("step_count")
+                    steps = 1
+                    if raw_steps is not None:
+                        try:
+                            steps = int(float(raw_steps))
+                        except (TypeError, ValueError):
+                            steps = 1
+                    elif isinstance(path_points, list) and len(path_points) >= 2:
+                        steps = max(1, len(path_points) - 1)
+
+                    if steps <= 0:
+                        steps = 1
+
+                    await asyncio.wait_for(
+                        self._browser.drag_mouse(start_x, start_y, end_x, end_y, steps=steps),
+                        timeout=self._action_timeout_seconds,
+                    )
                 elif action_type == "scroll":
                     await self._execute_scroll(action)
                 elif action_type == "type":
@@ -579,6 +658,10 @@ class ComputerUseSession:
             "pointer_move": "move",
             "mouse_move": "move",
             "hover": "move",
+            "pointer_drag": "drag",
+            "drag_and_drop": "drag",
+            "dragdrop": "drag",
+            "mouse_drag": "drag",
         }
         return alias_map.get(normalized, normalized)
 
