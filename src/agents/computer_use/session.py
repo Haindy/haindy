@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from openai import AsyncOpenAI
 
@@ -153,10 +154,41 @@ class ComputerUseSession:
 
             turn_counter += 1
             if turn_counter > self._settings.actions_computer_tool_max_turns:
+                max_turns = self._settings.actions_computer_tool_max_turns
+                message = (
+                    f"Computer Use max turns exceeded after {turn_counter} turns (limit: {max_turns})."
+                )
                 logger.warning(
                     "Computer Use max turns exceeded",
-                    extra={"max_turns": self._settings.actions_computer_tool_max_turns},
+                    extra={
+                        "max_turns": max_turns,
+                        "turn_count": turn_counter,
+                        "step_number": metadata.get("step_number"),
+                    },
                 )
+                failure_turn = ComputerToolTurn(
+                    call_id=f"turn-limit-{uuid4()}",
+                    action_type="system_notice",
+                    parameters={
+                        "type": "system_notice",
+                        "reason": "max_turns_exceeded",
+                        "turn_count": turn_counter,
+                        "max_turns": max_turns,
+                    },
+                    response_id=response_dict.get("id"),
+                )
+                failure_turn.status = "failed"
+                failure_turn.error_message = message
+                _inject_context_metadata(failure_turn, metadata)
+                failure_turn.metadata.update(
+                    {
+                        "reason": "max_turns_exceeded",
+                        "turn_count": turn_counter,
+                        "max_turns": max_turns,
+                    }
+                )
+                result.actions.append(failure_turn)
+                result.final_output = message
                 break
 
             call = computer_calls[0]

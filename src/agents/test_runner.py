@@ -40,6 +40,7 @@ from src.monitoring.logger import get_logger
 from src.browser.instrumented_driver import InstrumentedBrowserDriver
 
 logger = get_logger(__name__)
+MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 
 
 class TestRunner(BaseAgent):
@@ -405,6 +406,7 @@ class TestRunner(BaseAgent):
             # Execute each action
             success = True
             action_results = []  # Store full action results
+            forced_blocker_reason: Optional[str] = None
             
             for action in actions:
                 logger.debug("Executing sub-action", extra={
@@ -421,6 +423,32 @@ class TestRunner(BaseAgent):
                     "result": action_result,
                     "full_data": self._current_step_actions[-1] if self._current_step_actions else {}
                 })
+                
+                if forced_blocker_reason is None:
+                    error_text = action_result.get("error")
+                    if not error_text:
+                        full_data = action_results[-1]["full_data"]
+                        if isinstance(full_data, dict):
+                            result_blob = full_data.get("result", {})
+                            if isinstance(result_blob, dict):
+                                exec_blob = result_blob.get("execution") or {}
+                                error_text = (
+                                    result_blob.get("error")
+                                    or exec_blob.get("error_message")
+                                )
+                    if error_text and isinstance(error_text, str) and error_text.startswith(MAX_TURN_ERROR_PREFIX):
+                        forced_blocker_reason = error_text
+                        success = False
+                        logger.error(
+                            "Action aborted due to Computer Use turn limit",
+                            extra={
+                                "step_number": step.step_number,
+                                "action_description": action.get("description", ""),
+                                "reason": error_text,
+                            },
+                        )
+                        self._current_step_data["blocker_reasoning"] = error_text
+                        self._current_step_data["forced_blocker_reason"] = error_text
                 
                 if not action_result.get("success", False):
                     success = False
@@ -462,7 +490,17 @@ class TestRunner(BaseAgent):
             
             # Always produce a verification decision for reporting
             try:
-                if step.intent == StepIntent.SETUP:
+                if forced_blocker_reason:
+                    verification = {
+                        "verdict": "FAIL",
+                        "reasoning": forced_blocker_reason,
+                        "actual_result": forced_blocker_reason,
+                        "confidence": 1.0,
+                        "is_blocker": True,
+                        "blocker_reasoning": forced_blocker_reason,
+                    }
+                    self._current_step_data["verification_mode"] = "runner_short_circuit"
+                elif step.intent == StepIntent.SETUP:
                     verification = self._evaluate_setup_step(success, action_results)
                     self._current_step_data["verification_mode"] = "runner_short_circuit"
                 else:
