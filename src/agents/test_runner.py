@@ -866,9 +866,10 @@ Recent execution history (most recent first):
 
 Guidelines:
 1. Inspect the screenshot before planning navigation. If the required view is already visible, emit a single `skip_navigation` action that explains the evidence.
-2. Provide only high-level, outcome-focused actions. The Action Agent handles helper behaviors (scrolls, waits, retries, confirmations).
-3. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
-4. Use the previous/next step context to stay aligned with the intended flow.
+2. Provide high-level, outcome-focused actions. When a single control needs repeated interactions (e.g., clicking the calendar's next arrow three times, then choosing May 28), bundle that sequence into one action instead of emitting one action per tap.
+3. When a step involves multiple distinct controls (e.g., separate date and time fields), emit one action per control so the Action Agent can address each field explicitly.
+4. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
+5. Use the previous/next step context to stay aligned with the intended flow.
 
 Action schema for each entry:
 - type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
