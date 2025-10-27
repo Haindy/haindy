@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from openai import AsyncOpenAI
 
@@ -63,6 +66,7 @@ class ComputerUseSession:
             "click",
             "double_click",
             "right_click",
+            "move",
             "type",
             "keypress",
             "drag",
@@ -111,6 +115,8 @@ class ComputerUseSession:
 
         turn_counter = 0
         previous_response_id = response_dict.get("id")
+        loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
+        loop_history: Deque[Tuple[Tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
             computer_calls = extract_computer_calls(response_dict)
@@ -152,10 +158,41 @@ class ComputerUseSession:
 
             turn_counter += 1
             if turn_counter > self._settings.actions_computer_tool_max_turns:
+                max_turns = self._settings.actions_computer_tool_max_turns
+                message = (
+                    f"Computer Use max turns exceeded after {turn_counter} turns (limit: {max_turns})."
+                )
                 logger.warning(
                     "Computer Use max turns exceeded",
-                    extra={"max_turns": self._settings.actions_computer_tool_max_turns},
+                    extra={
+                        "max_turns": max_turns,
+                        "turn_count": turn_counter,
+                        "step_number": metadata.get("step_number"),
+                    },
                 )
+                failure_turn = ComputerToolTurn(
+                    call_id=f"turn-limit-{uuid4()}",
+                    action_type="system_notice",
+                    parameters={
+                        "type": "system_notice",
+                        "reason": "max_turns_exceeded",
+                        "turn_count": turn_counter,
+                        "max_turns": max_turns,
+                    },
+                    response_id=response_dict.get("id"),
+                )
+                failure_turn.status = "failed"
+                failure_turn.error_message = message
+                _inject_context_metadata(failure_turn, metadata)
+                failure_turn.metadata.update(
+                    {
+                        "reason": "max_turns_exceeded",
+                        "turn_count": turn_counter,
+                        "max_turns": max_turns,
+                    }
+                )
+                result.actions.append(failure_turn)
+                result.final_output = message
                 break
 
             call = computer_calls[0]
@@ -203,6 +240,42 @@ class ComputerUseSession:
             result.actions.append(turn)
             metadata["_auto_confirmation_attempts"] = 0
 
+            loop_detection = self._update_loop_history(
+                turn=turn,
+                history=loop_history,
+                window=loop_window,
+            )
+            if loop_detection:
+                message = loop_detection["message"]
+                logger.warning(
+                    "Computer Use loop detected",
+                    extra={
+                        "step_number": metadata.get("step_number"),
+                        "action_type": turn.action_type,
+                        "signature": loop_detection.get("signature"),
+                        "loop_window": loop_detection.get("loop_window"),
+                    },
+                )
+                failure_turn = ComputerToolTurn(
+                    call_id=f"loop-detected-{uuid4()}",
+                    action_type="system_notice",
+                    parameters={
+                        "type": "system_notice",
+                        "reason": "loop_detected",
+                        "signature": loop_detection.get("signature"),
+                        "screenshot_hash": loop_detection.get("screenshot_hash"),
+                        "loop_window": loop_detection.get("loop_window"),
+                    },
+                    response_id=response_dict.get("id"),
+                )
+                failure_turn.status = "failed"
+                failure_turn.error_message = message
+                _inject_context_metadata(failure_turn, metadata)
+                failure_turn.metadata.update(loop_detection)
+                result.actions.append(failure_turn)
+                result.final_output = message
+                break
+
             follow_up_payload = await self._build_follow_up_request(
                 previous_response_id=previous_response_id,
                 call=turn,
@@ -247,6 +320,105 @@ class ComputerUseSession:
                     await self._execute_click(action, viewport_width, viewport_height)
                 elif action_type in {"double_click", "right_click"}:
                     await self._execute_special_click(action, viewport_width, viewport_height)
+                elif action_type == "move":
+                    x, y = normalize_coordinates(
+                        action.get("x"),
+                        action.get("y"),
+                        viewport_width,
+                        viewport_height,
+                    )
+                    raw_steps = action.get("steps") or action.get("step_count")
+                    steps = 1
+                    if raw_steps is not None:
+                        try:
+                            steps = int(float(raw_steps))
+                        except (TypeError, ValueError):
+                            steps = 1
+                    if steps <= 0:
+                        steps = 1
+                    await asyncio.wait_for(
+                        self._browser.move_mouse(x, y, steps=steps),
+                        timeout=self._action_timeout_seconds,
+                    )
+                elif action_type == "drag":
+                    def _coerce_float(value: Any) -> Optional[float]:
+                        if value is None:
+                            return None
+                        try:
+                            return float(value)
+                        except (TypeError, ValueError):
+                            return None
+
+                    start_x_raw = _coerce_float(
+                        action.get("start_x")
+                        or action.get("from_x")
+                        or action.get("x")
+                    )
+                    start_y_raw = _coerce_float(
+                        action.get("start_y")
+                        or action.get("from_y")
+                        or action.get("y")
+                    )
+
+                    end_x_raw = _coerce_float(
+                        action.get("end_x") or action.get("to_x")
+                    )
+                    end_y_raw = _coerce_float(
+                        action.get("end_y") or action.get("to_y")
+                    )
+
+                    path_points = action.get("path") or action.get("points")
+                    if isinstance(path_points, list) and len(path_points) >= 2:
+                        first_point = path_points[0]
+                        last_point = path_points[-1]
+
+                        if start_x_raw is None:
+                            start_x_raw = _coerce_float(first_point.get("x"))
+                        if start_y_raw is None:
+                            start_y_raw = _coerce_float(first_point.get("y"))
+                        if end_x_raw is None:
+                            end_x_raw = _coerce_float(last_point.get("x"))
+                        if end_y_raw is None:
+                            end_y_raw = _coerce_float(last_point.get("y"))
+
+                    if start_x_raw is None or start_y_raw is None:
+                        raise ComputerUseExecutionError("Drag action missing start coordinates.")
+
+                    delta_x_raw = _coerce_float(action.get("dx") or action.get("delta_x"))
+                    delta_y_raw = _coerce_float(action.get("dy") or action.get("delta_y"))
+
+                    if end_x_raw is None and delta_x_raw is not None:
+                        end_x_raw = start_x_raw + delta_x_raw
+                    if end_y_raw is None and delta_y_raw is not None:
+                        end_y_raw = start_y_raw + delta_y_raw
+
+                    if end_x_raw is None or end_y_raw is None:
+                        raise ComputerUseExecutionError("Drag action missing destination coordinates.")
+
+                    start_x, start_y = normalize_coordinates(
+                        start_x_raw, start_y_raw, viewport_width, viewport_height
+                    )
+                    end_x, end_y = normalize_coordinates(
+                        end_x_raw, end_y_raw, viewport_width, viewport_height
+                    )
+
+                    raw_steps = action.get("steps") or action.get("step_count")
+                    steps = 1
+                    if raw_steps is not None:
+                        try:
+                            steps = int(float(raw_steps))
+                        except (TypeError, ValueError):
+                            steps = 1
+                    elif isinstance(path_points, list) and len(path_points) >= 2:
+                        steps = max(1, len(path_points) - 1)
+
+                    if steps <= 0:
+                        steps = 1
+
+                    await asyncio.wait_for(
+                        self._browser.drag_mouse(start_x, start_y, end_x, end_y, steps=steps),
+                        timeout=self._action_timeout_seconds,
+                    )
                 elif action_type == "scroll":
                     await self._execute_scroll(action)
                 elif action_type == "type":
@@ -447,6 +619,108 @@ class ComputerUseSession:
 
         return payload
 
+    def _update_loop_history(
+        self,
+        turn: ComputerToolTurn,
+        history: Deque[Tuple[Tuple[str, ...], str]],
+        window: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Track repeated Computer Use turns and detect loops."""
+        if window < 2:
+            return None
+        if turn.status != "executed":
+            history.clear()
+            return None
+
+        signature = self._compute_turn_signature(turn)
+        screenshot_hash = self._hash_base64(turn.metadata.get("screenshot_base64"))
+        if not signature or not screenshot_hash:
+            history.clear()
+            return None
+
+        history.append((signature, screenshot_hash))
+        if len(history) < window:
+            return None
+
+        if all(sig == signature and hash_ == screenshot_hash for sig, hash_ in history):
+            action_label = signature[0] if signature else "unknown"
+            message = (
+                f"Computer Use loop detected: action '{action_label}' "
+                f"repeated {window} times without visible change."
+            )
+            return {
+                "message": message,
+                "signature": signature,
+                "screenshot_hash": screenshot_hash,
+                "loop_window": window,
+            }
+        return None
+
+    def _compute_turn_signature(self, turn: ComputerToolTurn) -> Optional[Tuple[str, ...]]:
+        """Build a lightweight signature representing the Computer Use turn."""
+        action_type_raw = turn.action_type or turn.parameters.get("type")
+        if not action_type_raw:
+            return None
+        action_type = str(action_type_raw).strip().lower()
+        if not action_type:
+            return None
+
+        params = turn.parameters or {}
+        signature: List[str] = [action_type]
+
+        def append_coord(label: str, x_value: Any, y_value: Any) -> None:
+            coord = self._format_coordinate(x_value, y_value)
+            if coord:
+                signature.append(f"{label}:{coord}")
+
+        append_coord("xy", params.get("x"), params.get("y"))
+        append_coord(
+            "start",
+            params.get("start_x") or params.get("from_x"),
+            params.get("start_y") or params.get("from_y"),
+        )
+        append_coord(
+            "end",
+            params.get("end_x") or params.get("to_x"),
+            params.get("end_y") or params.get("to_y"),
+        )
+
+        if action_type == "type":
+            text_value = params.get("text") or params.get("value") or ""
+            signature.append(str(text_value).strip().lower()[:64])
+        elif action_type == "key_press":
+            key_value = params.get("key") or params.get("keys")
+            if isinstance(key_value, list):
+                key_value = "+".join(str(part) for part in key_value)
+            signature.append(str(key_value).strip().lower())
+
+        if "scroll_x" in params or "scroll_y" in params:
+            signature.append(f"scroll:{params.get('scroll_x', 0)}:{params.get('scroll_y', 0)}")
+
+        return tuple(component for component in signature if component)
+
+    @staticmethod
+    def _format_coordinate(x_value: Any, y_value: Any) -> Optional[str]:
+        """Format coordinate pairs for signature comparison."""
+        if x_value is None or y_value is None:
+            return None
+        try:
+            x_float = round(float(x_value), 2)
+            y_float = round(float(y_value), 2)
+            return f"{x_float}:{y_float}"
+        except (TypeError, ValueError):
+            return f"{x_value}:{y_value}"
+
+    @staticmethod
+    def _hash_base64(value: Optional[str]) -> Optional[str]:
+        """Hash base64 strings for quick comparison without storing raw data."""
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            return hashlib.sha256(value.encode("utf-8")).hexdigest()
+        except Exception:  # pragma: no cover - defensive
+            return None
+
     def _build_initial_request(
         self,
         goal: str,
@@ -555,6 +829,13 @@ class ComputerUseSession:
             "rightclick": "right_click",
             "scroll_to_element": "scroll",
             "scroll_vertical": "scroll",
+            "pointer_move": "move",
+            "mouse_move": "move",
+            "hover": "move",
+            "pointer_drag": "drag",
+            "drag_and_drop": "drag",
+            "dragdrop": "drag",
+            "mouse_drag": "drag",
         }
         return alias_map.get(normalized, normalized)
 

@@ -39,6 +39,7 @@ class ActionType(str, Enum):
     SCROLL_TO_TOP = "scroll_to_top"
     SCROLL_TO_BOTTOM = "scroll_to_bottom"
     SCROLL_HORIZONTAL = "scroll_horizontal"
+    SKIP_NAVIGATION = "skip_navigation"
 
 
 class ConfidenceLevel(str, Enum):
@@ -108,6 +109,14 @@ class ActionResult(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class StepIntent(str, Enum):
+    """Describes the goal of a test step for execution-time heuristics."""
+
+    SETUP = "setup"  # prepare state without heavy validation
+    VALIDATION = "validation"  # default expectation-driven check
+    GROUP_ASSERT = "group_assert"  # combined assertions captured together
+
+
 class TestStep(BaseModel):
     """A single step in a test case."""
 
@@ -122,6 +131,10 @@ class TestStep(BaseModel):
         default_factory=list, description="Step numbers that must complete first"
     )
     optional: bool = Field(False, description="Whether this step can be skipped")
+    intent: StepIntent = Field(
+        StepIntent.VALIDATION,
+        description="Execution intent that guides runner heuristics",
+    )
     max_retries: int = Field(3, description="Maximum retry attempts")
 
 
@@ -395,6 +408,26 @@ class BugReport(BaseModel):
     error_details: Optional[str] = None
     reproduction_steps: List[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    plan_blocker: Optional[bool] = Field(
+        None,
+        description="Whether plan-level evaluation marked this issue as blocking",
+    )
+    plan_blocker_reason: Optional[str] = Field(
+        None,
+        description="Plan-level rationale for blocking determination",
+    )
+    plan_recommended_severity: Optional[BugSeverity] = Field(
+        None,
+        description="Severity suggested by plan-level analysis",
+    )
+    plan_assessment_notes: Optional[str] = Field(
+        None,
+        description="Additional notes captured during plan-level assessment",
+    )
+    plan_recommendations: List[str] = Field(
+        default_factory=list,
+        description="Suggested follow-up actions from plan-level assessment",
+    )
     
 
 class TestCaseResult(BaseModel):

@@ -198,6 +198,7 @@ class TestPlanFormatter:
                             "step_number": step.step_number,
                             "action": step.action,
                             "expected_result": step.expected_result,
+                            "intent": step.intent.value,
                             "dependencies": step.dependencies,
                             "optional": step.optional
                         }

@@ -40,6 +40,12 @@ Guidelines for Test Steps:
 - Never include technical implementation details or automation commands
 - Never include steps like "wait", "pause", or "sleep"
 - Use separate actions for typing and keyboard controls
+- Tag every step with an intent value that guides execution:
+  - **setup**: prepare the environment with minimal verification; avoid assertions unless absolutely required to proceed
+  - **validation**: perform a focused check that confirms a single expectation
+  - **group_assert**: bundle related UI validations into one consolidated assertion so a single observation covers them all
+- Mark prerequisite-only steps as `setup` to reduce redundant checks
+- Prefer `group_assert` when several validations can be captured in one screenshot or observation
 - IMPORTANT: Use the EXACT URL provided in the requirements
 - IMPORTANT: Do not add redundant "click to focus" steps before typing
 - IMPORTANT: Never use code terminology - describe elements as users see them (e.g., "main heading" not "H1", "button" not "submit input")

@@ -17,6 +17,7 @@ The Test Planner Agent is responsible for understanding high-level requirements 
 - **Requirement Analysis**: Parse and understand various input formats (PRDs, user stories, URLs, natural language descriptions)
 - **Test Plan Generation**: Create hierarchical test plans with clear structure
 - **Coverage Determination**: Ensure comprehensive test coverage based on requirements
+- **Step Intent Tagging**: Label each test step as setup, validation, or group assertion so the runner can apply the right execution heuristics
 - **Priority Assignment**: Determine test case priorities based on criticality
 
 #### Data Model Hierarchy
@@ -29,9 +30,9 @@ Test Plan
     │   ├── Priority (Critical/High/Medium/Low)
     │   ├── Prerequisites
     │   ├── Test Steps
-    │   │   ├── Step 1 (action, expected result)
-    │   │   ├── Step 2 (action, expected result)
-    │   │   └── Step N (action, expected result)
+    │   │   ├── Step 1 (action, expected result, intent)
+    │   │   ├── Step 2 (action, expected result, intent)
+    │   │   └── Step N (action, expected result, intent)
     │   └── Post-conditions
     └── Test Case N
 ```
@@ -43,6 +44,7 @@ Test Plan
 #### Key Design Principles
 - **Completeness**: Every requirement should map to at least one test case
 - **Clarity**: Each step should be unambiguous and actionable
+- **Intent-Driven Output**: Every step encodes its execution intent so downstream agents can tailor effort (setup vs. validation vs. grouped assertions)
 - **Independence**: Test cases should be executable independently when possible
 - **Traceability**: Clear linkage between requirements and test cases
 
@@ -61,8 +63,11 @@ The Test Runner Agent orchestrates test execution, maintains test state, generat
 ##### B. Step Interpretation and Decomposition
 - **Understand Intent**: Comprehend what each test step aims to achieve
 - **Action Planning**: Break down high-level steps into executable actions
-- **Dynamic Adaptation**: Inject helper actions (scroll, wait) when needed
-- **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, and decomposed instructions so Computer Use has all necessary signals.
+- **Delegated Adaptation**: Produce high-level actions while deferring helper behaviors (scroll, wait, retries) to the Action Agent
+- **Intent-Aware Execution**: Skip heavy verification for `setup` steps and consolidate `group_assert` validations into a single evidence-gathering prompt
+- **Visual Grounding**: Attach the initial browser screenshot and reuse the most recent after-step image when interpreting subsequent steps so planning decisions reflect the actual UI state.
+- **Timeline Awareness**: Supply the current, previous, and next step summaries—plus the final step of the last completed test case when rolling into a new one—so the interpreter understands what has already happened.
+- **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, decomposed instructions, and the selected screenshot so Computer Use has all necessary signals (including when it can safely skip navigation).
 
 ##### C. Report Management
 - **Living Documentation**: Maintain real-time test execution reports
@@ -111,7 +116,9 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 #### Core Responsibilities
 - **Computer Use Orchestration**: Drive the OpenAI computer-use model with rich context, manage multi-turn tool loops, and translate model output into concrete browser operations.
 - **Visual Analysis & Grid Mapping**: When direct coordinate work is required, analyze screenshots to localise targets on the 60x60 grid and refine positions as needed.
+- **Dynamic Adaptation**: Detect visibility gaps and inject helper behaviors (scrolls, waits, alternate strategies) so high-level instructions succeed without extra guidance from the Test Runner.
 - **Action Execution**: Issue clicks, key presses, typing, scrolls, waits, and assertions through the browser driver, falling back to manual execution if the model omits critical payloads.
+- **Navigation Short-Circuiting**: Accept `skip_navigation` actions when the Test Runner determines the target view is already present, returning success without invoking the Computer Use loop.
 - **Mode Management**: Distinguish between execution steps and observe-only assertions, setting the appropriate policy before invoking the computer-use model.
 - **Result Packaging**: Capture pre/post states, validation results, AI analysis, and raw computer-use turns for downstream reporting.
 
@@ -121,6 +128,7 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 3. **Scrolling**: Vertical/horizontal scroll, scroll to element/by pixels.
 4. **Validation**: Visual assertions, including observe-only confirmation steps.
 5. **Advanced**: Composite flows that stitch together multiple computer-use turns with context reminders.
+6. **Skip Navigation**: Acknowledge when the required page is already visible and return success without further interaction.
 
 #### Key Design Principles
 - **Computer Use First**: Default to the OpenAI model for stateful UI work, supplementing with synthetic payloads only when the model response is incomplete.
@@ -136,6 +144,7 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 4. **Execution & Fallbacks** – If the model omits required payloads (e.g., `keys` for a keypress or `text` for typing), the agent synthesises the missing data from test instructions to ensure the browser command executes or fails loudly.
 5. **Clarification Guardrails** – When the model replies with confirmation questions during execute mode, the Action Agent automatically acknowledges with a generic “Yes, proceed” follow-up and resubmits the screenshot, keeping the loop moving.
 6. **Trace Capture** – After every turn the agent records screenshots, current URL, latency, metadata, and aggregated response IDs for audit trails and reporting.
+7. **Loop Detection** – The agent fingerprints each computer-use turn (action type, coordinates, payload) and watches for repeated signatures with unchanged screenshots. After three identical loops it raises a structured `loop_detected` failure so the Test Runner can replan or abort without wasting additional turns.
 
 #### Safety & Observation Modes
 - **Execute Mode** – Used for interaction steps. All stateful actions are permitted unless blocked by domain policy. The agent injects reminders that the model must perform the action without pausing for approval.
