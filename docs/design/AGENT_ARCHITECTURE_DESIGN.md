@@ -63,7 +63,7 @@ The Test Runner Agent orchestrates test execution, maintains test state, generat
 ##### B. Step Interpretation and Decomposition
 - **Understand Intent**: Comprehend what each test step aims to achieve
 - **Action Planning**: Break down high-level steps into executable actions
-- **Dynamic Adaptation**: Inject helper actions (scroll, wait) when needed
+- **Delegated Adaptation**: Produce high-level actions while deferring helper behaviors (scroll, wait, retries) to the Action Agent
 - **Intent-Aware Execution**: Skip heavy verification for `setup` steps and consolidate `group_assert` validations into a single evidence-gathering prompt
 - **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, and decomposed instructions so Computer Use has all necessary signals.
 
@@ -114,6 +114,7 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 #### Core Responsibilities
 - **Computer Use Orchestration**: Drive the OpenAI computer-use model with rich context, manage multi-turn tool loops, and translate model output into concrete browser operations.
 - **Visual Analysis & Grid Mapping**: When direct coordinate work is required, analyze screenshots to localise targets on the 60x60 grid and refine positions as needed.
+- **Dynamic Adaptation**: Detect visibility gaps and inject helper behaviors (scrolls, waits, alternate strategies) so high-level instructions succeed without extra guidance from the Test Runner.
 - **Action Execution**: Issue clicks, key presses, typing, scrolls, waits, and assertions through the browser driver, falling back to manual execution if the model omits critical payloads.
 - **Mode Management**: Distinguish between execution steps and observe-only assertions, setting the appropriate policy before invoking the computer-use model.
 - **Result Packaging**: Capture pre/post states, validation results, AI analysis, and raw computer-use turns for downstream reporting.
@@ -139,6 +140,7 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 4. **Execution & Fallbacks** – If the model omits required payloads (e.g., `keys` for a keypress or `text` for typing), the agent synthesises the missing data from test instructions to ensure the browser command executes or fails loudly.
 5. **Clarification Guardrails** – When the model replies with confirmation questions during execute mode, the Action Agent automatically acknowledges with a generic “Yes, proceed” follow-up and resubmits the screenshot, keeping the loop moving.
 6. **Trace Capture** – After every turn the agent records screenshots, current URL, latency, metadata, and aggregated response IDs for audit trails and reporting.
+7. **Loop Detection** – The agent fingerprints each computer-use turn (action type, coordinates, payload) and watches for repeated signatures with unchanged screenshots. After three identical loops it raises a structured `loop_detected` failure so the Test Runner can replan or abort without wasting additional turns.
 
 #### Safety & Observation Modes
 - **Execute Mode** – Used for interaction steps. All stateful actions are permitted unless blocked by domain policy. The agent injects reminders that the model must perform the action without pausing for approval.

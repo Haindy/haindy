@@ -148,6 +148,12 @@ class Settings(BaseSettings):
         description="Maximum tool turns per action when using Computer Use",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS",
     )
+    actions_computer_tool_loop_detection_window: int = Field(
+        default=3,
+        ge=2,
+        description="Repeated identical turns (with identical screenshots) before flagging a loop",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW",
+    )
     actions_computer_tool_action_timeout_ms: int = Field(
         default=7000,
         ge=500,

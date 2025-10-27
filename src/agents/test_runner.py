@@ -41,6 +41,7 @@ from src.browser.instrumented_driver import InstrumentedBrowserDriver
 
 logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
+LOOP_ERROR_PREFIX = "Computer Use loop detected"
 
 
 class TestRunner(BaseAgent):
@@ -436,11 +437,14 @@ class TestRunner(BaseAgent):
                                     result_blob.get("error")
                                     or exec_blob.get("error_message")
                                 )
-                    if error_text and isinstance(error_text, str) and error_text.startswith(MAX_TURN_ERROR_PREFIX):
+                    if error_text and isinstance(error_text, str) and (
+                        error_text.startswith(MAX_TURN_ERROR_PREFIX)
+                        or error_text.startswith(LOOP_ERROR_PREFIX)
+                    ):
                         forced_blocker_reason = error_text
                         success = False
                         logger.error(
-                            "Action aborted due to Computer Use turn limit",
+                            "Action aborted due to Computer Use limit or loop",
                             extra={
                                 "step_number": step.step_number,
                                 "action_description": action.get("description", ""),
@@ -640,7 +644,7 @@ class TestRunner(BaseAgent):
         }
         
         # Use AI to interpret the step
-        prompt = f"""Analyze this test step and break it down into specific browser actions:
+        prompt = f"""Analyze this test step and outline the minimal set of browser actions required to satisfy the intent.
 
 Test Case: {context['test_case']}
 Step {context['step_number']}: {context['action']}
@@ -653,55 +657,35 @@ Recent actions:
 Intent Guidance:
 - setup: Provide only the minimum interactions needed to reach the state. Do NOT include 'assert' actions unless absolutely required to proceed.
 - validation: Follow standard behavior by pairing key actions with targeted assertions.
-- group_assert: Combine related validations into a single, well-described 'assert' action so evidence and verification happen together.
+- group_assert: Combine related validations into a single evidence-gathering action.
 
-Break this down into a sequence of specific actions. For each action provide:
-1. type: The action type - MUST be one of these exact values:
+Action Planning Guidelines:
+- Focus on the goal expressed in the step and its expected result.
+- Prefer a single high-level action when the goal can be achieved in one flow. Only split into multiple actions when the step clearly describes distinct tasks that must happen in sequence.
+- Do not add helper actions (scrolls, waits, screenshots, retries) unless the step text explicitly requires them. The Action Agent and Computer Use session will handle visibility, scrolling, and other dynamic adjustments automatically.
+- Write descriptions that capture the outcome so the Action Agent understands what success looks like.
+
+Action schema for each entry:
+1. type: Must be one of these values:
    - navigate: Go to a URL
    - click: Click on an element
    - type: Type text into a field
    - assert: Verify something on the page
    - key_press: Press a specific key (Enter, Tab, etc.)
-   - scroll_to_element: Scroll until an element is visible
-   - scroll_by_pixels: Scroll by a specific number of pixels
-   - scroll_to_top: Scroll to top of page
-   - scroll_to_bottom: Scroll to bottom of page
-   - scroll_horizontal: Scroll horizontally
-2. target: Describe the element in human terms (e.g., "the search input field", "the blue Login button", "the main navigation menu") - DO NOT use CSS selectors, IDs, or any DOM references
-3. value: Required for certain action types:
+   - scroll_to_element: Scroll until an element is visible (only if the step explicitly instructs to scroll)
+   - scroll_by_pixels: Scroll by a specific number of pixels (only if the step explicitly instructs to scroll)
+   - scroll_to_top: Scroll to top of page (only if the step explicitly instructs to scroll)
+   - scroll_to_bottom: Scroll to bottom of page (only if the step explicitly instructs to scroll)
+   - scroll_horizontal: Scroll horizontally (only if the step explicitly instructs to scroll)
+2. target: Describe the element in human terms (e.g., "the search input field", "the blue Login button") – never use raw selectors.
+3. value: Required when needed by the action type:
    - For 'type': The text to type
    - For 'navigate': The URL to navigate to
    - For 'key_press': The key to press (e.g., "Enter", "Tab")
    - For 'scroll_by_pixels': Number of pixels (positive for down/right, negative for up/left)
-4. description: Brief description of what this action does
+4. description: Briefly explain what this action accomplishes; keep it outcome-driven.
 5. critical: Whether failure should stop remaining actions (true/false)
-
-IMPORTANT: Choose the most appropriate action type from the list above. For dropdown/select elements, use 'click' type.
-
-Consider:
-- Do we need to scroll to make elements visible?
-- Are there multiple UI interactions needed?
-- Should we verify intermediate states?
-
-ACTION RULES:
-1. Text Input Fields (search bars, text boxes, input fields):
-   - DO NOT use 'click' followed by 'type' for text input fields
-   - Use 'type' action directly - it will automatically focus the field
-   - Text fields don't provide visual feedback when clicked, so click validation will fail
-   - Example: For "Enter 'Python' in the search box", use only type action, not click+type
-
-2. Navigation:
-   - Always use 'navigate' for going to URLs, not click on address bar + type
-
-3. Scrolling:
-   - ONLY add scroll actions when truly necessary
-   - Use common sense: elements like search bars, main navigation, headers are visible on page load
-   - DO NOT scroll unless:
-     a) The test explicitly mentions scrolling
-     b) The element is logically below the fold (footer, comments, "load more" content)
-     c) Previous actions suggest the element might not be visible
-   - Example: Google's search bar is visible immediately - no scroll needed
-   - Example: "Privacy Policy" link in footer - scroll needed
+6. expected_outcome (optional): Use only if the expected result for this action differs from the step-level expected result.
 
 Respond with a JSON object containing an "actions" array."""
 
