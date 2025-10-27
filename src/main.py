@@ -18,8 +18,10 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from src.browser.controller import BrowserController
+from src.agents.scope_triage import ScopeTriageAgent
 from src.agents.test_planner import TestPlannerAgent
 from src.config.settings import get_settings
+from src.error_handling import ScopeTriageBlockedError
 from src.models.openai_client import ResponseStreamObserver
 from src.monitoring.logger import get_logger, setup_logging
 from src.monitoring.reporter import TestReporter
@@ -27,7 +29,8 @@ from src.monitoring.debug_logger import initialize_debug_logger
 from src.orchestration.communication import MessageBus
 from src.orchestration.coordinator import WorkflowCoordinator
 from src.orchestration.state_manager import StateManager
-from src.core.types import TestState
+from src.core.types import ScopeTriageResult, TestPlan, TestState
+from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
 
@@ -360,10 +363,11 @@ async def run_test(
             console.print("\n[dim]Skipping browser startup (--plan-only mode). Only the Test Planner will run.[/dim]")
             console.print("\n[yellow]Generating test plan...[/yellow]")
 
-            test_plan = await _generate_plan_only_plan(requirements)
+            test_plan, triage_result = await _generate_plan_only_plan(requirements)
 
             _render_plan_table(test_plan)
             _print_plan_storage_locations(test_plan)
+            _print_scope_triage_followups(triage_result)
 
             return 0
 
@@ -461,6 +465,11 @@ async def run_test(
                 console.print(f"Success Rate: [cyan]{report.summary.success_rate:.1f}%[/cyan]")
         else:
             console.print("[yellow]No test report available[/yellow]")
+
+        triage_result = None
+        if coordinator:
+            triage_result = coordinator.get_scope_triage_result(test_state.test_plan.plan_id)
+        _print_scope_triage_followups(triage_result)
         
         # Generate report
         if output_dir is None:
@@ -502,6 +511,10 @@ async def run_test(
         # Return appropriate exit code
         return 0 if status_value in success_statuses else 1
         
+    except ScopeTriageBlockedError as scope_error:
+        logger.warning("Scope triage blocked planning", exc_info=True)
+        _print_scope_blockers(scope_error)
+        return 1
     except asyncio.TimeoutError:
         console.print(f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]")
         return 2
@@ -558,10 +571,19 @@ async def _run_with_timeout(
     )
 
 
-async def _generate_plan_only_plan(requirements: str):
-    """Create a test plan using only the Test Planner agent."""
+async def _generate_plan_only_plan(requirements: str) -> Tuple[TestPlan, ScopeTriageResult]:
+    """Create a test plan using the two-pass scope triage pipeline."""
     settings = get_settings()
+    triage_cfg = settings.get_agent_model_config("scope_triage")
     planner_cfg = settings.get_agent_model_config("test_planner")
+
+    triage_agent = ScopeTriageAgent(
+        name="ScopeTriage",
+        model=triage_cfg.model,
+        temperature=triage_cfg.temperature,
+        reasoning_level=triage_cfg.reasoning_level,
+        modalities=triage_cfg.modalities,
+    )
 
     planner = TestPlannerAgent(
         name="TestPlanner",
@@ -584,9 +606,11 @@ async def _generate_plan_only_plan(requirements: str):
                 total=None,
             )
             stream_observer = PlanGenerationStreamObserver(progress, task)
-            test_plan = await planner.create_test_plan(
-                requirements,
-                stream_observer=stream_observer,
+            test_plan, triage_result = await run_scope_triage_and_plan(
+                requirements=requirements,
+                planner=planner,
+                triage_agent=triage_agent,
+                planner_kwargs={"stream_observer": stream_observer},
             )
             stream_observer.mark_complete()
             if hasattr(progress, "stop_task"):
@@ -596,11 +620,15 @@ async def _generate_plan_only_plan(requirements: str):
         _print_plan_stats(test_plan, usage_totals, stream_observer.has_usage_data())
     else:
         console.print("[cyan]Generating test plan…[/cyan]")
-        test_plan = await planner.create_test_plan(requirements)
+        test_plan, triage_result = await run_scope_triage_and_plan(
+            requirements=requirements,
+            planner=planner,
+            triage_agent=triage_agent,
+        )
         console.print("[green]Test plan ready.[/green]")
         _print_plan_stats(test_plan, None, False)
 
-    return test_plan
+    return test_plan, triage_result
 
 
 def _print_plan_stats(
@@ -636,6 +664,60 @@ def _print_plan_stats(
         console.print("LLM tokens: [yellow]usage metrics unavailable[/yellow]")
     else:
         console.print("LLM tokens: [yellow]not reported[/yellow]")
+
+
+def _print_scope_triage_followups(triage_result: Optional[ScopeTriageResult]) -> None:
+    """Display scope exclusions and ambiguities identified during triage."""
+    if triage_result is None:
+        return
+
+    exclusions = [item.strip() for item in triage_result.explicit_exclusions if item.strip()]
+    ambiguities = [item.strip() for item in triage_result.ambiguous_points if item.strip()]
+
+    if not exclusions and not ambiguities:
+        return
+
+    if exclusions:
+        console.print("\n[bold cyan]Explicit Exclusions[/bold cyan]")
+        for item in exclusions:
+            console.print(f"- {item}")
+
+    if ambiguities:
+        console.print("\n[bold yellow]Scope Ambiguities[/bold yellow]")
+        console.print(
+            "[yellow]Share these with the requirements author before executing the plan.[/yellow]"
+        )
+        for item in ambiguities:
+            console.print(f"- {item}")
+
+
+def _print_scope_blockers(error: ScopeTriageBlockedError) -> None:
+    """Print blocking questions discovered during scope triage."""
+    console.print("\n[bold red]Scope triage blocked test planning[/bold red]")
+
+    blocking = error.blocking_questions or []
+    if not blocking and getattr(error, "triage_result", None):
+        blocking = getattr(error.triage_result, "blocking_questions", []) or []
+
+    if blocking:
+        for item in blocking:
+            console.print(f"- {item}")
+    else:
+        console.print("- Unresolved scope contradictions detected.")
+
+    additional = error.ambiguous_points or []
+    if not additional and getattr(error, "triage_result", None):
+        additional = getattr(error.triage_result, "ambiguous_points", []) or []
+
+    if additional:
+        console.print("\n[bold yellow]Other ambiguities for follow-up[/bold yellow]")
+        for item in additional:
+            console.print(f"- {item}")
+
+    console.print(
+        "\n[yellow]Please update the requirements document to resolve these questions, "
+        "then rerun the planner.[/yellow]"
+    )
 
 
 def _render_plan_table(test_plan) -> None:

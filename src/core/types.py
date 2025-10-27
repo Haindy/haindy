@@ -218,6 +218,65 @@ class TestPlan(BaseModel):
         return data
 
 
+class ScopeTriageResult(BaseModel):
+    """Structured summary of scope triage analysis."""
+
+    in_scope: str = Field(
+        "",
+        description="Plain-language summary of functionality explicitly in scope",
+    )
+    explicit_exclusions: List[str] = Field(
+        default_factory=list,
+        description="Items explicitly ruled out of scope",
+    )
+    ambiguous_points: List[str] = Field(
+        default_factory=list,
+        description="Requirements or details that remain unclear but are not blockers",
+    )
+    blocking_questions: List[str] = Field(
+        default_factory=list,
+        description="Contradictions or missing details that must be resolved before planning",
+    )
+
+    def has_blockers(self) -> bool:
+        """Return True when unresolved blockers are present."""
+        return any(item.strip() for item in self.blocking_questions)
+
+    def build_planner_brief(self) -> str:
+        """Generate the curated scope brief for the test planner."""
+        sections: List[str] = []
+
+        normalized_scope = self.in_scope.strip()
+        if normalized_scope:
+            sections.append("IN-SCOPE SUMMARY:\n" + normalized_scope)
+
+        exclusions = [item.strip() for item in self.explicit_exclusions if item.strip()]
+        if exclusions:
+            exclusions_text = "\n".join(f"- {item}" for item in exclusions)
+            sections.append("EXPLICIT EXCLUSIONS:\n" + exclusions_text)
+
+        if not sections:
+            return "IN-SCOPE SUMMARY:\nFull scope is permitted. No explicit exclusions noted."
+
+        return "\n\n".join(sections)
+
+    def ambiguous_report(self) -> Optional[str]:
+        """Return a formatted ambiguous points report, if any."""
+        items = [item.strip() for item in self.ambiguous_points if item.strip()]
+        if not items:
+            return None
+        lines = "\n".join(f"- {item}" for item in items)
+        return f"FOLLOW-UP NOTES:\n{lines}"
+
+    def blocking_report(self) -> Optional[str]:
+        """Return a formatted blocking questions report, if any."""
+        items = [item.strip() for item in self.blocking_questions if item.strip()]
+        if not items:
+            return None
+        lines = "\n".join(f"- {item}" for item in items)
+        return f"BLOCKING QUESTIONS:\n{lines}"
+
+
 class TestState(BaseModel):
     """Current state of test execution."""
 

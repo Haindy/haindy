@@ -12,8 +12,15 @@ from uuid import uuid4
 import pytest
 
 from src.core.types import (
-    ActionInstruction, ActionType, AgentMessage,
-    TestPlan, TestCase, TestStep, TestState, TestStatus
+    ActionInstruction,
+    ActionType,
+    AgentMessage,
+    ScopeTriageResult,
+    TestPlan,
+    TestCase,
+    TestStep,
+    TestState,
+    TestStatus,
 )
 from src.orchestration.communication import MessageBus, MessageType
 from src.orchestration.coordinator import WorkflowCoordinator, CoordinatorState
@@ -137,12 +144,17 @@ class TestWorkflowCoordinatorTestExecution:
     async def test_generate_test_plan_method(self, coordinator, sample_test_plan):
         """Test the public generate_test_plan method."""
         await coordinator.initialize()
-        
-        # Mock test planner
-        with patch.object(
-            coordinator._agents["test_planner"],
-            'create_test_plan',
-            AsyncMock(return_value=sample_test_plan)
+
+        triage_result = ScopeTriageResult(
+            in_scope="Only test the login flow",
+            explicit_exclusions=["Do not touch reporting views"],
+            ambiguous_points=[],
+            blocking_questions=[],
+        )
+
+        with patch(
+            "src.orchestration.coordinator.run_scope_triage_and_plan",
+            AsyncMock(return_value=(sample_test_plan, triage_result)),
         ):
             # Generate plan
             plan = await coordinator.generate_test_plan("Test requirements")
@@ -150,6 +162,8 @@ class TestWorkflowCoordinatorTestExecution:
             # Verify
             assert plan == sample_test_plan
             assert plan.name == "Login Test"
+            stored = coordinator.get_scope_triage_result(sample_test_plan.plan_id)
+            assert stored == triage_result
     
     @pytest.mark.asyncio
     async def test_concurrent_test_limit_check(self, coordinator):

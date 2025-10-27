@@ -18,7 +18,8 @@ from src.main import (
     show_version,
     test_api_connection,
 )
-from src.core.types import TestCase, TestCasePriority, TestPlan, TestStep
+from src.core.types import ScopeTriageResult, TestCase, TestCasePriority, TestPlan, TestStep
+from src.error_handling import ScopeTriageBlockedError
 
 
 class TestCLIParser:
@@ -319,7 +320,13 @@ class TestMainFlow:
         (plan_dir / f"test_plan_{plan_id}.md").write_text("# Plan")
 
         planner_instance = MagicMock()
-        planner_instance.create_test_plan = AsyncMock(return_value=test_plan)
+        triage_result = ScopeTriageResult(
+            in_scope="Admin scope only",
+            explicit_exclusions=["Exclude FMC flows"],
+            ambiguous_points=["Clarify translation requirements"],
+            blocking_questions=[],
+        )
+        pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
 
         class DummyProgress:
             def __init__(self, *args, **kwargs):
@@ -337,7 +344,9 @@ class TestMainFlow:
             def update(self, *args, **kwargs):
                 return None
 
-        with patch("src.main.TestPlannerAgent", return_value=planner_instance) as mock_planner, \
+        with patch("src.main.ScopeTriageAgent", return_value=MagicMock()) as mock_triage, \
+             patch("src.main.TestPlannerAgent", return_value=planner_instance) as mock_planner, \
+             patch("src.main.run_scope_triage_and_plan", pipeline_mock), \
              patch("src.main.BrowserController") as mock_browser, \
              patch("src.main.Progress", DummyProgress):
             result = await run_test(
@@ -355,12 +364,55 @@ class TestMainFlow:
         assert result == 0
         mock_browser.assert_not_called()
         mock_planner.assert_called_once()
+        mock_triage.assert_called_once()
+        pipeline_mock.assert_awaited_once()
 
         captured = capsys.readouterr()
         assert "generated_test_plans" in captured.out
         assert str(plan_id) in captured.out
         assert f"test_plan_{plan_id}.json" in captured.out
         assert f"test_plan_{plan_id}.md" in captured.out
+        assert "Explicit Exclusions" in captured.out
+        assert "Scope Ambiguities" in captured.out
+        assert "Clarify translation requirements" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_plan_only_reports_scope_blockers(self, capsys):
+        """Plan-only mode should stop when scope blockers are detected."""
+        blocking_result = ScopeTriageResult(
+            in_scope="Admin scope only",
+            explicit_exclusions=[],
+            ambiguous_points=["Confirm translation coverage."],
+            blocking_questions=["Need staging URL before planning."],
+        )
+        pipeline_error = ScopeTriageBlockedError(triage_result=blocking_result)
+        pipeline_mock = AsyncMock(side_effect=pipeline_error)
+
+        with patch("src.main.ScopeTriageAgent", return_value=MagicMock()) as mock_triage, \
+             patch("src.main.TestPlannerAgent", return_value=MagicMock()) as mock_planner, \
+             patch("src.main.run_scope_triage_and_plan", pipeline_mock), \
+             patch("src.main.BrowserController") as mock_browser:
+            result = await run_test(
+                requirements="List requirements here",
+                url="https://example.com",
+                plan_only=True,
+                headless=True,
+                output_dir=None,
+                report_format="html",
+                timeout=1200,
+                max_steps=50,
+                berserk=False,
+            )
+
+        assert result == 1
+        mock_browser.assert_not_called()
+        mock_triage.assert_called_once()
+        mock_planner.assert_called_once()
+        pipeline_mock.assert_awaited_once()
+
+        captured = capsys.readouterr()
+        assert "Scope triage blocked test planning" in captured.out
+        assert "Need staging URL before planning." in captured.out
 
     @pytest.mark.asyncio
     async def test_no_input_shows_help(self, capsys):

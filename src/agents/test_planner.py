@@ -64,6 +64,8 @@ class TestPlannerAgent(BaseAgent):
         self,
         requirements: str,
         context: Optional[Dict] = None,
+        curated_scope: Optional[str] = None,
+        ambiguous_points: Optional[List[str]] = None,
         stream_observer: Optional[ResponseStreamObserver] = None,
     ) -> TestPlan:
         """
@@ -83,7 +85,12 @@ class TestPlannerAgent(BaseAgent):
         })
         
         # Build the user message
-        user_message = self._build_requirements_message(requirements, context)
+        user_message = self._build_requirements_message(
+            requirements=requirements,
+            context=context,
+            curated_scope=curated_scope,
+            ambiguous_points=ambiguous_points,
+        )
         
         # Build messages with system prompt
         messages = [
@@ -125,16 +132,58 @@ class TestPlannerAgent(BaseAgent):
 
         return test_plan
     
-    def _build_requirements_message(self, requirements: str, context: Optional[Dict] = None) -> str:
-        """Build the user message with requirements and context."""
-        message = f"Please create a test plan for the following requirements:\n\n{requirements}"
-        
+    def _build_requirements_message(
+        self,
+        requirements: str,
+        context: Optional[Dict] = None,
+        curated_scope: Optional[str] = None,
+        ambiguous_points: Optional[List[str]] = None,
+    ) -> str:
+        """Build the user message with requirements, curated scope, and context."""
+        message_parts: List[str] = []
+
+        if curated_scope:
+            message_parts.append(
+                "Use the curated testing scope below. Do NOT introduce functionality beyond it."
+            )
+            message_parts.append("")
+            message_parts.append(curated_scope)
+
+            normalized_ambiguities = [
+                item.strip() for item in (ambiguous_points or []) if item.strip()
+            ]
+            if normalized_ambiguities:
+                message_parts.append("")
+                message_parts.append(
+                    "Ambiguous points identified by scope triage "
+                    "(surface them in plan notes; do not resolve automatically):"
+                )
+                for point in normalized_ambiguities:
+                    message_parts.append(f"- {point}")
+
+            message_parts.append("")
+            message_parts.append(
+                "Full requirements package is included below for reference only."
+            )
+            message_parts.append(
+                "Never infer additional features that are not part of the curated scope."
+            )
+        else:
+            message_parts.append(
+                "Please create a test plan for the following requirements:"
+            )
+
+        message_parts.append("")
+        message_parts.append(requirements)
+
         if context:
-            message += "\n\nAdditional Context:"
+            message_parts.append("")
+            message_parts.append("Additional Context:")
             for key, value in context.items():
-                message += f"\n- {key}: {value}"
-        
-        message += """\n\nProvide the test plan in the following JSON format:
+                message_parts.append(f"- {key}: {value}")
+
+        message_parts.append(
+            """\n\nProvide the test plan in the following JSON format:
 {
     "name": "Test plan name",
     "description": "Overall description of what is being tested",
@@ -170,9 +219,11 @@ IMPORTANT:
 - Include both positive (happy path) and realistic negative (user-observable) test cases only
 - Assign test case IDs sequentially without gaps (TC001, TC002, ...)
 - Tag each step with an 'intent': use 'setup' for preparatory actions with minimal verification, 'validation' for standard checks, and 'group_assert' when bundling multiple related assertions into one step
-- Do NOT assign or output priority fields"""
-        
-        return message
+- Do NOT assign or output priority fields
+- Respond with well-formed json that matches the structure above."""
+        )
+
+        return "\n".join(message_parts)
     
     def _parse_test_plan_response(self, response: Dict) -> TestPlan:
         """Parse the AI response into a TestPlan object."""

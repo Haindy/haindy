@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.browser.controller import BrowserController
-from src.core.types import TestState, TestStatus
+from src.core.types import ScopeTriageResult, TestState, TestStatus
 from src.main import async_main, load_scenario
 from src.monitoring.reporter import TestReporter
 from src.orchestration.communication import MessageBus
@@ -381,7 +381,13 @@ class TestEndToEndIntegration:
             steps=test_case.steps  # For backward compatibility
         )
         planner_instance = MagicMock()
-        planner_instance.create_test_plan = AsyncMock(return_value=mock_plan)
+        triage_result = ScopeTriageResult(
+            in_scope="Scope triage summary",
+            explicit_exclusions=["Do not test FMC."],
+            ambiguous_points=[],
+            blocking_questions=[],
+        )
+        pipeline_mock = AsyncMock(return_value=(mock_plan, triage_result))
         
         # Mock interactive input
         with patch("src.main.get_interactive_requirements") as mock_get_req:
@@ -389,7 +395,9 @@ class TestEndToEndIntegration:
             
             with patch("src.main.BrowserController", return_value=mock_browser_controller):
                 with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    with patch("src.main.TestPlannerAgent", return_value=planner_instance):
+                    with patch("src.main.ScopeTriageAgent", return_value=MagicMock()), \
+                         patch("src.main.TestPlannerAgent", return_value=planner_instance), \
+                         patch("src.main.run_scope_triage_and_plan", pipeline_mock):
                         # Run main in plan-only mode
                         exit_code = await async_main([
                             "--requirements",
@@ -400,7 +408,7 @@ class TestEndToEndIntegration:
         assert exit_code == 0
         
         # Verify only plan was generated, not executed
-        planner_instance.create_test_plan.assert_awaited_once()
+        pipeline_mock.assert_awaited_once()
         mock_coordinator.generate_test_plan.assert_not_called()
         mock_coordinator.execute_test_from_requirements.assert_not_called()
     
