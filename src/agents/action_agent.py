@@ -240,6 +240,8 @@ class ActionAgent(BaseAgent):
             return False
         if not self.use_computer_tool:
             return False
+        if action_type == ActionType.SKIP_NAVIGATION:
+            return False
         return True
 
     def _build_computer_use_goal(
@@ -551,6 +553,61 @@ class ActionAgent(BaseAgent):
         result.timestamp_end = datetime.now(timezone.utc)
         return result
 
+    async def _execute_skip_navigation_workflow(
+        self,
+        test_step: TestStep,
+        test_context: Dict[str, Any],
+    ) -> EnhancedActionResult:
+        """Return a successful result when navigation is already satisfied."""
+        instruction = test_step.action_instruction
+        rationale = instruction.description if instruction else test_step.description
+        rationale = rationale or "Navigation already satisfied."
+
+        validation = ValidationResult(
+            valid=True,
+            confidence=0.9,
+            reasoning=f"Navigation skipped: {rationale}",
+        )
+        execution = ExecutionResult(
+            success=True,
+            execution_time_ms=0.0,
+            error_message=None,
+        )
+        ai_analysis = AIAnalysis(
+            success=True,
+            confidence=0.7,
+            actual_outcome=rationale,
+            matches_expected=True,
+        )
+
+        result = EnhancedActionResult(
+            test_step_id=test_step.step_id,
+            test_step=test_step,
+            test_context=test_context,
+            validation=validation,
+            execution=execution,
+            ai_analysis=ai_analysis,
+            overall_success=True,
+            failure_phase=None,
+        )
+        result.timestamp_end = datetime.now(timezone.utc)
+
+        debug_logger = get_debug_logger()
+        if debug_logger:
+            debug_logger.log_ai_interaction(
+                agent_name=self.name,
+                action_type="skip_navigation",
+                prompt=rationale,
+                response="Navigation already satisfied; no action taken.",
+                screenshot_path=None,
+                additional_context={
+                    "step_number": test_step.step_number,
+                    "test_case_name": test_context.get("test_case_name"),
+                },
+            )
+
+        return result
+
     async def execute_action(
         self,
         test_step: TestStep,
@@ -608,6 +665,8 @@ class ActionAgent(BaseAgent):
         # Route to appropriate workflow based on action type
         if action_type == "navigate":
             return await self._execute_navigate_workflow(test_step, test_context)
+        elif action_type == "skip_navigation":
+            return await self._execute_skip_navigation_workflow(test_step, test_context)
         elif action_type == "click":
             # Phase 8c: Check if this is a dropdown/select action
             target_lower = test_step.action_instruction.target.lower()

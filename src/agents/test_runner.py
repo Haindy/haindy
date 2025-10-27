@@ -20,6 +20,7 @@ from src.agents.base_agent import BaseAgent
 from src.agents.formatters import TestPlanFormatter
 from src.browser.driver import BrowserDriver
 from src.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
+from src.config.settings import get_settings
 from src.core.types import (
     ActionInstruction,
     ActionType,
@@ -87,6 +88,12 @@ class TestRunner(BaseAgent):
         # Execution context
         self._initial_url: Optional[str] = None
         self._execution_history: List[Dict[str, Any]] = []
+        self._settings = get_settings()
+        self._initial_screenshot_bytes: Optional[bytes] = None
+        self._initial_screenshot_path: Optional[str] = None
+        self._latest_screenshot_bytes: Optional[bytes] = None
+        self._latest_screenshot_path: Optional[str] = None
+        self._latest_screenshot_origin: Optional[str] = None
         
         # Action storage for Phase 17
         self._action_storage: Dict[str, Any] = {
@@ -107,6 +114,92 @@ class TestRunner(BaseAgent):
             BugSeverity.LOW: 3,
         }
         return severity_order.get(severity, 99)
+    
+    async def _ensure_initial_screenshot(self) -> None:
+        """Capture and cache the initial browser screenshot."""
+        if self._initial_screenshot_bytes is not None:
+            return
+        if not self.browser_driver:
+            return
+        
+        wait_seconds = max(
+            float(self._settings.actions_computer_tool_stabilization_wait_ms) / 1000.0,
+            0.0,
+        )
+        if wait_seconds:
+            await asyncio.sleep(wait_seconds)
+        
+        try:
+            screenshot = await self.browser_driver.screenshot()
+        except Exception as exc:  # pragma: no cover - defensive path
+            logger.warning(
+                "Failed to capture initial screenshot",
+                extra={"error": str(exc)},
+            )
+            return
+        
+        screenshot_path = self._save_screenshot(screenshot, "initial_state")
+        self._initial_screenshot_bytes = screenshot
+        self._initial_screenshot_path = str(screenshot_path)
+        self._latest_screenshot_bytes = screenshot
+        self._latest_screenshot_path = self._initial_screenshot_path
+        self._latest_screenshot_origin = "initial_state"
+        
+        logger.info(
+            "Captured initial browser screenshot",
+            extra={"screenshot_path": self._initial_screenshot_path},
+        )
+
+    async def _get_interpretation_screenshot(
+        self,
+        step: TestStep,
+        test_case: TestCase,
+    ) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        """
+        Resolve the screenshot to send alongside step interpretation.
+
+        Returns a tuple of (screenshot_bytes, screenshot_path, source_label).
+        """
+        await self._ensure_initial_screenshot()
+
+        if self._latest_screenshot_bytes and self._latest_screenshot_path:
+            source = self._latest_screenshot_origin or "cached_snapshot"
+            if (
+                source == "initial_state"
+                and step.step_number > 1
+            ):
+                source = "initial_state_cached"
+            return (
+                self._latest_screenshot_bytes,
+                self._latest_screenshot_path,
+                source,
+            )
+
+        if not self.browser_driver:
+            return None, None, None
+
+        try:
+            screenshot = await self.browser_driver.screenshot()
+        except Exception as exc:  # pragma: no cover - defensive path
+            logger.warning(
+                "Failed to capture screenshot for interpretation",
+                extra={"error": str(exc)},
+            )
+            return None, None, None
+
+        screenshot_path = self._save_screenshot(
+            screenshot,
+            f"tc{test_case.test_id}_step{step.step_number}_context",
+        )
+
+        self._latest_screenshot_bytes = screenshot
+        self._latest_screenshot_path = str(screenshot_path)
+        if self._initial_screenshot_bytes is None:
+            self._initial_screenshot_bytes = screenshot
+            self._initial_screenshot_path = str(screenshot_path)
+        self._latest_screenshot_origin = "fresh_capture"
+
+        return screenshot, str(screenshot_path), "fresh_capture"
     
     async def execute_test_plan(
         self,
@@ -134,6 +227,11 @@ class TestRunner(BaseAgent):
         self._current_test_plan = test_plan
         self._initial_url = initial_url
         self._test_state = test_state
+        self._initial_screenshot_bytes = None
+        self._initial_screenshot_path = None
+        self._latest_screenshot_bytes = None
+        self._latest_screenshot_path = None
+        self._latest_screenshot_origin = None
         
         # Initialize action storage for this test run
         self._action_storage = {
@@ -169,6 +267,8 @@ class TestRunner(BaseAgent):
             if initial_url and self.browser_driver:
                 logger.info("Navigating to initial URL", extra={"url": initial_url})
                 await self.browser_driver.navigate(initial_url)
+            
+            await self._ensure_initial_screenshot()
             
             # Execute each test case sequentially
             for i, test_case in enumerate(test_plan.test_cases):
@@ -384,7 +484,9 @@ class TestRunner(BaseAgent):
             expected_result=step.expected_result,
             actual_result=""
         )
-        
+        screenshot_before: Optional[bytes] = None
+        screenshot_after: Optional[bytes] = None
+       
         try:
             # Check dependencies
             if not self._check_dependencies(step, case_result):
@@ -470,6 +572,9 @@ class TestRunner(BaseAgent):
                     f"tc{test_case.test_id}_step{step.step_number}_after"
                 )
                 step_result.screenshot_after = str(screenshot_path)
+                self._latest_screenshot_bytes = screenshot_after
+                self._latest_screenshot_path = str(screenshot_path)
+                self._latest_screenshot_origin = f"step_{step.step_number}_after"
             
             # Build execution history for this test case
             execution_history = []
@@ -562,6 +667,14 @@ class TestRunner(BaseAgent):
         
         finally:
             step_result.completed_at = datetime.now(timezone.utc)
+            if (
+                screenshot_after is None
+                and screenshot_before is not None
+                and step_result.screenshot_before
+            ):
+                self._latest_screenshot_bytes = screenshot_before
+                self._latest_screenshot_path = step_result.screenshot_before
+                self._latest_screenshot_origin = f"step_{step.step_number}_before"
             
             # Add to execution history
             self._execution_history.append({
@@ -621,8 +734,7 @@ class TestRunner(BaseAgent):
         
         Returns a list of actions to be executed sequentially.
         """
-        # Build context for interpretation
-        # Convert recent history to JSON-serializable format
+        # Recent execution history (for temporal awareness)
         recent_history = []
         for item in self._execution_history[-3:]:
             recent_history.append({
@@ -630,64 +742,165 @@ class TestRunner(BaseAgent):
                 "step": item.get("step", 0),
                 "action": item.get("action", ""),
                 "result": item.get("result", ""),
-                "timestamp": item.get("timestamp").isoformat() if isinstance(item.get("timestamp"), datetime) else str(item.get("timestamp", ""))
+                "timestamp": item.get("timestamp").isoformat()
+                if isinstance(item.get("timestamp"), datetime)
+                else str(item.get("timestamp", "")),
             })
-        
-        context = {
-            "test_case": test_case.name,
-            "step_number": step.step_number,
-            "action": step.action,
-            "expected_result": step.expected_result,
-            "intent": step.intent.value,
-            "recent_history": recent_history,
-            "current_url": self._initial_url
-        }
-        
-        # Use AI to interpret the step
-        prompt = f"""Analyze this test step and outline the minimal set of browser actions required to satisfy the intent.
+        recent_history_text = json.dumps(recent_history, indent=2)
 
-Test Case: {context['test_case']}
-Step {context['step_number']}: {context['action']}
-Expected Result: {context['expected_result']}
-Step Intent: {context['intent']}
+        # Determine position within the test case
+        total_steps = len(test_case.steps)
+        step_index = None
+        for idx, candidate in enumerate(test_case.steps):
+            if candidate.step_id == step.step_id:
+                step_index = idx
+                break
+        if step_index is None:
+            step_index = max(0, step.step_number - 1)
 
-Recent actions:
-{json.dumps(context['recent_history'], indent=2)}
+        def format_step_summary(
+            step_obj: TestStep,
+            result_obj: Optional[StepResult],
+            include_status: bool = True,
+        ) -> str:
+            base = f"Step {step_obj.step_number}: {step_obj.action}\n  - Expected: {step_obj.expected_result}"
+            if include_status:
+                if result_obj:
+                    status_value = result_obj.status.value.upper()
+                    actual = result_obj.actual_result or "Not recorded"
+                    base += f"\n  - Status: {status_value}\n  - Actual: {actual}"
+                else:
+                    base += "\n  - Status: NOT_EXECUTED\n  - Actual: N/A"
+            return base
 
-Intent Guidance:
-- setup: Provide only the minimum interactions needed to reach the state. Do NOT include 'assert' actions unless absolutely required to proceed.
-- validation: Follow standard behavior by pairing key actions with targeted assertions.
-- group_assert: Combine related validations into a single evidence-gathering action.
+        previous_step_summary = "No previous steps in this test case."
+        if step_index > 0:
+            previous_step = test_case.steps[step_index - 1]
+            previous_result = next(
+                (sr for sr in case_result.step_results if sr.step_number == previous_step.step_number),
+                None,
+            )
+            previous_step_summary = format_step_summary(previous_step, previous_result)
 
-Action Planning Guidelines:
-- Focus on the goal expressed in the step and its expected result.
-- Prefer a single high-level action when the goal can be achieved in one flow. Only split into multiple actions when the step clearly describes distinct tasks that must happen in sequence.
-- Do not add helper actions (scrolls, waits, screenshots, retries) unless the step text explicitly requires them. The Action Agent and Computer Use session will handle visibility, scrolling, and other dynamic adjustments automatically.
-- Write descriptions that capture the outcome so the Action Agent understands what success looks like.
+        next_step_summary = "This is the final step in this test case."
+        if step_index < total_steps - 1:
+            next_step = test_case.steps[step_index + 1]
+            next_step_summary = format_step_summary(next_step, None, include_status=False)
+
+        previous_case_summary = "No previous test cases or steps."
+        if step_index == 0 and self._test_report:
+            previous_case_result: Optional[TestCaseResult] = None
+            for tc_result in self._test_report.test_cases:
+                if tc_result.case_id == test_case.case_id:
+                    break
+                previous_case_result = tc_result
+
+            if previous_case_result:
+                last_step_definition: Optional[TestStep] = None
+                if self._current_test_plan:
+                    for candidate_case in self._current_test_plan.test_cases:
+                        if candidate_case.case_id == previous_case_result.case_id:
+                            if candidate_case.steps:
+                                last_step_definition = candidate_case.steps[-1]
+                            break
+
+                if previous_case_result.step_results:
+                    last_result = previous_case_result.step_results[-1]
+                else:
+                    last_result = None
+
+                if last_step_definition:
+                    previous_case_summary = (
+                        f"Previous test case '{previous_case_result.name}' ended on "
+                        f"{format_step_summary(last_step_definition, last_result)}"
+                    )
+                else:
+                    status_value = (
+                        previous_case_result.status.value.upper()
+                        if isinstance(previous_case_result.status, TestStatus)
+                        else str(previous_case_result.status)
+                    )
+                    previous_case_summary = (
+                        f"Previous test case '{previous_case_result.name}' completed "
+                        f"with overall status {status_value}."
+                    )
+
+        case_outline_lines = [
+            f"Step {case_step.step_number}: {case_step.action} "
+            f"(intent: {case_step.intent.value}, expected: {case_step.expected_result})"
+            for case_step in test_case.steps
+        ]
+        case_outline_text = "\n".join(f"- {line}" for line in case_outline_lines)
+
+        screenshot_bytes, screenshot_path, screenshot_source = await self._get_interpretation_screenshot(
+            step,
+            test_case,
+        )
+        screenshot_b64: Optional[str] = None
+        if screenshot_bytes:
+            screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
+
+        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal browser actions needed for the next step.
+
+Run & Screenshot Context:
+- Test case: {test_case.test_id} – {test_case.name}
+- Test case description: {test_case.description}
+- Step position: {step.step_number} of {total_steps} (intent: {step.intent.value})
+- Screenshot path: {screenshot_path or "unavailable"}
+- Screenshot source: {screenshot_source or "unknown"}
+
+Previous step summary:
+{previous_step_summary}
+
+Next step preview:
+{next_step_summary}
+
+Previous test case context:
+{previous_case_summary}
+
+Full test case outline:
+{case_outline_text}
+
+Recent execution history (most recent first):
+{recent_history_text}
+
+Guidelines:
+1. Inspect the screenshot before planning navigation. If the required view is already visible, emit a single `skip_navigation` action that explains the evidence.
+2. Provide only high-level, outcome-focused actions. The Action Agent handles helper behaviors (scrolls, waits, retries, confirmations).
+3. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
+4. Use the previous/next step context to stay aligned with the intended flow.
 
 Action schema for each entry:
-1. type: Must be one of these values:
-   - navigate: Go to a URL
-   - click: Click on an element
-   - type: Type text into a field
-   - assert: Verify something on the page
-   - key_press: Press a specific key (Enter, Tab, etc.)
-   - scroll_to_element: Scroll until an element is visible (only if the step explicitly instructs to scroll)
-   - scroll_by_pixels: Scroll by a specific number of pixels (only if the step explicitly instructs to scroll)
-   - scroll_to_top: Scroll to top of page (only if the step explicitly instructs to scroll)
-   - scroll_to_bottom: Scroll to bottom of page (only if the step explicitly instructs to scroll)
-   - scroll_horizontal: Scroll horizontally (only if the step explicitly instructs to scroll)
-2. target: Describe the element in human terms (e.g., "the search input field", "the blue Login button") – never use raw selectors.
-3. value: Required when needed by the action type:
-   - For 'type': The text to type
-   - For 'navigate': The URL to navigate to
-   - For 'key_press': The key to press (e.g., "Enter", "Tab")
-   - For 'scroll_by_pixels': Number of pixels (positive for down/right, negative for up/left)
-4. description: Briefly explain what this action accomplishes; keep it outcome-driven.
-5. critical: Whether failure should stop remaining actions (true/false)
-6. expected_outcome (optional): Use only if the expected result for this action differs from the step-level expected result.
+- type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
+  • Use `skip_navigation` only when navigation is already satisfied; do not provide a value.
+- target: Human description of the element or high-level goal.
+- value: Required only when the action type needs input (navigate URL, type text, key_press key, scroll_by_pixels amount).
+- description: Outcome-focused explanation so the Action Agent knows what success looks like.
+- critical: Whether failure should halt remaining actions (true/false).
+- expected_outcome (optional): Override the step-level expected result only if needed.
 
 Respond with a JSON object containing an "actions" array."""
+
+        message_content: List[Dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+        if screenshot_b64:
+            message_content.append(
+                {
+                    "type": "input_image",
+                    "image_url": f"data:image/png;base64,{screenshot_b64}",
+                }
+            )
+
+        interpretation_context_payload = {
+            "screenshot_path": screenshot_path,
+            "screenshot_source": screenshot_source,
+            "previous_step_summary": previous_step_summary,
+            "next_step_summary": next_step_summary,
+            "previous_test_case": previous_case_summary,
+            "case_outline": case_outline_lines,
+            "recent_history": recent_history,
+        }
+        if hasattr(self, "_current_step_data"):
+            self._current_step_data["interpretation_context"] = interpretation_context_payload
 
         # Log what we're sending to AI
         logger.info("Interpreting step with AI", extra={
@@ -695,14 +908,16 @@ Respond with a JSON object containing an "actions" array."""
             "action": step.action,
             "expected_result": step.expected_result,
             "intent": step.intent.value,
-            "prompt_length": len(prompt)
+            "prompt_length": len(prompt),
+            "screenshot_path": screenshot_path,
+            "screenshot_source": screenshot_source,
         })
         
         try:
             
             try:
                 response = await self.call_openai(
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[{"role": "user", "content": message_content}],
                     response_format={"type": "json_object"}
                 )
                 
@@ -715,7 +930,10 @@ Respond with a JSON object containing an "actions" array."""
                 if hasattr(self, '_current_step_data'):
                     self._current_step_data["test_runner_interpretation"] = {
                         "prompt": prompt,
-                        "response": response.get("content", {})
+                        "response": response.get("content", {}),
+                        "screenshot_path": screenshot_path,
+                        "screenshot_source": screenshot_source,
+                        "context": interpretation_context_payload,
                     }
                 
             except Exception as api_error:

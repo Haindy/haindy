@@ -39,6 +39,7 @@ class ActionType(str, Enum):
     SCROLL_TO_TOP = "scroll_to_top"
     SCROLL_TO_BOTTOM = "scroll_to_bottom"
     SCROLL_HORIZONTAL = "scroll_horizontal"
+    SKIP_NAVIGATION = "skip_navigation"
 
 
 class ConfidenceLevel(str, Enum):

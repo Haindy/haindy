@@ -65,7 +65,9 @@ The Test Runner Agent orchestrates test execution, maintains test state, generat
 - **Action Planning**: Break down high-level steps into executable actions
 - **Delegated Adaptation**: Produce high-level actions while deferring helper behaviors (scroll, wait, retries) to the Action Agent
 - **Intent-Aware Execution**: Skip heavy verification for `setup` steps and consolidate `group_assert` validations into a single evidence-gathering prompt
-- **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, and decomposed instructions so Computer Use has all necessary signals.
+- **Visual Grounding**: Attach the initial browser screenshot and reuse the most recent after-step image when interpreting subsequent steps so planning decisions reflect the actual UI state.
+- **Timeline Awareness**: Supply the current, previous, and next step summaries—plus the final step of the last completed test case when rolling into a new one—so the interpreter understands what has already happened.
+- **Context Packaging**: Provide the Action Agent with recent history, plan/case metadata, decomposed instructions, and the selected screenshot so Computer Use has all necessary signals (including when it can safely skip navigation).
 
 ##### C. Report Management
 - **Living Documentation**: Maintain real-time test execution reports
@@ -116,6 +118,7 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 - **Visual Analysis & Grid Mapping**: When direct coordinate work is required, analyze screenshots to localise targets on the 60x60 grid and refine positions as needed.
 - **Dynamic Adaptation**: Detect visibility gaps and inject helper behaviors (scrolls, waits, alternate strategies) so high-level instructions succeed without extra guidance from the Test Runner.
 - **Action Execution**: Issue clicks, key presses, typing, scrolls, waits, and assertions through the browser driver, falling back to manual execution if the model omits critical payloads.
+- **Navigation Short-Circuiting**: Accept `skip_navigation` actions when the Test Runner determines the target view is already present, returning success without invoking the Computer Use loop.
 - **Mode Management**: Distinguish between execution steps and observe-only assertions, setting the appropriate policy before invoking the computer-use model.
 - **Result Packaging**: Capture pre/post states, validation results, AI analysis, and raw computer-use turns for downstream reporting.
 
@@ -125,6 +128,7 @@ The Action Agent executes browser interactions on behalf of the Test Runner. It 
 3. **Scrolling**: Vertical/horizontal scroll, scroll to element/by pixels.
 4. **Validation**: Visual assertions, including observe-only confirmation steps.
 5. **Advanced**: Composite flows that stitch together multiple computer-use turns with context reminders.
+6. **Skip Navigation**: Acknowledge when the required page is already visible and return success without further interaction.
 
 #### Key Design Principles
 - **Computer Use First**: Default to the OpenAI model for stateful UI work, supplementing with synthetic payloads only when the model response is incomplete.

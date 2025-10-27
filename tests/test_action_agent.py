@@ -208,6 +208,48 @@ class TestActionAgentBasics:
         with patch.object(action_agent, '_execute_click_workflow', AsyncMock()) as mock_click:
             await action_agent.execute_action(click_step, test_context)
             mock_click.assert_called_once()
+
+        # Test skip navigation routing
+        skip_step = TestStep(
+            step_number=1,
+            description="Confirm current page is already correct",
+            action="Skip navigation",
+            expected_result="Remain on current page",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.SKIP_NAVIGATION,
+                description="No navigation needed; the target page is already visible.",
+                target="Current page state",
+                expected_outcome="Remain on current page"
+            )
+        )
+
+        with patch.object(action_agent, '_execute_skip_navigation_workflow', AsyncMock()) as mock_skip:
+            await action_agent.execute_action(skip_step, test_context)
+            mock_skip.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skip_navigation_workflow_success(self, action_agent, test_context):
+        """Skip navigation workflow should return success without side effects."""
+        skip_step = TestStep(
+            step_number=2,
+            description="Skip redundant navigation",
+            action="Skip navigation",
+            expected_result="Stay on the current page",
+            action_instruction=ActionInstruction(
+                action_type=ActionType.SKIP_NAVIGATION,
+                description="Already on the desired page; no navigation needed.",
+                target="Current page",
+                expected_outcome="Stay on the current page"
+            )
+        )
+
+        with patch("src.agents.action_agent.get_debug_logger", return_value=None):
+            result = await action_agent._execute_skip_navigation_workflow(skip_step, test_context)
+
+        assert result.overall_success is True
+        assert result.execution.success is True
+        assert result.validation.valid is True
+        assert result.execution.error_message is None
     
     @pytest.mark.asyncio
     async def test_determine_action_basic(
