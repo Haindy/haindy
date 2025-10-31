@@ -866,8 +866,8 @@ Recent execution history (most recent first):
 
 Guidelines:
 1. Inspect the screenshot before planning navigation. If the required view is already visible, emit a single `skip_navigation` action that explains the evidence.
-2. Provide high-level, outcome-focused actions. When a single control needs repeated interactions (e.g., clicking the calendar's next arrow three times, then choosing May 28), bundle that sequence into one action instead of emitting one action per tap.
-3. When a step involves multiple distinct controls (e.g., separate date and time fields), emit one action per control so the Action Agent can address each field explicitly.
+2. Provide high-level, outcome-focused actions. For text or form inputs, emit a single `type` action with the final value and let the Action Agent/Computer Use model handle focusing, clearing, or key presses. Do not emit helper `click`/`key_press` steps for the same control.
+3. Only break a step into multiple actions when it truly touches different controls (e.g., separate date and time pickers). Otherwise, keep the entire outcome in one action so the Action Agent can decide the mechanics.
 4. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
 5. Use the previous/next step context to stay aligned with the intended flow.
 

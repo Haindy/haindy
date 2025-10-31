@@ -18,7 +18,8 @@ from src.main import (
     show_version,
     test_api_connection,
 )
-from src.core.types import TestCase, TestCasePriority, TestPlan, TestStep
+from src.core.types import ScopeTriageResult, TestCase, TestCasePriority, TestPlan, TestStep
+from src.error_handling import ScopeTriageBlockedError
 
 
 class TestCLIParser:
@@ -134,11 +135,11 @@ class TestInteractiveMode:
         
         # Mock URL prompt
         with patch("src.main.Prompt.ask", return_value="https://example.com"):
-            requirements, url = get_interactive_requirements()
-        
+            requirements, override_url = get_interactive_requirements()
+
         assert "Test the login flow" in requirements
         assert "Enter username and password" in requirements
-        assert url == "https://example.com"
+        assert override_url == "https://example.com"
         
         captured = capsys.readouterr()
         assert "HAINDY Interactive Mode" in captured.out
@@ -171,12 +172,13 @@ class TestPlanFileReading:
         test_file = tmp_path / "test_requirements.md"
         test_file.write_text("https://example.com\nTest the login flow\nVerify user can log in")
         
-        requirements, url = await read_plan_file(test_file)
-        
-        assert url == "https://example.com"
+        with patch("src.main.Prompt.ask") as prompt_mock:
+            requirements = await read_plan_file(test_file)
+
+        prompt_mock.assert_not_called()
         assert "Test the login flow" in requirements
         assert "Verify user can log in" in requirements
-        assert "https://example.com" not in requirements  # URL should be removed from requirements
+        assert "https://example.com" in requirements
     
     @pytest.mark.asyncio
     async def test_read_plan_file_without_url(self, tmp_path):
@@ -185,10 +187,10 @@ class TestPlanFileReading:
         test_file.write_text("Test the shopping cart functionality")
         
         # Mock user input for URL
-        with patch("src.main.Prompt.ask", return_value="https://shop.example.com"):
-            requirements, url = await read_plan_file(test_file)
+        with patch("src.main.Prompt.ask") as prompt_mock:
+            requirements = await read_plan_file(test_file)
         
-        assert url == "https://shop.example.com"
+        prompt_mock.assert_not_called()
         assert requirements == "Test the shopping cart functionality"
 
 
@@ -229,25 +231,27 @@ class TestMainFlow:
                 # Check that requirements and URL were passed correctly
                 call_kwargs = mock_run.call_args.kwargs
                 assert call_kwargs["requirements"] == "test requirements"
-                assert call_kwargs["url"] == "https://example.com"
-    
+                assert call_kwargs["override_url"] == "https://example.com"
+
     @pytest.mark.asyncio
     async def test_plan_mode(self):
         """Test --plan mode."""
         with patch("src.main.read_plan_file", new_callable=AsyncMock) as mock_read:
-            mock_read.return_value = ("Test requirements", "https://example.com")
+            mock_read.return_value = "Test requirements"
             with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
                 mock_run.return_value = 0
                 result = await async_main(["--plan", "test.md"])
                 assert result == 0
                 mock_read.assert_called_once()
                 mock_run.assert_called_once()
-    
+                call_kwargs = mock_run.call_args.kwargs
+                assert call_kwargs["override_url"] is None
+
     @pytest.mark.asyncio
     async def test_berserk_mode_flag(self):
         """Test --berserk flag is passed through."""
         with patch("src.main.read_plan_file", new_callable=AsyncMock) as mock_read:
-            mock_read.return_value = ("Test requirements", "https://example.com")
+            mock_read.return_value = "Test requirements"
             with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
                 mock_run.return_value = 0
                 result = await async_main(["--plan", "test.md", "--berserk"])
@@ -255,7 +259,7 @@ class TestMainFlow:
                 # Verify berserk flag was passed to run_test
                 call_kwargs = mock_run.call_args.kwargs
                 assert call_kwargs["berserk"] is True
-    
+
     @pytest.mark.asyncio
     async def test_json_test_plan_mode(self):
         """Test --json-test-plan mode."""
@@ -278,7 +282,7 @@ class TestMainFlow:
                 
                 call_kwargs = mock_run.call_args.kwargs
                 assert call_kwargs["requirements"] == "Test requirements"
-                assert call_kwargs["url"] == "https://example.com"
+                assert call_kwargs["override_url"] == "https://example.com"
 
     @pytest.mark.asyncio
     async def test_plan_only_skips_browser_and_reports_storage(
@@ -319,7 +323,13 @@ class TestMainFlow:
         (plan_dir / f"test_plan_{plan_id}.md").write_text("# Plan")
 
         planner_instance = MagicMock()
-        planner_instance.create_test_plan = AsyncMock(return_value=test_plan)
+        triage_result = ScopeTriageResult(
+            in_scope="Admin scope only",
+            explicit_exclusions=["Exclude FMC flows"],
+            ambiguous_points=["Clarify translation requirements"],
+            blocking_questions=[],
+        )
+        pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
 
         class DummyProgress:
             def __init__(self, *args, **kwargs):
@@ -337,12 +347,14 @@ class TestMainFlow:
             def update(self, *args, **kwargs):
                 return None
 
-        with patch("src.main.TestPlannerAgent", return_value=planner_instance) as mock_planner, \
+        with patch("src.main.ScopeTriageAgent", return_value=MagicMock()) as mock_triage, \
+             patch("src.main.TestPlannerAgent", return_value=planner_instance) as mock_planner, \
+             patch("src.main.run_scope_triage_and_plan", pipeline_mock), \
              patch("src.main.BrowserController") as mock_browser, \
              patch("src.main.Progress", DummyProgress):
             result = await run_test(
                 requirements="Look up Wikipedia",
-                url="https://example.com",
+                override_url="https://example.com",
                 plan_only=True,
                 headless=True,
                 output_dir=None,
@@ -355,12 +367,55 @@ class TestMainFlow:
         assert result == 0
         mock_browser.assert_not_called()
         mock_planner.assert_called_once()
+        mock_triage.assert_called_once()
+        pipeline_mock.assert_awaited_once()
 
         captured = capsys.readouterr()
         assert "generated_test_plans" in captured.out
         assert str(plan_id) in captured.out
         assert f"test_plan_{plan_id}.json" in captured.out
         assert f"test_plan_{plan_id}.md" in captured.out
+        assert "Explicit Exclusions" in captured.out
+        assert "Scope Ambiguities" in captured.out
+        assert "Clarify translation requirements" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_plan_only_reports_scope_blockers(self, capsys):
+        """Plan-only mode should stop when scope blockers are detected."""
+        blocking_result = ScopeTriageResult(
+            in_scope="Admin scope only",
+            explicit_exclusions=[],
+            ambiguous_points=["Confirm translation coverage."],
+            blocking_questions=["Need staging URL before planning."],
+        )
+        pipeline_error = ScopeTriageBlockedError(triage_result=blocking_result)
+        pipeline_mock = AsyncMock(side_effect=pipeline_error)
+
+        with patch("src.main.ScopeTriageAgent", return_value=MagicMock()) as mock_triage, \
+             patch("src.main.TestPlannerAgent", return_value=MagicMock()) as mock_planner, \
+             patch("src.main.run_scope_triage_and_plan", pipeline_mock), \
+             patch("src.main.BrowserController") as mock_browser:
+            result = await run_test(
+                requirements="List requirements here",
+                override_url="https://example.com",
+                plan_only=True,
+                headless=True,
+                output_dir=None,
+                report_format="html",
+                timeout=1200,
+                max_steps=50,
+                berserk=False,
+            )
+
+        assert result == 1
+        mock_browser.assert_not_called()
+        mock_triage.assert_called_once()
+        mock_planner.assert_called_once()
+        pipeline_mock.assert_awaited_once()
+
+        captured = capsys.readouterr()
+        assert "Scope triage blocked test planning" in captured.out
+        assert "Need staging URL before planning." in captured.out
 
     @pytest.mark.asyncio
     async def test_no_input_shows_help(self, capsys):

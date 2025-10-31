@@ -4,20 +4,28 @@ Workflow coordinator for managing multi-agent test execution.
 
 import asyncio
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import UUID, uuid4
 
 from src.agents import (
+    ScopeTriageAgent,
     TestPlannerAgent,
     TestRunner,
     ActionAgent,
 )
 from src.browser.driver import BrowserDriver
-from src.core.types import AgentMessage, TestPlan, TestState, TestStatus
+from src.core.types import (
+    AgentMessage,
+    ScopeTriageResult,
+    TestPlan,
+    TestState,
+    TestStatus,
+)
 from src.orchestration.communication import MessageBus, MessageType
 from src.orchestration.state_manager import StateManager, StateTransition
 from src.monitoring.logger import get_logger
 from src.config.settings import get_settings
+from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 
 logger = get_logger(__name__)
 
@@ -70,6 +78,7 @@ class WorkflowCoordinator:
         # Coordinator state
         self._state = CoordinatorState.IDLE
         self._active_tests: Dict[UUID, asyncio.Task] = {}
+        self._plan_triage_results: Dict[UUID, ScopeTriageResult] = {}
         
         # Configuration
         self._max_concurrent_tests = 5
@@ -82,12 +91,20 @@ class WorkflowCoordinator:
         logger.info("Initializing workflow coordinator")
 
         settings = get_settings()
+        triage_cfg = settings.get_agent_model_config("scope_triage")
         planner_cfg = settings.get_agent_model_config("test_planner")
         runner_cfg = settings.get_agent_model_config("test_runner")
         action_cfg = settings.get_agent_model_config("action_agent")
 
         # Create agents
         self._agents = {
+            "scope_triage": ScopeTriageAgent(
+                name="ScopeTriage",
+                model=triage_cfg.model,
+                temperature=triage_cfg.temperature,
+                reasoning_level=triage_cfg.reasoning_level,
+                modalities=triage_cfg.modalities,
+            ),
             "test_planner": TestPlannerAgent(
                 name="TestPlanner",
                 model=planner_cfg.model,
@@ -159,7 +176,9 @@ class WorkflowCoordinator:
         self,
         requirements: str,
         initial_url: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        precomputed_plan: Optional[TestPlan] = None,
+        triage_result: Optional[ScopeTriageResult] = None,
     ) -> TestState:
         """
         Execute a test from high-level requirements.
@@ -168,6 +187,8 @@ class WorkflowCoordinator:
             requirements: Natural language test requirements
             initial_url: Optional starting URL
             context: Optional execution context
+            precomputed_plan: Optional pre-generated test plan to execute
+            triage_result: Optional triage outcome associated with the plan
             
         Returns:
             Final test state
@@ -183,11 +204,28 @@ class WorkflowCoordinator:
         try:
             # Phase 1: Generate test plan
             self._state = CoordinatorState.PLANNING
-            test_plan = await self._generate_test_plan(requirements)
+            if precomputed_plan is not None:
+                test_plan = precomputed_plan
+                triage_outcome = triage_result or ScopeTriageResult()
+                self._plan_triage_results[test_plan.plan_id] = triage_outcome
+
+                await self.message_bus.publish(
+                    AgentMessage(
+                        from_agent="test_planner",
+                        to_agent="broadcast",
+                        message_type=MessageType.PLAN_CREATED,
+                        content={"test_plan": test_plan.model_dump()},
+                    )
+                )
+            else:
+                test_plan, triage_outcome = await self._generate_test_plan(
+                    requirements,
+                    context,
+                )
             
             # Phase 2: Initialize test state
             test_state = await self.state_manager.create_test_state(
-                test_plan, 
+                test_plan,
                 context
             )
             
@@ -206,11 +244,18 @@ class WorkflowCoordinator:
             self._state = CoordinatorState.ERROR
             raise
     
-    async def _generate_test_plan(self, requirements: str) -> TestPlan:
+    async def _generate_test_plan(
+        self,
+        requirements: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[TestPlan, ScopeTriageResult]:
         """Generate test plan using Test Planner agent."""
         logger.info("Generating test plan from requirements")
         
+        triage_agent = self._agents.get("scope_triage")
         planner = self._agents.get("test_planner")
+        if not triage_agent:
+            raise RuntimeError("Scope Triage agent not available")
         if not planner:
             raise RuntimeError("Test Planner agent not available")
         
@@ -224,8 +269,16 @@ class WorkflowCoordinator:
         
         await self.message_bus.publish(message)
         
-        # Create test plan
-        test_plan = await planner.create_test_plan(requirements)
+        # Create test plan via two-pass flow
+        test_plan, triage_result = await run_scope_triage_and_plan(
+            requirements=requirements,
+            planner=planner,
+            triage_agent=triage_agent,
+            context=context,
+        )
+
+        # Store triage result for downstream consumption
+        self._plan_triage_results[test_plan.plan_id] = triage_result
         
         # Notify plan created
         await self.message_bus.publish(
@@ -237,7 +290,7 @@ class WorkflowCoordinator:
             )
         )
         
-        return test_plan
+        return test_plan, triage_result
     
     async def _execute_test_plan(
         self,
@@ -398,6 +451,10 @@ class WorkflowCoordinator:
     def get_active_tests(self) -> List[UUID]:
         """Get list of active test IDs."""
         return list(self._active_tests.keys())
+
+    def get_scope_triage_result(self, plan_id: UUID) -> Optional[ScopeTriageResult]:
+        """Retrieve the stored scope triage result for a generated plan."""
+        return self._plan_triage_results.get(plan_id)
     
     async def get_test_progress(self, test_id: UUID) -> Dict[str, Any]:
         """Get progress for a specific test."""
@@ -427,7 +484,7 @@ class WorkflowCoordinator:
         
         try:
             # Generate test plan using the planner agent
-            test_plan = await self._generate_test_plan(requirements)
+            test_plan, _ = await self._generate_test_plan(requirements)
             self._state = CoordinatorState.IDLE
             return test_plan
         except Exception as e:
@@ -462,6 +519,7 @@ class WorkflowCoordinator:
         # Shutdown components
         await self.message_bus.shutdown()
         await self.state_manager.shutdown()
+        self._plan_triage_results.clear()
         
         self._state = CoordinatorState.IDLE
         logger.info("Workflow coordinator shutdown complete")

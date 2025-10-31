@@ -15,7 +15,8 @@ from .exceptions import (
     RetryableError,
     NonRetryableError,
     TimeoutError,
-    CoordinationError
+    CoordinationError,
+    ScopeTriageBlockedError,
 )
 
 from .recovery import (
@@ -55,6 +56,7 @@ __all__ = [
     "NonRetryableError",
     "TimeoutError",
     "CoordinationError",
+    "ScopeTriageBlockedError",
     
     # Recovery
     "RetryStrategy",

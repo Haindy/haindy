@@ -13,6 +13,7 @@ from src.core.interfaces import ConfigProvider
 
 
 AGENT_ENV_PREFIX: Dict[str, str] = {
+    "scope_triage": "HAINDY_SCOPE_TRIAGE",
     "test_planner": "HAINDY_TEST_PLANNER",
     "test_runner": "HAINDY_TEST_RUNNER",
     "action_agent": "HAINDY_ACTION_AGENT",
@@ -47,6 +48,11 @@ class AgentModelConfig(BaseModel):
 
 
 DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
+    "scope_triage": AgentModelConfig(
+        model="gpt-5",
+        temperature=0.15,
+        reasoning_level="high",
+    ),
     "test_planner": AgentModelConfig(
         model="gpt-5",
         temperature=0.35,

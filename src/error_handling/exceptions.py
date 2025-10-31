@@ -5,8 +5,11 @@ Provides a structured exception hierarchy that enables proper error categorizati
 retry logic, and recovery strategies.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from datetime import datetime, timezone
+
+if TYPE_CHECKING:
+    from src.core.types import ScopeTriageResult
 
 
 class HAINDYError(Exception):
@@ -206,4 +209,35 @@ class CoordinationError(HAINDYError):
         self.details.update({
             "agents_involved": agents_involved,
             "coordination_phase": coordination_phase
+        })
+
+
+class ScopeTriageBlockedError(NonRetryableError):
+    """Error raised when scope triage prevents planning from continuing."""
+
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        triage_result: Optional["ScopeTriageResult"] = None,
+        **kwargs
+    ):
+        blocking_questions: List[str] = []
+        ambiguous_points: List[str] = []
+
+        if triage_result is not None:
+            blocking_questions = list(getattr(triage_result, "blocking_questions", []) or [])
+            ambiguous_points = list(getattr(triage_result, "ambiguous_points", []) or [])
+
+        resolved_message = message or (
+            "Scope triage identified blocking questions that must be resolved before planning."
+        )
+
+        super().__init__(resolved_message, **kwargs)
+
+        self.triage_result = triage_result
+        self.blocking_questions = blocking_questions
+        self.ambiguous_points = ambiguous_points
+        self.details.update({
+            "blocking_questions": blocking_questions,
+            "ambiguous_points": ambiguous_points
         })
