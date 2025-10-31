@@ -263,14 +263,28 @@ class TestEndToEndIntegration:
         with patch("src.main.get_interactive_requirements") as mock_get_req:
             mock_get_req.return_value = ("Test the login flow", "https://example.com")
             
+            from src.core.types import TestPlan
+
+            test_plan = TestPlan(
+                name="Sample Plan",
+                description="Plan description",
+                requirements_source="Test requirements",
+                test_cases=[],
+            )
+            triage_result = ScopeTriageResult()
+
+            pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
+            mock_coordinator.get_scope_triage_result.return_value = triage_result
+            
             with patch("src.main.BrowserController", return_value=mock_browser_controller):
                 with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    # Run main with requirements
-                    exit_code = await async_main([
-                        "--requirements",
-                        "--output", str(tmp_path),
-                        "--format", "json",
-                    ])
+                    with patch("src.main.run_scope_triage_and_plan", pipeline_mock):
+                        # Run main with requirements
+                        exit_code = await async_main([
+                            "--requirements",
+                            "--output", str(tmp_path),
+                            "--format", "json",
+                        ])
         
         # Verify success
         assert exit_code == 0
@@ -284,6 +298,8 @@ class TestEndToEndIntegration:
         
         # Verify test was executed
         mock_coordinator.execute_test_from_requirements.assert_called_once()
+
+        pipeline_mock.assert_awaited_once()
         
         # Verify report was generated
         reports = list(tmp_path.glob("test_report_*.json"))
@@ -310,22 +326,40 @@ class TestEndToEndIntegration:
         # Mock the test execution
         mock_coordinator.execute_test_from_requirements.return_value = sample_test_state
         
+        from src.core.types import TestPlan
+
+        test_plan = TestPlan(
+            name="Scenario Plan",
+            description="Plan description",
+            requirements_source="Scenario requirements",
+            test_cases=[],
+        )
+        triage_result = ScopeTriageResult()
+
+        pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
+        mock_coordinator.get_scope_triage_result.return_value = triage_result
+
         with patch("src.main.BrowserController", return_value=mock_browser_controller):
             with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                # Run main with scenario file
-                exit_code = await async_main([
-                    "--json-test-plan", str(scenario_file),
-                    "--output", str(tmp_path),
-                ])
+                with patch("src.main.run_scope_triage_and_plan", pipeline_mock):
+                    # Run main with scenario file
+                    exit_code = await async_main([
+                        "--json-test-plan", str(scenario_file),
+                        "--output", str(tmp_path),
+                    ])
         
         # Verify success
         assert exit_code == 0
         
-        # Verify test was executed with scenario data
-        mock_coordinator.execute_test_from_requirements.assert_called_once_with(
-            requirements="Test the application",
-            initial_url="https://example.com",
-        )
+        # Verify test was executed with scenario data and precomputed plan
+        mock_coordinator.execute_test_from_requirements.assert_called_once()
+        call_kwargs = mock_coordinator.execute_test_from_requirements.call_args.kwargs
+        assert call_kwargs["requirements"] == "Test the application"
+        assert call_kwargs["initial_url"] == "https://example.com"
+        assert call_kwargs["precomputed_plan"] == test_plan
+        assert call_kwargs["triage_result"] == triage_result
+
+        pipeline_mock.assert_awaited_once()
     
     @pytest.mark.asyncio
     async def test_main_plan_only_mode(

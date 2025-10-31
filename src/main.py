@@ -6,10 +6,11 @@ Main entry point for the application.
 import argparse
 import asyncio
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -300,7 +301,7 @@ def load_scenario(scenario_path: Path) -> dict:
             scenario = json.load(f)
         
         # Validate required fields
-        required_fields = ["name", "requirements", "url"]
+        required_fields = ["name", "requirements"]
         missing_fields = [f for f in required_fields if f not in scenario]
         if missing_fields:
             raise ValueError(f"Scenario missing required fields: {missing_fields}")
@@ -317,9 +318,33 @@ def load_scenario(scenario_path: Path) -> dict:
         sys.exit(1)
 
 
+def _create_planning_agents(settings) -> Tuple[ScopeTriageAgent, TestPlannerAgent]:
+    """Instantiate scope triage and test planner agents with current settings."""
+    triage_cfg = settings.get_agent_model_config("scope_triage")
+    planner_cfg = settings.get_agent_model_config("test_planner")
+
+    triage_agent = ScopeTriageAgent(
+        name="ScopeTriage",
+        model=triage_cfg.model,
+        temperature=triage_cfg.temperature,
+        reasoning_level=triage_cfg.reasoning_level,
+        modalities=triage_cfg.modalities,
+    )
+
+    planner = TestPlannerAgent(
+        name="TestPlanner",
+        model=planner_cfg.model,
+        temperature=planner_cfg.temperature,
+        reasoning_level=planner_cfg.reasoning_level,
+        modalities=planner_cfg.modalities,
+    )
+
+    return triage_agent, planner
+
+
 async def run_test(
     requirements: str,
-    url: str,
+    override_url: Optional[str] = None,
     plan_only: bool = False,
     headless: bool = True,
     output_dir: Optional[Path] = None,
@@ -330,31 +355,29 @@ async def run_test(
 ) -> int:
     """
     Run a test with the given requirements.
-    
+
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    # Initialize components
     browser_controller = None
     coordinator = None
+    test_plan: Optional[TestPlan] = None
+    triage_result: Optional[ScopeTriageResult] = None
     settings = get_settings()
     use_progress = settings.log_format == "json"
-    
+
     try:
-        # Generate test run ID
         test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Initialize debug logger
+
         debug_logger = initialize_debug_logger(test_run_id)
         console.print(f"[dim]Debug logging initialized for run: {test_run_id}[/dim]")
-        
-        # Show startup banner
+
         console.print(Panel.fit(
             "[bold cyan]HAINDY - Autonomous AI Testing Agent[/bold cyan]\n"
             "Orchestrating multi-agent test execution",
             border_style="cyan",
         ))
-        
+
         if berserk:
             console.print("\n[bold red]BERSERK MODE ACTIVATED[/bold red]")
             console.print("[yellow]Running in fully autonomous mode - no confirmations![/yellow]\n")
@@ -371,32 +394,39 @@ async def run_test(
 
             return 0
 
-        # Initialize core components
+        console.print("\n[yellow]Generating test plan...[/yellow]")
+        triage_agent, planner = _create_planning_agents(settings)
+        test_plan, triage_result = await run_scope_triage_and_plan(
+            requirements=requirements,
+            planner=planner,
+            triage_agent=triage_agent,
+        )
+
+        initial_url = _extract_initial_url(requirements, override_url)
+
         if use_progress:
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console,
             ) as progress:
-                init_task = progress.add_task("[cyan]Initializing components...", total=None)
+                init_task = progress.add_task("[cyan]Initializing browser and agents...", total=None)
                 browser_controller, coordinator = await _create_coordinator_stack(
                     headless=headless,
                     max_steps=max_steps,
                 )
                 progress.update(init_task, completed=True)
         else:
-            console.print("[cyan]Initializing components...[/cyan]")
+            console.print("[cyan]Initializing browser and agents...[/cyan]")
             browser_controller, coordinator = await _create_coordinator_stack(
                 headless=headless,
                 max_steps=max_steps,
             )
             console.print("[green]Components initialized.[/green]")
-        
-        # Navigate to initial URL
-        console.print(f"\n[cyan]Navigating to:[/cyan] {url}")
-        await browser_controller.navigate(url)
-        
-        # Execute test
+
+        console.print(f"\n[cyan]Navigating to:[/cyan] {initial_url}")
+        await browser_controller.navigate(initial_url)
+
         if use_progress:
             with Progress(
                 SpinnerColumn(),
@@ -404,35 +434,37 @@ async def run_test(
                 console=console,
             ) as progress:
                 exec_task = progress.add_task("[cyan]Running test...", total=None)
-                
+
                 test_state = await _run_with_timeout(
                     coordinator=coordinator,
                     requirements=requirements,
-                    url=url,
+                    initial_url=initial_url,
+                    precomputed_plan=test_plan,
+                    triage_result=triage_result,
                     timeout=timeout,
                 )
-                
+
                 progress.update(exec_task, completed=True)
         else:
             console.print("[cyan]Running test...[/cyan]")
             test_state = await _run_with_timeout(
                 coordinator=coordinator,
                 requirements=requirements,
-                url=url,
+                initial_url=initial_url,
+                precomputed_plan=test_plan,
+                triage_result=triage_result,
                 timeout=timeout,
             )
             console.print("[green]Test run completed.[/green]")
-        
-        # Display results summary
+
         console.print("\n[bold]Test Execution Summary:[/bold]")
-        
+
         raw_status = getattr(test_state, "status", getattr(test_state, "test_status", "unknown"))
         status_value = raw_status.value if hasattr(raw_status, "value") else raw_status
         success_statuses = {"passed", "completed"}
         status_color = "green" if status_value in success_statuses else "red"
         console.print(f"Status: [{status_color}]{status_value}[/{status_color}]")
-        
-        # Display test execution metrics from test report
+
         report = getattr(test_state, "test_report", None)
         if report:
             test_cases = getattr(report, "test_cases", [])
@@ -466,26 +498,25 @@ async def run_test(
         else:
             console.print("[yellow]No test report available[/yellow]")
 
-        triage_result = None
+        final_triage = triage_result
         if coordinator:
-            triage_result = coordinator.get_scope_triage_result(test_state.test_plan.plan_id)
-        _print_scope_triage_followups(triage_result)
-        
-        # Generate report
+            stored_triage = coordinator.get_scope_triage_result(test_state.test_plan.plan_id)
+            if stored_triage:
+                final_triage = stored_triage
+        _print_scope_triage_followups(final_triage)
+
         if output_dir is None:
-            # Use the debug logger's reports directory for organized output
             output_dir = debug_logger.reports_dir
         output_dir.mkdir(exist_ok=True)
-        
+
         console.print(f"\n[cyan]Generating {report_format} report...[/cyan]")
-        
-        # Get action storage from test runner if available
+
         action_storage = None
         if coordinator and hasattr(coordinator, '_agents') and 'test_runner' in coordinator._agents:
             test_runner = coordinator._agents['test_runner']
             if hasattr(test_runner, 'get_action_storage'):
                 action_storage = test_runner.get_action_storage()
-        
+
         reporter = TestReporter()
         report_path, actions_path = await reporter.generate_report(
             test_state=test_state,
@@ -493,24 +524,21 @@ async def run_test(
             format=report_format,
             action_storage=action_storage
         )
-        
+
         console.print(f"[green]Report saved to:[/green] {report_path}")
-        
-        # Print actions file path if it was generated
+
         if actions_path:
             console.print(f"[green]Actions saved to:[/green] {actions_path}")
-        
-        # Show debug summary
+
         debug_summary = debug_logger.get_debug_summary()
         console.print(f"\n[bold]Debug Information:[/bold]")
         console.print(f"Test Run ID: [cyan]{debug_summary['test_run_id']}[/cyan]")
         console.print(f"Debug Directory: [cyan]{debug_summary['debug_directory']}[/cyan]")
         console.print(f"AI Interactions Logged: [green]{debug_summary['ai_interactions']}[/green]")
         console.print(f"Screenshots Saved: [green]{debug_summary['screenshots_saved']}[/green]")
-        
-        # Return appropriate exit code
+
         return 0 if status_value in success_statuses else 1
-        
+
     except ScopeTriageBlockedError as scope_error:
         logger.warning("Scope triage blocked planning", exc_info=True)
         _print_scope_blockers(scope_error)
@@ -526,7 +554,6 @@ async def run_test(
         logger.exception("Test execution failed")
         return 1
     finally:
-        # Cleanup
         if coordinator:
             await coordinator.cleanup()
         if browser_controller:
@@ -558,14 +585,20 @@ async def _create_coordinator_stack(
 async def _run_with_timeout(
     coordinator: WorkflowCoordinator,
     requirements: str,
-    url: str,
+    initial_url: str,
+    precomputed_plan: TestPlan,
+    triage_result: ScopeTriageResult,
     timeout: int,
+    context: Optional[Dict[str, Any]] = None,
 ) -> TestState:
     """Execute the coordinator run with a timeout guard."""
     return await asyncio.wait_for(
         coordinator.execute_test_from_requirements(
             requirements=requirements,
-            initial_url=url,
+            initial_url=initial_url,
+            context=context,
+            precomputed_plan=precomputed_plan,
+            triage_result=triage_result,
         ),
         timeout=timeout,
     )
@@ -574,24 +607,7 @@ async def _run_with_timeout(
 async def _generate_plan_only_plan(requirements: str) -> Tuple[TestPlan, ScopeTriageResult]:
     """Create a test plan using the two-pass scope triage pipeline."""
     settings = get_settings()
-    triage_cfg = settings.get_agent_model_config("scope_triage")
-    planner_cfg = settings.get_agent_model_config("test_planner")
-
-    triage_agent = ScopeTriageAgent(
-        name="ScopeTriage",
-        model=triage_cfg.model,
-        temperature=triage_cfg.temperature,
-        reasoning_level=triage_cfg.reasoning_level,
-        modalities=triage_cfg.modalities,
-    )
-
-    planner = TestPlannerAgent(
-        name="TestPlanner",
-        model=planner_cfg.model,
-        temperature=planner_cfg.temperature,
-        reasoning_level=planner_cfg.reasoning_level,
-        modalities=planner_cfg.modalities,
-    )
+    triage_agent, planner = _create_planning_agents(settings)
 
     use_progress = settings.log_format == "json"
 
@@ -629,6 +645,28 @@ async def _generate_plan_only_plan(requirements: str) -> Tuple[TestPlan, ScopeTr
         _print_plan_stats(test_plan, None, False)
 
     return test_plan, triage_result
+
+
+def _extract_initial_url(
+    requirements: str,
+    override_url: Optional[str] = None,
+) -> str:
+    """Resolve the starting URL from requirements text or an explicit override."""
+    if override_url:
+        return override_url.strip()
+
+    url_pattern = r"https?://[^\s<>'\"()]+"
+    matches = re.findall(url_pattern, requirements)
+    if matches:
+        candidate = matches[0].rstrip(".,;:!?)\"']")
+        return candidate
+
+    triage_result = ScopeTriageResult(
+        blocking_questions=[
+            "No starting URL was provided. Include the navigation target in the requirements or supply --url."
+        ]
+    )
+    raise ScopeTriageBlockedError(triage_result=triage_result)
 
 
 def _print_plan_stats(
@@ -782,7 +820,7 @@ def _print_plan_storage_locations(test_plan) -> None:
         console.print(line, soft_wrap=True)
 
 
-def get_interactive_requirements() -> tuple[str, str]:
+def get_interactive_requirements() -> tuple[str, Optional[str]]:
     """Get test requirements interactively from user."""
     console.print("\n[bold cyan]HAINDY Interactive Mode[/bold cyan]")
     console.print("Enter your test requirements. You can paste multi-line text.")
@@ -810,10 +848,13 @@ def get_interactive_requirements() -> tuple[str, str]:
         console.print("[red]Error: No requirements provided[/red]")
         sys.exit(1)
     
-    # Get URL
-    url = Prompt.ask("\n[cyan]Enter the starting URL for testing[/cyan]")
+    override_url = Prompt.ask(
+        "\n[cyan]Enter the starting URL for testing (leave blank to auto-detect)[/cyan]",
+        default="",
+        show_default=False,
+    ).strip()
     
-    return requirements, url
+    return requirements, override_url or None
 
 
 async def test_api_connection() -> int:
@@ -857,8 +898,8 @@ def show_version() -> int:
     return 0
 
 
-async def read_plan_file(file_path: Path) -> tuple[str, str]:
-    """Read requirements from a plan file and extract URL."""
+async def read_plan_file(file_path: Path) -> str:
+    """Read requirements text from a plan file without altering embedded URLs."""
     if not file_path.exists():
         console.print(f"[red]Error: File not found: {file_path}[/red]")
         sys.exit(1)
@@ -866,30 +907,13 @@ async def read_plan_file(file_path: Path) -> tuple[str, str]:
     console.print(f"\n[cyan]Reading requirements from:[/cyan] {file_path}")
     
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             file_contents = f.read().strip()
     except Exception as e:
         console.print(f"[red]Error reading file: {e}[/red]")
         sys.exit(1)
     
-    # Extract URL from the document
-    import re
-    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?\'")\]}]'
-    urls = re.findall(url_pattern, file_contents)
-    
-    requirements_text = file_contents
-
-    if urls:
-        # Use the first URL found
-        url = urls[0]
-        console.print(f"[dim]Found URL in document: {url}[/dim]")
-        requirements_text = requirements_text.replace(url, "", 1).strip()
-    else:
-        # Prompt for URL
-        url = Prompt.ask("\n[cyan]Enter the application URL[/cyan]")
-        requirements_text = requirements_text.strip()
-    
-    return requirements_text, url
+    return file_contents
 
 
 async def async_main(args: Optional[list[str]] = None) -> int:
@@ -932,17 +956,19 @@ async def async_main(args: Optional[list[str]] = None) -> int:
     sanitizer = DataSanitizer()
     
     # Handle different input modes
+    override_url = parsed_args.url
     if parsed_args.requirements:
         # Interactive mode
-        requirements, url = get_interactive_requirements()
+        requirements, interactive_url = get_interactive_requirements()
+        override_url = override_url or interactive_url
     elif parsed_args.plan:
         # Read requirements from plan file
-        requirements, url = await read_plan_file(parsed_args.plan)
+        requirements = await read_plan_file(parsed_args.plan)
     elif parsed_args.json_test_plan:
         # Load from JSON scenario file
         scenario = load_scenario(parsed_args.json_test_plan)
         requirements = scenario["requirements"]
-        url = scenario["url"]
+        override_url = override_url or scenario.get("url")
     else:
         # No input provided
         parser.print_help()
@@ -951,7 +977,7 @@ async def async_main(args: Optional[list[str]] = None) -> int:
     # Run test
     return await run_test(
         requirements=requirements,
-        url=url,
+        override_url=override_url,
         plan_only=parsed_args.plan_only,
         headless=settings.browser_headless,
         output_dir=parsed_args.output,

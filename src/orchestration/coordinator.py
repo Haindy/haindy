@@ -176,7 +176,9 @@ class WorkflowCoordinator:
         self,
         requirements: str,
         initial_url: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        precomputed_plan: Optional[TestPlan] = None,
+        triage_result: Optional[ScopeTriageResult] = None,
     ) -> TestState:
         """
         Execute a test from high-level requirements.
@@ -185,6 +187,8 @@ class WorkflowCoordinator:
             requirements: Natural language test requirements
             initial_url: Optional starting URL
             context: Optional execution context
+            precomputed_plan: Optional pre-generated test plan to execute
+            triage_result: Optional triage outcome associated with the plan
             
         Returns:
             Final test state
@@ -200,10 +204,24 @@ class WorkflowCoordinator:
         try:
             # Phase 1: Generate test plan
             self._state = CoordinatorState.PLANNING
-            test_plan, _ = await self._generate_test_plan(
-                requirements,
-                context,
-            )
+            if precomputed_plan is not None:
+                test_plan = precomputed_plan
+                triage_outcome = triage_result or ScopeTriageResult()
+                self._plan_triage_results[test_plan.plan_id] = triage_outcome
+
+                await self.message_bus.publish(
+                    AgentMessage(
+                        from_agent="test_planner",
+                        to_agent="broadcast",
+                        message_type=MessageType.PLAN_CREATED,
+                        content={"test_plan": test_plan.model_dump()},
+                    )
+                )
+            else:
+                test_plan, triage_outcome = await self._generate_test_plan(
+                    requirements,
+                    context,
+                )
             
             # Phase 2: Initialize test state
             test_state = await self.state_manager.create_test_state(

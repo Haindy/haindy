@@ -117,7 +117,11 @@ class ScopeTriageAgent(BaseAgent):
                 return [str(item) for item in value if str(item).strip()]
             return [str(value)]
 
-        in_scope = payload.get("in_scope") or ""
+        in_scope_value = payload.get("in_scope")
+        if isinstance(in_scope_value, list):
+            in_scope = "\n".join(str(item).strip() for item in in_scope_value if str(item).strip())
+        else:
+            in_scope = str(in_scope_value) if in_scope_value is not None else ""
         explicit_exclusions = _ensure_list(payload.get("explicit_exclusions"))
         ambiguous_points = _ensure_list(payload.get("ambiguous_points"))
         blocking_questions = _ensure_list(payload.get("blocking_questions"))
