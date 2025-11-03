@@ -102,10 +102,11 @@ class TestWorkflowCoordinatorBasics:
         await coordinator.initialize()
         
         # Verify agents are created
-        assert len(coordinator._agents) == 3
+        assert len(coordinator._agents) == 4
         assert "test_planner" in coordinator._agents
         assert "test_runner" in coordinator._agents
         assert "action_agent" in coordinator._agents
+        assert "scope_triage" in coordinator._agents
         
         # Verify coordinator state
         assert coordinator._state == CoordinatorState.IDLE
@@ -122,6 +123,7 @@ class TestWorkflowCoordinatorBasics:
         assert "test_planner" in stats["registered_agents"]
         assert "test_runner" in stats["registered_agents"]
         assert "action_agent" in stats["registered_agents"]
+        assert "scope_triage" in stats["registered_agents"]
     
     def test_get_active_tests(self, coordinator):
         """Test getting list of active tests."""

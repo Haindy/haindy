@@ -85,6 +85,8 @@ def action_agent(mock_browser_driver, mock_grid_overlay):
         name="TestActionAgent",
         browser_driver=mock_browser_driver
     )
+    agent.use_computer_tool = False
+    agent.settings.actions_use_computer_tool = False
     agent.grid_overlay = mock_grid_overlay
     
     # Mock the grid refinement to avoid low confidence issues

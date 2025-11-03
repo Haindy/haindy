@@ -28,6 +28,7 @@ def session_settings():
         actions_computer_tool_action_timeout_ms=5000,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
+        actions_computer_tool_loop_detection_window=3,
         actions_computer_tool_fail_fast_on_safety=True,
         actions_computer_tool_allowed_domains=[],
         actions_computer_tool_blocked_domains=[],
