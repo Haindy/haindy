@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.interfaces import ConfigProvider
@@ -220,7 +220,7 @@ class Settings(BaseSettings):
     desktop_enable_resolution_switch: bool = Field(
         default=False,
         description="Allow temporary resolution downshift for desktop runs",
-        env="HAINDY_DESKTOP_RES_SWITCH",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_RES_SWITCH"),
     )
     desktop_screenshot_dir: Path = Field(
         default=Path("debug_screenshots/desktop"),
