@@ -266,6 +266,15 @@ class Settings(BaseSettings):
     cache_dir: Path = Field(
         default=Path(".cache"), description="Cache directory"
     )
+    run_cache_enabled: bool = Field(
+        default=True,
+        description="Enable persistent run cache for plans and step interpretations",
+        env="HAINDY_RUN_CACHE_ENABLED",
+    )
+    run_cache_dir: Path = Field(
+        default=Path("data/run_cache"),
+        description="Persistent run cache directory",
+    )
 
     # Security Configuration
     rate_limit_enabled: bool = Field(
@@ -344,6 +353,7 @@ class Settings(BaseSettings):
             self.cache_dir,
             self.desktop_screenshot_dir,
             self.desktop_cache_path.parent,
+            self.run_cache_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
 

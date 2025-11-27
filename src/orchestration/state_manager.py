@@ -104,6 +104,12 @@ class StateManager:
             self._test_plans[test_plan.plan_id] = test_plan
             self._step_results[test_plan.plan_id] = []
             self._active_agents[test_plan.plan_id] = set()
+
+            if initial_context:
+                try:
+                    test_state.context.update(initial_context)
+                except Exception:
+                    logger.debug("Failed to attach initial context to test state", exc_info=True)
             
             # Record state change
             await self._record_state_change(

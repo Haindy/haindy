@@ -37,6 +37,7 @@ from src.core.types import (
     TestStep,
     TestSummary,
 )
+from src.core.run_cache import PersistentRunCache
 from src.monitoring.logger import get_logger
 from src.browser.instrumented_driver import InstrumentedBrowserDriver
 
@@ -80,6 +81,8 @@ class TestRunner(BaseAgent):
         name: str = "TestRunner",
         browser_driver: Optional[BrowserDriver] = None,
         action_agent: Optional[ActionAgent] = None,
+        run_cache: Optional[PersistentRunCache] = None,
+        run_signature: Optional[str] = None,
         **kwargs
     ):
         """
@@ -95,6 +98,8 @@ class TestRunner(BaseAgent):
         self.system_prompt = TEST_RUNNER_SYSTEM_PROMPT
         self.browser_driver = browser_driver
         self.action_agent = action_agent
+        self._run_cache = run_cache
+        self._run_signature = run_signature
         
         # Current execution state
         self._current_test_plan: Optional[TestPlan] = None
@@ -107,6 +112,8 @@ class TestRunner(BaseAgent):
         self._initial_url: Optional[str] = None
         self._execution_history: List[Dict[str, Any]] = []
         self._settings = get_settings()
+        self._disable_cache_for_case: Dict[str, bool] = {}
+        self._plan_cache_source: str = "live"
         self._initial_screenshot_bytes: Optional[bytes] = None
         self._initial_screenshot_path: Optional[str] = None
         self._latest_screenshot_bytes: Optional[bytes] = None
@@ -122,6 +129,48 @@ class TestRunner(BaseAgent):
         }
         self._current_test_case_actions: Optional[Dict[str, Any]] = None
         self._current_step_actions: Optional[List[Dict[str, Any]]] = None
+
+    def set_run_cache(
+        self, run_cache: Optional[PersistentRunCache], run_signature: Optional[str]
+    ) -> None:
+        """Update the run cache configuration at runtime."""
+        self._run_cache = run_cache
+        self._run_signature = run_signature
+
+    def _should_use_cache_for_case(self, test_case: TestCase) -> bool:
+        """Determine if caching should be used for this case."""
+        if not self._settings.run_cache_enabled:
+            return False
+        if not self._run_cache or not self._run_signature:
+            return False
+        return not self._disable_cache_for_case.get(str(test_case.case_id), False)
+
+    def _invalidate_step_cache(self, test_case: TestCase, step: TestStep, reason: str) -> None:
+        """Invalidate a cached step interpretation."""
+        if not (self._run_cache and self._run_signature and self._settings.run_cache_enabled):
+            return
+        try:
+            self._run_cache.invalidate_step(
+                signature=self._run_signature,
+                case_id=str(test_case.case_id),
+                step_number=step.step_number,
+                reason=reason,
+            )
+        except Exception:
+            logger.debug("Failed to invalidate step cache", exc_info=True)
+
+    def _invalidate_case_cache(self, test_case: TestCase, reason: str) -> None:
+        """Invalidate cached data for the given case."""
+        if not (self._run_cache and self._run_signature and self._settings.run_cache_enabled):
+            return
+        try:
+            self._run_cache.mark_case_invalid(
+                signature=self._run_signature,
+                case_id=str(test_case.case_id),
+                reason=reason,
+            )
+        except Exception:
+            logger.debug("Failed to invalidate case cache", exc_info=True)
 
     def _build_computer_use_manual(self) -> str:
         """Construct the Computer Use manual with environment-aware context."""
@@ -271,6 +320,11 @@ class TestRunner(BaseAgent):
         self._latest_screenshot_bytes = None
         self._latest_screenshot_path = None
         self._latest_screenshot_origin = None
+        self._disable_cache_for_case = {}
+        try:
+            self._plan_cache_source = getattr(test_state, "context", {}).get("plan_source", "live")
+        except Exception:
+            self._plan_cache_source = "live"
         
         # Initialize action storage for this test run
         self._action_storage = {
@@ -384,6 +438,18 @@ class TestRunner(BaseAgent):
             
             # Print summary to console
             self._print_summary()
+
+        if (
+            self._settings.run_cache_enabled
+            and self._run_cache
+            and self._run_signature
+            and self._plan_cache_source == "cache"
+            and getattr(self._test_report, "status", None) == TestStatus.FAILED
+        ):
+            try:
+                self._run_cache.invalidate_plan(self._run_signature, "test_run_failed")
+            except Exception:
+                logger.debug("Failed to invalidate plan cache", exc_info=True)
         
         return self._test_state
     
@@ -487,6 +553,10 @@ class TestRunner(BaseAgent):
         
         finally:
             case_result.completed_at = datetime.now(timezone.utc)
+
+        if case_result.status == TestStatus.FAILED:
+            self._disable_cache_for_case[str(test_case.case_id)] = True
+            self._invalidate_case_cache(test_case, "case_failed")
         
         return case_result
     
@@ -504,231 +574,268 @@ class TestRunner(BaseAgent):
         })
         
         self._current_test_step = step
-        
-        # Initialize action tracking for this step
-        self._current_step_actions = []
-        self._current_step_data = {
-            "step_number": step.step_number,
-            "step_id": str(step.step_id),
-            "step_description": step.action,
-            "actions": self._current_step_actions,
-            "step_intent": step.intent.value,
-        }
-        self._current_test_case_actions["steps"].append(self._current_step_data)
-        
-        # Initialize step result
-        step_result = StepResult(
-            step_id=step.step_id,
-            step_number=step.step_number,
-            status=TestStatus.IN_PROGRESS,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),  # Will update later
-            action=step.action,
-            expected_result=step.expected_result,
-            actual_result=""
-        )
-        screenshot_before: Optional[bytes] = None
-        screenshot_after: Optional[bytes] = None
-       
-        try:
-            # Check dependencies
-            if not self._check_dependencies(step, case_result):
-                step_result.status = TestStatus.SKIPPED
-                step_result.actual_result = "Skipped due to unmet dependencies"
-                return step_result
+        attempt = 0
+        use_cache = self._should_use_cache_for_case(test_case)
+        last_step_result: Optional[StepResult] = None
+
+        while True:
+            self._current_step_actions = []
+            if attempt == 0:
+                self._current_step_data = {
+                    "step_number": step.step_number,
+                    "step_id": str(step.step_id),
+                    "step_description": step.action,
+                    "actions": self._current_step_actions,
+                    "step_intent": step.intent.value,
+                }
+                self._current_test_case_actions["steps"].append(self._current_step_data)
+            else:
+                self._current_step_data["actions"] = self._current_step_actions
+                self._current_step_data["retry_attempt"] = attempt
+            self._current_step_data["cache_policy"] = "cache" if use_cache else "no_cache"
             
-            # Capture before screenshot
-            if self.browser_driver:
-                screenshot_before = await self.browser_driver.screenshot()
-                screenshot_path = self._save_screenshot(
-                    screenshot_before,
-                    f"tc{test_case.test_id}_step{step.step_number}_before"
-                )
-                step_result.screenshot_before = str(screenshot_path)
-            
-            # Interpret step and decompose into actions
-            actions = await self._interpret_step(step, test_case, case_result)
-            
-            # Execute each action
-            success = True
-            action_results = []  # Store full action results
-            forced_blocker_reason: Optional[str] = None
-            
-            for action in actions:
-                logger.debug("Executing sub-action", extra={
-                    "action_type": action["type"],
-                    "description": action.get("description", "")
-                })
-                
-                action_result = await self._execute_action(action, step)
-                step_result.actions_performed.append(action_result)
-                
-                # Store full action data
-                action_results.append({
-                    "action": action,
-                    "result": action_result,
-                    "full_data": self._current_step_actions[-1] if self._current_step_actions else {}
-                })
-                
-                if forced_blocker_reason is None:
-                    error_text = action_result.get("error")
-                    if not error_text:
-                        full_data = action_results[-1]["full_data"]
-                        if isinstance(full_data, dict):
-                            result_blob = full_data.get("result", {})
-                            if isinstance(result_blob, dict):
-                                exec_blob = result_blob.get("execution") or {}
-                                error_text = (
-                                    result_blob.get("error")
-                                    or exec_blob.get("error_message")
-                                )
-                    if error_text and isinstance(error_text, str) and (
-                        error_text.startswith(MAX_TURN_ERROR_PREFIX)
-                        or error_text.startswith(LOOP_ERROR_PREFIX)
-                    ):
-                        forced_blocker_reason = error_text
-                        success = False
-                        logger.error(
-                            "Action aborted due to Computer Use limit or loop",
-                            extra={
-                                "step_number": step.step_number,
-                                "action_description": action.get("description", ""),
-                                "reason": error_text,
-                            },
-                        )
-                        self._current_step_data["blocker_reasoning"] = error_text
-                        self._current_step_data["forced_blocker_reason"] = error_text
-                
-                if not action_result.get("success", False):
-                    success = False
-                    
-                    # Determine if we should continue with remaining actions
-                    if action.get("critical", True):
-                        break
-            
-            # Capture after screenshot
-            if self.browser_driver:
-                await asyncio.sleep(1)  # Brief wait for UI to stabilize
-                screenshot_after = await self.browser_driver.screenshot()
-                screenshot_path = self._save_screenshot(
-                    screenshot_after,
-                    f"tc{test_case.test_id}_step{step.step_number}_after"
-                )
-                step_result.screenshot_after = str(screenshot_path)
-                self._latest_screenshot_bytes = screenshot_after
-                self._latest_screenshot_path = str(screenshot_path)
-                self._latest_screenshot_origin = f"step_{step.step_number}_after"
-            
-            # Build execution history for this test case
-            execution_history = []
-            for prev_step in case_result.step_results:
-                execution_history.append({
-                    "step_number": prev_step.step_number,
-                    "action": prev_step.action,
-                    "status": prev_step.status,
-                    "actual_result": prev_step.actual_result
-                })
-            
-            # Get next test case for blocker determination
-            next_test_case = None
-            if self._current_test_plan:
-                current_idx = None
-                for idx, tc in enumerate(self._current_test_plan.test_cases):
-                    if tc.case_id == test_case.case_id:
-                        current_idx = idx
-                        break
-                if current_idx is not None and current_idx < len(self._current_test_plan.test_cases) - 1:
-                    next_test_case = self._current_test_plan.test_cases[current_idx + 1]
-            
-            # Always produce a verification decision for reporting
+            step_result = StepResult(
+                step_id=step.step_id,
+                step_number=step.step_number,
+                status=TestStatus.IN_PROGRESS,
+                started_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(timezone.utc),  # Will update later
+                action=step.action,
+                expected_result=step.expected_result,
+                actual_result=""
+            )
+            screenshot_before: Optional[bytes] = None
+            screenshot_after: Optional[bytes] = None
+            should_retry = False
+            record_history = True
+           
             try:
-                if forced_blocker_reason:
-                    verification = {
-                        "verdict": "FAIL",
-                        "reasoning": forced_blocker_reason,
-                        "actual_result": forced_blocker_reason,
-                        "confidence": 1.0,
-                        "is_blocker": True,
-                        "blocker_reasoning": forced_blocker_reason,
-                    }
-                    self._current_step_data["verification_mode"] = "runner_short_circuit"
-                elif step.intent == StepIntent.SETUP:
-                    verification = self._evaluate_setup_step(success, action_results)
-                    self._current_step_data["verification_mode"] = "runner_short_circuit"
-                else:
-                    verification = await self._verify_expected_outcome(
-                        test_case=test_case,
-                        step=step,
-                        action_results=action_results,
-                        screenshot_before=screenshot_before,
-                        screenshot_after=screenshot_after,
-                        execution_history=execution_history,
-                        next_test_case=next_test_case
+                # Check dependencies
+                if not self._check_dependencies(step, case_result):
+                    step_result.status = TestStatus.SKIPPED
+                    step_result.actual_result = "Skipped due to unmet dependencies"
+                    return step_result
+                
+                # Capture before screenshot
+                if self.browser_driver:
+                    screenshot_before = await self.browser_driver.screenshot()
+                    screenshot_path = self._save_screenshot(
+                        screenshot_before,
+                        f"tc{test_case.test_id}_step{step.step_number}_before"
                     )
-                    self._current_step_data["verification_mode"] = "ai"
+                    step_result.screenshot_before = str(screenshot_path)
                 
-                # Store verification result for bug reporting
-                self._current_step_data["verification_result"] = verification
+                # Interpret step and decompose into actions
+                actions, interpretation_meta = await self._interpret_step(
+                    step, test_case, case_result, use_cache=use_cache
+                )
+                self._current_step_data["interpretation_source"] = interpretation_meta.get("interpretation_source")
+                self._current_step_data["interpretation_cache_key"] = interpretation_meta.get("cache_key")
+                self._current_step_data["interpretation_screenshot_hash"] = interpretation_meta.get("screenshot_hash")
                 
-                # Set step result based on verdict
-                if verification["verdict"] == "PASS":
-                    step_result.status = TestStatus.PASSED
-                else:
+                # Execute each action
+                success = True
+                action_results = []  # Store full action results
+                forced_blocker_reason: Optional[str] = None
+                
+                for action in actions:
+                    logger.debug("Executing sub-action", extra={
+                        "action_type": action["type"],
+                        "description": action.get("description", "")
+                    })
+                    
+                    action_result = await self._execute_action(action, step)
+                    step_result.actions_performed.append(action_result)
+                    
+                    # Store full action data
+                    action_results.append({
+                        "action": action,
+                        "result": action_result,
+                        "full_data": self._current_step_actions[-1] if self._current_step_actions else {}
+                    })
+                    
+                    if forced_blocker_reason is None:
+                        error_text = action_result.get("error")
+                        if not error_text:
+                            full_data = action_results[-1]["full_data"]
+                            if isinstance(full_data, dict):
+                                result_blob = full_data.get("result", {})
+                                if isinstance(result_blob, dict):
+                                    exec_blob = result_blob.get("execution") or {}
+                                    error_text = (
+                                        result_blob.get("error")
+                                        or exec_blob.get("error_message")
+                                    )
+                        if error_text and isinstance(error_text, str) and (
+                            error_text.startswith(MAX_TURN_ERROR_PREFIX)
+                            or error_text.startswith(LOOP_ERROR_PREFIX)
+                        ):
+                            forced_blocker_reason = error_text
+                            success = False
+                            logger.error(
+                                "Action aborted due to Computer Use limit or loop",
+                                extra={
+                                    "step_number": step.step_number,
+                                    "action_description": action.get("description", ""),
+                                    "reason": error_text,
+                                },
+                            )
+                            self._current_step_data["blocker_reasoning"] = error_text
+                            self._current_step_data["forced_blocker_reason"] = error_text
+                    
+                    if not action_result.get("success", False):
+                        success = False
+                        
+                        # Determine if we should continue with remaining actions
+                        if action.get("critical", True):
+                            break
+                
+                # Capture after screenshot
+                if self.browser_driver:
+                    await asyncio.sleep(1)  # Brief wait for UI to stabilize
+                    screenshot_after = await self.browser_driver.screenshot()
+                    screenshot_path = self._save_screenshot(
+                        screenshot_after,
+                        f"tc{test_case.test_id}_step{step.step_number}_after"
+                    )
+                    step_result.screenshot_after = str(screenshot_path)
+                    self._latest_screenshot_bytes = screenshot_after
+                    self._latest_screenshot_path = str(screenshot_path)
+                    self._latest_screenshot_origin = f"step_{step.step_number}_after"
+                
+                # Build execution history for this test case
+                execution_history = []
+                for prev_step in case_result.step_results:
+                    execution_history.append({
+                        "step_number": prev_step.step_number,
+                        "action": prev_step.action,
+                        "status": prev_step.status,
+                        "actual_result": prev_step.actual_result
+                    })
+                
+                # Get next test case for blocker determination
+                next_test_case = None
+                if self._current_test_plan:
+                    current_idx = None
+                    for idx, tc in enumerate(self._current_test_plan.test_cases):
+                        if tc.case_id == test_case.case_id:
+                            current_idx = idx
+                            break
+                    if current_idx is not None and current_idx < len(self._current_test_plan.test_cases) - 1:
+                        next_test_case = self._current_test_plan.test_cases[current_idx + 1]
+                
+                # Always produce a verification decision for reporting
+                try:
+                    if forced_blocker_reason:
+                        verification = {
+                            "verdict": "FAIL",
+                            "reasoning": forced_blocker_reason,
+                            "actual_result": forced_blocker_reason,
+                            "confidence": 1.0,
+                            "is_blocker": True,
+                            "blocker_reasoning": forced_blocker_reason,
+                        }
+                        self._current_step_data["verification_mode"] = "runner_short_circuit"
+                    elif step.intent == StepIntent.SETUP:
+                        verification = self._evaluate_setup_step(success, action_results)
+                        self._current_step_data["verification_mode"] = "runner_short_circuit"
+                    else:
+                        verification = await self._verify_expected_outcome(
+                            test_case=test_case,
+                            step=step,
+                            action_results=action_results,
+                            screenshot_before=screenshot_before,
+                            screenshot_after=screenshot_after,
+                            execution_history=execution_history,
+                            next_test_case=next_test_case
+                        )
+                        self._current_step_data["verification_mode"] = "ai"
+                    
+                    # Store verification result for bug reporting
+                    self._current_step_data["verification_result"] = verification
+                    
+                    # Set step result based on verdict
+                    if verification["verdict"] == "PASS":
+                        step_result.status = TestStatus.PASSED
+                    else:
+                        step_result.status = TestStatus.FAILED
+                    
+                    step_result.actual_result = verification["actual_result"]
+                    step_result.error_message = verification["reasoning"] if verification["verdict"] == "FAIL" else None
+                    step_result.confidence = verification.get("confidence", 0.0)
+                    
+                    # Store blocker status
+                    if verification["verdict"] == "FAIL":
+                        self._current_step_data["is_blocker"] = verification.get("is_blocker", False)
+                        self._current_step_data["blocker_reasoning"] = verification.get("blocker_reasoning", "")
+                    
+                except Exception as e:
+                    # AI verification failed - this is a fatal error
+                    logger.error("AI verification failed - marking test as failed", extra={
+                        "error": str(e),
+                        "step_number": step.step_number,
+                        "test_case": test_case.name
+                    })
                     step_result.status = TestStatus.FAILED
-                
-                step_result.actual_result = verification["actual_result"]
-                step_result.error_message = verification["reasoning"] if verification["verdict"] == "FAIL" else None
-                step_result.confidence = verification.get("confidence", 0.0)
-                
-                # Store blocker status
-                if verification["verdict"] == "FAIL":
-                    self._current_step_data["is_blocker"] = verification.get("is_blocker", False)
-                    self._current_step_data["blocker_reasoning"] = verification.get("blocker_reasoning", "")
+                    step_result.actual_result = "Verification failed due to AI error"
+                    step_result.error_message = f"AI verification failed: {str(e)}"
+                    step_result.confidence = 0.0
+                    # Re-raise to trigger the outer exception handler
+                    raise
+
+                if (
+                    step_result.status == TestStatus.FAILED
+                    and interpretation_meta.get("interpretation_source") == "cache"
+                    and self._settings.run_cache_enabled
+                    and self._run_cache
+                    and self._run_signature
+                ):
+                    should_retry = True
+                    record_history = False
                 
             except Exception as e:
-                # AI verification failed - this is a fatal error
-                logger.error("AI verification failed - marking test as failed", extra={
+                logger.error("Step execution failed", extra={
                     "error": str(e),
-                    "step_number": step.step_number,
-                    "test_case": test_case.name
+                    "step_number": step.step_number
                 })
                 step_result.status = TestStatus.FAILED
-                step_result.actual_result = "Verification failed due to AI error"
-                step_result.error_message = f"AI verification failed: {str(e)}"
-                step_result.confidence = 0.0
-                # Re-raise to trigger the outer exception handler
-                raise
-            
-        except Exception as e:
-            logger.error("Step execution failed", extra={
-                "error": str(e),
-                "step_number": step.step_number
-            })
-            step_result.status = TestStatus.FAILED
-            step_result.actual_result = f"Error: {str(e)}"
-            step_result.error_message = str(e)
+                step_result.actual_result = f"Error: {str(e)}"
+                step_result.error_message = str(e)
+            finally:
+                step_result.completed_at = datetime.now(timezone.utc)
+                if (
+                    record_history
+                    and
+                    screenshot_after is None
+                    and screenshot_before is not None
+                    and step_result.screenshot_before
+                ):
+                    self._latest_screenshot_bytes = screenshot_before
+                    self._latest_screenshot_path = step_result.screenshot_before
+                    self._latest_screenshot_origin = f"step_{step.step_number}_before"
+                
+                if record_history:
+                    self._execution_history.append({
+                        "test_case": test_case.name,
+                        "step": step.step_number,
+                        "action": step.action,
+                        "result": step_result.status.value,
+                        "timestamp": step_result.completed_at
+                    })
+
+            if should_retry:
+                self._invalidate_step_cache(test_case, step, "execution_failure")
+                self._disable_cache_for_case[str(test_case.case_id)] = True
+                use_cache = False
+                attempt += 1
+                continue
+
+            last_step_result = step_result
+            if step_result.status == TestStatus.FAILED:
+                self._disable_cache_for_case[str(test_case.case_id)] = True
+            break
         
-        finally:
-            step_result.completed_at = datetime.now(timezone.utc)
-            if (
-                screenshot_after is None
-                and screenshot_before is not None
-                and step_result.screenshot_before
-            ):
-                self._latest_screenshot_bytes = screenshot_before
-                self._latest_screenshot_path = step_result.screenshot_before
-                self._latest_screenshot_origin = f"step_{step.step_number}_before"
-            
-            # Add to execution history
-            self._execution_history.append({
-                "test_case": test_case.name,
-                "step": step.step_number,
-                "action": step.action,
-                "result": step_result.status.value,
-                "timestamp": step_result.completed_at
-            })
-        
-        return step_result
+        return last_step_result if last_step_result else step_result
     
     @staticmethod
     def _evaluate_setup_step(
@@ -770,12 +877,13 @@ class TestRunner(BaseAgent):
         self,
         step: TestStep,
         test_case: TestCase,
-        case_result: TestCaseResult
-    ) -> List[Dict[str, Any]]:
+        case_result: TestCaseResult,
+        use_cache: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Interpret a test step and decompose it into executable actions.
         
-        Returns a list of actions to be executed sequentially.
+        Returns a tuple of (actions, interpretation_metadata).
         """
         # Recent execution history (for temporal awareness)
         recent_history = []
@@ -879,9 +987,42 @@ class TestRunner(BaseAgent):
             step,
             test_case,
         )
+        interpretation_meta: Dict[str, Any] = {
+            "interpretation_source": "live",
+            "cache_key": None,
+            "screenshot_hash": None,
+        }
         screenshot_b64: Optional[str] = None
         if screenshot_bytes:
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
+        screenshot_hash = PersistentRunCache.hash_bytes(screenshot_bytes)
+        interpretation_meta["screenshot_hash"] = screenshot_hash
+
+        if use_cache and self._should_use_cache_for_case(test_case):
+            try:
+                cached = self._run_cache.get_step_actions(
+                    signature=self._run_signature,
+                    case_id=str(test_case.case_id),
+                    step_number=step.step_number,
+                    screenshot_hash=screenshot_hash,
+                    model=self.model,
+                ) if self._run_cache else None
+            except Exception:
+                cached = None
+                logger.debug("Step cache lookup failed", exc_info=True)
+
+            if cached:
+                logger.info(
+                    "Using cached step interpretation",
+                    extra={
+                        "test_case": test_case.name,
+                        "step_number": step.step_number,
+                        "cache_key": cached.get("cache_key"),
+                    },
+                )
+                interpretation_meta["interpretation_source"] = "cache"
+                interpretation_meta["cache_key"] = cached.get("cache_key")
+                return cached.get("actions", []), interpretation_meta
 
         action_surface = (
             "desktop actions" if self._settings.desktop_mode_enabled else "browser actions"
@@ -1019,13 +1160,31 @@ Respond with a JSON object containing an "actions" array where every item follow
             if not actions:
                 raise ValueError(f"AI failed to provide actions for step {step.step_number}: {step.action}")
             
+            if (
+                self._settings.run_cache_enabled
+                and self._run_cache
+                and self._run_signature
+            ):
+                try:
+                    cache_key = self._run_cache.set_step_actions(
+                        signature=self._run_signature,
+                        case_id=str(test_case.case_id),
+                        step_number=step.step_number,
+                        screenshot_hash=screenshot_hash,
+                        model=self.model,
+                        actions=actions,
+                    ) if self._run_cache else None
+                    interpretation_meta["cache_key"] = cache_key
+                except Exception:
+                    logger.debug("Failed to write step cache", exc_info=True)
+
             logger.info("Step interpretation successful", extra={
                 "step": step.step_number,
                 "original_action": step.action,
                 "decomposed_actions": len(actions)
             })
             
-            return actions
+            return actions, interpretation_meta
             
         except Exception as e:
             logger.error("Failed to interpret step with AI", extra={

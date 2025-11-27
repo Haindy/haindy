@@ -29,12 +29,13 @@
   - Supply allowed actions and an “interaction_mode=observe_only” guard similar to the current flow.
   - Persist raw action traces and screenshots for debugging parity with the browser path.
 
-### 3) Coordinate cache
-- Introduce `src/desktop/cache.py`:
-  - Cache entries: `{label, action, coordinates (x,y), window_id, resolution, timestamp, evidence_screenshot_hash}`.
-  - Storage: JSON at `data/desktop_cache/linkedin.json`; append-only with compaction utility.
-  - Lookup strategy: on each action, attempt cache match (same window + resolution, recent timestamp); validate with lightweight visual check (e.g., crop comparison using perceptual hash). If validation fails, fall back to computer-use loop and refresh the cache entry.
-  - Provide TTL/eviction to avoid stale positions when LinkedIn UI shifts.
+### 3) Coordinate + run caches
+- Coordinate cache (`src/desktop/cache.py`):
+  - Cache entries: `{label, action, coordinates (x,y), resolution, timestamp, screenshot_hash}` stored in `data/desktop_cache/linkedin.json`.
+  - Lookup before each desktop action; prefer reuse when resolution/screenshot hash match, fall back to computer-use when stale.
+- Run cache (`src/core/run_cache.py`):
+  - Persist plan + step interpretations keyed by a deterministic signature (requirements + settings + viewport + models).
+  - Reuse cached plans and step actions when screenshots align; invalidate on failures and retry live.
 
 ### 4) Planner/Runner integration
 - Add a “desktop_mode” flag to plans/test cases. When true:
@@ -42,6 +43,7 @@
   - Inject Desktop controller metadata (window title hint, preferred resolution) into action prompts.
   - Supply initial screenshot from `ScreenCapture`.
   - Route `ActionAgent` to the desktop computer-use executor and coordinate cache before invoking the model.
+- Thread the run cache through planning and execution; leverage cached plans/step actions to cut latency while auto-invalidating on failure.
 - Extend test planner prompt templates to allow single-app scenarios (LinkedIn) with cached coordinates/visual targets to cut latency (no DOM cues).
 
 ### 5) Model & SDK updates
@@ -60,6 +62,7 @@
 - Extend debug logger to tag desktop runs (`mode=desktop`) and persist OS screenshots alongside action traces.
 - Safety rails: block input if the focused window is not LinkedIn; stop on rapid repeated identical actions (reuse loop detection from `ComputerUseSession`).
 - Add a dry-run/observe-only mode for assertion steps to avoid unintended sends.
+- Typing guardrails: Action prompts now instruct select-all + single replacement for text fields; `VirtualInput` maps shifted number-row symbols (e.g., `!@#$%^&*()`) to prevent dropped punctuation.
 
 ## Experiment Plan (high level)
 1) Bootstrap desktop modules (`DesktopController`, `ScreenCapture`, `VirtualInput`, `ResolutionManager`).

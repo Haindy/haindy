@@ -8,7 +8,7 @@ Test actions:
 1) Search for "Vanesa Iavarone" and open the profile. This user is already a contact. If there are multiple options choose the first.
 2) Validate the profile shows the name and that a profile photo is present (no other profile checks).
 3) Click the button to send a message.
-4) Send a message saying "Hello" exactly. Nothing more.
+4) Send a message saying "Portate bien!" exactly. Nothing more.
 5) Verified the message is sent 
 
 Notes:

@@ -227,6 +227,21 @@ class VirtualInput:
             key = getattr(ecodes, f"KEY_{char}", None)
             return key, False
 
+        digit_shift_map = {
+            "!": (ecodes.KEY_1, True),
+            "@": (ecodes.KEY_2, True),
+            "#": (ecodes.KEY_3, True),
+            "$": (ecodes.KEY_4, True),
+            "%": (ecodes.KEY_5, True),
+            "^": (ecodes.KEY_6, True),
+            "&": (ecodes.KEY_7, True),
+            "*": (ecodes.KEY_8, True),
+            "(": (ecodes.KEY_9, True),
+            ")": (ecodes.KEY_0, True),
+        }
+        if char in digit_shift_map:
+            return digit_shift_map[char]
+
         mapping = {
             " ": (ecodes.KEY_SPACE, False),
             "\n": (ecodes.KEY_ENTER, False),

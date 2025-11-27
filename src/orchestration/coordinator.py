@@ -54,7 +54,9 @@ class WorkflowCoordinator:
         message_bus: Optional[MessageBus] = None,
         state_manager: Optional[StateManager] = None,
         browser_driver: Optional[BrowserDriver] = None,
-        max_steps: int = 50
+        max_steps: int = 50,
+        run_cache: Optional[Any] = None,
+        run_signature: Optional[str] = None,
     ):
         """
         Initialize the workflow coordinator.
@@ -83,6 +85,8 @@ class WorkflowCoordinator:
         # Configuration
         self._max_concurrent_tests = 5
         self.max_steps = max_steps
+        self._run_cache = run_cache
+        self._run_signature = run_signature
         
         logger.info("Workflow coordinator initialized")
     
@@ -119,6 +123,8 @@ class WorkflowCoordinator:
                 temperature=runner_cfg.temperature,
                 reasoning_level=runner_cfg.reasoning_level,
                 modalities=runner_cfg.modalities,
+                run_cache=self._run_cache,
+                run_signature=self._run_signature,
             ),
             "action_agent": ActionAgent(
                 name="ActionAgent",
@@ -179,6 +185,7 @@ class WorkflowCoordinator:
         context: Optional[Dict[str, Any]] = None,
         precomputed_plan: Optional[TestPlan] = None,
         triage_result: Optional[ScopeTriageResult] = None,
+        run_signature: Optional[str] = None,
     ) -> TestState:
         """
         Execute a test from high-level requirements.
@@ -200,6 +207,15 @@ class WorkflowCoordinator:
             raise RuntimeError(
                 f"Maximum concurrent tests ({self._max_concurrent_tests}) reached"
             )
+
+        if run_signature:
+            self._run_signature = run_signature
+            runner_agent = self._agents.get("test_runner")
+            if runner_agent and hasattr(runner_agent, "set_run_cache"):
+                try:
+                    runner_agent.set_run_cache(self._run_cache, self._run_signature)
+                except Exception:
+                    logger.debug("Unable to propagate run cache to runner", exc_info=True)
         
         try:
             # Phase 1: Generate test plan

@@ -456,6 +456,14 @@ class ActionAgent(BaseAgent):
                 f"- Bring the LinkedIn Firefox window to the front before acting. "
                 f"Window hint: {session_metadata['window_hint']}."
             )
+            if instruction.action_type == ActionType.TYPE:
+                goal = (
+                    f"{goal}\n\nTyping guardrails:\n"
+                    f"- Click the intended input once, then press Ctrl+A (or Cmd+A on macOS) to clear it completely.\n"
+                    f"- Type the provided value exactly once: '{instruction.value}'. Do not add prefixes or suffixes.\n"
+                    f"- If any stray characters appear, repeat select-all and replace the entire field in a single entry.\n"
+                    f"- Stop after the text matches exactly, rather than trying additional keystrokes."
+                )
 
         session = self._new_computer_use_session(debug_logger)
 

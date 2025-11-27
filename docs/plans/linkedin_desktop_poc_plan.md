@@ -32,8 +32,11 @@
 - Add `desktop/cache.py`:
   - Append-only JSON store at `data/desktop_cache/linkedin.json` with entries: label, action, (x,y), resolution, timestamp, screenshot hash.
   - Lookup-first strategy with lightweight visual validation (crop + pHash); on miss/fail, fall back to computer-use and refresh cache.
-  - TTL/eviction utility and small CLI/maintenance hook.
-- Integrate into ActionAgent: check cache before model call; record success/failure to update cache.
+- Integrate into ActionAgent: check cache before model call; record success/failure to update cache. (TTL dropped; failure-driven invalidation instead.)
+
+### M3.5: Run cache for plans and steps
+- Add `src/core/run_cache.py` with deterministic run signatures (requirements + settings + viewport + models).
+- Cache test plans and per-step action interpretations; reuse when screenshots match; invalidate on step/test failures and retry live.
 
 ### M4: Planner/Runner threading
 - Add `desktop_mode` to plans/test cases; propagate through TestRunner → ActionAgent.
@@ -42,6 +45,7 @@
   - Initial desktop screenshot capture.
   - Window acquisition via a short computer-use goal (“bring LinkedIn Firefox window front and maximize”).
 - Update planner prompts to prefer cached coordinates/visual targets (no DOM) and to skip Playwright setup in desktop mode.
+- Thread run cache through planning/execution so repeat runs can skip re-interpretation unless a prior failure invalidated entries.
 
 ### M5: Model/SDK alignment
 - Bump `openai` to latest 2.8.x; update client wrappers for Responses API defaults (truncation auto, verbosity/reasoning parameters).
@@ -49,7 +53,7 @@
 
 ### M6: Test and runbook
 - Add a LinkedIn POC scenario under `test_scenarios/` describing the four target steps.
-- Smoke test script to exercise desktop mode end-to-end (manual verification expected).
+- Smoke test script to exercise desktop mode end-to-end (manual verification expected). Scenario updated to send “Portate bien!” exactly.
 - Runbook in `docs/runbook` covering prerequisites (uinput provisioning, single display, resolution toggle) and launch instructions.
 
 ## Risks & Mitigations

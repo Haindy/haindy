@@ -35,6 +35,7 @@ from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
+from src.core.run_cache import PersistentRunCache
 
 console = Console()
 logger = get_logger("main")
@@ -383,7 +384,30 @@ async def run_test(
     settings.desktop_mode_enabled = desktop_mode
     if desktop_mode:
         settings.actions_use_computer_tool = True
+    planner_cfg = settings.get_agent_model_config("test_planner")
     use_progress = settings.log_format == "json"
+    run_cache: Optional[PersistentRunCache] = None
+    run_signature: Optional[str] = None
+    plan_source = "live"
+    signature_payload: Optional[Dict[str, Any]] = None
+
+    if settings.run_cache_enabled:
+        run_cache = PersistentRunCache(settings.run_cache_dir)
+        planner_cfg = settings.get_agent_model_config("test_planner")
+        signature_payload = {
+            "requirements": requirements,
+            "override_url": override_url or "",
+            "desktop_mode": desktop_mode,
+            "headless": headless,
+            "models": {name: cfg.model for name, cfg in settings.agent_models.items()},
+            "viewport": [
+                settings.browser_viewport_width,
+                settings.browser_viewport_height,
+            ],
+            "grid_size": settings.grid_size,
+            "planner_model": planner_cfg.model,
+        }
+        run_signature = PersistentRunCache.compute_signature(signature_payload)
 
     try:
         test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -405,7 +429,26 @@ async def run_test(
             console.print("\n[dim]Skipping browser startup (--plan-only mode). Only the Test Planner will run.[/dim]")
             console.print("\n[yellow]Generating test plan...[/yellow]")
 
-            test_plan, triage_result = await _generate_plan_only_plan(requirements)
+            if run_cache and run_signature:
+                cached_plan = run_cache.get_plan(run_signature, planner_cfg.model)
+                if cached_plan:
+                    test_plan = TestPlan.model_validate(cached_plan["data"])
+                    triage_result = ScopeTriageResult.model_validate(
+                        cached_plan.get("triage", {}) or {}
+                    )
+                    plan_source = "cache"
+                    logger.info("Using cached test plan", extra={"run_signature": run_signature, "source": "plan_only"})
+
+            if not test_plan:
+                test_plan, triage_result = await _generate_plan_only_plan(requirements)
+                if run_cache and run_signature:
+                    run_cache.set_plan(
+                        signature=run_signature,
+                        plan_payload=test_plan.model_dump(),
+                        triage_payload=triage_result.model_dump(),
+                        model=planner_cfg.model,
+                        signature_payload=signature_payload,
+                    )
 
             _render_plan_table(test_plan)
             _print_plan_storage_locations(test_plan)
@@ -414,12 +457,31 @@ async def run_test(
             return 0
 
         console.print("\n[yellow]Generating test plan...[/yellow]")
-        triage_agent, planner = _create_planning_agents(settings)
-        test_plan, triage_result = await run_scope_triage_and_plan(
-            requirements=requirements,
-            planner=planner,
-            triage_agent=triage_agent,
-        )
+        if run_cache and run_signature:
+            cached_plan = run_cache.get_plan(run_signature, planner_cfg.model)
+            if cached_plan:
+                test_plan = TestPlan.model_validate(cached_plan["data"])
+                triage_result = ScopeTriageResult.model_validate(
+                    cached_plan.get("triage", {}) or {}
+                )
+                plan_source = "cache"
+                logger.info("Using cached test plan", extra={"run_signature": run_signature, "source": "standard"})
+
+        if not test_plan:
+            triage_agent, planner = _create_planning_agents(settings)
+            test_plan, triage_result = await run_scope_triage_and_plan(
+                requirements=requirements,
+                planner=planner,
+                triage_agent=triage_agent,
+            )
+            if run_cache and run_signature:
+                run_cache.set_plan(
+                    signature=run_signature,
+                    plan_payload=test_plan.model_dump(),
+                    triage_payload=triage_result.model_dump(),
+                    model=planner_cfg.model,
+                    signature_payload=signature_payload,
+                )
 
         if desktop_mode:
             initial_url = override_url or ""
@@ -437,6 +499,8 @@ async def run_test(
                     headless=headless,
                     max_steps=max_steps,
                     desktop_mode=desktop_mode,
+                    run_cache=run_cache,
+                    run_signature=run_signature,
                 )
                 if hasattr(controller, "driver") and not isinstance(controller, BrowserController):
                     desktop_controller = controller
@@ -449,6 +513,8 @@ async def run_test(
                 headless=headless,
                 max_steps=max_steps,
                 desktop_mode=desktop_mode,
+                run_cache=run_cache,
+                run_signature=run_signature,
             )
             if hasattr(controller, "driver") and not isinstance(controller, BrowserController):
                 desktop_controller = controller
@@ -479,6 +545,8 @@ async def run_test(
                     precomputed_plan=test_plan,
                     triage_result=triage_result,
                     timeout=timeout,
+                    context={"plan_source": plan_source},
+                    run_signature=run_signature,
                 )
 
                 progress.update(exec_task, completed=True)
@@ -491,6 +559,8 @@ async def run_test(
                 precomputed_plan=test_plan,
                 triage_result=triage_result,
                 timeout=timeout,
+                context={"plan_source": plan_source},
+                run_signature=run_signature,
             )
             console.print("[green]Test run completed.[/green]")
 
@@ -574,6 +644,15 @@ async def run_test(
         console.print(f"AI Interactions Logged: [green]{debug_summary['ai_interactions']}[/green]")
         console.print(f"Screenshots Saved: [green]{debug_summary['screenshots_saved']}[/green]")
 
+        if (
+            settings.run_cache_enabled
+            and run_cache
+            and run_signature
+            and plan_source == "cache"
+            and status_value not in success_statuses
+        ):
+            run_cache.invalidate_plan(run_signature, reason="test_run_failed")
+
         return 0 if status_value in success_statuses else 1
 
     except ScopeTriageBlockedError as scope_error:
@@ -603,6 +682,8 @@ async def _create_coordinator_stack(
     headless: bool,
     max_steps: int,
     desktop_mode: bool,
+    run_cache: Optional[PersistentRunCache],
+    run_signature: Optional[str],
 ) -> Tuple[object, WorkflowCoordinator]:
     """Build and initialize the browser/controller/coordinator stack."""
     settings = get_settings()
@@ -635,6 +716,8 @@ async def _create_coordinator_stack(
         state_manager=state_manager,
         browser_driver=driver,
         max_steps=max_steps,
+        run_cache=run_cache,
+        run_signature=run_signature,
     )
 
     await coordinator.initialize()
@@ -649,6 +732,7 @@ async def _run_with_timeout(
     triage_result: ScopeTriageResult,
     timeout: int,
     context: Optional[Dict[str, Any]] = None,
+    run_signature: Optional[str] = None,
 ) -> TestState:
     """Execute the coordinator run with a timeout guard."""
     return await asyncio.wait_for(
@@ -658,6 +742,7 @@ async def _run_with_timeout(
             context=context,
             precomputed_plan=precomputed_plan,
             triage_result=triage_result,
+            run_signature=run_signature,
         ),
         timeout=timeout,
     )
