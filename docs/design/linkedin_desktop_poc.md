@@ -3,7 +3,7 @@
 ## Objectives
 - Control an already-open browser with a signed-in LinkedIn session (no new Playwright context).
 - Execute the experiment workflow: search person A and send connect invite; search person B (existing contact) and send a message; open person B profile and generate a sourcer-style summary.
-- Operate at the OS layer (keyboard, mouse, screenshots) instead of DOM-bound automation.
+- Operate at the OS layer (keyboard, mouse, screenshots) with zero DOM access.
 - Cache stable UI coordinates for LinkedIn elements to minimize repeated computer-use cycles.
 - Keep the work compatible with Haindy so learnings can be folded back into the core flow.
 
@@ -11,7 +11,7 @@
 - Environment: Ubuntu with sudo available for uinput and resolution changes. 4K primary display today; prefer 1080p during runs.
 - Browser: reuse an already-open window (likely Chrome/Chromium) with an authenticated LinkedIn session.
 - Do not rely on Playwright; all interaction and screenshots come from the OS-level desktop path.
-- Minimize dependencies on LinkedIn DOM structure; lean on visual cues and cached coordinates.
+- No DOM access anywhere; automation is 100% visual (screenshots + absolute coordinates).
 
 ## Proposed Architecture
 
@@ -42,7 +42,7 @@
   - Inject Desktop controller metadata (window title hint, preferred resolution) into action prompts.
   - Supply initial screenshot from `ScreenCapture`.
   - Route `ActionAgent` to the desktop computer-use executor and coordinate cache before invoking the model.
-- Extend test planner prompt templates to allow single-app scenarios (LinkedIn) with cached selectors to cut latency.
+- Extend test planner prompt templates to allow single-app scenarios (LinkedIn) with cached coordinates/visual targets to cut latency (no DOM cues).
 
 ### 5) Model & SDK updates
 - SDK: bump `openai` to the latest 2.8.x line to stay current with Responses API and computer-use tooling. Update `pyproject.toml` + client instantiation to match.
