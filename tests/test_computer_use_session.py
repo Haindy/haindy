@@ -308,7 +308,7 @@ async def test_computer_use_session_auto_acknowledges_safety_checks(
     # Verify acknowledgement is sent back to the model
     follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
     ack_list = follow_up_payload["input"][0]["acknowledged_safety_checks"]
-    assert ack_list == ["sc1"]
+    assert ack_list == [{"id": "sc1"}]
     assert result.final_output == "Action executed after safety ack."
 
 

@@ -594,7 +594,8 @@ class ComputerUseSession:
             screenshot_b64 = encode_png_base64(screenshot_bytes)
 
         viewport_width, viewport_height = await self._browser.get_viewport_size()
-        acknowledged_safety_checks = call.metadata.get("acknowledged_safety_checks") or []
+        raw_acknowledged = call.metadata.get("acknowledged_safety_checks") or []
+        acknowledged_safety_checks = self._format_acknowledged_safety_checks(raw_acknowledged)
 
         payload: Dict[str, Any] = {
             "model": self._model,
@@ -1092,6 +1093,25 @@ class ComputerUseSession:
         if override is not None:
             return self._normalize_safety_code_set(override)
         return self._auto_ack_codes
+
+    @staticmethod
+    def _format_acknowledged_safety_checks(checks: List[Any]) -> List[Dict[str, str]]:
+        """
+        Normalize acknowledged safety checks to the object format expected by the API.
+
+        The API requires a list of objects like {"id": "<safety_check_id>"}.
+        """
+        formatted: List[Dict[str, str]] = []
+        for item in checks or []:
+            if isinstance(item, dict):
+                check_id = item.get("id") or item.get("check_id")
+            else:
+                check_id = str(item) if item is not None else None
+
+            if check_id:
+                formatted.append({"id": str(check_id)})
+
+        return formatted
 
     @staticmethod
     def _normalize_safety_code_set(codes: Optional[List[str]]) -> Optional[Set[str]]:
