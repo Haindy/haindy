@@ -10,7 +10,7 @@
 ## Scope & Constraints
 - Environment: Ubuntu with sudo available for uinput and resolution changes. 4K primary display today; prefer 1080p during runs.
 - Browser: reuse an already-open window (likely Chrome/Chromium) with an authenticated LinkedIn session.
-- Avoid Playwright navigation; only use it for fallback screenshotting if needed.
+- Do not rely on Playwright; all interaction and screenshots come from the OS-level desktop path.
 - Minimize dependencies on LinkedIn DOM structure; lean on visual cues and cached coordinates.
 
 ## Proposed Architecture
