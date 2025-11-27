@@ -49,18 +49,24 @@ class ComputerUseSession:
         settings: Settings,
         debug_logger: Optional[DebugLogger] = None,
         model: str = "computer-use-preview",
+        environment: str = "browser",
     ) -> None:
         self._client = client
         self._browser = browser
         self._settings = settings
         self._debug_logger = debug_logger
         self._model = model
+        self._environment = self._normalize_environment(environment)
         self._allowed_actions: Optional[Set[str]] = None
         self._allowed_domains: Set[str] = self._normalize_domain_set(
             settings.actions_computer_tool_allowed_domains
         )
         self._blocked_domains: Set[str] = self._normalize_domain_set(
             settings.actions_computer_tool_blocked_domains
+        )
+        self._auto_ack_safety: bool = settings.actions_computer_tool_auto_ack_safety
+        self._auto_ack_codes: Optional[Set[str]] = self._normalize_safety_code_set(
+            settings.actions_computer_tool_auto_ack_codes
         )
         self._stateful_actions: Set[str] = {
             "click",
@@ -72,6 +78,29 @@ class ComputerUseSession:
             "drag",
             "navigate",
         }
+
+    @staticmethod
+    def _normalize_environment(environment: str) -> str:
+        """
+        Ensure the Computer Use environment value matches supported options.
+
+        Maps legacy or shorthand values to the OpenAI-supported set and
+        defaults to "browser" when an unexpected value is provided.
+        """
+        normalized = (environment or "browser").strip().lower()
+        alias_map = {
+            "desktop": "linux",
+            "os": "linux",
+        }
+        normalized = alias_map.get(normalized, normalized)
+        allowed = {"browser", "windows", "mac", "linux"}
+        if normalized not in allowed:
+            logger.warning(
+                "Unsupported Computer Use environment '%s'; defaulting to 'browser'.",
+                environment,
+            )
+            return "browser"
+        return normalized
 
     async def run(
         self,
@@ -206,29 +235,43 @@ class ComputerUseSession:
 
             _inject_context_metadata(turn, metadata)
 
-            if turn.pending_safety_checks and self._settings.actions_computer_tool_fail_fast_on_safety:
+            if turn.pending_safety_checks:
+                acknowledged_ids = self._maybe_acknowledge_safety(turn, metadata)
                 safety_event = SafetyEvent(
                     call_id=turn.call_id,
                     code=turn.pending_safety_checks[0].get("code", "unknown"),
                     message=turn.pending_safety_checks[0].get("message", ""),
-                    acknowledged=False,
+                    acknowledged=bool(acknowledged_ids),
                     response_id=response_dict.get("id"),
+                    acknowledged_ids=acknowledged_ids,
                 )
                 result.safety_events.append(safety_event)
-                turn.status = "failed"
-                turn.error_message = (
-                    "Safety check triggered; action halted (fail-fast enabled)."
-                )
-                result.actions.append(turn)
-                logger.warning(
-                    "Computer Use safety check triggered; aborting action execution",
-                    extra={
-                        "call_id": turn.call_id,
-                        "code": safety_event.code,
-                        "safety_message": safety_event.message,
-                    },
-                )
-                return result
+
+                if acknowledged_ids:
+                    turn.metadata["acknowledged_safety_checks"] = acknowledged_ids
+                    logger.info(
+                        "Computer Use safety check acknowledged automatically",
+                        extra={
+                            "call_id": turn.call_id,
+                            "codes": [c.get("code") for c in turn.pending_safety_checks],
+                            "acknowledged_ids": acknowledged_ids,
+                        },
+                    )
+                elif self._settings.actions_computer_tool_fail_fast_on_safety:
+                    turn.status = "failed"
+                    turn.error_message = (
+                        "Safety check triggered; action halted (fail-fast enabled)."
+                    )
+                    result.actions.append(turn)
+                    logger.warning(
+                        "Computer Use safety check triggered; aborting action execution",
+                        extra={
+                            "call_id": turn.call_id,
+                            "code": safety_event.code,
+                            "safety_message": safety_event.message,
+                        },
+                    )
+                    return result
 
             try:
                 await self._execute_tool_action(turn, metadata, turn_counter)
@@ -551,6 +594,7 @@ class ComputerUseSession:
             screenshot_b64 = encode_png_base64(screenshot_bytes)
 
         viewport_width, viewport_height = await self._browser.get_viewport_size()
+        acknowledged_safety_checks = call.metadata.get("acknowledged_safety_checks") or []
 
         payload: Dict[str, Any] = {
             "model": self._model,
@@ -572,7 +616,7 @@ class ComputerUseSession:
                         "image_url": f"data:image/png;base64,{screenshot_b64}",
                     },
                     "current_url": call.metadata.get("current_url"),
-                    "acknowledged_safety_checks": [],
+                    "acknowledged_safety_checks": acknowledged_safety_checks,
                 }
             ],
             "truncation": "auto",
@@ -757,7 +801,7 @@ class ComputerUseSession:
                     "type": "computer_use_preview",
                     "display_width": viewport_width,
                     "display_height": viewport_height,
-                    "environment": "browser",
+                    "environment": self._environment,
                 }
             ],
             "input": [
@@ -912,7 +956,7 @@ class ComputerUseSession:
                     "type": "computer_use_preview",
                     "display_width": viewport_width,
                     "display_height": viewport_height,
-                    "environment": "browser",
+                    "environment": self._environment,
                 }
             ],
             "input": [
@@ -1004,6 +1048,64 @@ class ComputerUseSession:
         hostname = hostname.strip().lower()
         domain = domain.strip().lower()
         return hostname == domain or hostname.endswith(f".{domain}")
+
+    def _maybe_acknowledge_safety(
+        self, turn: ComputerToolTurn, metadata: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Determine whether to acknowledge pending safety checks and return the IDs to send.
+
+        When enabled, this allows trusted steps (e.g., window focus) to proceed without fail-fast.
+        """
+        if not turn.pending_safety_checks:
+            return []
+
+        if not self._should_auto_acknowledge_safety(metadata):
+            return []
+
+        eligible_codes = self._eligible_safety_codes(metadata)
+        acknowledged_ids: List[str] = []
+
+        for check in turn.pending_safety_checks:
+            code = (check.get("code") or "").strip().lower()
+            check_id = check.get("id")
+            if eligible_codes is not None and code and code not in eligible_codes:
+                continue
+            if isinstance(check_id, str) and check_id:
+                acknowledged_ids.append(check_id)
+
+        return acknowledged_ids
+
+    def _should_auto_acknowledge_safety(self, metadata: Dict[str, Any]) -> bool:
+        """Resolve whether auto-acknowledgement is enabled for this run/step."""
+        if "auto_ack_safety" in metadata:
+            return bool(metadata.get("auto_ack_safety"))
+        return self._auto_ack_safety
+
+    def _eligible_safety_codes(self, metadata: Dict[str, Any]) -> Optional[Set[str]]:
+        """
+        Resolve the allowed safety codes for acknowledgement.
+
+        Returns None when all codes are allowed (i.e., list is empty).
+        """
+        override = metadata.get("auto_ack_safety_codes")
+        if override is not None:
+            return self._normalize_safety_code_set(override)
+        return self._auto_ack_codes
+
+    @staticmethod
+    def _normalize_safety_code_set(codes: Optional[List[str]]) -> Optional[Set[str]]:
+        """Normalize safety check codes to a lowercase set; empty list -> None (all codes)."""
+        if codes is None:
+            return None
+        normalized: Set[str] = set()
+        for code in codes or []:
+            if not code:
+                continue
+            value = str(code).strip().lower()
+            if value:
+                normalized.add(value)
+        return normalized or None
 
     @property
     def _action_timeout_seconds(self) -> float:

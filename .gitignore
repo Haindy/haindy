@@ -156,6 +156,7 @@ test_artifacts/
 generated_test_plans/
 screenshots/
 debug_screenshots/
+data/desktop_cache/
 *.log
 examples/demo_output/
 demo_journals/

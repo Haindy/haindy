@@ -49,22 +49,22 @@ class AgentModelConfig(BaseModel):
 
 DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
     "scope_triage": AgentModelConfig(
-        model="gpt-5",
-        temperature=0.15,
-        reasoning_level="high",
+        model="gpt-5.1-mini",
+        temperature=0.1,
+        reasoning_level="medium",
     ),
     "test_planner": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.1",
         temperature=0.35,
         reasoning_level="high",
     ),
     "test_runner": AgentModelConfig(
-        model="gpt-5",
-        temperature=0.55,
+        model="gpt-5.1",
+        temperature=0.5,
         reasoning_level="medium",
     ),
     "action_agent": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.1",
         temperature=0.25,
         reasoning_level="low",
         modalities={"text", "vision"},
@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(
-        default="gpt-5", description="Default OpenAI model"
+        default="gpt-5.1", description="Default OpenAI model"
     )
     openai_temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Default temperature"
@@ -178,6 +178,18 @@ class Settings(BaseSettings):
         description="Abort immediately when Computer Use returns pending safety checks",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
     )
+    actions_computer_tool_auto_ack_safety: bool = Field(
+        default=True,
+        description="Automatically acknowledge Computer Use safety checks instead of failing fast",
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_AUTO_ACK_SAFETY",
+    )
+    actions_computer_tool_auto_ack_codes: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Safety check codes eligible for auto-ack when enabled; empty list means acknowledge all codes"
+        ),
+        env="HAINDY_ACTIONS_COMPUTER_TOOL_AUTO_ACK_CODES",
+    )
     actions_computer_tool_allowed_domains: List[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool is permitted to interact with",
@@ -187,6 +199,45 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Domains the Computer Use tool must never interact with",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS",
+    )
+
+    # Desktop Configuration
+    desktop_mode_enabled: bool = Field(
+        default=True,
+        description="Enable desktop computer-use mode (OS-level automation)",
+        env="HAINDY_DESKTOP_MODE",
+    )
+    desktop_preferred_width: int = Field(
+        default=1920,
+        description="Preferred desktop width when switching resolution",
+        env="HAINDY_DESKTOP_WIDTH",
+    )
+    desktop_preferred_height: int = Field(
+        default=1080,
+        description="Preferred desktop height when switching resolution",
+        env="HAINDY_DESKTOP_HEIGHT",
+    )
+    desktop_enable_resolution_switch: bool = Field(
+        default=False,
+        description="Allow temporary resolution downshift for desktop runs",
+        env="HAINDY_DESKTOP_RES_SWITCH",
+    )
+    desktop_screenshot_dir: Path = Field(
+        default=Path("debug_screenshots/desktop"),
+        description="Directory for desktop screenshots",
+    )
+    desktop_cache_path: Path = Field(
+        default=Path("data/desktop_cache/linkedin.json"),
+        description="Coordinate cache path for desktop mode",
+    )
+    desktop_window_hint: str = Field(
+        default="Firefox window with LinkedIn",
+        description="Hint used to surface the correct window during acquisition",
+    )
+    desktop_display: Optional[str] = Field(
+        default=None,
+        description="Override DISPLAY for desktop capture/input (e.g., ':1')",
+        env="HAINDY_DESKTOP_DISPLAY",
     )
 
     # Logging Configuration
@@ -291,6 +342,8 @@ class Settings(BaseSettings):
             self.reports_dir,
             self.screenshots_dir,
             self.cache_dir,
+            self.desktop_screenshot_dir,
+            self.desktop_cache_path.parent,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
 

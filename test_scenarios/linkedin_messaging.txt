@@ -1,0 +1,16 @@
+LinkedIn Messaging POC (Desktop)
+
+Goals:
+- Operate in desktop mode using the already-open Firefox window signed into LinkedIn.
+- See a users profile and send a message. 
+
+Test actions:
+1) Search for "Vanesa Iavarone" and open the profile. This user is already a contact. If there are multiple options choose the first.
+2) Validate the profile shows the name and that a profile photo is present (no other profile checks).
+3) Click the button to send a message.
+4) Send a message saying "Hello" exactly. Nothing more.
+5) Verified the message is sent 
+
+Notes:
+- Keep the Firefox/LinkedIn window visible and frontmost; the agent will bring it forward via computer-use.
+- Assume that all permissions are given for the test to succesfully run. 

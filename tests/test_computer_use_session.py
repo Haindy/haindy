@@ -30,6 +30,8 @@ def session_settings():
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,
         actions_computer_tool_fail_fast_on_safety=True,
+        actions_computer_tool_auto_ack_safety=False,
+        actions_computer_tool_auto_ack_codes=[],
         actions_computer_tool_allowed_domains=[],
         actions_computer_tool_blocked_domains=[],
     )
@@ -237,6 +239,77 @@ async def test_computer_use_session_fail_fast_on_safety(
     assert result.safety_events
     assert mock_browser.click.await_count == 0
     mock_client.responses.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_auto_acknowledges_safety_checks(
+    mock_client, mock_browser, session_settings
+):
+    """Allow auto-acknowledgement to proceed past safety checks when configured."""
+    session_settings.actions_computer_tool_fail_fast_on_safety = True
+    session_settings.actions_computer_tool_auto_ack_safety = True
+
+    safety_response = DummyResponse(
+        {
+            "id": "resp_safe_ack",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_safe_ack",
+                    "action": {"type": "click", "x": 10, "y": 20},
+                    "pending_safety_checks": [
+                        {
+                            "id": "sc1",
+                            "code": "malicious_instructions",
+                            "message": "Potential malicious action detected.",
+                        }
+                    ],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_safe_ack_final",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Action executed after safety ack."}
+                    ],
+                }
+            ],
+        }
+    )
+
+    mock_client.responses.create.side_effect = [safety_response, final_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Click after acknowledging safety.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 6},
+    )
+
+    assert result.safety_events
+    assert result.safety_events[0].acknowledged is True
+    assert result.safety_events[0].acknowledged_ids == ["sc1"]
+    assert result.actions[0].metadata.get("acknowledged_safety_checks") == ["sc1"]
+    mock_browser.click.assert_awaited_once_with(10, 20, button="left", click_count=1)
+
+    # Verify acknowledgement is sent back to the model
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    ack_list = follow_up_payload["input"][0]["acknowledged_safety_checks"]
+    assert ack_list == ["sc1"]
+    assert result.final_output == "Action executed after safety ack."
 
 
 @pytest.mark.asyncio

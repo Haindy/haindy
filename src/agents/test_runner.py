@@ -44,9 +44,9 @@ logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 LOOP_ERROR_PREFIX = "Computer Use loop detected"
 
-COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
+COMPUTER_USE_PROMPT_MANUAL_TEMPLATE = """Computer Use execution context:
 - Executor: OpenAI Computer Use tool powered by GPT-5 with medium reasoning effort.
-- Environment: Chromium browser with full mouse, keyboard, scrolling, and screenshot control.
+- Environment: {environment_description}
 - Inputs: Each prompt is delivered with the latest screenshot and scenario metadata; do not capture screenshots yourself.
 
 Prompt construction rules:
@@ -112,6 +112,7 @@ class TestRunner(BaseAgent):
         self._latest_screenshot_bytes: Optional[bytes] = None
         self._latest_screenshot_path: Optional[str] = None
         self._latest_screenshot_origin: Optional[str] = None
+        self._computer_use_prompt_manual: str = self._build_computer_use_manual()
         
         # Action storage for Phase 17
         self._action_storage: Dict[str, Any] = {
@@ -121,6 +122,26 @@ class TestRunner(BaseAgent):
         }
         self._current_test_case_actions: Optional[Dict[str, Any]] = None
         self._current_step_actions: Optional[List[Dict[str, Any]]] = None
+
+    def _build_computer_use_manual(self) -> str:
+        """Construct the Computer Use manual with environment-aware context."""
+        environment_description = self._computer_use_environment_description()
+        return COMPUTER_USE_PROMPT_MANUAL_TEMPLATE.format(
+            environment_description=environment_description
+        )
+
+    def _computer_use_environment_description(self) -> str:
+        """Describe the execution surface for Computer Use prompts."""
+        if self._settings.desktop_mode_enabled:
+            return (
+                "Linux desktop environment with OS-level mouse, keyboard, scrolling, "
+                "and screenshot control. Interact with windows and applications directly; "
+                "do not assume a sandboxed browser-only context."
+            )
+        return (
+            "Chromium browser environment with full mouse, keyboard, scrolling, and "
+            "screenshot control."
+        )
 
     @staticmethod
     def _severity_rank(severity: BugSeverity) -> int:
@@ -266,8 +287,8 @@ class TestRunner(BaseAgent):
             status=TestStatus.IN_PROGRESS,
             environment={
                 "initial_url": initial_url,
-                "browser": "Chromium",
-                "execution_mode": "enhanced"
+                "browser": "Desktop Firefox" if self._settings.desktop_mode_enabled else "Chromium",
+                "execution_mode": "desktop" if self._settings.desktop_mode_enabled else "enhanced",
             }
         )
         
@@ -282,9 +303,13 @@ class TestRunner(BaseAgent):
         
         try:
             # Navigate to initial URL if provided
-            if initial_url and self.browser_driver:
+            if initial_url and self.browser_driver and not self._settings.desktop_mode_enabled:
                 logger.info("Navigating to initial URL", extra={"url": initial_url})
                 await self.browser_driver.navigate(initial_url)
+            elif self._settings.desktop_mode_enabled:
+                logger.info(
+                    "Desktop mode active; skipping initial navigation and assuming target window is already open."
+                )
             
             await self._ensure_initial_screenshot()
             
@@ -858,7 +883,19 @@ class TestRunner(BaseAgent):
         if screenshot_bytes:
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
 
-        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal browser actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
+        action_surface = (
+            "desktop actions" if self._settings.desktop_mode_enabled else "browser actions"
+        )
+        environment_note = (
+            "Environment: OS-level Linux desktop control; interact with windows and "
+            "applications directly, not just a browser surface."
+            if self._settings.desktop_mode_enabled
+            else "Environment: Chromium browser control."
+        )
+
+        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal {action_surface} needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
+
+{environment_note}
 
 Run & Screenshot Context:
 - Test case: {test_case.test_id} – {test_case.name}
@@ -883,7 +920,7 @@ Recent execution history (most recent first):
 {recent_history_text}
 
 Computer Use executor manual (follow this precisely when writing prompts):
-{COMPUTER_USE_PROMPT_MANUAL}
+{self._computer_use_prompt_manual}
 
 Guidelines:
 1. Inspect the screenshot before planning navigation. If the required view is already visible, emit a single `skip_navigation` action that explains the evidence (leave computer_use_prompt empty in that case).

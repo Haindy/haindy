@@ -86,6 +86,14 @@ class ActionAgent(BaseAgent):
         self.settings = settings
         self.grid_overlay = GridOverlay(grid_size=settings.grid_size)
         self.grid_refinement = GridRefinement(base_grid=self.grid_overlay)
+        self.desktop_cache = None
+        if getattr(settings, "desktop_mode_enabled", False):
+            try:
+                from src.desktop.cache import CoordinateCache
+
+                self.desktop_cache = CoordinateCache(settings.desktop_cache_path)
+            except Exception:
+                logger.debug("Desktop coordinate cache unavailable; proceeding without cache.", exc_info=True)
         
         # Configuration
         self.confidence_threshold = settings.grid_confidence_threshold
@@ -341,6 +349,7 @@ class ActionAgent(BaseAgent):
             settings=self.settings,
             debug_logger=debug_logger,
             model=self._computer_use_model,
+            environment="linux" if getattr(self.settings, "desktop_mode_enabled", False) else "browser",
         )
 
     async def _execute_computer_tool_workflow(
@@ -398,9 +407,55 @@ class ActionAgent(BaseAgent):
         if browser_state_before.url:
             session_metadata["current_url"] = browser_state_before.url
 
+        # Prefer auto-acknowledging safety checks in desktop mode to avoid benign blocks.
+        if getattr(self.settings, "desktop_mode_enabled", False):
+            session_metadata.setdefault("auto_ack_safety", True)
+            codes = getattr(self.settings, "actions_computer_tool_auto_ack_codes", [])
+            if codes:
+                session_metadata["auto_ack_safety_codes"] = codes
+
         if isinstance(context_for_result, dict):
             context_for_result["safety_identifier"] = safety_identifier
             context_for_result["interaction_mode"] = interaction_mode
+
+        cache_entry = None
+        viewport_hint: Optional[tuple[int, int]] = None
+        if getattr(self.settings, "desktop_mode_enabled", False) and self.desktop_cache:
+            try:
+                viewport_hint = await self.browser_driver.get_viewport_size() if self.browser_driver else None
+                reference_screenshot = initial_screenshot
+                if reference_screenshot is None and self.browser_driver:
+                    reference_screenshot = await self.browser_driver.screenshot()
+                cache_entry = self.desktop_cache.lookup(
+                    label=instruction.target or instruction.description or "",
+                    action=instruction.action_type.value,
+                    resolution=viewport_hint or (0, 0),
+                    screenshot_bytes=reference_screenshot,
+                )
+            except Exception:
+                logger.debug("Coordinate cache lookup failed", exc_info=True)
+
+        if cache_entry:
+            cached_hint = (
+                f"\nCached coordinate hint: target '{instruction.target}' last seen at "
+                f"({cache_entry.x}, {cache_entry.y}) for resolution {cache_entry.resolution}. "
+                "Prefer reusing this location if the UI matches."
+            )
+            goal = goal + cached_hint
+            session_metadata["cached_coordinate"] = {
+                "x": cache_entry.x,
+                "y": cache_entry.y,
+                "resolution": cache_entry.resolution,
+            }
+
+        if getattr(self.settings, "desktop_mode_enabled", False):
+            session_metadata["window_hint"] = getattr(self.settings, "desktop_window_hint", "Firefox with LinkedIn open")
+            goal = (
+                f"{goal}\n\nEnvironment details:\n"
+                f"- Desktop mode is active; interact with the existing Firefox window.\n"
+                f"- Bring the LinkedIn Firefox window to the front before acting. "
+                f"Window hint: {session_metadata['window_hint']}."
+            )
 
         session = self._new_computer_use_session(debug_logger)
 
@@ -499,6 +554,41 @@ class ActionAgent(BaseAgent):
                     "response_ids": session_result.response_ids,
                 },
             )
+
+        if getattr(self.settings, "desktop_mode_enabled", False) and self.desktop_cache:
+            try:
+                last_action = next(
+                    (
+                        turn
+                        for turn in reversed(session_result.actions)
+                        if turn.status == "executed"
+                        and turn.parameters
+                        and ("x" in turn.parameters or "end_x" in turn.parameters)
+                    ),
+                    None,
+                )
+                if last_action and browser_state_after and browser_state_after.viewport_size:
+                    x_coord = (
+                        last_action.parameters.get("x")
+                        or last_action.parameters.get("end_x")
+                        or last_action.parameters.get("start_x")
+                    )
+                    y_coord = (
+                        last_action.parameters.get("y")
+                        or last_action.parameters.get("end_y")
+                        or last_action.parameters.get("start_y")
+                    )
+                    if x_coord is not None and y_coord is not None:
+                        self.desktop_cache.add(
+                            label=instruction.target or instruction.description or "",
+                            action=last_action.action_type,
+                            x=int(float(x_coord)),
+                            y=int(float(y_coord)),
+                            resolution=browser_state_after.viewport_size,
+                            screenshot_bytes=browser_state_after.screenshot,
+                        )
+            except Exception:
+                logger.debug("Failed to update desktop coordinate cache", exc_info=True)
 
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,

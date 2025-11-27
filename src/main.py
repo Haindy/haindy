@@ -6,6 +6,7 @@ Main entry point for the application.
 import argparse
 import asyncio
 import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -254,6 +255,19 @@ Examples:
         help="Run browser in headless mode",
     )
     parser.add_argument(
+        "--desktop-mode",
+        dest="desktop_mode",
+        action="store_true",
+        default=True,
+        help="Enable desktop computer-use mode (default for POC)",
+    )
+    parser.add_argument(
+        "--browser-mode",
+        dest="desktop_mode",
+        action="store_false",
+        help="Use Playwright browser automation instead of desktop mode",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug mode with verbose logging",
@@ -347,6 +361,7 @@ async def run_test(
     override_url: Optional[str] = None,
     plan_only: bool = False,
     headless: bool = True,
+    desktop_mode: bool = True,
     output_dir: Optional[Path] = None,
     report_format: str = "html",
     timeout: int = 7200,
@@ -360,10 +375,14 @@ async def run_test(
         Exit code (0 for success, non-zero for failure)
     """
     browser_controller = None
+    desktop_controller = None
     coordinator = None
     test_plan: Optional[TestPlan] = None
     triage_result: Optional[ScopeTriageResult] = None
     settings = get_settings()
+    settings.desktop_mode_enabled = desktop_mode
+    if desktop_mode:
+        settings.actions_use_computer_tool = True
     use_progress = settings.log_format == "json"
 
     try:
@@ -402,7 +421,10 @@ async def run_test(
             triage_agent=triage_agent,
         )
 
-        initial_url = _extract_initial_url(requirements, override_url)
+        if desktop_mode:
+            initial_url = override_url or ""
+        else:
+            initial_url = _extract_initial_url(requirements, override_url)
 
         if use_progress:
             with Progress(
@@ -411,21 +433,36 @@ async def run_test(
                 console=console,
             ) as progress:
                 init_task = progress.add_task("[cyan]Initializing browser and agents...", total=None)
-                browser_controller, coordinator = await _create_coordinator_stack(
+                controller, coordinator = await _create_coordinator_stack(
                     headless=headless,
                     max_steps=max_steps,
+                    desktop_mode=desktop_mode,
                 )
+                if hasattr(controller, "driver") and not isinstance(controller, BrowserController):
+                    desktop_controller = controller
+                else:
+                    browser_controller = controller
                 progress.update(init_task, completed=True)
         else:
             console.print("[cyan]Initializing browser and agents...[/cyan]")
-            browser_controller, coordinator = await _create_coordinator_stack(
+            controller, coordinator = await _create_coordinator_stack(
                 headless=headless,
                 max_steps=max_steps,
+                desktop_mode=desktop_mode,
             )
+            if hasattr(controller, "driver") and not isinstance(controller, BrowserController):
+                desktop_controller = controller
+            else:
+                browser_controller = controller
             console.print("[green]Components initialized.[/green]")
 
-        console.print(f"\n[cyan]Navigating to:[/cyan] {initial_url}")
-        await browser_controller.navigate(initial_url)
+        if browser_controller:
+            console.print(f"\n[cyan]Navigating to:[/cyan] {initial_url}")
+            await browser_controller.navigate(initial_url)
+        else:
+            console.print(
+                "\n[cyan]Desktop mode active:[/cyan] Skipping Playwright navigation and expecting existing LinkedIn window."
+            )
 
         if use_progress:
             with Progress(
@@ -558,15 +595,37 @@ async def run_test(
             await coordinator.cleanup()
         if browser_controller:
             await browser_controller.stop()
+        if desktop_controller:
+            await desktop_controller.stop()
 
 
 async def _create_coordinator_stack(
     headless: bool,
     max_steps: int,
-) -> Tuple[BrowserController, WorkflowCoordinator]:
+    desktop_mode: bool,
+) -> Tuple[object, WorkflowCoordinator]:
     """Build and initialize the browser/controller/coordinator stack."""
-    browser_controller = BrowserController(headless=headless)
-    await browser_controller.start()
+    settings = get_settings()
+    settings.desktop_mode_enabled = desktop_mode
+
+    if desktop_mode:
+        from src.desktop.controller import DesktopController
+
+        desktop_controller = DesktopController(
+            screenshot_dir=settings.desktop_screenshot_dir,
+            cache_path=settings.desktop_cache_path,
+            prefer_resolution=(settings.desktop_preferred_width, settings.desktop_preferred_height),
+            enable_resolution_switch=settings.desktop_enable_resolution_switch,
+            display=settings.desktop_display or os.environ.get("DISPLAY", ":0"),
+        )
+        await desktop_controller.start()
+        driver = desktop_controller.driver
+        controller: object = desktop_controller
+    else:
+        browser_controller = BrowserController(headless=headless)
+        await browser_controller.start()
+        driver = browser_controller.driver
+        controller = browser_controller
 
     message_bus = MessageBus()
     state_manager = StateManager()
@@ -574,18 +633,18 @@ async def _create_coordinator_stack(
     coordinator = WorkflowCoordinator(
         message_bus=message_bus,
         state_manager=state_manager,
-        browser_driver=browser_controller.driver,
+        browser_driver=driver,
         max_steps=max_steps,
     )
 
     await coordinator.initialize()
-    return browser_controller, coordinator
+    return controller, coordinator
 
 
 async def _run_with_timeout(
     coordinator: WorkflowCoordinator,
     requirements: str,
-    initial_url: str,
+    initial_url: Optional[str],
     precomputed_plan: TestPlan,
     triage_result: ScopeTriageResult,
     timeout: int,
@@ -980,6 +1039,7 @@ async def async_main(args: Optional[list[str]] = None) -> int:
         override_url=override_url,
         plan_only=parsed_args.plan_only,
         headless=settings.browser_headless,
+        desktop_mode=parsed_args.desktop_mode,
         output_dir=parsed_args.output,
         report_format=parsed_args.format,
         timeout=parsed_args.timeout,

@@ -141,6 +141,10 @@ class SafetyEvent(BaseModel):
     acknowledged: bool = Field(
         False, description="Whether the event was acknowledged by the system"
     )
+    acknowledged_ids: List[str] = Field(
+        default_factory=list,
+        description="IDs of safety checks acknowledged in follow-up payloads",
+    )
     response_id: Optional[str] = Field(
         None, description="Response ID where the safety event originated"
     )

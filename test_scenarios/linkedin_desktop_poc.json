@@ -1,0 +1,16 @@
+{
+  "name": "LinkedIn Desktop POC",
+  "description": "Visual-only LinkedIn sourcing flow using an existing Firefox session.",
+  "requirements": "Use the already-open Firefox window that is signed in to LinkedIn on the desktop. Do not launch a new browser or open new tabs. Steps:\n1) Bring the Firefox window with LinkedIn into focus and maximize it if needed.\n2) Search for candidate A and send a connection request with a short note.\n3) Search for candidate B (an existing connection) and send a brief message.\n4) Open candidate B's profile and generate a short sourcer-style summary of their experience.\nOperate entirely via desktop screenshots and absolute coordinates (no DOM). Prefer cached coordinates when available.",
+  "expected_outcomes": [
+    "Firefox/LinkedIn window is frontmost and ready for interaction",
+    "Candidate A search completes and a connect invite is sent with a note",
+    "Candidate B search completes and an in-network message is sent",
+    "Candidate B profile is opened and summarized in the final output"
+  ],
+  "tags": ["linkedin", "desktop", "computer-use"],
+  "timeout": 900,
+  "max_steps": 40,
+  "desktop_mode": true,
+  "notes": "Ensure /dev/uinput is available and ffmpeg/xrandr are installed. Keep resolution at 1920x1080 if possible for cache stability."
+}
