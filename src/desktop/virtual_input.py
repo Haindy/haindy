@@ -99,7 +99,8 @@ class VirtualInput:
     async def type_text(self, text: str) -> None:
         """Type text using key events."""
         for char in text:
-            await self._emit_char(char)
+            self._emit_char(char)
+            await asyncio.sleep(0.005)
 
     async def press_key(self, key: str | Iterable[str]) -> None:
         """Press a key or key combination."""
