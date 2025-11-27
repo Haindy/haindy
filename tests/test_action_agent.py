@@ -73,6 +73,8 @@ def action_agent(mock_settings, mock_browser_driver):
         # Mock the OpenAI client
         agent._client = AsyncMock()
         agent.call_openai = AsyncMock()
+        agent.use_computer_tool = False
+        agent.settings.actions_use_computer_tool = False
         return agent
 
 

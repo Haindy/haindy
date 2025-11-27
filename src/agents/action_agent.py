@@ -244,44 +244,6 @@ class ActionAgent(BaseAgent):
             return False
         return True
 
-    def _build_computer_use_goal(
-        self,
-        instruction: ActionInstruction,
-        test_step: TestStep,
-        interaction_mode: str,
-    ) -> str:
-        """Construct a goal prompt for the Computer Use tool."""
-        description = instruction.description or test_step.description
-        components = []
-        if description:
-            components.append(description.strip())
-        if instruction.target:
-            components.append(f"Target element description: {instruction.target}")
-        if instruction.action_type == ActionType.TYPE and instruction.value:
-            components.append(f"Text to input: {instruction.value}")
-        elif instruction.action_type == ActionType.KEY_PRESS and instruction.value:
-            components.append(f"Key to press: {instruction.value}")
-        elif instruction.value:
-            components.append(f"Associated value: {instruction.value}")
-        expected = instruction.expected_outcome or test_step.expected_result
-        if expected:
-            components.append(f"Expected outcome: {expected}")
-        if interaction_mode == "observe_only":
-            components.append(
-                "You are in observe-only mode. Do not interact with the page; inspect the UI and describe what you see."
-            )
-        else:
-            components.append(
-                "You must perform this action yourself. Do not ask for confirmation—execute the interaction directly."
-            )
-        components.append(
-            "Use the current screenshot to understand the UI. If the action cannot be completed exactly, describe why."
-        )
-        components.append(
-            "If the same approach fails three times in a row, switch to a different method (e.g., typing the value, using keyboard shortcuts, or selecting a more reliable control). Avoid looping on ineffective interactions."
-        )
-        return "\n".join(components)
-
     @staticmethod
     def _slugify_identifier(value: str, max_length: int = 32) -> str:
         """Create a filesystem and API friendly slug from arbitrary text."""
@@ -406,7 +368,11 @@ class ActionAgent(BaseAgent):
         instruction = test_step.action_instruction
         is_assert_step = instruction.action_type == ActionType.ASSERT
         interaction_mode = "observe_only" if is_assert_step else "execute"
-        goal = self._build_computer_use_goal(instruction, test_step, interaction_mode)
+        goal = instruction.computer_use_prompt
+        if not goal:
+            raise ComputerUseExecutionError(
+                "Missing computer_use_prompt for Computer Use workflow."
+            )
 
         if hasattr(test_context, "get"):
             context_lookup = test_context

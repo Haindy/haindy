@@ -78,6 +78,10 @@ class ActionInstruction(BaseModel):
     target: Optional[str] = Field(None, description="Target element description")
     value: Optional[str] = Field(None, description="Value for type actions")
     expected_outcome: str = Field(..., description="Expected result of the action")
+    computer_use_prompt: Optional[str] = Field(
+        None,
+        description="Fully prepared prompt for the Computer Use executor",
+    )
     timeout: int = Field(5000, description="Timeout in milliseconds")
 
 

@@ -456,6 +456,49 @@ class TestEndToEndIntegration:
         """Test main execution with timeout."""
         # Mock timeout during execution
         mock_coordinator.execute_test_from_requirements.side_effect = asyncio.TimeoutError()
+
+        from src.core.types import (
+            ActionInstruction,
+            TestCase,
+            TestCasePriority,
+            TestPlan,
+            TestStep,
+        )
+        test_case = TestCase(
+            test_id="TC-Timeout",
+            name="Timeout Case",
+            description="Simulate execution timeout",
+            priority=TestCasePriority.MEDIUM,
+            steps=[
+                TestStep(
+                    step_number=1,
+                    description="Navigate somewhere",
+                    action="Navigate somewhere",
+                    expected_result="Page loads",
+                    action_instruction=ActionInstruction(
+                        action_type="navigate",
+                        description="Navigate somewhere",
+                        target="example page",
+                        expected_outcome="Page loads",
+                    ),
+                )
+            ],
+        )
+        test_plan = TestPlan(
+            name="Timeout Plan",
+            description="Plan used to exercise timeout handling",
+            requirements_source="Test login",
+            test_cases=[test_case],
+            steps=test_case.steps,
+        )
+        triage_result = ScopeTriageResult(
+            in_scope="Timeout triage summary",
+            explicit_exclusions=[],
+            ambiguous_points=[],
+            blocking_questions=[],
+        )
+        pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
+        mock_coordinator.get_scope_triage_result.return_value = triage_result
         
         # Mock interactive input
         with patch("src.main.get_interactive_requirements") as mock_get_req:
@@ -463,11 +506,14 @@ class TestEndToEndIntegration:
             
             with patch("src.main.BrowserController", return_value=mock_browser_controller):
                 with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    # Run main with short timeout
-                    exit_code = await async_main([
-                        "--requirements",
-                        "--timeout", "1",
-                    ])
+                    with patch("src.main.ScopeTriageAgent", return_value=MagicMock()), \
+                         patch("src.main.TestPlannerAgent", return_value=MagicMock()), \
+                         patch("src.main.run_scope_triage_and_plan", pipeline_mock):
+                        # Run main with short timeout
+                        exit_code = await async_main([
+                            "--requirements",
+                            "--timeout", "1",
+                        ])
         
         # Verify timeout exit code
         assert exit_code == 2

@@ -44,6 +44,24 @@ logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 LOOP_ERROR_PREFIX = "Computer Use loop detected"
 
+COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
+- Executor: OpenAI Computer Use tool powered by GPT-5 with medium reasoning effort.
+- Environment: Chromium browser with full mouse, keyboard, scrolling, and screenshot control.
+- Inputs: Each prompt is delivered with the latest screenshot and scenario metadata; do not capture screenshots yourself.
+
+Prompt construction rules:
+1. Begin with a concise imperative goal that states the desired outcome.
+2. Identify the UI target(s) using the exact labels a human sees (no CSS/XPath speculation).
+3. Provide any text to enter or keys to press when relevant.
+4. Restate the expected outcome so the executor can verify completion on its own.
+5. Instruct the executor to act directly without seeking confirmation from the user.
+6. Require a strategy shift after three identical failures and ask for an explanation if blocked.
+7. Tell it to rely on the provided screenshot for context and to scroll or refocus if elements are off-screen.
+8. For observation-only (`assert`) actions, explicitly forbid interactions and request a visual verification summary instead.
+9. Avoid backend assumptions, hidden DOM references, or multi-step checklists—each prompt should cover one cohesive action.
+
+If no interaction is required (`skip_navigation`), leave the computer_use_prompt empty.""".strip()
+
 
 class TestRunner(BaseAgent):
     """
@@ -840,7 +858,7 @@ class TestRunner(BaseAgent):
         if screenshot_bytes:
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
 
-        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal browser actions needed for the next step.
+        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal browser actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
 
 Run & Screenshot Context:
 - Test case: {test_case.test_id} – {test_case.name}
@@ -864,14 +882,18 @@ Full test case outline:
 Recent execution history (most recent first):
 {recent_history_text}
 
+Computer Use executor manual (follow this precisely when writing prompts):
+{COMPUTER_USE_PROMPT_MANUAL}
+
 Guidelines:
-1. Inspect the screenshot before planning navigation. If the required view is already visible, emit a single `skip_navigation` action that explains the evidence.
-2. Provide high-level, outcome-focused actions. For text or form inputs, emit a single `type` action with the final value and let the Action Agent/Computer Use model handle focusing, clearing, or key presses. Do not emit helper `click`/`key_press` steps for the same control.
-3. Only break a step into multiple actions when it truly touches different controls (e.g., separate date and time pickers). Otherwise, keep the entire outcome in one action so the Action Agent can decide the mechanics.
+1. Inspect the screenshot before planning navigation. If the required view is already visible, emit a single `skip_navigation` action that explains the evidence (leave computer_use_prompt empty in that case).
+2. Provide high-level, outcome-focused actions. For text or form inputs, emit a single `type` action with the final value and let the Computer Use model handle focusing, clearing, or key presses—do not add helper clicks for the same control.
+3. Only break a step into multiple actions when it truly touches different controls (e.g., separate date and time pickers). Otherwise, keep the entire outcome in one action so the executor can decide the mechanics.
 4. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
 5. Use the previous/next step context to stay aligned with the intended flow.
+6. Every non-skip action must include a `computer_use_prompt` that is ready to send directly to the Computer Use model—no additional wrapping will be added later.
 
-Action schema for each entry:
+Action schema for each entry (JSON object):
 - type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
   • Use `skip_navigation` only when navigation is already satisfied; do not provide a value.
 - target: Human description of the element or high-level goal.
@@ -879,8 +901,9 @@ Action schema for each entry:
 - description: Outcome-focused explanation so the Action Agent knows what success looks like.
 - critical: Whether failure should halt remaining actions (true/false).
 - expected_outcome (optional): Override the step-level expected result only if needed.
+- computer_use_prompt: String containing the final directive for the Computer Use model, constructed according to the manual above. Required unless type is `skip_navigation`.
 
-Respond with a JSON object containing an "actions" array."""
+Respond with a JSON object containing an "actions" array where every item follows this schema exactly."""
 
         message_content: List[Dict[str, Any]] = [{"type": "input_text", "text": prompt}]
         if screenshot_b64:
@@ -1027,7 +1050,8 @@ Respond with a JSON object containing an "actions" array."""
                 description=action.get("description", ""),
                 target=action.get("target", ""),
                 value=action.get("value"),
-                expected_outcome=action.get("expected_outcome", step.expected_result)
+                expected_outcome=action.get("expected_outcome", step.expected_result),
+                computer_use_prompt=action.get("computer_use_prompt"),
             )
             
             # Create a temporary TestStep for the action
