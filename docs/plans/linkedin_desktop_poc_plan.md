@@ -62,3 +62,11 @@
 - Desktop mode executes the four LinkedIn steps visually with no DOM or Playwright usage.
 - Coordinate cache reduces repeated computer-use calls on subsequent runs at the same resolution.
 - Toggle-able integration that leaves existing browser path unaffected when desktop_mode is off. 
+
+## Manual prerequisites (operator steps)
+Follow before running the POC; none of these are automated:
+- **Enable uinput** (root): `sudo modprobe uinput`; ensure persistence by adding `uinput` to `/etc/modules` or equivalent. If `/dev/uinput` permissions are restrictive, add your user to the appropriate group or set udev rules (e.g., `/etc/udev/rules.d/99-uinput.rules` with `KERNEL=="uinput", MODE="0660", GROUP="input"`), then reload udev and re-login.
+- **Confirm single active display**: `xrandr --listmonitors` should show 1. If more than one, either disable extras or be aware the plan will skip resolution downshift and cache entries will be display-specific.
+- **Resolution downshift readiness**: Verify your primary output supports 1920x1080@60 via `xrandr --query`. If unsupported, the run will keep native resolution.
+- **Open and sign in**: Manually open Firefox (or chosen browser) with an authenticated LinkedIn session and a visible window. Leave it in a normal/maximizable state; the agent will bring it forward via computer-use.
+- **Environment vars/keys**: Ensure `OPENAI_API_KEY` is set and that your account has access to `gpt-5.1`, `gpt-5.1-mini`, and `computer-use-preview`.
