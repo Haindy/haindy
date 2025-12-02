@@ -477,11 +477,31 @@ class ComputerUseSession:
                     key_sequence = self._resolve_key_sequence(action, metadata)
                     if not key_sequence:
                         raise ComputerUseExecutionError("Key press action missing key payload.")
+
+                    normalized_keys = [
+                        normalize_key_sequence(key) for key in key_sequence if key
+                    ]
+                    normalized_keys = [key for key in normalized_keys if key]
+                    if not normalized_keys:
+                        raise ComputerUseExecutionError("Key press action missing key payload.")
+
                     if not action.get("keys"):
                         turn.metadata["synthetic_key_sequence"] = key_sequence
-                    for key in key_sequence:
-                        normalized = normalize_key_sequence(key)
-                        await self._browser.press_key(normalized)
+
+                    # Treat multi-key sequences as a chord so modifiers (e.g., Ctrl+A)
+                    # press together instead of firing as sequential single keys.
+                    if len(normalized_keys) > 1:
+                        chord_parts: List[str] = []
+                        for key in normalized_keys:
+                            if "+" in key:
+                                chord_parts.extend(part for part in key.split("+") if part)
+                            else:
+                                chord_parts.append(key)
+                        chord = "+".join(chord_parts)
+                        turn.metadata["combined_key_sequence"] = chord
+                        await self._browser.press_key(chord)
+                    else:
+                        await self._browser.press_key(normalized_keys[0])
                 elif action_type == "wait":
                     duration = int(
                         action.get("duration_ms")

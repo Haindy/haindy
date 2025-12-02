@@ -127,6 +127,61 @@ async def test_computer_use_session_executes_actions_successfully(
 
 
 @pytest.mark.asyncio
+async def test_computer_use_session_presses_key_chords_together(
+    mock_client, mock_browser, session_settings
+):
+    """Ensure multi-key sequences are sent as a single chord (e.g., Ctrl+A)."""
+    initial_response = DummyResponse(
+        {
+            "id": "resp_keypress",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_keypress",
+                    "action": {"type": "keypress", "keys": ["CTRL", "A"]},
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_keypress_final",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Chord executed."}
+                    ],
+                }
+            ],
+        }
+    )
+
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Send select-all shortcut.",
+        initial_screenshot=b"bytes",
+        metadata={"step_number": 1},
+    )
+
+    assert len(result.actions) == 1
+    turn = result.actions[0]
+    assert turn.status == "executed"
+    mock_browser.press_key.assert_awaited_once_with("Control+A")
+
+
+@pytest.mark.asyncio
 async def test_computer_use_session_blocks_actions_in_observe_mode(
     mock_client, mock_browser, session_settings
 ):
