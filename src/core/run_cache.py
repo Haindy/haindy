@@ -140,6 +140,7 @@ class PersistentRunCache:
         step_number: int,
         screenshot_hash: Optional[str],
         model: Optional[str],
+        ignore_screenshot_hash: bool = False,
     ) -> Optional[Dict[str, Any]]:
         cache = self._load(signature)
         key = f"{case_id}::{step_number}"
@@ -151,7 +152,12 @@ class PersistentRunCache:
         if model and entry.get("model") and entry.get("model") != model:
             return None
         cached_hash = entry.get("screenshot_hash")
-        if screenshot_hash and cached_hash and cached_hash != screenshot_hash:
+        if (
+            not ignore_screenshot_hash
+            and screenshot_hash
+            and cached_hash
+            and cached_hash != screenshot_hash
+        ):
             return None
         return {"cache_key": key, "actions": entry.get("actions", [])}
 

@@ -1,0 +1,16 @@
+LinkedIn Search POC (Desktop)
+
+Goals:
+- Operate in desktop mode using the already-open Firefox window signed into LinkedIn.
+- See a users profile and browse their posts. 
+
+Test actions:
+1) Search for "Vanesa Iavarone" and click the first suggestion. The user is a connection so the right one will appear first.
+2) Validate the profile shows the name and that a profile photo is present (no other profile checks).
+3) Click the button to see Vanesa's posts. You might need to scroll down to see it.
+4) Check that there are posts (no need to check all, just the presence of one post is enough).
+5) Return to home page. 
+
+Notes:
+- Keep the Firefox/LinkedIn window visible and frontmost; the agent will bring it forward via computer-use.
+- Assume that all permissions are given for the test to succesfully run. 

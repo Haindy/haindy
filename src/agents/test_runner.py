@@ -1000,13 +1000,31 @@ class TestRunner(BaseAgent):
 
         if use_cache and self._should_use_cache_for_case(test_case):
             try:
+                hashless_cache_used = False
                 cached = self._run_cache.get_step_actions(
                     signature=self._run_signature,
                     case_id=str(test_case.case_id),
                     step_number=step.step_number,
                     screenshot_hash=screenshot_hash,
                     model=self.model,
+                    ignore_screenshot_hash=False,
                 ) if self._run_cache else None
+
+                # In desktop mode, allow fallback reuse even when the screenshot hash changes
+                if (
+                    not cached
+                    and self._settings.desktop_mode_enabled
+                    and self._run_cache
+                ):
+                    cached = self._run_cache.get_step_actions(
+                        signature=self._run_signature,
+                        case_id=str(test_case.case_id),
+                        step_number=step.step_number,
+                        screenshot_hash=screenshot_hash,
+                        model=self.model,
+                        ignore_screenshot_hash=True,
+                    )
+                    hashless_cache_used = bool(cached)
             except Exception:
                 cached = None
                 logger.debug("Step cache lookup failed", exc_info=True)
@@ -1018,10 +1036,12 @@ class TestRunner(BaseAgent):
                         "test_case": test_case.name,
                         "step_number": step.step_number,
                         "cache_key": cached.get("cache_key"),
+                        "ignore_screenshot_hash": hashless_cache_used,
                     },
                 )
                 interpretation_meta["interpretation_source"] = "cache"
                 interpretation_meta["cache_key"] = cached.get("cache_key")
+                interpretation_meta["ignore_screenshot_hash"] = hashless_cache_used
                 return cached.get("actions", []), interpretation_meta
 
         action_surface = (
