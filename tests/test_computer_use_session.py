@@ -2,6 +2,7 @@
 Tests for the Computer Use session orchestration.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,7 +22,7 @@ class DummyResponse:
 
 
 @pytest.fixture
-def session_settings():
+def session_settings(tmp_path):
     """Provide minimal settings required by the session."""
     return SimpleNamespace(
         openai_request_timeout_seconds=900,
@@ -32,6 +33,17 @@ def session_settings():
         actions_computer_tool_fail_fast_on_safety=True,
         actions_computer_tool_allowed_domains=[],
         actions_computer_tool_blocked_domains=[],
+        scroll_turn_multiplier=3.0,
+        scroll_default_magnitude=450,
+        scroll_max_magnitude=600,
+        cu_provider="openai",
+        google_cu_model="gemini-2.5-computer-use-preview-10-2025",
+        vertex_api_key="",
+        vertex_project="",
+        vertex_location="us-central1",
+        cu_safety_policy="auto_approve",
+        model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
+        desktop_coordinate_cache_path=tmp_path / "coords.json",
     )
 
 

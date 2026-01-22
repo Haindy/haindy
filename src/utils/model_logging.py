@@ -1,0 +1,183 @@
+"""Utilities for recording raw model prompts and responses."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
+
+try:
+    from src.monitoring.logger import get_run_id
+except Exception:  # pragma: no cover - defensive import
+    get_run_id = lambda: "unknown"  # type: ignore[assignment]
+
+
+def _now_iso() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _normalize_response_obj(response: Any) -> Any:
+    if response is None:
+        return None
+    if isinstance(response, (str, int, float, bool)):
+        return response
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "model_dump"):
+        try:
+            return response.model_dump()
+        except Exception:
+            return str(response)
+    if hasattr(response, "to_dict"):
+        try:
+            return response.to_dict()
+        except Exception:
+            return str(response)
+    return str(response)
+
+
+def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
+    """Recursively coerce values into JSON-serializable shapes."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        try:
+            length = len(value)
+        except Exception:
+            length = -1
+        return f"<<bytes:{length}>>"
+    if isinstance(value, Path):
+        return str(value)
+
+    if _seen is None:
+        _seen = set()
+    value_id = id(value)
+    if value_id in _seen:
+        return "<<cycle>>"
+    _seen.add(value_id)
+
+    if isinstance(value, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, item in value.items():
+            sanitized[str(key)] = _sanitize_for_json(item, _seen=_seen)
+        return sanitized
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_for_json(item, _seen=_seen) for item in value]
+
+    if hasattr(value, "model_dump"):
+        try:
+            return _sanitize_for_json(value.model_dump(), _seen=_seen)
+        except Exception:
+            return str(value)
+    if hasattr(value, "to_dict"):
+        try:
+            return _sanitize_for_json(value.to_dict(), _seen=_seen)
+        except Exception:
+            return str(value)
+
+    return str(value)
+
+
+class ModelCallLogger:
+    """Append-only logger for model inputs/outputs with optional screenshots."""
+
+    def __init__(self, log_path: Path) -> None:
+        self._log_path = log_path
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._screenshot_dir = self._log_path.parent / "screenshots"
+        self._screenshot_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = asyncio.Lock()
+
+    async def log_call(
+        self,
+        *,
+        agent: str,
+        model: str,
+        prompt: str,
+        request_payload: Optional[Any],
+        response: Any,
+        screenshots: Optional[Sequence[Tuple[str, bytes]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        screenshot_entries: List[Dict[str, str]] = []
+        screenshot_errors: List[Dict[str, str]] = []
+        if screenshots:
+            for label, data in screenshots:
+                if not data:
+                    continue
+                try:
+                    path = self._persist_screenshot(label, data)
+                except Exception as exc:  # pragma: no cover - best-effort logging
+                    screenshot_errors.append({"label": label, "error": str(exc)})
+                    continue
+                else:
+                    screenshot_entries.append({"label": label, "path": path})
+
+        entry = {
+            "timestamp": _now_iso(),
+            "run_id": get_run_id(),
+            "agent": agent,
+            "model": model,
+            "prompt": prompt,
+            "request_payload": _sanitize_for_json(request_payload),
+            "prompt_has_screenshot": bool(screenshot_entries),
+            "attached_screenshots": screenshot_entries,
+            "response": _sanitize_for_json(_normalize_response_obj(response)),
+            "metadata": _sanitize_for_json(metadata or {}),
+        }
+        if screenshot_errors:
+            entry["metadata"]["screenshot_errors"] = screenshot_errors
+
+        try:
+            serialized = json.dumps(entry, ensure_ascii=False)
+        except Exception as exc:  # pragma: no cover - logging should never crash a run
+            fallback = {
+                "timestamp": entry.get("timestamp"),
+                "agent": agent,
+                "model": model,
+                "prompt": prompt,
+                "prompt_has_screenshot": bool(screenshot_entries),
+                "attached_screenshots": screenshot_entries,
+                "serialization_error": str(exc),
+            }
+            serialized = json.dumps(fallback, ensure_ascii=False, default=str)
+
+        try:
+            async with self._lock:
+                with self._log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(serialized)
+                    handle.write("\n")
+        except Exception:  # pragma: no cover - logging must be non-fatal
+            logger.debug("ModelCallLogger failed to write log entry", exc_info=True)
+            return
+
+    def _persist_screenshot(self, label: str, data: bytes) -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        safe_label = label.replace(" ", "_").replace("/", "-")
+        filename = f"{safe_label}_{timestamp}.png"
+        path = self._screenshot_dir / filename
+        path.write_bytes(data)
+        return str(path)
+
+
+_LOGGER_CACHE: Dict[Path, ModelCallLogger] = {}
+
+
+def get_model_logger(log_path: Path) -> ModelCallLogger:
+    """Return a singleton logger instance per log file path."""
+    resolved = log_path.resolve()
+    cached = _LOGGER_CACHE.get(resolved)
+    if cached:
+        return cached
+    logger_instance = ModelCallLogger(resolved)
+    _LOGGER_CACHE[resolved] = logger_instance
+    return logger_instance

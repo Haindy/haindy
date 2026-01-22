@@ -24,7 +24,7 @@ from src.agents.test_planner import TestPlannerAgent
 from src.config.settings import get_settings
 from src.error_handling import ScopeTriageBlockedError
 from src.models.openai_client import ResponseStreamObserver
-from src.monitoring.logger import get_logger, setup_logging
+from src.monitoring.logger import get_logger, setup_logging, get_run_id
 from src.monitoring.reporter import TestReporter
 from src.monitoring.debug_logger import initialize_debug_logger
 from src.orchestration.communication import MessageBus
@@ -367,7 +367,9 @@ async def run_test(
     use_progress = settings.log_format == "json"
 
     try:
-        test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        test_run_id = get_run_id()
+        if test_run_id == "unknown":
+            test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         debug_logger = initialize_debug_logger(test_run_id)
         console.print(f"[dim]Debug logging initialized for run: {test_run_id}[/dim]")

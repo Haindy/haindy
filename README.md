@@ -10,6 +10,7 @@ HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to
 
 - **Multi-Agent Architecture**: Three specialized AI agents (Test Planner, Test Runner, Action Agent)
 - **DOM-Free Visual Interaction**: Adaptive grid-based interaction with automatic refinement
+- **Desktop + Gemini Computer Use**: Optional OS-level driver with Gemini provider support
 - **Just-In-Time Scripted Automation**: Records successful actions for faster replay
 - **Hierarchical Validation**: Multi-layer validation to prevent hallucinations
 - **Detailed Execution Journaling**: Comprehensive logging in structured natural language
@@ -81,6 +82,26 @@ If the agent-specific variables are omitted, the system falls back to the global
 values. Override per agent to fine-tune cost vs. accuracy or adjust request timeouts
 for long-running GPT-5 reasoning calls.
 
+#### Computer Use (Gemini + Desktop) Configuration
+```env
+# Enable Computer Use tool execution
+HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+
+# Choose provider (default: google)
+CU_PROVIDER=google
+GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
+VERTEX_API_KEY=your-vertex-api-key
+VERTEX_PROJECT=your-vertex-project
+VERTEX_LOCATION=us-central1
+CU_SAFETY_POLICY=auto_approve
+
+# Driver backend: playwright or desktop
+HAINDY_DRIVER_BACKEND=desktop
+```
+
+Desktop automation has OS-level dependencies (`ffmpeg`, `xrandr`, `/dev/uinput`, `xclip`).
+See `docs/RUNBOOK.md` for setup details.
+
 ## Usage
 
 ### Running Test Scenarios
@@ -98,6 +119,14 @@ python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
 
 # Emit structured JSON logs (suitable for automation)
 python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --verbose
+```
+
+#### Desktop + Gemini Quickstart
+```bash
+export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+export CU_PROVIDER=google
+export HAINDY_DRIVER_BACKEND=desktop
+python -m src.main -j test_scenarios/wikipedia_search.json
 ```
 
 #### Interactive Mode
@@ -205,6 +234,8 @@ The repository includes example test scenarios in the `test_scenarios/` director
 Test execution generates:
 - **HTML Report**: Detailed test report with screenshots and AI conversations
 - **Debug Logs**: Timestamped directory with all screenshots and interactions
+- **Model Logs + Trace**: `data/model_logs/model_calls.jsonl` and `data/traces/<run_id>.json`
+- **Caches**: task plan, execution replay, and desktop coordinate caches under `data/`
 - **Console Output**: Real-time progress and summary
 
 Reports are saved to:

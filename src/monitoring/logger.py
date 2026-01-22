@@ -5,6 +5,7 @@ Logging configuration and utilities for the HAINDY framework.
 import json
 import logging
 import re
+import uuid
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,8 @@ STANDARD_LOG_RECORD_ATTRS = {
     "message",
     "asctime",
 }
+
+_CURRENT_RUN_ID: Optional[str] = None
 
 HUMAN_LOG_EXTRA_FIELD_ORDER = [
     "taskName",
@@ -92,6 +95,7 @@ class JSONFormatter(logging.Formatter):
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
+            "run_id": get_run_id(),
         }
 
         # Add all extra fields dynamically
@@ -241,6 +245,22 @@ class AgentLogAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
+def _generate_run_id() -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{timestamp}_{uuid.uuid4().hex[:8]}"
+
+
+def set_run_id(run_id: str) -> None:
+    """Set the active run identifier for logging and tracing."""
+    global _CURRENT_RUN_ID
+    _CURRENT_RUN_ID = run_id
+
+
+def get_run_id() -> str:
+    """Return the active run identifier."""
+    return _CURRENT_RUN_ID or "unknown"
+
+
 def setup_logging(
     log_level: Optional[str] = None,
     log_format: Optional[str] = None,
@@ -319,6 +339,8 @@ def setup_logging(
 
     # Log startup message
     logger = logging.getLogger("haindy")
+    if get_run_id() == "unknown":
+        set_run_id(_generate_run_id())
     logger.info(
         f"HAINDY logging initialized",
         extra={

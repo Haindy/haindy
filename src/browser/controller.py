@@ -5,10 +5,10 @@ High-level browser controller combining browser and grid functionality.
 from pathlib import Path
 from typing import Optional
 
-from src.browser.driver import PlaywrightDriver
 from src.browser.instrumented_driver import InstrumentedBrowserDriver
 from src.config.settings import get_settings
 from src.core.types import GridCoordinate
+from src.desktop.driver import DesktopDriver
 from src.grid.overlay import GridOverlay
 from src.grid.refinement import GridRefinement
 
@@ -20,6 +20,7 @@ class BrowserController:
         self,
         headless: Optional[bool] = None,
         grid_size: Optional[int] = None,
+        driver_backend: Optional[str] = None,
     ) -> None:
         """
         Initialize browser controller.
@@ -34,8 +35,8 @@ class BrowserController:
         self.logger = get_logger("browser.controller")
 
         # Initialize components
-        # Use InstrumentedBrowserDriver for action tracking
-        self.driver = InstrumentedBrowserDriver(headless=headless)
+        self.driver_backend = (driver_backend or self.settings.driver_backend).strip().lower()
+        self.driver = self._build_driver(headless=headless)
         self.grid = GridOverlay(grid_size=grid_size)
         self.refinement = GridRefinement(self.grid)
 
@@ -50,13 +51,35 @@ class BrowserController:
         self.grid.initialize(width, height)
 
         self._initialized = True
-        self.logger.info("Browser controller started")
+        self.logger.info(
+            "Browser controller started",
+            extra={"driver_backend": self.driver_backend},
+        )
 
     async def stop(self) -> None:
         """Stop the browser."""
         await self.driver.stop()
         self._initialized = False
-        self.logger.info("Browser controller stopped")
+        self.logger.info(
+            "Browser controller stopped",
+            extra={"driver_backend": self.driver_backend},
+        )
+
+    def _build_driver(self, headless: Optional[bool]) -> InstrumentedBrowserDriver | DesktopDriver:
+        if self.driver_backend == "desktop":
+            return DesktopDriver(
+                screenshot_dir=self.settings.desktop_screenshot_dir,
+                cache_path=self.settings.desktop_coordinate_cache_path,
+                prefer_resolution=self.settings.desktop_prefer_resolution,
+                enable_resolution_switch=self.settings.desktop_enable_resolution_switch,
+                display=self.settings.desktop_display,
+                keyboard_layout=self.settings.desktop_keyboard_layout,
+                keyboard_emit_scancodes=self.settings.desktop_enable_keyboard_scancodes,
+                keyboard_key_delay_ms=self.settings.desktop_keyboard_key_delay_ms,
+                clipboard_timeout_seconds=self.settings.desktop_clipboard_timeout_seconds,
+                clipboard_hold_seconds=self.settings.desktop_clipboard_hold_seconds,
+            )
+        return InstrumentedBrowserDriver(headless=headless)
 
     async def navigate(self, url: str) -> None:
         """Navigate to a URL."""
