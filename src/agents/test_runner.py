@@ -124,7 +124,10 @@ class TestRunner(BaseAgent):
         self._environment = (
             "desktop" if self._settings.driver_backend == "desktop" else "browser"
         )
-        self._model_logger = get_model_logger(self._settings.model_log_path)
+        self._model_logger = get_model_logger(
+            self._settings.model_log_path,
+            max_screenshots=getattr(self._settings, "max_screenshots", None),
+        )
         run_id = get_run_id()
         if run_id == "unknown":
             run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8]

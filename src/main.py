@@ -34,6 +34,7 @@ from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
+from src.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
 
 console = Console()
 logger = get_logger("main")
@@ -263,6 +264,20 @@ Examples:
         action="store_true",
         help="Enable verbose structured logging output (JSON)",
     )
+    record_group = parser.add_mutually_exclusive_group()
+    record_group.add_argument(
+        "--record",
+        action="store_true",
+        dest="record",
+        help="Force-enable desktop screen recording for this run",
+    )
+    record_group.add_argument(
+        "--no-record",
+        action="store_false",
+        dest="record",
+        help="Force-disable desktop screen recording for this run",
+    )
+    parser.set_defaults(record=None)
     
     # Output options
     parser.add_argument(
@@ -352,6 +367,7 @@ async def run_test(
     timeout: int = 7200,
     max_steps: int = 50,
     berserk: bool = False,
+    record_override: Optional[bool] = None,
 ) -> int:
     """
     Run a test with the given requirements.
@@ -361,6 +377,8 @@ async def run_test(
     """
     browser_controller = None
     coordinator = None
+    screen_recorder: Optional[ScreenRecorder] = None
+    recording_artifact_path: Optional[Path] = None
     test_plan: Optional[TestPlan] = None
     triage_result: Optional[ScopeTriageResult] = None
     settings = get_settings()
@@ -426,6 +444,35 @@ async def run_test(
             )
             console.print("[green]Components initialized.[/green]")
 
+        should_record = bool(settings.enable_screen_recording)
+        if record_override is not None:
+            should_record = bool(record_override)
+        if should_record and settings.driver_backend != "desktop":
+            logger.info(
+                "Screen recording requested but skipped for non-desktop backend",
+                extra={"driver_backend": settings.driver_backend},
+            )
+        if should_record and settings.driver_backend == "desktop":
+            screen_recorder = ScreenRecorder(
+                output_dir=settings.screen_recording_output_dir,
+                framerate=settings.screen_recording_framerate,
+                draw_cursor=settings.screen_recording_draw_cursor,
+                filename_prefix=settings.screen_recording_prefix,
+            )
+            try:
+                recording_artifact_path = screen_recorder.start()
+                console.print(
+                    f"[dim]Screen recording started:[/dim] {recording_artifact_path}"
+                )
+            except ScreenRecorderError as exc:
+                logger.warning(
+                    "Unable to start screen recording",
+                    exc_info=True,
+                    extra={"error": str(exc)},
+                )
+                screen_recorder = None
+                recording_artifact_path = None
+
         console.print(f"\n[cyan]Navigating to:[/cyan] {initial_url}")
         await browser_controller.navigate(initial_url)
 
@@ -458,6 +505,19 @@ async def run_test(
                 timeout=timeout,
             )
             console.print("[green]Test run completed.[/green]")
+        if screen_recorder:
+            try:
+                stopped_path = screen_recorder.stop()
+                if stopped_path:
+                    recording_artifact_path = stopped_path
+            except ScreenRecorderError as exc:
+                logger.warning(
+                    "Unable to stop screen recording cleanly",
+                    exc_info=True,
+                    extra={"error": str(exc)},
+                )
+            finally:
+                screen_recorder = None
 
         console.print("\n[bold]Test Execution Summary:[/bold]")
 
@@ -469,6 +529,8 @@ async def run_test(
 
         report = getattr(test_state, "test_report", None)
         if report:
+            if recording_artifact_path:
+                report.artifacts["screen_recording_path"] = str(recording_artifact_path)
             test_cases = getattr(report, "test_cases", [])
             total_test_cases = len(test_cases)
             completed_test_cases = len(
@@ -556,6 +618,15 @@ async def run_test(
         logger.exception("Test execution failed")
         return 1
     finally:
+        if screen_recorder:
+            try:
+                stopped_path = screen_recorder.stop()
+                if stopped_path:
+                    recording_artifact_path = stopped_path
+            except ScreenRecorderError:
+                logger.warning(
+                    "Screen recording stop failed during cleanup", exc_info=True
+                )
         if coordinator:
             await coordinator.cleanup()
         if browser_controller:
@@ -987,6 +1058,7 @@ async def async_main(args: Optional[list[str]] = None) -> int:
         timeout=parsed_args.timeout,
         max_steps=parsed_args.max_steps,
         berserk=parsed_args.berserk,
+        record_override=parsed_args.record,
     )
 
 

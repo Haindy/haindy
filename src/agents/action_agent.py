@@ -506,7 +506,12 @@ class ActionAgent(BaseAgent):
         )
 
         execution_error = None
-        if failing_action and failing_action.error_message:
+        if session_result.terminal_status == "failed":
+            execution_error = (
+                session_result.terminal_failure_reason
+                or "Computer Use session terminated with a failure state."
+            )
+        elif failing_action and failing_action.error_message:
             execution_error = failing_action.error_message
         elif failing_action:
             execution_error = (
@@ -565,6 +570,8 @@ class ActionAgent(BaseAgent):
                 additional_context={
                     "step_number": test_step.step_number,
                     "response_ids": session_result.response_ids,
+                    "terminal_status": session_result.terminal_status,
+                    "terminal_failure_code": session_result.terminal_failure_code,
                 },
             )
 
@@ -769,7 +776,10 @@ class ActionAgent(BaseAgent):
                 keys = params.get("key") or params.get("value") or params.get("keys")
                 if keys is None:
                     continue
-                recorded.append({"type": "press_key", "keys": keys})
+                normalized_keys = cls._canonicalize_replay_keys(keys)
+                if not normalized_keys:
+                    continue
+                recorded.append({"type": "press_key", "keys": normalized_keys})
             elif action_type == "wait":
                 duration_ms = meta.get("duration_ms") or params.get("duration_ms")
                 if duration_ms is None:
@@ -818,6 +828,19 @@ class ActionAgent(BaseAgent):
         if direction_norm == "left":
             return (-amount, 0)
         raise ValueError(f"Invalid scroll direction: {direction!r}")
+
+    @staticmethod
+    def _canonicalize_replay_keys(raw_keys: Any) -> Optional[str]:
+        """Normalize replay key payloads into a single driver-compatible string."""
+        if raw_keys is None:
+            return None
+        if isinstance(raw_keys, (list, tuple)):
+            pieces = [str(part).strip() for part in raw_keys if str(part).strip()]
+            if not pieces:
+                return None
+            return "+".join(pieces)
+        text = str(raw_keys).strip()
+        return text or None
 
     async def _execute_skip_navigation_workflow(
         self,

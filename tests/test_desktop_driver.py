@@ -61,3 +61,58 @@ async def test_desktop_driver_smoke(monkeypatch, tmp_path: Path) -> None:
     assert dummy_input.typed == ["hello"]
     assert dummy_input.keys == ["enter"]
     assert dummy_input.scrolls == [(0, 120)]
+
+
+@pytest.mark.asyncio
+async def test_desktop_driver_start_is_idempotent(monkeypatch, tmp_path: Path) -> None:
+    created = {"count": 0}
+    dummy_input = DummyVirtualInput()
+
+    def _virtual_input_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
+        created["count"] += 1
+        return dummy_input
+
+    monkeypatch.setattr("src.desktop.driver.VirtualInput", _virtual_input_factory)
+
+    driver = DesktopDriver(
+        screenshot_dir=tmp_path / "shots",
+        cache_path=tmp_path / "coords.json",
+        prefer_resolution=(800, 600),
+        enable_resolution_switch=False,
+    )
+    monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
+    monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
+    monkeypatch.setattr(driver.resolution_manager, "restore", lambda: None)
+
+    await driver.start()
+    await driver.start()
+    await driver.click(1, 2)
+    await driver.stop()
+
+    assert created["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_desktop_driver_scroll_rejects_invalid_direction(
+    monkeypatch, tmp_path: Path
+) -> None:
+    dummy_input = DummyVirtualInput()
+
+    def _virtual_input_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return dummy_input
+
+    monkeypatch.setattr("src.desktop.driver.VirtualInput", _virtual_input_factory)
+    driver = DesktopDriver(
+        screenshot_dir=tmp_path / "shots",
+        cache_path=tmp_path / "coords.json",
+        prefer_resolution=(800, 600),
+        enable_resolution_switch=False,
+    )
+    monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
+    monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
+    monkeypatch.setattr(driver.resolution_manager, "restore", lambda: None)
+
+    await driver.start()
+    with pytest.raises(ValueError):
+        await driver.scroll("diagonal", 100)
+    await driver.stop()

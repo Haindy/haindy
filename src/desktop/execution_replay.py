@@ -26,6 +26,18 @@ def _normalize_button(value: object) -> str:
     return button
 
 
+def _normalize_key_sequence(value: object) -> str:
+    if isinstance(value, (list, tuple)):
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        if not normalized:
+            raise DriverActionError("press_key action has empty keys list")
+        return "+".join(normalized)
+    normalized_single = str(value).strip()
+    if not normalized_single:
+        raise DriverActionError("press_key action has empty key")
+    return normalized_single
+
+
 def _scroll_xy(direction: str, magnitude: int) -> Tuple[int, int]:
     direction_norm = str(direction or "").strip().lower()
     amount = abs(int(magnitude))
@@ -95,15 +107,7 @@ def normalize_driver_action(raw: Dict[str, Any]) -> Dict[str, Any]:
             keys = raw.get("key")
         if keys is None:
             raise DriverActionError("press_key action missing 'keys'/'key'")
-        if isinstance(keys, (list, tuple)):
-            normalized = [str(item).strip() for item in keys if str(item).strip()]
-            if not normalized:
-                raise DriverActionError("press_key action has empty keys list")
-            return {"type": "press_key", "keys": normalized}
-        normalized_single = str(keys).strip()
-        if not normalized_single:
-            raise DriverActionError("press_key action has empty key")
-        return {"type": "press_key", "keys": normalized_single}
+        return {"type": "press_key", "keys": _normalize_key_sequence(keys)}
 
     if action_type == "wait":
         duration_ms = max(_require_int(raw.get("duration_ms"), field="duration_ms"), 0)

@@ -9,7 +9,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple
+from typing import Any, Deque, Dict, List, Literal, Optional, Set, Tuple
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -124,6 +124,9 @@ class ComputerUseSessionResult:
     final_output: Optional[str] = None
     response_ids: List[str] = field(default_factory=list)
     last_response: Optional[Dict[str, Any]] = None
+    terminal_status: Literal["success", "failed"] = "success"
+    terminal_failure_reason: Optional[str] = None
+    terminal_failure_code: Optional[str] = None
 
 
 class ComputerUseSession:
@@ -157,13 +160,18 @@ class ComputerUseSession:
         self._settings = settings
         self._debug_logger = debug_logger
         self._provider = (provider or settings.cu_provider or "openai").lower()
-        self._model = (
+        self._openai_model = (
             model
-            or (
-                settings.google_cu_model
-                if self._provider == "google"
-                else settings.computer_use_model
-            )
+            if model and self._provider == "openai"
+            else settings.computer_use_model
+        )
+        self._google_model = (
+            model
+            if model and self._provider == "google"
+            else settings.google_cu_model
+        )
+        self._model = (
+            self._google_model if self._provider == "google" else self._openai_model
         )
         self._google_client = google_client
         self._default_environment = self._normalize_environment_name(environment)
@@ -171,7 +179,8 @@ class ComputerUseSession:
             self._settings.desktop_coordinate_cache_path
         )
         self._model_logger = model_logger or get_model_logger(
-            self._settings.model_log_path
+            self._settings.model_log_path,
+            max_screenshots=getattr(self._settings, "max_screenshots", None),
         )
         self._allowed_actions: Optional[Set[str]] = None
         self._allowed_domains: Set[str] = self._normalize_domain_set(
@@ -247,32 +256,35 @@ class ComputerUseSession:
         env_mode = self._normalize_environment_name(
             environment or metadata.get("environment") or self._default_environment
         )
-        if self._provider == "google":
-            try:
-                return await self._run_google(
-                    goal=goal,
-                    metadata=metadata,
-                    environment=env_mode,
-                    cache_label=cache_label,
-                    cache_action=cache_action,
-                    use_cache=use_cache,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Google Computer Use provider failed; falling back to OpenAI",
-                    extra={"error": str(exc)},
-                )
-                self._provider = "openai"
-                self._model = self._settings.computer_use_model
-        return await self._run_openai(
-            goal=goal,
-            initial_screenshot=initial_screenshot,
-            metadata=metadata,
-            environment=env_mode,
-            cache_label=cache_label,
-            cache_action=cache_action,
-            use_cache=use_cache,
-        )
+        try:
+            if self._provider == "google":
+                try:
+                    return await self._run_google(
+                        goal=goal,
+                        metadata=metadata,
+                        environment=env_mode,
+                        cache_label=cache_label,
+                        cache_action=cache_action,
+                        use_cache=use_cache,
+                        model=self._google_model,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Google Computer Use provider failed; falling back to OpenAI",
+                        extra={"error": str(exc)},
+                    )
+            return await self._run_openai(
+                goal=goal,
+                initial_screenshot=initial_screenshot,
+                metadata=metadata,
+                environment=env_mode,
+                cache_label=cache_label,
+                cache_action=cache_action,
+                use_cache=use_cache,
+                model=self._openai_model,
+            )
+        finally:
+            self._allowed_actions = None
 
     async def _run_openai(
         self,
@@ -284,6 +296,7 @@ class ComputerUseSession:
         cache_label: Optional[str],
         cache_action: str,
         use_cache: bool,
+        model: str,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
@@ -301,12 +314,13 @@ class ComputerUseSession:
             viewport_height=viewport_height,
             metadata=metadata,
             environment=tool_environment,
+            model=model,
         )
 
         response = await self._create_response(request_payload)
         await self._model_logger.log_call(
             agent="computer_use.openai.initial",
-            model=self._model,
+            model=model,
             prompt=goal,
             request_payload=self._sanitize_payload_for_log(request_payload),
             response=response,
@@ -350,6 +364,7 @@ class ComputerUseSession:
                     previous_response_id=previous_response_id,
                     metadata=metadata,
                     environment=tool_environment,
+                    model=model,
                 )
                 response = await self._create_response(confirmation_payload)
                 response_dict = normalize_response(response)
@@ -374,29 +389,22 @@ class ComputerUseSession:
                         "step_number": metadata.get("step_number"),
                     },
                 )
-                failure_turn = ComputerToolTurn(
-                    call_id=f"turn-limit-{uuid4()}",
-                    action_type="system_notice",
+                self._append_terminal_failure_turn(
+                    result=result,
+                    metadata=metadata,
+                    response_id=response_dict.get("id"),
+                    reason=message,
+                    code="max_turns_exceeded",
                     parameters={
-                        "type": "system_notice",
-                        "reason": "max_turns_exceeded",
                         "turn_count": turn_counter,
                         "max_turns": max_turns,
                     },
-                    response_id=response_dict.get("id"),
-                )
-                failure_turn.status = "failed"
-                failure_turn.error_message = message
-                _inject_context_metadata(failure_turn, metadata)
-                failure_turn.metadata.update(
-                    {
-                        "reason": "max_turns_exceeded",
+                    metadata_updates={
                         "turn_count": turn_counter,
                         "max_turns": max_turns,
-                    }
+                    },
+                    call_id_prefix="turn-limit",
                 )
-                result.actions.append(failure_turn)
-                result.final_output = message
                 break
 
             call = computer_calls[0]
@@ -451,24 +459,20 @@ class ComputerUseSession:
                         "loop_window": loop_detection.get("loop_window"),
                     },
                 )
-                failure_turn = ComputerToolTurn(
-                    call_id=f"loop-detected-{uuid4()}",
-                    action_type="system_notice",
+                self._append_terminal_failure_turn(
+                    result=result,
+                    metadata=metadata,
+                    response_id=response_dict.get("id"),
+                    reason=message,
+                    code="loop_detected",
                     parameters={
-                        "type": "system_notice",
-                        "reason": "loop_detected",
                         "signature": loop_detection.get("signature"),
                         "screenshot_hash": loop_detection.get("screenshot_hash"),
                         "loop_window": loop_detection.get("loop_window"),
                     },
-                    response_id=response_dict.get("id"),
+                    metadata_updates=loop_detection,
+                    call_id_prefix="loop-detected",
                 )
-                failure_turn.status = "failed"
-                failure_turn.error_message = message
-                _inject_context_metadata(failure_turn, metadata)
-                failure_turn.metadata.update(loop_detection)
-                result.actions.append(failure_turn)
-                result.final_output = message
                 break
 
             follow_up_payload = await self._build_follow_up_request(
@@ -476,6 +480,7 @@ class ComputerUseSession:
                 call=turn,
                 metadata=metadata,
                 environment=tool_environment,
+                model=model,
             )
 
             response = await self._create_response(follow_up_payload)
@@ -492,7 +497,7 @@ class ComputerUseSession:
                 follow_up_screenshot = None
             await self._model_logger.log_call(
                 agent="computer_use.openai.follow_up",
-                model=self._model,
+                model=model,
                 prompt=f"{goal} (follow-up)",
                 request_payload=self._sanitize_payload_for_log(follow_up_payload),
                 response=response,
@@ -507,7 +512,6 @@ class ComputerUseSession:
             result.response_ids.append(response_dict.get("id", ""))
             previous_response_id = response_dict.get("id")
 
-        self._allowed_actions = None
         return result
 
     async def _run_google(
@@ -519,6 +523,7 @@ class ComputerUseSession:
         cache_label: Optional[str],
         cache_action: str,
         use_cache: bool,
+        model: str,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
@@ -535,11 +540,11 @@ class ComputerUseSession:
         )
 
         history: List[Any] = list(contents)
-        initial_request = {"model": self._model, "contents": contents, "config": config}
+        initial_request = {"model": model, "contents": contents, "config": config}
         response = await self._create_google_response(initial_request)
         await self._model_logger.log_call(
             agent="computer_use.google.initial",
-            model=self._model,
+            model=model,
             prompt=goal,
             request_payload={
                 "provider": "google",
@@ -565,6 +570,8 @@ class ComputerUseSession:
         scroll_turns = 0
         consecutive_ignored = 0
         max_turn_hit = False
+        max_turn_reason: Optional[str] = None
+        max_turn_code: Optional[str] = None
         last_assistant_text: Optional[str] = None
         last_response_dict: Optional[Dict[str, Any]] = None
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
@@ -635,24 +642,20 @@ class ComputerUseSession:
                             "loop_window": loop_detection.get("loop_window"),
                         },
                     )
-                    failure_turn = ComputerToolTurn(
-                        call_id=f"loop-detected-{uuid4()}",
-                        action_type="system_notice",
+                    self._append_terminal_failure_turn(
+                        result=result,
+                        metadata=metadata,
+                        response_id=response_dict.get("id"),
+                        reason=message,
+                        code="loop_detected",
                         parameters={
-                            "type": "system_notice",
-                            "reason": "loop_detected",
                             "signature": loop_detection.get("signature"),
                             "screenshot_hash": loop_detection.get("screenshot_hash"),
                             "loop_window": loop_detection.get("loop_window"),
                         },
-                        response_id=response_dict.get("id"),
+                        metadata_updates=loop_detection,
+                        call_id_prefix="loop-detected",
                     )
-                    failure_turn.status = "failed"
-                    failure_turn.error_message = message
-                    _inject_context_metadata(failure_turn, metadata)
-                    failure_turn.metadata.update(loop_detection)
-                    result.actions.append(failure_turn)
-                    result.final_output = message
                     max_turn_hit = True
                     break
 
@@ -676,6 +679,11 @@ class ComputerUseSession:
                                 "max_turns": self._settings.actions_computer_tool_max_turns,
                             },
                         )
+                        max_turn_code = "scroll_turn_limit_reached"
+                        max_turn_reason = (
+                            "Computer Use max turns exceeded: "
+                            f"scroll turn limit reached after {scroll_turns} scroll actions."
+                        )
                         max_turn_hit = True
                         break
                 else:
@@ -686,6 +694,12 @@ class ComputerUseSession:
                             extra={
                                 "max_turns": self._settings.actions_computer_tool_max_turns
                             },
+                        )
+                        max_turn_code = "max_turns_exceeded"
+                        max_turn_reason = (
+                            "Computer Use max turns exceeded after "
+                            f"{turn_counter} turns (limit: "
+                            f"{self._settings.actions_computer_tool_max_turns})."
                         )
                         max_turn_hit = True
                         break
@@ -699,13 +713,14 @@ class ComputerUseSession:
                     history=history,
                     turns=executed_turns,
                     environment=environment,
+                    model=model,
                 )
             )
             history.append(func_response_content)
             response = await self._create_google_response(follow_up_payload)
             await self._model_logger.log_call(
                 agent="computer_use.google.follow_up",
-                model=self._model,
+                model=model,
                 prompt=f"{goal} (follow-up)",
                 request_payload={
                     "provider": "google",
@@ -728,17 +743,31 @@ class ComputerUseSession:
                     )
 
         if max_turn_hit:
+            if result.terminal_status != "failed":
+                self._append_terminal_failure_turn(
+                    result=result,
+                    metadata=metadata,
+                    response_id=(
+                        last_response_dict.get("id")
+                        if isinstance(last_response_dict, dict)
+                        else None
+                    ),
+                    reason=max_turn_reason
+                    or "Computer Use max turn limit reached (google).",
+                    code=max_turn_code or "max_turns_exceeded",
+                )
             logger.error(
                 "Computer Use max turns reached (google)",
                 extra={
                     "goal": goal,
                     "max_turns": self._settings.actions_computer_tool_max_turns,
+                    "reason": max_turn_reason,
+                    "code": max_turn_code,
                     "last_assistant_text": last_assistant_text,
                     "last_response": last_response_dict,
                 },
             )
 
-        self._allowed_actions = None
         return result
 
     async def _execute_tool_action(
@@ -1274,6 +1303,7 @@ class ComputerUseSession:
         call: ComputerToolTurn,
         metadata: Dict[str, Any],
         environment: str = "browser",
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build the payload for a follow-up request after executing an action."""
         screenshot_b64 = call.metadata.get("screenshot_base64")
@@ -1284,7 +1314,7 @@ class ComputerUseSession:
         viewport_width, viewport_height = await self._browser.get_viewport_size()
 
         payload: Dict[str, Any] = {
-            "model": self._model,
+            "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
             "tools": [
                 {
@@ -1460,6 +1490,7 @@ class ComputerUseSession:
         viewport_height: int,
         metadata: Dict[str, Any],
         environment: str = "browser",
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build the payload for the initial Computer Use request."""
         context_lines = []
@@ -1483,7 +1514,7 @@ class ComputerUseSession:
             context_text = f"{goal}\n\nContext:\n" + "\n".join(f"- {line}" for line in context_lines)
 
         payload: Dict[str, Any] = {
-            "model": self._model,
+            "model": model or self._openai_model,
             "tools": [
                 {
                     "type": "computer_use_preview",
@@ -1563,6 +1594,7 @@ class ComputerUseSession:
         history: List[Any],
         turns: List[ComputerToolTurn],
         environment: str = "desktop",
+        model: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Any, bytes]:
         from google.genai import types  # type: ignore
 
@@ -1615,7 +1647,7 @@ class ComputerUseSession:
         ]
         return (
             {
-                "model": self._model,
+                "model": model or self._google_model,
                 "contents": contents,
                 "config": types.GenerateContentConfig(tools=tools),
             },
@@ -1662,9 +1694,47 @@ class ComputerUseSession:
             return self._google_client
         if genai is None:
             return None
-        if not self._settings.vertex_api_key:
-            raise ComputerUseExecutionError("VERTEX_API_KEY is required for Google CU provider.")
-        self._google_client = genai.Client(api_key=self._settings.vertex_api_key)
+        vertex_project = str(getattr(self._settings, "vertex_project", "") or "").strip()
+        vertex_location = str(
+            getattr(self._settings, "vertex_location", "us-central1") or ""
+        ).strip()
+        vertex_api_key = str(getattr(self._settings, "vertex_api_key", "") or "").strip()
+
+        if vertex_project:
+            if not vertex_location:
+                raise ComputerUseExecutionError(
+                    "VERTEX_LOCATION is required when VERTEX_PROJECT is configured."
+                )
+            try:
+                vertex_kwargs: Dict[str, Any] = {
+                    "vertexai": True,
+                    "project": vertex_project,
+                    "location": vertex_location,
+                }
+                if vertex_api_key:
+                    vertex_kwargs["api_key"] = vertex_api_key
+                self._google_client = genai.Client(
+                    **vertex_kwargs,
+                )
+                logger.info(
+                    "Initialized Google CU client in Vertex mode",
+                    extra={
+                        "vertex_project": vertex_project,
+                        "vertex_location": vertex_location,
+                    },
+                )
+                return self._google_client
+            except Exception as exc:
+                raise ComputerUseExecutionError(
+                    f"Failed to initialize Vertex Google client: {exc}"
+                ) from exc
+
+        if not vertex_api_key:
+            raise ComputerUseExecutionError(
+                "Google CU provider requires either VERTEX_PROJECT+VERTEX_LOCATION or VERTEX_API_KEY."
+            )
+        self._google_client = genai.Client(api_key=vertex_api_key)
+        logger.info("Initialized Google CU client in API key mode")
         return self._google_client
 
     async def _ensure_browser_ready(self) -> None:
@@ -1783,6 +1853,7 @@ class ComputerUseSession:
         previous_response_id: Optional[str],
         metadata: Dict[str, Any],
         environment: str = "browser",
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
         confirmation_text = (
@@ -1795,7 +1866,7 @@ class ComputerUseSession:
         viewport_width, viewport_height = await self._browser.get_viewport_size()
 
         payload: Dict[str, Any] = {
-            "model": self._model,
+            "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
             "tools": [
                 {
@@ -1845,7 +1916,10 @@ class ComputerUseSession:
             return False
 
         policy = self._settings.cu_safety_policy
-        if policy == "auto_approve":
+        fail_fast = bool(
+            getattr(self._settings, "actions_computer_tool_fail_fast_on_safety", True)
+        )
+        if not fail_fast and policy == "auto_approve":
             return False
 
         safety_payload = turn.pending_safety_checks[0]
@@ -1858,10 +1932,27 @@ class ComputerUseSession:
         )
         result.safety_events.append(safety_event)
         turn.status = "failed"
-        turn.error_message = (
-            "Safety check triggered; action halted (policy enforcement)."
+        if fail_fast:
+            turn.error_message = (
+                "Safety check triggered; action halted (fail-fast safety setting)."
+            )
+            failure_code = "safety_fail_fast"
+        else:
+            turn.error_message = (
+                "Safety check triggered; action halted (policy enforcement)."
+            )
+            failure_code = "safety_policy"
+        turn.metadata.update(
+            {
+                "safety_policy": policy,
+                "fail_fast_on_safety": fail_fast,
+            }
         )
         result.actions.append(turn)
+        result.terminal_status = "failed"
+        result.terminal_failure_reason = turn.error_message
+        result.terminal_failure_code = failure_code
+        result.final_output = turn.error_message
         logger.warning(
             "Computer Use safety check triggered; aborting action execution",
             extra={
@@ -1869,9 +1960,47 @@ class ComputerUseSession:
                 "code": safety_event.code,
                 "safety_message": safety_event.message,
                 "policy": policy,
+                "fail_fast": fail_fast,
             },
         )
         return True
+
+    def _append_terminal_failure_turn(
+        self,
+        *,
+        result: ComputerUseSessionResult,
+        metadata: Dict[str, Any],
+        reason: str,
+        code: str,
+        response_id: Optional[str],
+        parameters: Optional[Dict[str, Any]] = None,
+        metadata_updates: Optional[Dict[str, Any]] = None,
+        call_id_prefix: str = "terminal",
+    ) -> ComputerToolTurn:
+        """Append a terminal failed system notice turn and mark the result as failed."""
+        params = {
+            "type": "system_notice",
+            "reason": code,
+        }
+        if parameters:
+            params.update(parameters)
+        failure_turn = ComputerToolTurn(
+            call_id=f"{call_id_prefix}-{uuid4()}",
+            action_type="system_notice",
+            parameters=params,
+            response_id=response_id,
+        )
+        failure_turn.status = "failed"
+        failure_turn.error_message = reason
+        _inject_context_metadata(failure_turn, metadata)
+        if metadata_updates:
+            failure_turn.metadata.update(metadata_updates)
+        result.actions.append(failure_turn)
+        result.final_output = reason
+        result.terminal_status = "failed"
+        result.terminal_failure_reason = reason
+        result.terminal_failure_code = code
+        return failure_turn
 
     async def _enforce_domain_policy(self, action_type: Optional[str]) -> None:
         """Prevent interactions with domains outside defined allow/block lists."""

@@ -202,6 +202,32 @@ class Settings(BaseSettings):
         description="Max time to hold clipboard owner process",
         env="HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS",
     )
+    enable_screen_recording: bool = Field(
+        default=False,
+        description="Enable GNOME desktop screen recording during test execution",
+        env="HAINDY_ENABLE_SCREEN_RECORDING",
+    )
+    screen_recording_output_dir: Path = Field(
+        default=Path("reports/recordings"),
+        description="Directory for optional desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
+    )
+    screen_recording_framerate: int = Field(
+        default=30,
+        ge=1,
+        description="Framerate for GNOME desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_FRAMERATE",
+    )
+    screen_recording_draw_cursor: bool = Field(
+        default=True,
+        description="Draw cursor in GNOME desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_DRAW_CURSOR",
+    )
+    screen_recording_prefix: str = Field(
+        default="haindy-agent",
+        description="Filename prefix for desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_PREFIX",
+    )
 
     # Execution Configuration
     max_test_steps: int = Field(
@@ -285,7 +311,9 @@ class Settings(BaseSettings):
     )
     actions_computer_tool_fail_fast_on_safety: bool = Field(
         default=True,
-        description="Abort immediately when Computer Use returns pending safety checks",
+        description=(
+            "Abort immediately on pending safety checks before cu_safety_policy is applied"
+        ),
         env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
     )
     actions_computer_tool_allowed_domains: List[str] = Field(
@@ -494,6 +522,7 @@ class Settings(BaseSettings):
             self.task_plan_cache_path.parent,
             self.execution_replay_cache_path.parent,
             self.model_log_path.parent,
+            self.screen_recording_output_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
 

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from src.runtime.evidence import EvidenceManager
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -90,12 +92,15 @@ def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
 class ModelCallLogger:
     """Append-only logger for model inputs/outputs with optional screenshots."""
 
-    def __init__(self, log_path: Path) -> None:
+    def __init__(self, log_path: Path, max_screenshots: Optional[int] = None) -> None:
         self._log_path = log_path
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._screenshot_dir = self._log_path.parent / "screenshots"
         self._screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
+        self._evidence: Optional[EvidenceManager] = None
+        if max_screenshots is not None and int(max_screenshots) > 0:
+            self._evidence = EvidenceManager(self._screenshot_dir, int(max_screenshots))
 
     async def log_call(
         self,
@@ -166,18 +171,31 @@ class ModelCallLogger:
         filename = f"{safe_label}_{timestamp}.png"
         path = self._screenshot_dir / filename
         path.write_bytes(data)
+        if self._evidence:
+            self._evidence.register([str(path)])
         return str(path)
 
 
-_LOGGER_CACHE: Dict[Path, ModelCallLogger] = {}
+_LOGGER_CACHE: Dict[Tuple[Path, Optional[int]], ModelCallLogger] = {}
 
 
-def get_model_logger(log_path: Path) -> ModelCallLogger:
+def get_model_logger(
+    log_path: Path, max_screenshots: Optional[int] = None
+) -> ModelCallLogger:
     """Return a singleton logger instance per log file path."""
     resolved = log_path.resolve()
-    cached = _LOGGER_CACHE.get(resolved)
+    normalized_max: Optional[int] = None
+    if max_screenshots is not None:
+        try:
+            candidate = int(max_screenshots)
+            if candidate > 0:
+                normalized_max = candidate
+        except Exception:
+            normalized_max = None
+    cache_key = (resolved, normalized_max)
+    cached = _LOGGER_CACHE.get(cache_key)
     if cached:
         return cached
-    logger_instance = ModelCallLogger(resolved)
-    _LOGGER_CACHE[resolved] = logger_instance
+    logger_instance = ModelCallLogger(resolved, max_screenshots=normalized_max)
+    _LOGGER_CACHE[cache_key] = logger_instance
     return logger_instance

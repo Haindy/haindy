@@ -162,6 +162,7 @@ class TestSettings:
             reports_dir=tmp_path / "reports",
             screenshots_dir=tmp_path / "screenshots",
             cache_dir=tmp_path / "cache",
+            screen_recording_output_dir=tmp_path / "recordings",
         )
         
         # Directories shouldn't exist yet
@@ -176,6 +177,7 @@ class TestSettings:
         assert (tmp_path / "reports").exists()
         assert (tmp_path / "screenshots").exists()
         assert (tmp_path / "cache").exists()
+        assert (tmp_path / "recordings").exists()
 
 
 class TestConfigManager:

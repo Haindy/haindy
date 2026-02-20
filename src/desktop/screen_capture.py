@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
+from uuid import uuid4
 
 from src.desktop.resolution_manager import ResolutionManager
+from src.runtime.evidence import EvidenceManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +24,15 @@ class ScreenCapture:
         resolution_manager: ResolutionManager,
         screenshot_dir: Path,
         display: Optional[str] = None,
+        max_screenshots: Optional[int] = None,
     ) -> None:
         self.resolution_manager = resolution_manager
         self.screenshot_dir = screenshot_dir
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self.display = display or os.environ.get("DISPLAY", ":0")
+        self._evidence: Optional[EvidenceManager] = None
+        if max_screenshots is not None and int(max_screenshots) > 0:
+            self._evidence = EvidenceManager(self.screenshot_dir, int(max_screenshots))
 
     def capture(self, label: str) -> Tuple[bytes, str]:
         """Capture a single frame and persist it for debugging."""
@@ -64,8 +70,11 @@ class ScreenCapture:
                 f"ffmpeg capture failed: {result.stderr.decode('utf-8', errors='ignore')}"
             )
 
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"{label}_{timestamp}.png"
+        safe_label = str(label or "desktop").replace(" ", "_").replace("/", "-")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{safe_label}_{timestamp}_{uuid4().hex[:8]}.png"
         path = self.screenshot_dir / filename
         path.write_bytes(result.stdout)
+        if self._evidence:
+            self._evidence.register([str(path)])
         return result.stdout, str(path)

@@ -2,6 +2,7 @@
 High-level browser controller combining browser and grid functionality.
 """
 
+import platform
 from pathlib import Path
 from typing import Optional
 
@@ -67,6 +68,10 @@ class BrowserController:
 
     def _build_driver(self, headless: Optional[bool]) -> InstrumentedBrowserDriver | DesktopDriver:
         if self.driver_backend == "desktop":
+            if platform.system().lower() != "linux":
+                raise RuntimeError(
+                    "driver_backend=desktop is currently supported on Linux only."
+                )
             return DesktopDriver(
                 screenshot_dir=self.settings.desktop_screenshot_dir,
                 cache_path=self.settings.desktop_coordinate_cache_path,
@@ -78,6 +83,7 @@ class BrowserController:
                 keyboard_key_delay_ms=self.settings.desktop_keyboard_key_delay_ms,
                 clipboard_timeout_seconds=self.settings.desktop_clipboard_timeout_seconds,
                 clipboard_hold_seconds=self.settings.desktop_clipboard_hold_seconds,
+                max_screenshots=self.settings.max_screenshots,
             )
         return InstrumentedBrowserDriver(headless=headless)
 

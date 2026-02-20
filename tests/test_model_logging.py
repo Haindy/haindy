@@ -34,3 +34,24 @@ async def test_model_call_logger_sanitizes_bytes(tmp_path: Path) -> None:
 
     screenshot_path = Path(entry["attached_screenshots"][0]["path"])
     assert screenshot_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_model_call_logger_prunes_screenshots(tmp_path: Path) -> None:
+    log_path = tmp_path / "model_calls.jsonl"
+    logger = ModelCallLogger(log_path, max_screenshots=2)
+
+    for index in range(3):
+        await logger.log_call(
+            agent="test-agent",
+            model="test-model",
+            prompt=f"hello-{index}",
+            request_payload={},
+            response={"ok": True},
+            screenshots=[(f"shot-{index}", b"png-bytes")],
+            metadata={},
+        )
+
+    screenshot_dir = log_path.parent / "screenshots"
+    pngs = sorted(screenshot_dir.glob("*.png"))
+    assert len(pngs) == 2

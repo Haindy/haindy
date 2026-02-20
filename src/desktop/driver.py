@@ -34,6 +34,7 @@ class DesktopDriver(BrowserDriver):
         keyboard_key_delay_ms: int = 12,
         clipboard_timeout_seconds: float = 3.0,
         clipboard_hold_seconds: float = 15.0,
+        max_screenshots: Optional[int] = None,
     ) -> None:
         self.resolution_manager = ResolutionManager(
             preferred_width=prefer_resolution[0],
@@ -44,6 +45,7 @@ class DesktopDriver(BrowserDriver):
             resolution_manager=self.resolution_manager,
             screenshot_dir=screenshot_dir,
             display=display,
+            max_screenshots=max_screenshots,
         )
         self.keyboard_layout = keyboard_layout
         self.keyboard_emit_scancodes = keyboard_emit_scancodes
@@ -58,20 +60,26 @@ class DesktopDriver(BrowserDriver):
 
     async def start(self) -> None:
         """Initialize resolution and virtual input device."""
+        if self._started and self.virtual_input is not None:
+            return
         self.resolution_manager.maybe_downshift()
-        viewport = self.resolution_manager.viewport_size()
-        self.virtual_input = VirtualInput(
-            viewport=viewport,
-            keyboard_layout=self.keyboard_layout,
-            emit_scancodes=self.keyboard_emit_scancodes,
-            key_delay_ms=self.keyboard_key_delay_ms,
-        )
+        if self.virtual_input is None:
+            viewport = self.resolution_manager.viewport_size()
+            self.virtual_input = VirtualInput(
+                viewport=viewport,
+                keyboard_layout=self.keyboard_layout,
+                emit_scancodes=self.keyboard_emit_scancodes,
+                key_delay_ms=self.keyboard_key_delay_ms,
+            )
         self._started = True
 
     async def stop(self) -> None:
         """Restore resolution if changed."""
+        if not self._started and self.virtual_input is None:
+            return
         await self._cleanup_clipboard_owner()
         self.resolution_manager.restore()
+        self.virtual_input = None
         self._started = False
 
     async def __aenter__(self) -> "DesktopDriver":
@@ -116,10 +124,14 @@ class DesktopDriver(BrowserDriver):
         await self.virtual_input.press_key(key)
 
     async def scroll(self, direction: str, amount: int) -> None:
-        delta = amount if direction in {"down", "right"} else -amount
+        normalized_direction = str(direction or "").strip().lower()
+        if normalized_direction not in {"up", "down", "left", "right"}:
+            raise ValueError(f"Invalid scroll direction: {direction!r}")
+        magnitude = abs(int(amount))
+        delta = magnitude if normalized_direction in {"down", "right"} else -magnitude
         await self.scroll_by_pixels(
-            y=delta if direction in {"up", "down"} else 0,
-            x=delta if direction in {"left", "right"} else 0,
+            y=delta if normalized_direction in {"up", "down"} else 0,
+            x=delta if normalized_direction in {"left", "right"} else 0,
         )
 
     async def scroll_by_pixels(self, x: int = 0, y: int = 0, smooth: bool = True) -> None:

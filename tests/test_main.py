@@ -42,6 +42,7 @@ class TestCLIParser:
         assert "test_api" in actions
         assert "version" in actions
         assert "berserk" in actions
+        assert "record" in actions
     
     def test_requirements_is_action(self):
         """Test that --requirements is now an action, not taking a value."""
@@ -59,6 +60,8 @@ class TestCLIParser:
         parser.parse_args(["--json-test-plan", "test.json"])
         parser.parse_args(["--test-api"])
         parser.parse_args(["--version"])
+        parser.parse_args(["--record"])
+        parser.parse_args(["--no-record"])
         
         # These should fail
         with pytest.raises(SystemExit):
