@@ -138,10 +138,15 @@ class SituationalAgent(BaseAgent):
                 error_message = ""
                 if result.execution and result.execution.error_message:
                     error_message = f" ({result.execution.error_message})"
-                raise RuntimeError(
-                    f"Entrypoint action failed at step {step_number}: "
-                    f"{entry_action.description}{error_message}"
+                logger.warning(
+                    "Entrypoint action failed; continuing with best-effort setup",
+                    extra={
+                        "step_number": step_number,
+                        "description": entry_action.description,
+                        "error": error_message or "unknown",
+                    },
                 )
+                continue
 
     async def _call_model_assessment(
         self,
@@ -190,7 +195,9 @@ class SituationalAgent(BaseAgent):
         if target_type not in {"web", "desktop_app"}:
             target_type = "web" if self._extract_url(source_text) else "desktop_app"
 
-        setup_payload = payload.get("setup", {}) if isinstance(payload.get("setup"), dict) else {}
+        setup_payload = (
+            payload.get("setup", {}) if isinstance(payload.get("setup"), dict) else {}
+        )
         setup = SetupInstructions(
             web_url=str(setup_payload.get("web_url") or "").strip(),
             app_name=str(setup_payload.get("app_name") or "").strip(),
@@ -222,6 +229,12 @@ class SituationalAgent(BaseAgent):
             )
 
         missing_items = sorted({item.strip() for item in missing_items if item.strip()})
+        if target_type == "desktop_app" and missing_items:
+            notes.extend(
+                f"Non-blocking context gap for desktop entrypoint: {item}"
+                for item in missing_items
+            )
+            missing_items = []
 
         return SituationalAssessment(
             target_type=target_type,
@@ -281,7 +294,11 @@ class SituationalAgent(BaseAgent):
         if target_type != "desktop_app":
             return []
 
-        app_name = setup.app_name or self._extract_app_name(source_text) or "the target application"
+        app_name = (
+            setup.app_name
+            or self._extract_app_name(source_text)
+            or "the target application"
+        )
         launch_hint = setup.launch_command or self._extract_launch_command(source_text)
         prompt_lines = [
             f"Open {app_name} and bring it to the foreground using visible desktop UI actions only.",

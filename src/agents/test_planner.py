@@ -4,6 +4,7 @@ Analyzes requirements/PRDs and creates structured test plans.
 """
 
 import inspect
+import re
 from pathlib import Path
 
 from src.agents.base_agent import BaseAgent
@@ -85,10 +86,13 @@ class TestPlannerAgent(BaseAgent):
         Returns:
             TestPlan: Structured test plan with steps and expected outcomes
         """
-        logger.info("Creating test plan from requirements", extra={
-            "requirements_length": len(requirements),
-            "has_context": context is not None
-        })
+        logger.info(
+            "Creating test plan from requirements",
+            extra={
+                "requirements_length": len(requirements),
+                "has_context": context is not None,
+            },
+        )
 
         # Build the user message
         user_message = self._build_requirements_message(
@@ -101,7 +105,7 @@ class TestPlannerAgent(BaseAgent):
         # Build messages with system prompt
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": user_message},
         ]
 
         # Get test plan from AI
@@ -126,15 +130,18 @@ class TestPlannerAgent(BaseAgent):
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", 0)
 
-        logger.info("Test plan created successfully", extra={
-            "plan_name": test_plan.name,
-            "num_test_cases": len(test_plan.test_cases),
-            "total_steps": total_steps,
-            "has_tags": bool(test_plan.tags),
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-        })
+        logger.info(
+            "Test plan created successfully",
+            extra={
+                "plan_name": test_plan.name,
+                "num_test_cases": len(test_plan.test_cases),
+                "total_steps": total_steps,
+                "has_tags": bool(test_plan.tags),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+        )
 
         return test_plan
 
@@ -252,44 +259,67 @@ IMPORTANT:
                     "critical": TestCasePriority.CRITICAL,
                     "high": TestCasePriority.HIGH,
                     "medium": TestCasePriority.MEDIUM,
-                    "low": TestCasePriority.LOW
+                    "low": TestCasePriority.LOW,
                 }
                 priority = priority_map.get(
-                    case_data.get("priority", "medium").lower(),
-                    TestCasePriority.MEDIUM
+                    str(case_data.get("priority", "medium")).lower(),
+                    TestCasePriority.MEDIUM,
                 )
 
                 # Parse steps for this test case
                 steps = []
-                for step_data in case_data.get("steps", []):
+                for default_step_number, step_data in enumerate(
+                    case_data.get("steps", []),
+                    start=1,
+                ):
                     intent_value = step_data.get("intent")
                     try:
-                        intent = StepIntent(intent_value) if intent_value else StepIntent.VALIDATION
+                        intent = (
+                            StepIntent(intent_value)
+                            if intent_value
+                            else StepIntent.VALIDATION
+                        )
                     except ValueError:
                         intent = StepIntent.VALIDATION
 
+                    step_number = self._parse_step_number(
+                        step_data.get("step_number"),
+                        default=default_step_number,
+                    )
+                    dependencies = self._parse_step_dependencies(
+                        step_data.get("dependencies")
+                    )
+                    # Prevent impossible self-dependencies from malformed model output.
+                    dependencies = [
+                        dep_step_number
+                        for dep_step_number in dependencies
+                        if dep_step_number != step_number
+                    ]
+
                     step = TestStep(
-                        step_number=step_data["step_number"],
-                        description=step_data.get("description", step_data.get("action", "")),
+                        step_number=step_number,
+                        description=step_data.get(
+                            "description", step_data.get("action", "")
+                        ),
                         action=step_data.get("action", ""),
                         expected_result=step_data.get("expected_result", ""),
-                        dependencies=step_data.get("dependencies", []),
+                        dependencies=dependencies,
                         optional=step_data.get("optional", False),
                         intent=intent,
-                        max_retries=step_data.get("max_retries", 3)
+                        max_retries=step_data.get("max_retries", 3),
                     )
                     steps.append(step)
 
                 # Create test case
                 test_case = TestCase(
-                    test_id=case_data.get("test_id", f"TC{len(test_cases)+1:03d}"),
+                    test_id=case_data.get("test_id", f"TC{len(test_cases) + 1:03d}"),
                     name=case_data.get("name", "Unnamed Test Case"),
                     description=case_data.get("description", ""),
                     priority=priority,
                     prerequisites=case_data.get("prerequisites", []),
                     steps=steps,
                     postconditions=case_data.get("postconditions", []),
-                    tags=case_data.get("tags", [])
+                    tags=case_data.get("tags", []),
                 )
                 test_cases.append(test_case)
 
@@ -300,17 +330,65 @@ IMPORTANT:
                 requirements_source=plan_data.get("requirements_source", "Unknown"),
                 test_cases=test_cases,
                 tags=plan_data.get("tags", []),
-                estimated_duration_seconds=plan_data.get("estimated_duration_seconds")
+                estimated_duration_seconds=plan_data.get("estimated_duration_seconds"),
             )
 
             return test_plan
 
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error("Failed to parse test plan response", extra={
-                "error": str(e),
-                "response": response
-            })
+            logger.error(
+                "Failed to parse test plan response",
+                extra={"error": str(e), "response": response},
+            )
             raise ValueError(f"Failed to parse test plan response: {e}") from e
+
+    @staticmethod
+    def _parse_step_number(value: object, default: int) -> int:
+        """Normalize LLM-provided step number values to a positive integer."""
+        parsed_numbers = TestPlannerAgent._extract_step_numbers(value)
+        return parsed_numbers[0] if parsed_numbers else default
+
+    @staticmethod
+    def _parse_step_dependencies(value: object) -> list[int]:
+        """Normalize LLM-provided dependency values to ordered, unique step numbers."""
+        if value is None:
+            return []
+        return TestPlannerAgent._extract_step_numbers(value)
+
+    @staticmethod
+    def _extract_step_numbers(value: object) -> list[int]:
+        """Extract positive step numbers from loose values like 'Step 1' or [1, 'step 2']."""
+        parsed_numbers: list[int] = []
+        raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+
+        for raw_value in raw_values:
+            if isinstance(raw_value, bool):
+                continue
+
+            if isinstance(raw_value, int):
+                if raw_value > 0:
+                    parsed_numbers.append(raw_value)
+                continue
+
+            if isinstance(raw_value, float):
+                if raw_value.is_integer() and raw_value > 0:
+                    parsed_numbers.append(int(raw_value))
+                continue
+
+            if isinstance(raw_value, str):
+                parsed_numbers.extend(
+                    int(match) for match in re.findall(r"\d+", raw_value)
+                )
+
+        unique_numbers: list[int] = []
+        seen_numbers: set[int] = set()
+        for number in parsed_numbers:
+            if number <= 0 or number in seen_numbers:
+                continue
+            seen_numbers.add(number)
+            unique_numbers.append(number)
+
+        return unique_numbers
 
     def _save_test_plan(self, test_plan: TestPlan) -> None:
         """Save test plan to permanent storage."""
@@ -335,12 +413,15 @@ IMPORTANT:
         with open(md_path, "w") as f:
             f.write(formatter.to_markdown(test_plan))
 
-        logger.info("Test plan saved permanently", extra={
-            "plan_id": str(test_plan.plan_id),
-            "plan_dir": str(plan_dir),
-            "json_path": str(json_path),
-            "md_path": str(md_path)
-        })
+        logger.info(
+            "Test plan saved permanently",
+            extra={
+                "plan_id": str(test_plan.plan_id),
+                "plan_dir": str(plan_dir),
+                "json_path": str(json_path),
+                "md_path": str(md_path),
+            },
+        )
 
     async def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
         """
@@ -353,10 +434,10 @@ IMPORTANT:
         Returns:
             TestPlan: Refined test plan
         """
-        logger.info("Refining test plan based on feedback", extra={
-            "plan_name": test_plan.name,
-            "feedback_length": len(feedback)
-        })
+        logger.info(
+            "Refining test plan based on feedback",
+            extra={"plan_name": test_plan.name, "feedback_length": len(feedback)},
+        )
 
         # Build refinement message
         current_plan = self._serialize_test_plan(test_plan)
@@ -371,14 +452,12 @@ Please provide an updated test plan that addresses the feedback while maintainin
         # Build messages
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": user_message},
         ]
 
         # Get refined plan from AI
         response = await self._get_completion(
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.3
+            messages=messages, response_format={"type": "json_object"}, temperature=0.3
         )
 
         # Parse the refined plan
@@ -387,11 +466,14 @@ Please provide an updated test plan that addresses the feedback while maintainin
         # Calculate total steps for new structure
         total_steps = sum(len(tc.steps) for tc in refined_plan.test_cases)
 
-        logger.info("Test plan refined successfully", extra={
-            "plan_name": refined_plan.name,
-            "num_test_cases": len(refined_plan.test_cases),
-            "total_steps": total_steps
-        })
+        logger.info(
+            "Test plan refined successfully",
+            extra={
+                "plan_name": refined_plan.name,
+                "num_test_cases": len(refined_plan.test_cases),
+                "total_steps": total_steps,
+            },
+        )
 
         return refined_plan
 
@@ -424,17 +506,16 @@ Output as JSON object with a "scenarios" array."""
 
         messages = [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": requirements}
+            {"role": "user", "content": requirements},
         ]
 
         response = await self._get_completion(
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.3
+            messages=messages, response_format={"type": "json_object"}, temperature=0.3
         )
 
         try:
             import json
+
             content = response.get("content", "{}")
             scenarios_data = json.loads(content)
             scenarios = scenarios_data.get("scenarios", [])

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+from asyncio import subprocess as aio_subprocess
 from collections.abc import Iterable
 
 from evdev import AbsInfo, UInput, ecodes
+from evdev.uinput import UInputError
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +162,23 @@ class VirtualInput:
             ecodes.EV_MSC: [ecodes.MSC_SCAN],
         }
 
-        self._ui = uinput_device or UInput(capabilities, name=device_name, bustype=0x03)
+        self._ui: UInput | None = None
+        self._xdotool_binary: str | None = None
+        if uinput_device is not None:
+            self._ui = uinput_device
+        else:
+            try:
+                self._ui = UInput(capabilities, name=device_name, bustype=0x03)
+            except (PermissionError, OSError, UInputError) as exc:
+                xdotool_binary = shutil.which("xdotool")
+                if not xdotool_binary:
+                    raise
+                self._xdotool_binary = xdotool_binary
+                logger.warning(
+                    "uinput unavailable; falling back to xdotool input backend",
+                    extra={"error": str(exc), "binary": xdotool_binary},
+                )
+
         self._viewport = viewport
         self._keyboard_layout = self._normalize_layout(keyboard_layout)
         self._emit_scancodes = emit_scancodes
@@ -179,6 +198,10 @@ class VirtualInput:
     async def move(self, x: int, y: int, steps: int = 1) -> None:
         """Move pointer to absolute coordinates."""
         x_clamped, y_clamped = self._clamp(x, y)
+        if self._ui is None:
+            await self._xdotool_move(x_clamped, y_clamped)
+            return
+
         for _ in range(max(steps, 1)):
             self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, x_clamped)
             self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, y_clamped)
@@ -192,6 +215,12 @@ class VirtualInput:
         """Click at absolute coordinates."""
         code = self._button_code(button)
         x_clamped, y_clamped = self._clamp(x, y)
+        if self._ui is None:
+            await self._xdotool_click(
+                x_clamped, y_clamped, button=button, click_count=click_count
+            )
+            return
+
         for _ in range(max(click_count, 1)):
             self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, x_clamped)
             self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, y_clamped)
@@ -208,6 +237,10 @@ class VirtualInput:
         """Drag from start to end coordinates."""
         start_x, start_y = self._clamp(*start)
         end_x, end_y = self._clamp(*end)
+        if self._ui is None:
+            await self._xdotool_drag((start_x, start_y), (end_x, end_y), steps=steps)
+            return
+
         self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, start_x)
         self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, start_y)
         self._ui.syn()
@@ -228,6 +261,10 @@ class VirtualInput:
 
     async def scroll(self, x: int = 0, y: int = 0) -> None:
         """Scroll by pixel deltas using wheel events."""
+        if self._ui is None:
+            await self._xdotool_scroll(x=x, y=y)
+            return
+
         if y:
             self._ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, self._scroll_delta(y))
         if x:
@@ -237,12 +274,20 @@ class VirtualInput:
 
     async def type_text(self, text: str) -> None:
         """Type text using key events."""
+        if self._ui is None:
+            await self._xdotool_type(text)
+            return
+
         for char in text:
             self._emit_char(char)
             await asyncio.sleep(max(self._key_delay, 0.005))
 
     async def press_key(self, key: str | Iterable[str]) -> None:
         """Press a key or key combination."""
+        if self._ui is None:
+            await self._xdotool_press_key(key)
+            return
+
         sequence = self._normalize_key_sequence(key)
         codes = [self._lookup_key_code(item) for item in sequence]
         codes = [c for c in codes if c is not None]
@@ -309,10 +354,179 @@ class VirtualInput:
         return scancode
 
     def _write_key_event(self, key_code: int, value: int) -> None:
+        if self._ui is None:
+            return
         scancode = self._lookup_scancode(key_code)
         if scancode is not None:
             self._ui.write(ecodes.EV_MSC, ecodes.MSC_SCAN, scancode)
         self._ui.write(ecodes.EV_KEY, key_code, value)
+
+    async def _run_xdotool(self, *args: str) -> None:
+        if not self._xdotool_binary:
+            raise RuntimeError(
+                "Virtual input backend unavailable: /dev/uinput failed and xdotool is not installed."
+            )
+        process = await asyncio.create_subprocess_exec(
+            self._xdotool_binary,
+            *args,
+            stdout=aio_subprocess.DEVNULL,
+            stderr=aio_subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            message = (stderr or b"").decode("utf-8", errors="ignore").strip()
+            raise RuntimeError(
+                f"xdotool command failed ({' '.join(args)}): {message or 'unknown error'}"
+            )
+
+    async def _xdotool_move(self, x: int, y: int) -> None:
+        await self._run_xdotool("mousemove", "--sync", str(x), str(y))
+
+    async def _xdotool_click(
+        self, x: int, y: int, button: str = "left", click_count: int = 1
+    ) -> None:
+        button_map = {"left": 1, "middle": 2, "right": 3}
+        button_code = button_map.get((button or "left").lower(), 1)
+        await self._xdotool_move(x, y)
+        await self._run_xdotool(
+            "click",
+            "--repeat",
+            str(max(click_count, 1)),
+            str(button_code),
+        )
+        await asyncio.sleep(0.02)
+
+    async def _xdotool_drag(
+        self, start: tuple[int, int], end: tuple[int, int], steps: int = 1
+    ) -> None:
+        start_x, start_y = start
+        end_x, end_y = end
+        await self._xdotool_move(start_x, start_y)
+        await self._run_xdotool("mousedown", "1")
+        for step in range(max(steps, 1)):
+            progress = (step + 1) / max(steps, 1)
+            x = int(start_x + (end_x - start_x) * progress)
+            y = int(start_y + (end_y - start_y) * progress)
+            await self._xdotool_move(x, y)
+            if steps > 1:
+                await asyncio.sleep(0.01)
+        await self._run_xdotool("mouseup", "1")
+
+    async def _xdotool_scroll(self, x: int = 0, y: int = 0) -> None:
+        if y:
+            vertical_button = "5" if y > 0 else "4"
+            repeats = max(abs(y) // 120, 1)
+            await self._run_xdotool("click", "--repeat", str(repeats), vertical_button)
+        if x:
+            horizontal_button = "7" if x > 0 else "6"
+            repeats = max(abs(x) // 120, 1)
+            await self._run_xdotool(
+                "click", "--repeat", str(repeats), horizontal_button
+            )
+        await asyncio.sleep(0.01)
+
+    async def _xdotool_type(self, text: str) -> None:
+        if text == "":
+            return
+        delay_ms = max(int(self._key_delay * 1000), 5)
+        await self._run_xdotool(
+            "type",
+            "--delay",
+            str(delay_ms),
+            "--clearmodifiers",
+            "--",
+            text,
+        )
+
+    async def _xdotool_press_key(self, key: str | Iterable[str]) -> None:
+        sequence = self._normalize_key_sequence(key)
+        translated = [
+            translated_key
+            for translated_key in (
+                self._translate_xdotool_key_name(item) for item in sequence
+            )
+            if translated_key
+        ]
+        if not translated:
+            logger.debug(
+                "No valid xdotool keys found for press_key", extra={"key": key}
+            )
+            return
+        await self._run_xdotool("key", "--clearmodifiers", "+".join(translated))
+        await asyncio.sleep(max(self._key_delay, 0.01))
+
+    @staticmethod
+    def _translate_xdotool_key_name(name: str) -> str | None:
+        normalized = (name or "").strip().lower()
+        if not normalized:
+            return None
+        alias_map = {
+            "ctrl": "ctrl",
+            "control": "ctrl",
+            "lctrl": "ctrl",
+            "rctrl": "ctrl",
+            "alt": "alt",
+            "lalt": "alt",
+            "ralt": "alt",
+            "altgr": "ISO_Level3_Shift",
+            "shift": "shift",
+            "lshift": "shift",
+            "rshift": "shift",
+            "meta": "super",
+            "cmd": "super",
+            "super": "super",
+            "win": "super",
+            "leftmeta": "super",
+            "rightmeta": "super_R",
+            "menu": "Menu",
+            "compose": "Multi_key",
+            "enter": "Return",
+            "return": "Return",
+            "kpenter": "KP_Enter",
+            "tab": "Tab",
+            "esc": "Escape",
+            "escape": "Escape",
+            "space": "space",
+            "backspace": "BackSpace",
+            "delete": "Delete",
+            "del": "Delete",
+            "insert": "Insert",
+            "ins": "Insert",
+            "home": "Home",
+            "end": "End",
+            "pageup": "Page_Up",
+            "pgup": "Page_Up",
+            "pagedown": "Page_Down",
+            "pgdn": "Page_Down",
+            "up": "Up",
+            "down": "Down",
+            "left": "Left",
+            "right": "Right",
+            "numlock": "Num_Lock",
+            "scrolllock": "Scroll_Lock",
+            "capslock": "Caps_Lock",
+            "printscreen": "Print",
+            "prtsc": "Print",
+            "sysrq": "Sys_Req",
+            "pause": "Pause",
+            "break": "Break",
+            "kpplus": "KP_Add",
+            "kpminus": "KP_Subtract",
+            "kpdivide": "KP_Divide",
+            "kpmultiply": "KP_Multiply",
+            "kpdot": "KP_Decimal",
+        }
+        if normalized in alias_map:
+            return alias_map[normalized]
+        if normalized.startswith("kp") and normalized[2:].isdigit():
+            return f"KP_{normalized[2:]}"
+        if normalized.startswith("f") and normalized[1:].isdigit():
+            index = int(normalized[1:])
+            if 1 <= index <= 24:
+                return f"F{index}"
+        if len(normalized) == 1 and (normalized.isalpha() or normalized.isdigit()):
+            return normalized
+        return name.strip()
 
     @staticmethod
     def _normalize_key_sequence(key: str | Iterable[str]) -> list[str]:
@@ -336,7 +550,9 @@ class VirtualInput:
     def _normalize_layout(layout: str) -> str:
         normalized = (layout or "us").lower()
         if normalized not in {"us", "es"}:
-            logger.warning("Unknown keyboard layout; defaulting to US", extra={"layout": layout})
+            logger.warning(
+                "Unknown keyboard layout; defaulting to US", extra={"layout": layout}
+            )
             return "us"
         return normalized
 

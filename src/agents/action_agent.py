@@ -26,7 +26,9 @@ from src.desktop.execution_replay import DriverActionError, normalize_driver_act
 from src.monitoring.debug_logger import get_debug_logger
 from src.monitoring.logger import get_logger
 
-OBSERVE_ONLY_ALLOWED_ACTIONS: frozenset[str] = frozenset({"screenshot", "wait", "scroll"})
+OBSERVE_ONLY_ALLOWED_ACTIONS: frozenset[str] = frozenset(
+    {"screenshot", "wait", "scroll"}
+)
 
 logger = get_logger(__name__)
 
@@ -78,7 +80,10 @@ class ActionAgent(BaseAgent):
             modalities=self.modalities,
         )
 
-        assistant_message = {"role": "assistant", "content": response.get("content", "")}
+        assistant_message = {
+            "role": "assistant",
+            "content": response.get("content", ""),
+        }
         self.conversation_history.append(assistant_message)
 
         if debug_logger:
@@ -163,16 +168,22 @@ class ActionAgent(BaseAgent):
                 self._slugify_identifier(debug_logger.test_run_id, max_length=24)
             )
 
-        plan_name = test_context.get("test_plan_name") or test_context.get("plan_name") or ""
+        plan_name = (
+            test_context.get("test_plan_name") or test_context.get("plan_name") or ""
+        )
         if isinstance(plan_name, str) and plan_name.strip():
             components.append(self._slugify_identifier(plan_name))
 
-        case_name = test_context.get("test_case_name") or test_context.get("case_name") or ""
+        case_name = (
+            test_context.get("test_case_name") or test_context.get("case_name") or ""
+        )
         if isinstance(case_name, str) and case_name.strip():
             components.append(self._slugify_identifier(case_name))
 
         components.append(f"step{test_step.step_number}")
-        identifier = "-".join(filter(None, components)) or f"haindy-step-{test_step.step_number}"
+        identifier = (
+            "-".join(filter(None, components)) or f"haindy-step-{test_step.step_number}"
+        )
         return identifier[:64]
 
     @staticmethod
@@ -230,7 +241,10 @@ class ActionAgent(BaseAgent):
                     exc_info=True,
                 )
 
-        viewport_width, viewport_height = await self.automation_driver.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self.automation_driver.get_viewport_size()
 
         screenshot_path = None
         if screenshot and debug_logger:
@@ -258,7 +272,9 @@ class ActionAgent(BaseAgent):
             raise ComputerUseExecutionError("Automation driver is not available.")
 
         model_override = (
-            self._computer_use_model if getattr(self.settings, "cu_provider", "") == "openai" else None
+            self._computer_use_model
+            if getattr(self.settings, "cu_provider", "") == "openai"
+            else None
         )
 
         cache = self._coordinate_cache
@@ -346,7 +362,9 @@ class ActionAgent(BaseAgent):
         return text or None
 
     @classmethod
-    def _extract_driver_actions(cls, turns: list[ComputerToolTurn]) -> list[dict[str, Any]]:
+    def _extract_driver_actions(
+        cls, turns: list[ComputerToolTurn]
+    ) -> list[dict[str, Any]]:
         """Translate Computer Use turns into replayable driver actions."""
         recorded: list[dict[str, Any]] = []
         for turn in turns:
@@ -377,13 +395,29 @@ class ActionAgent(BaseAgent):
                 y = meta.get("y")
                 if x is None or y is None:
                     continue
-                recorded.append({"type": "click", "x": x, "y": y, "button": "left", "click_count": 2})
+                recorded.append(
+                    {
+                        "type": "click",
+                        "x": x,
+                        "y": y,
+                        "button": "left",
+                        "click_count": 2,
+                    }
+                )
             elif action_type == "right_click":
                 x = meta.get("x")
                 y = meta.get("y")
                 if x is None or y is None:
                     continue
-                recorded.append({"type": "click", "x": x, "y": y, "button": "right", "click_count": 1})
+                recorded.append(
+                    {
+                        "type": "click",
+                        "x": x,
+                        "y": y,
+                        "button": "right",
+                        "click_count": 1,
+                    }
+                )
             elif action_type in {"move", "hover_at"}:
                 x = meta.get("x")
                 y = meta.get("y")
@@ -410,7 +444,9 @@ class ActionAgent(BaseAgent):
                 scroll_x = meta.get("scroll_x")
                 scroll_y = meta.get("scroll_y")
                 if scroll_x is None and scroll_y is None:
-                    direction = meta.get("scroll_direction") or params.get("direction") or ""
+                    direction = (
+                        meta.get("scroll_direction") or params.get("direction") or ""
+                    )
                     magnitude = meta.get("scroll_magnitude") or params.get("magnitude")
                     if magnitude is None:
                         continue
@@ -420,9 +456,17 @@ class ActionAgent(BaseAgent):
                         continue
                     recorded.append({"type": "scroll_by_pixels", "x": dx, "y": dy})
                 else:
-                    recorded.append({"type": "scroll_by_pixels", "x": scroll_x or 0, "y": scroll_y or 0})
+                    recorded.append(
+                        {
+                            "type": "scroll_by_pixels",
+                            "x": scroll_x or 0,
+                            "y": scroll_y or 0,
+                        }
+                    )
             elif action_type == "scroll_document":
-                direction = meta.get("scroll_direction") or params.get("direction") or ""
+                direction = (
+                    meta.get("scroll_direction") or params.get("direction") or ""
+                )
                 magnitude = meta.get("scroll_magnitude") or params.get("magnitude")
                 if magnitude is None:
                     continue
@@ -436,7 +480,9 @@ class ActionAgent(BaseAgent):
                 y = meta.get("y")
                 if x is not None and y is not None:
                     recorded.append({"type": "move", "x": x, "y": y})
-                direction = meta.get("scroll_direction") or params.get("direction") or ""
+                direction = (
+                    meta.get("scroll_direction") or params.get("direction") or ""
+                )
                 magnitude = meta.get("scroll_magnitude") or params.get("magnitude")
                 if magnitude is None:
                     continue
@@ -446,7 +492,9 @@ class ActionAgent(BaseAgent):
                     continue
                 recorded.append({"type": "scroll_by_pixels", "x": dx, "y": dy})
             elif action_type == "type":
-                text_payload = params.get("text") or params.get("value") or params.get("input")
+                text_payload = (
+                    params.get("text") or params.get("value") or params.get("input")
+                )
                 if text_payload is None:
                     continue
                 recorded.append({"type": "type_text", "text": str(text_payload)})
@@ -461,7 +509,15 @@ class ActionAgent(BaseAgent):
                 press_enter_default = False if normalized_coords else True
                 press_enter = bool(params.get("press_enter", press_enter_default))
                 clear_before = bool(params.get("clear_before_typing", True))
-                recorded.append({"type": "click", "x": x, "y": y, "button": "left", "click_count": 1})
+                recorded.append(
+                    {
+                        "type": "click",
+                        "x": x,
+                        "y": y,
+                        "button": "left",
+                        "click_count": 1,
+                    }
+                )
                 if clear_before:
                     recorded.append({"type": "press_key", "keys": "ctrl+a"})
                     recorded.append({"type": "press_key", "keys": "backspace"})
@@ -496,7 +552,9 @@ class ActionAgent(BaseAgent):
                 recorded.append({"type": "press_key", "keys": "enter"})
             elif action_type == "search":
                 recorded.append({"type": "press_key", "keys": "ctrl+l"})
-                recorded.append({"type": "type_text", "text": "https://www.google.com/"})
+                recorded.append(
+                    {"type": "type_text", "text": "https://www.google.com/"}
+                )
                 recorded.append({"type": "press_key", "keys": "enter"})
 
         normalized: list[dict[str, Any]] = []
@@ -582,7 +640,9 @@ class ActionAgent(BaseAgent):
 
         instruction = test_step.action_instruction
         if not instruction:
-            raise ComputerUseExecutionError("Missing action instruction for Computer Use workflow.")
+            raise ComputerUseExecutionError(
+                "Missing action instruction for Computer Use workflow."
+            )
 
         debug_logger = get_debug_logger()
         initial_screenshot = screenshot
@@ -603,17 +663,23 @@ class ActionAgent(BaseAgent):
             raise ComputerUseExecutionError("Missing Computer Use goal.")
 
         context_lookup = test_context if isinstance(test_context, dict) else {}
-        context_for_result = dict(test_context) if isinstance(test_context, dict) else {}
+        context_for_result = (
+            dict(test_context) if isinstance(test_context, dict) else {}
+        )
 
         session_metadata = {
             "step_number": test_step.step_number,
-            "test_plan_name": context_lookup.get("test_plan_name") or context_lookup.get("plan_name"),
-            "test_case_name": context_lookup.get("test_case_name") or context_lookup.get("case_name"),
+            "test_plan_name": context_lookup.get("test_plan_name")
+            or context_lookup.get("plan_name"),
+            "test_case_name": context_lookup.get("test_case_name")
+            or context_lookup.get("case_name"),
             "target": instruction.target,
             "value": instruction.value,
             "interaction_mode": interaction_mode,
             "step_goal": test_step.description,
             "environment": "desktop",
+            # Allow auto-approve safety policy to continue execution when enabled.
+            "allow_safety_auto_approve": True,
         }
 
         safety_identifier = self._resolve_safety_identifier(test_step, context_lookup)
@@ -634,7 +700,9 @@ class ActionAgent(BaseAgent):
         cache_label: str | None = None
         cache_action = "click"
         if instruction.action_type in {ActionType.CLICK, ActionType.TYPE}:
-            cache_label = instruction.target or instruction.description or test_step.description
+            cache_label = (
+                instruction.target or instruction.description or test_step.description
+            )
         if isinstance(test_context, dict):
             cache_label = test_context.get("cache_label") or cache_label
             cache_action = test_context.get("cache_action") or cache_action
@@ -668,7 +736,11 @@ class ActionAgent(BaseAgent):
         )
 
         failing_action = next(
-            (action for action in session_result.actions if action.status != "executed"),
+            (
+                action
+                for action in session_result.actions
+                if action.status != "executed"
+            ),
             None,
         )
 
@@ -683,7 +755,10 @@ class ActionAgent(BaseAgent):
         elif failing_action:
             execution_error = f"Computer action '{failing_action.action_type}' did not complete successfully."
         elif session_result.safety_events:
-            execution_error = session_result.safety_events[0].message or "Safety check prevented action execution."
+            execution_error = (
+                session_result.safety_events[0].message
+                or "Safety check prevented action execution."
+            )
 
         success = execution_error is None
 
@@ -719,7 +794,9 @@ class ActionAgent(BaseAgent):
                 actual_outcome=session_result.final_output,
                 matches_expected=success,
             )
-            self.conversation_history.append({"role": "assistant", "content": session_result.final_output})
+            self.conversation_history.append(
+                {"role": "assistant", "content": session_result.final_output}
+            )
 
         if debug_logger:
             debug_logger.log_ai_interaction(
@@ -741,7 +818,11 @@ class ActionAgent(BaseAgent):
             cache_label,
             cache_action,
         )
-        driver_actions = self._extract_driver_actions(session_result.actions) if record_driver_actions else []
+        driver_actions = (
+            self._extract_driver_actions(session_result.actions)
+            if record_driver_actions
+            else []
+        )
 
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,

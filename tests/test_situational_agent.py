@@ -15,7 +15,9 @@ def test_heuristic_web_context_is_sufficient() -> None:
     assert assessment.setup.maximize is True
 
 
-def test_heuristic_desktop_context_uses_visual_entry_action_without_os_identifiers() -> None:
+def test_heuristic_desktop_context_uses_visual_entry_action_without_os_identifiers() -> (
+    None
+):
     agent = SituationalAgent()
     assessment = agent._heuristic_assessment("Target type: desktop app for KeenBench")
     assert assessment.sufficient is True
@@ -58,3 +60,31 @@ def test_parse_assessment_filters_deterministic_identifier_blockers() -> None:
     assert assessment.sufficient is True
     assert not assessment.missing_items
     assert assessment.entry_actions
+
+
+def test_parse_assessment_treats_desktop_missing_items_as_non_blocking() -> None:
+    agent = SituationalAgent()
+    payload = {
+        "target_type": "desktop_app",
+        "sufficient": False,
+        "missing_items": [
+            (
+                "Confirmation that KeenBench is on the Home screen with a visible "
+                "New Workbench button"
+            )
+        ],
+        "setup": {"app_name": "KeenBench"},
+        "entry_actions": [],
+        "notes": [],
+    }
+
+    assessment = agent._parse_assessment(
+        payload,
+        "Test KeenBench workflows",
+        "KeenBench is already open on the desktop",
+    )
+
+    assert assessment.sufficient is True
+    assert not assessment.missing_items
+    assert assessment.entry_actions
+    assert any("Non-blocking context gap" in note for note in assessment.notes)

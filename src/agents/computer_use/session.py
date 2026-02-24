@@ -49,7 +49,9 @@ class InteractionConstraints:
             lines.append("- Do NOT scroll (no scroll actions; no mouse wheel).")
         return "\n".join(lines)
 
-    def apply_overrides(self, metadata: dict[str, Any] | None) -> InteractionConstraints:
+    def apply_overrides(
+        self, metadata: dict[str, Any] | None
+    ) -> InteractionConstraints:
         """Apply optional constraint overrides supplied via runtime metadata."""
         if not metadata:
             return self
@@ -114,6 +116,7 @@ class InteractionConstraints:
         )
         return InteractionConstraints(disallow_scroll=not allows_scroll)
 
+
 @dataclass
 class ComputerUseSessionResult:
     """Result of executing a Computer Use session."""
@@ -171,9 +174,7 @@ class ComputerUseSession:
             else settings.computer_use_model
         )
         self._google_model = (
-            model
-            if model and self._provider == "google"
-            else settings.google_cu_model
+            model if model and self._provider == "google" else settings.google_cu_model
         )
         self._model = (
             self._google_model if self._provider == "google" else self._openai_model
@@ -251,27 +252,46 @@ class ComputerUseSession:
 
         step_goal = str(metadata.get("step_goal") or "").strip()
         constraint_source = " ".join([step_goal, goal]).strip()
-        self._interaction_constraints = (
-            InteractionConstraints.from_text(constraint_source)
-            .apply_overrides(metadata)
-        )
+        self._interaction_constraints = InteractionConstraints.from_text(
+            constraint_source
+        ).apply_overrides(metadata)
         if self._interaction_constraints.has_any():
-            goal = goal + "\n\nCONSTRAINTS:\n" + self._interaction_constraints.to_prompt()
+            goal = (
+                goal + "\n\nCONSTRAINTS:\n" + self._interaction_constraints.to_prompt()
+            )
 
         env_mode = self._normalize_environment_name(
             environment or metadata.get("environment") or self._default_environment
         )
         try:
             if self._provider == "google":
-                return await self._run_google(
-                    goal=goal,
-                    metadata=metadata,
-                    environment=env_mode,
-                    cache_label=cache_label,
-                    cache_action=cache_action,
-                    use_cache=use_cache,
-                    model=self._google_model,
-                )
+                try:
+                    return await self._run_google(
+                        goal=goal,
+                        metadata=metadata,
+                        environment=env_mode,
+                        cache_label=cache_label,
+                        cache_action=cache_action,
+                        use_cache=use_cache,
+                        model=self._google_model,
+                    )
+                except Exception as exc:
+                    if not self._can_fallback_to_openai():
+                        raise
+                    logger.warning(
+                        "Google CU provider failed; falling back to OpenAI for this action",
+                        extra={"error": str(exc)},
+                    )
+                    return await self._run_openai(
+                        goal=goal,
+                        initial_screenshot=initial_screenshot,
+                        metadata=metadata,
+                        environment=env_mode,
+                        cache_label=cache_label,
+                        cache_action=cache_action,
+                        use_cache=use_cache,
+                        model=self._openai_model,
+                    )
             if self._provider == "openai":
                 return await self._run_openai(
                     goal=goal,
@@ -306,7 +326,10 @@ class ComputerUseSession:
 
         await self._ensure_automation_driver_ready()
 
-        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
         screenshot_b64 = encode_png_base64(screenshot)
         tool_environment = self._map_openai_environment(environment)
@@ -382,9 +405,7 @@ class ComputerUseSession:
             turn_counter += 1
             if turn_counter > self._settings.actions_computer_tool_max_turns:
                 max_turns = self._settings.actions_computer_tool_max_turns
-                message = (
-                    f"Computer Use max turns exceeded after {turn_counter} turns (limit: {max_turns})."
-                )
+                message = f"Computer Use max turns exceeded after {turn_counter} turns (limit: {max_turns})."
                 logger.warning(
                     "Computer Use max turns exceeded",
                     extra={
@@ -441,7 +462,8 @@ class ComputerUseSession:
                 turn.status = "failed"
                 turn.error_message = str(exc)
                 logger.exception(
-                    "Computer Use action execution failed", extra={"call_id": turn.call_id}
+                    "Computer Use action execution failed",
+                    extra={"call_id": turn.call_id},
                 )
 
             result.actions.append(turn)
@@ -518,6 +540,10 @@ class ComputerUseSession:
 
         return result
 
+    def _can_fallback_to_openai(self) -> bool:
+        """Return True when an OpenAI client is available for fallback execution."""
+        return self._client is not None
+
     async def _run_google(
         self,
         *,
@@ -532,7 +558,10 @@ class ComputerUseSession:
         result = ComputerUseSessionResult()
 
         await self._ensure_automation_driver_ready()
-        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
         initial_screenshot = await self._automation_driver.screenshot()
         wrapped_goal = self._wrap_goal_for_google(goal, environment)
         contents, config = self._build_google_initial_request(
@@ -711,14 +740,16 @@ class ComputerUseSession:
             if max_turn_hit:
                 break
 
-            follow_up_payload, func_response_content, follow_up_screenshot = (
-                await self._build_google_follow_up_request(
-                    goal=goal,
-                    history=history,
-                    turns=executed_turns,
-                    environment=environment,
-                    model=model,
-                )
+            (
+                follow_up_payload,
+                func_response_content,
+                follow_up_screenshot,
+            ) = await self._build_google_follow_up_request(
+                goal=goal,
+                history=history,
+                turns=executed_turns,
+                environment=environment,
+                model=model,
             )
             history.append(func_response_content)
             response = await self._create_google_response(follow_up_payload)
@@ -795,7 +826,10 @@ class ComputerUseSession:
             turn.action_type = action_type
         start = time.perf_counter()
 
-        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
         turn.metadata["resolution"] = (viewport_width, viewport_height)
         turn.metadata["normalized_coords"] = bool(normalized_coords)
         allow_action, deny_reason = self._is_action_allowed(action_type)
@@ -833,7 +867,10 @@ class ComputerUseSession:
             else:
                 await self._enforce_domain_policy(action_type)
 
-                if self._interaction_constraints.disallow_scroll and self._is_scroll_action(action_type):
+                if (
+                    self._interaction_constraints.disallow_scroll
+                    and self._is_scroll_action(action_type)
+                ):
                     raise ComputerUseExecutionError(
                         "Step context prohibits scrolling for this action."
                     )
@@ -859,7 +896,9 @@ class ComputerUseSession:
                     button = (action.get("button", "left") or "left").lower()
                     click_count = int(action.get("click_count", 1))
                     await asyncio.wait_for(
-                        self._automation_driver.click(x, y, button=button, click_count=click_count),
+                        self._automation_driver.click(
+                            x, y, button=button, click_count=click_count
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -884,7 +923,9 @@ class ComputerUseSession:
                     button = "right" if action_type == "right_click" else "left"
                     click_count = 2 if action_type == "double_click" else 1
                     await asyncio.wait_for(
-                        self._automation_driver.click(x, y, button=button, click_count=click_count),
+                        self._automation_driver.click(
+                            x, y, button=button, click_count=click_count
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -917,6 +958,7 @@ class ComputerUseSession:
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "drag":
+
                     def _coerce_float(value: Any) -> float | None:
                         if value is None:
                             return None
@@ -948,16 +990,24 @@ class ComputerUseSession:
                             end_y_raw = _coerce_float(last_point.get("y"))
 
                     if start_x_raw is None or start_y_raw is None:
-                        raise ComputerUseExecutionError("Drag action missing start coordinates.")
+                        raise ComputerUseExecutionError(
+                            "Drag action missing start coordinates."
+                        )
 
-                    delta_x_raw = _coerce_float(action.get("dx") or action.get("delta_x"))
-                    delta_y_raw = _coerce_float(action.get("dy") or action.get("delta_y"))
+                    delta_x_raw = _coerce_float(
+                        action.get("dx") or action.get("delta_x")
+                    )
+                    delta_y_raw = _coerce_float(
+                        action.get("dy") or action.get("delta_y")
+                    )
                     if end_x_raw is None and delta_x_raw is not None:
                         end_x_raw = start_x_raw + delta_x_raw
                     if end_y_raw is None and delta_y_raw is not None:
                         end_y_raw = start_y_raw + delta_y_raw
                     if end_x_raw is None or end_y_raw is None:
-                        raise ComputerUseExecutionError("Drag action missing destination coordinates.")
+                        raise ComputerUseExecutionError(
+                            "Drag action missing destination coordinates."
+                        )
 
                     if normalized_coords:
                         start_x, start_y = denormalize_coordinates(
@@ -987,11 +1037,18 @@ class ComputerUseSession:
                         steps = 1
 
                     await asyncio.wait_for(
-                        self._automation_driver.drag_mouse(start_x, start_y, end_x, end_y, steps=steps),
+                        self._automation_driver.drag_mouse(
+                            start_x, start_y, end_x, end_y, steps=steps
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update(
-                        {"start_x": start_x, "start_y": start_y, "end_x": end_x, "end_y": end_y}
+                        {
+                            "start_x": start_x,
+                            "start_y": start_y,
+                            "end_x": end_x,
+                            "end_y": end_y,
+                        }
                     )
                     turn.status = "executed"
                 elif action_type == "drag_and_drop":
@@ -1009,7 +1066,9 @@ class ComputerUseSession:
                         normalized=normalized_coords,
                     )
                     await asyncio.wait_for(
-                        self._automation_driver.drag_mouse(start_x, start_y, end_x, end_y, steps=1),
+                        self._automation_driver.drag_mouse(
+                            start_x, start_y, end_x, end_y, steps=1
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update(
@@ -1033,14 +1092,18 @@ class ComputerUseSession:
                     turn.metadata["scroll_x"] = scroll_x
                     turn.metadata["scroll_y"] = scroll_y
                     await asyncio.wait_for(
-                        self._automation_driver.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+                        self._automation_driver.scroll_by_pixels(
+                            x=scroll_x, y=scroll_y, smooth=False
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.status = "executed"
                 elif action_type == "scroll_document":
                     direction = (action.get("direction") or "").lower()
                     if direction not in {"up", "down", "left", "right"}:
-                        raise ComputerUseExecutionError("scroll_document action missing direction.")
+                        raise ComputerUseExecutionError(
+                            "scroll_document action missing direction."
+                        )
                     magnitude_raw = action.get("magnitude")
                     magnitude = (
                         abs(int(magnitude_raw))
@@ -1055,7 +1118,9 @@ class ComputerUseSession:
                 elif action_type == "scroll_at":
                     direction = (action.get("direction") or "").lower()
                     if direction not in {"up", "down", "left", "right"}:
-                        raise ComputerUseExecutionError("scroll_at action missing direction.")
+                        raise ComputerUseExecutionError(
+                            "scroll_at action missing direction."
+                        )
                     magnitude_raw = action.get("magnitude")
                     magnitude = (
                         abs(int(magnitude_raw))
@@ -1089,13 +1154,17 @@ class ComputerUseSession:
                         if text_payload:
                             turn.metadata["synthetic_text_payload"] = text_payload
                     if not text_payload:
-                        raise ComputerUseExecutionError("Type action missing text payload.")
+                        raise ComputerUseExecutionError(
+                            "Type action missing text payload."
+                        )
                     await self._automation_driver.type_text(text_payload)
                     turn.status = "executed"
                 elif action_type == "type_text_at":
                     text_payload = action.get("text")
                     if text_payload is None:
-                        raise ComputerUseExecutionError("type_text_at action missing text.")
+                        raise ComputerUseExecutionError(
+                            "type_text_at action missing text."
+                        )
                     press_enter_default = False if normalized_coords else True
                     press_enter = bool(action.get("press_enter", press_enter_default))
                     clear_before = bool(action.get("clear_before_typing", True))
@@ -1108,7 +1177,9 @@ class ComputerUseSession:
                             viewport_height,
                             normalized=normalized_coords,
                         )
-                    await self._automation_driver.click(x, y, button="left", click_count=1)
+                    await self._automation_driver.click(
+                        x, y, button="left", click_count=1
+                    )
                     if clear_before:
                         await self._automation_driver.press_key("ctrl+a")
                         await self._automation_driver.press_key("backspace")
@@ -1129,7 +1200,9 @@ class ComputerUseSession:
                         for key in key_sequence:
                             normalized = normalize_key_sequence(key)
                             await self._automation_driver.press_key(normalized)
-                            if self._should_capture_clipboard_after_key_combo(normalized):
+                            if self._should_capture_clipboard_after_key_combo(
+                                normalized
+                            ):
                                 capture_clipboard_after_action = True
                     else:
                         keys = action.get("keys")
@@ -1215,7 +1288,9 @@ class ComputerUseSession:
             if cache_allowed and cache_hit:
                 try:
                     self._coordinate_cache.invalidate(
-                        cache_label or "", cache_action, (viewport_width, viewport_height)
+                        cache_label or "",
+                        cache_action,
+                        (viewport_width, viewport_height),
                     )
                 except Exception:
                     logger.debug("Failed to invalidate coordinate cache", exc_info=True)
@@ -1223,7 +1298,9 @@ class ComputerUseSession:
             if cache_allowed and cache_hit:
                 try:
                     self._coordinate_cache.invalidate(
-                        cache_label or "", cache_action, (viewport_width, viewport_height)
+                        cache_label or "",
+                        cache_action,
+                        (viewport_width, viewport_height),
                     )
                 except Exception:
                     logger.debug("Failed to invalidate coordinate cache", exc_info=True)
@@ -1297,7 +1374,9 @@ class ComputerUseSession:
         scroll_x = int(action.get("scroll_x", 0))
         scroll_y = int(action.get("scroll_y", 0))
         await asyncio.wait_for(
-            self._automation_driver.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+            self._automation_driver.scroll_by_pixels(
+                x=scroll_x, y=scroll_y, smooth=False
+            ),
             timeout=self._action_timeout_seconds,
         )
 
@@ -1315,7 +1394,10 @@ class ComputerUseSession:
             screenshot_bytes = await self._automation_driver.screenshot()
             screenshot_b64 = encode_png_base64(screenshot_bytes)
 
-        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
 
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
@@ -1460,7 +1542,9 @@ class ComputerUseSession:
             signature.append(str(key_value).strip().lower())
 
         if "scroll_x" in params or "scroll_y" in params:
-            signature.append(f"scroll:{params.get('scroll_x', 0)}:{params.get('scroll_y', 0)}")
+            signature.append(
+                f"scroll:{params.get('scroll_x', 0)}:{params.get('scroll_y', 0)}"
+            )
 
         return tuple(component for component in signature if component)
 
@@ -1515,7 +1599,9 @@ class ComputerUseSession:
 
         context_text = goal
         if context_lines:
-            context_text = f"{goal}\n\nContext:\n" + "\n".join(f"- {line}" for line in context_lines)
+            context_text = f"{goal}\n\nContext:\n" + "\n".join(
+                f"- {line}" for line in context_lines
+            )
 
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
@@ -1662,7 +1748,9 @@ class ComputerUseSession:
     async def _create_response(self, payload: dict[str, Any]) -> Any:
         """Call the OpenAI Responses API with the provided payload."""
         timeout = float(self._settings.openai_request_timeout_seconds)
-        logger.debug("Calling OpenAI Responses API", extra={"model": payload.get("model")})
+        logger.debug(
+            "Calling OpenAI Responses API", extra={"model": payload.get("model")}
+        )
         return await self._client.responses.create(timeout=timeout, **payload)
 
     async def _create_google_response(self, payload: dict[str, Any]) -> Any:
@@ -1698,11 +1786,15 @@ class ComputerUseSession:
             return self._google_client
         if genai is None:
             return None
-        vertex_project = str(getattr(self._settings, "vertex_project", "") or "").strip()
+        vertex_project = str(
+            getattr(self._settings, "vertex_project", "") or ""
+        ).strip()
         vertex_location = str(
             getattr(self._settings, "vertex_location", "us-central1") or ""
         ).strip()
-        vertex_api_key = str(getattr(self._settings, "vertex_api_key", "") or "").strip()
+        vertex_api_key = str(
+            getattr(self._settings, "vertex_api_key", "") or ""
+        ).strip()
 
         if vertex_project:
             if not vertex_location:
@@ -1774,7 +1866,10 @@ class ComputerUseSession:
                     return None
                 return str(value)
             except Exception:
-                logger.debug("Failed to retrieve current URL from automation driver", exc_info=True)
+                logger.debug(
+                    "Failed to retrieve current URL from automation driver",
+                    exc_info=True,
+                )
         return None
 
     @staticmethod
@@ -1863,14 +1958,15 @@ class ComputerUseSession:
         model: str | None = None,
     ) -> dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
-        confirmation_text = (
-            "Yes, proceed. Execute the requested action now without asking for additional confirmation."
-        )
+        confirmation_text = "Yes, proceed. Execute the requested action now without asking for additional confirmation."
         target_text = metadata.get("target")
         if target_text:
             confirmation_text += f" Focus on: {target_text}."
 
-        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
 
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
@@ -1886,9 +1982,7 @@ class ComputerUseSession:
             "input": [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": confirmation_text}
-                    ],
+                    "content": [{"type": "input_text", "text": confirmation_text}],
                 }
             ],
             "truncation": "auto",
@@ -1909,9 +2003,7 @@ class ComputerUseSession:
         if action_type in self._allowed_actions:
             return True, None
 
-        return False, (
-            f"Action '{action_type}' is not permitted in observe-only mode."
-        )
+        return False, (f"Action '{action_type}' is not permitted in observe-only mode.")
 
     def _should_abort_on_safety(
         self,
@@ -1926,7 +2018,10 @@ class ComputerUseSession:
         fail_fast = bool(
             getattr(self._settings, "actions_computer_tool_fail_fast_on_safety", True)
         )
-        if not fail_fast and policy == "auto_approve":
+        allow_auto_approve_override = bool(
+            turn.metadata.get("allow_safety_auto_approve")
+        )
+        if policy == "auto_approve" and (not fail_fast or allow_auto_approve_override):
             return False
 
         safety_payload = turn.pending_safety_checks[0]
@@ -2028,14 +2123,16 @@ class ComputerUseSession:
         normalized_host = hostname.lower()
 
         if self._allowed_domains and not any(
-            self._domain_matches(normalized_host, domain) for domain in self._allowed_domains
+            self._domain_matches(normalized_host, domain)
+            for domain in self._allowed_domains
         ):
             raise ComputerUseExecutionError(
                 f"Current domain '{hostname}' is not in the allowlist."
             )
 
         if self._blocked_domains and any(
-            self._domain_matches(normalized_host, domain) for domain in self._blocked_domains
+            self._domain_matches(normalized_host, domain)
+            for domain in self._blocked_domains
         ):
             raise ComputerUseExecutionError(
                 f"Current domain '{hostname}' is blocked by policy."
@@ -2109,7 +2206,9 @@ class ComputerUseSession:
         return False
 
     @staticmethod
-    def _extract_scroll_direction(action_type: str, action: dict[str, Any]) -> str | None:
+    def _extract_scroll_direction(
+        action_type: str, action: dict[str, Any]
+    ) -> str | None:
         normalized = (action_type or "").lower()
         if normalized in {"scroll_document", "scroll_at", "scroll_window"}:
             direction = (action.get("direction") or "").lower()
@@ -2145,9 +2244,9 @@ class ComputerUseSession:
         normalized = keys_str.lower().replace(" ", "")
         if normalized in {"ctrl+c", "control+c"}:
             return True
-        if (("ctrl+" in normalized) or ("control+" in normalized)) and normalized.endswith(
-            "+c"
-        ):
+        if (
+            ("ctrl+" in normalized) or ("control+" in normalized)
+        ) and normalized.endswith("+c"):
             return True
         return False
 
@@ -2421,7 +2520,9 @@ def extract_google_function_calls(response_obj: Any) -> list[Any]:
     return calls
 
 
-def extract_google_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]]:
+def extract_google_computer_calls(
+    response_dict: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Extract function/call items from a Google response."""
     calls: list[dict[str, Any]] = []
     output_items = response_dict.get("output", [])
@@ -2484,6 +2585,10 @@ def _inject_context_metadata(turn: ComputerToolTurn, metadata: dict[str, Any]) -
     for key in ("step_number", "test_plan_name", "test_case_name", "target", "value"):
         if metadata.get(key) is not None:
             turn.metadata[key] = metadata[key]
+    if metadata.get("allow_safety_auto_approve") is not None:
+        turn.metadata["allow_safety_auto_approve"] = bool(
+            metadata["allow_safety_auto_approve"]
+        )
     if metadata.get("safety_identifier") is not None:
         turn.metadata["safety_identifier"] = metadata["safety_identifier"]
     if metadata.get("interaction_mode") is not None:
@@ -2497,6 +2602,7 @@ def normalize_coordinates(
     viewport_height: int,
 ) -> tuple[int, int]:
     """Normalize coordinates into the viewport bounds."""
+
     def _clamp(value: float, maximum: int) -> int:
         return max(0, min(int(round(value)), max(0, maximum - 1)))
 
