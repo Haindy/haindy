@@ -10,7 +10,7 @@ HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to
 
 - **Multi-Agent Architecture**: Scope Triage, Situational, Test Planner, Test Runner, and Action Agent
 - **DOM-Free Visual Interaction**: Adaptive grid-based interaction with automatic refinement
-- **Desktop + Gemini Computer Use**: Optional OS-level driver with Gemini provider support
+- **Desktop + Computer Use**: Optional OS-level driver with OpenAI and Google provider support
 - **Just-In-Time Scripted Automation**: Records successful actions for faster replay
 - **Hierarchical Validation**: Multi-layer validation to prevent hallucinations
 - **Detailed Execution Journaling**: Comprehensive logging in structured natural language
@@ -47,57 +47,48 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
-### Environment Configuration
-
-Create a `.env` file in the project root:
-```env
-OPENAI_API_KEY=your_api_key_here
-
-# Optional: override defaults globally
-OPENAI_MODEL=gpt-5.2
-OPENAI_TEMPERATURE=0.7
-OPENAI_REQUEST_TIMEOUT_SECONDS=900
-
-# Agent-specific overrides (recommended)
-HAINDY_TEST_PLANNER_MODEL=gpt-5.2
-HAINDY_TEST_PLANNER_REASONING_LEVEL=high
-HAINDY_TEST_PLANNER_TEMPERATURE=0.35
-
-HAINDY_TEST_RUNNER_MODEL=gpt-5.2
-HAINDY_TEST_RUNNER_REASONING_LEVEL=medium
-HAINDY_TEST_RUNNER_TEMPERATURE=0.55
-
-HAINDY_ACTION_AGENT_MODEL=gpt-5.2
-HAINDY_ACTION_AGENT_REASONING_LEVEL=low
-HAINDY_ACTION_AGENT_TEMPERATURE=0.25
-HAINDY_ACTION_AGENT_MODALITIES=text,vision
+5. Install desktop browser tooling:
+```bash
+playwright install chromium
 ```
 
-If the agent-specific variables are omitted, the system falls back to the global
-`OPENAI_MODEL`, `OPENAI_TEMPERATURE`, and `OPENAI_REQUEST_TIMEOUT_SECONDS`
-values. Override per agent to fine-tune cost vs. accuracy or adjust request timeouts
-for long-running GPT-5.2 reasoning calls.
+### Environment Configuration
+
+Copy `.env.example` and update values:
+```bash
+cp .env.example .env
+```
+
+Core model settings:
+- `OPENAI_API_KEY` (required)
+- `OPENAI_MODEL`, `OPENAI_TEMPERATURE`, `OPENAI_REQUEST_TIMEOUT_SECONDS`
+- `OPENAI_MAX_RETRIES`
+
+Optional per-agent overrides use the `HAINDY_<AGENT>_*` namespace:
+- `HAINDY_SCOPE_TRIAGE_*`
+- `HAINDY_TEST_PLANNER_*`
+- `HAINDY_TEST_RUNNER_*`
+- `HAINDY_ACTION_AGENT_*`
+- `HAINDY_SITUATIONAL_AGENT_*`
 
 Supported `*_REASONING_LEVEL` values: `none`, `minimal`, `low`, `medium`,
 `high`, and `xhigh`.
 
-#### Computer Use (Gemini + Desktop) Configuration
-```env
-# Enable Computer Use tool execution
-HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+`*_TEMPERATURE`, `*_MODEL`, and `*_MODALITIES` on an agent override global values when set.
 
-# Choose provider (default: google)
-CU_PROVIDER=google
-GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
-VERTEX_API_KEY=your-vertex-api-key
-VERTEX_PROJECT=your-vertex-project
-VERTEX_LOCATION=us-central1
-CU_SAFETY_POLICY=auto_approve
+Computer Use options use either OpenAI or Google provider:
+- `HAINDY_ACTIONS_USE_COMPUTER_TOOL`
+- `HAINDY_COMPUTER_USE_MODEL` (OpenAI)
+- `CU_PROVIDER` (`openai` or `google`, default `google`)
+- `GOOGLE_CU_MODEL` and Vertex vars (`VERTEX_API_KEY`, `VERTEX_PROJECT`, `VERTEX_LOCATION`)
+- `CU_SAFETY_POLICY`
+- `HAINDY_ACTIONS_COMPUTER_TOOL_*` controls tool behavior
 
-```
+Other groups are in `.env.example`: grid, execution, recording, desktop, storage,
+logging, security, and rate limiting.
 
-Desktop automation has OS-level dependencies (`ffmpeg`, `xrandr`, `/dev/uinput`, `xclip`).
-See `docs/RUNBOOK.md` for setup details.
+Desktop automation requires OS-level dependencies (`ffmpeg`, `xrandr`, `/dev/uinput`,
+`xclip`). See `docs/RUNBOOK.md` for setup details.
 
 ## Usage
 
@@ -120,7 +111,7 @@ python -m src.main --plan requirements.md --context execution_context.txt --debu
 python -m src.main --plan requirements.md --context execution_context.txt --verbose
 ```
 
-#### Desktop + Gemini Quickstart
+#### Desktop + Computer Use Quickstart
 ```bash
 export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=google
@@ -161,6 +152,10 @@ python -m src.main --plan requirements.md --context execution_context.txt --time
 
 # Set maximum steps (default: 50)
 python -m src.main --plan requirements.md --context execution_context.txt --max-steps 100
+
+# Force desktop recording on or off for a single run
+python -m src.main --plan requirements.md --context execution_context.txt --record
+python -m src.main --plan requirements.md --context execution_context.txt --no-record
 ```
 
 ### Utility Commands
