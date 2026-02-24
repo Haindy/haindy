@@ -12,6 +12,8 @@ from openai import AsyncOpenAI
 
 from src.config.settings import get_settings
 
+SUPPORTED_OPENAI_MODEL = "gpt-5.2"
+
 
 class ResponseStreamObserver(Protocol):
     """Observer that receives streaming updates from the Responses API."""
@@ -58,7 +60,6 @@ class OpenAIClient:
             api_key: Optional API key (defaults to env/config)
             max_retries: Maximum number of retry attempts
         """
-        self.model = model
         self.max_retries = max_retries
         self.reasoning_level = reasoning_level
         self.modalities = modalities or {"text"}
@@ -75,6 +76,13 @@ class OpenAIClient:
             raise ValueError(
                 "OpenAI API key not provided. Set OPENAI_API_KEY environment variable."
             )
+
+        if model != SUPPORTED_OPENAI_MODEL:
+            raise ValueError(
+                f"Unsupported OpenAI model '{model}'. "
+                f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
+            )
+        self.model = model
 
         self.client = AsyncOpenAI(
             api_key=self.api_key,
@@ -105,42 +113,31 @@ class OpenAIClient:
             f"messages={len(final_messages)}, temperature={temperature}"
         )
 
-        use_responses = self._should_use_responses_api(self.model)
-
         try:
-            if use_responses:
-                if stream or stream_observer is not None:
-                    try:
-                        return await self._call_responses_api_streaming(
-                            final_messages=final_messages,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            response_format=response_format,
-                            reasoning_level=reasoning_level or self.reasoning_level,
-                            system_prompt=system_prompt,
-                            observer=stream_observer,
-                        )
-                    except Exception:
-                        self.logger.warning(
-                            "Streaming responses call failed; falling back to standard execution",
-                            exc_info=True,
-                        )
+            if stream or stream_observer is not None:
+                try:
+                    return await self._call_responses_api_streaming(
+                        final_messages=final_messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        response_format=response_format,
+                        reasoning_level=reasoning_level or self.reasoning_level,
+                        system_prompt=system_prompt,
+                        observer=stream_observer,
+                    )
+                except Exception:
+                    self.logger.warning(
+                        "Streaming responses call failed; falling back to standard execution",
+                        exc_info=True,
+                    )
 
-                return await self._call_responses_api(
-                    final_messages=final_messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    response_format=response_format,
-                    reasoning_level=reasoning_level or self.reasoning_level,
-                    system_prompt=system_prompt,
-                )
-
-            return await self._call_chat_completions(
+            return await self._call_responses_api(
                 final_messages=final_messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 response_format=response_format,
-                modalities=modalities,
+                reasoning_level=reasoning_level or self.reasoning_level,
+                system_prompt=system_prompt,
             )
 
         except openai.APIError as e:
@@ -252,40 +249,10 @@ class OpenAIClient:
         Returns:
             Estimated cost in USD
         """
-        # Pricing as of GPT-4o mini (adjust as needed)
-        # These are example prices - update with actual pricing
-        pricing = {
-            "gpt-5.2": {
-                "prompt": 1.25 / 1_000_000,
-                "completion": 5.0 / 1_000_000,
-            },
-            "gpt-5": {
-                "prompt": 1.25 / 1_000_000,
-                "completion": 5.0 / 1_000_000,
-            },
-            "gpt-4.1": {
-                "prompt": 0.75 / 1_000_000,
-                "completion": 2.5 / 1_000_000,
-            },
-            "gpt-4.1-mini": {
-                "prompt": 0.5 / 1_000_000,
-                "completion": 1.2 / 1_000_000,
-            },
-            "gpt-4.1-mini-vision": {
-                "prompt": 0.3 / 1_000_000,
-                "completion": 0.9 / 1_000_000,
-            },
-            "gpt-4o-mini": {
-                "prompt": 0.15 / 1_000_000,
-                "completion": 0.6 / 1_000_000,
-            },
-            "gpt-4o": {
-                "prompt": 5.0 / 1_000_000,
-                "completion": 15.0 / 1_000_000,
-            },
+        model_pricing = {
+            "prompt": 1.25 / 1_000_000,
+            "completion": 5.0 / 1_000_000,
         }
-
-        model_pricing = self._resolve_pricing(pricing)
 
         prompt_cost = usage.get("prompt_tokens", 0) * model_pricing["prompt"]
         completion_cost = (
@@ -294,75 +261,11 @@ class OpenAIClient:
 
         return prompt_cost + completion_cost
 
-    def _resolve_pricing(self, pricing: dict[str, dict[str, float]]) -> dict[str, float]:
-        """Resolve pricing entry for the configured model."""
-        if self.model in pricing:
-            return pricing[self.model]
-
-        # Attempt to match by family prefix (e.g., gpt-4.1-mini-high)
-        for key in pricing:
-            if self.model.startswith(key):
-                return pricing[key]
-
-        return pricing["gpt-4o-mini"]
-
-    def _should_use_responses_api(self, model: str) -> bool:
-        """Return True when the Responses API should be used."""
-        return model.startswith("gpt-5") or model.startswith("gpt-4.1")
-
     def _supports_responses_temperature(
-        self, model: str, reasoning_level: str | None
+        self, reasoning_level: str | None
     ) -> bool:
         """Return True if the Responses model accepts the temperature parameter."""
-        # For GPT-5.2+ usage in this project, temperature is only used when
-        # reasoning effort is explicitly set to none.
-        return model.startswith("gpt-5.2") and (reasoning_level or "medium") == "none"
-
-    async def _call_chat_completions(
-        self,
-        final_messages: list[dict[str, str]],
-        temperature: float,
-        max_tokens: int | None,
-        response_format: dict[str, Any] | None,
-        modalities: set[str] | None,
-    ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": final_messages,
-            "temperature": temperature,
-        }
-
-        if max_tokens:
-            kwargs["max_completion_tokens"] = max_tokens
-
-        if response_format:
-            kwargs["response_format"] = response_format
-
-        selected_modalities = modalities or self.modalities
-        if selected_modalities:
-            kwargs["modalities"] = sorted(selected_modalities)
-
-        response = await self.client.chat.completions.create(
-            timeout=self.request_timeout,
-            **kwargs,
-        )
-
-        content = response.choices[0].message.content
-        if response_format and response_format.get("type") == "json_object":
-            try:
-                content = json.loads(content)
-            except json.JSONDecodeError as exc:
-                self.logger.error(f"Failed to parse JSON response: {exc}")
-                content = {"error": "Invalid JSON response", "raw": content}
-
-        usage_payload = self._normalize_chat_usage(response.usage)
-
-        return {
-            "content": content,
-            "usage": usage_payload,
-            "model": response.model,
-            "finish_reason": response.choices[0].finish_reason,
-        }
+        return (reasoning_level or "medium") == "none"
 
     async def _call_responses_api(
         self,
@@ -393,7 +296,7 @@ class OpenAIClient:
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
 
-        if self._supports_responses_temperature(self.model, reasoning_level or "medium"):
+        if self._supports_responses_temperature(reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
         response = await self.client.responses.create(
@@ -464,7 +367,7 @@ class OpenAIClient:
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
 
-        if self._supports_responses_temperature(self.model, reasoning_level or "medium"):
+        if self._supports_responses_temperature(reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
         usage_totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}

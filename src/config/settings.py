@@ -18,6 +18,7 @@ AGENT_ENV_PREFIX: dict[str, str] = {
     "action_agent": "HAINDY_ACTION_AGENT",
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
+SUPPORTED_OPENAI_MODEL = "gpt-5.2"
 
 ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
@@ -36,6 +37,16 @@ class AgentModelConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     reasoning_level: str = Field(default="medium")
     modalities: set[str] = Field(default_factory=lambda: {"text"})
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, value: str) -> str:
+        if value != SUPPORTED_OPENAI_MODEL:
+            raise ValueError(
+                f"Unsupported OpenAI model '{value}'. "
+                f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
+            )
+        return value
 
     @field_validator("reasoning_level")
     @classmethod
@@ -233,6 +244,16 @@ class Settings(BaseSettings):
     screenshot_quality: int = Field(
         default=80, ge=1, le=100, description="Screenshot JPEG quality"
     )
+
+    @field_validator("openai_model")
+    @classmethod
+    def validate_openai_model(cls, value: str) -> str:
+        if value != SUPPORTED_OPENAI_MODEL:
+            raise ValueError(
+                f"Unsupported OpenAI model '{value}' for openai_model. "
+                f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
+            )
+        return value
 
     # Computer Use Configuration
     actions_use_computer_tool: bool = Field(
