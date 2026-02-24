@@ -2,6 +2,7 @@
 Pattern matching for action reuse and caching.
 """
 
+import math
 import re
 from typing import Any
 
@@ -78,11 +79,13 @@ class PatternMatcher:
             if pattern.element_type == features["element_type"]:
                 confidence += self.weights["element_type"]
 
-        # Visual signature similarity (grid coordinates)
-        if pattern.visual_signature.get("grid_coordinates") and features.get("grid_coordinates"):
+        # Visual signature similarity (coordinate metadata)
+        if pattern.visual_signature.get("coordinate_metadata") and features.get(
+            "coordinate_metadata"
+        ):
             visual_sim = self._visual_similarity(
-                pattern.visual_signature["grid_coordinates"],
-                features["grid_coordinates"]
+                pattern.visual_signature["coordinate_metadata"],
+                features["coordinate_metadata"]
             )
             confidence += visual_sim * self.weights["visual_signature"]
 
@@ -188,40 +191,40 @@ class PatternMatcher:
 
     def _visual_similarity(self, coords1: dict[str, Any], coords2: dict[str, Any]) -> float:
         """
-        Calculate visual similarity based on grid coordinates.
-
-        Considers proximity and refinement patterns.
+        Calculate similarity for provider-neutral coordinate metadata.
         """
-        # Check initial selection proximity
-        cell1 = coords1.get("initial_selection", "")
-        cell2 = coords2.get("initial_selection", "")
+        ref1 = (coords1.get("target_reference") or "").strip().lower()
+        ref2 = (coords2.get("target_reference") or "").strip().lower()
 
-        if not cell1 or not cell2:
-            return 0.0
-
-        # Parse grid cells (e.g., "M23" -> (M, 23))
-        match1 = re.match(r'([A-Z]+)(\d+)', cell1)
-        match2 = re.match(r'([A-Z]+)(\d+)', cell2)
-
-        if not match1 or not match2:
-            return 0.0
-
-        col1, row1 = match1.groups()
-        col2, row2 = match2.groups()
-
-        # Calculate distance
-        col_dist = abs(ord(col1[0]) - ord(col2[0]))
-        row_dist = abs(int(row1) - int(row2))
-
-        # Nearby cells get higher similarity
-        if col_dist == 0 and row_dist == 0:
+        if ref1 and ref2 and ref1 == ref2:
             return 1.0
-        elif col_dist <= 1 and row_dist <= 1:
-            return 0.8
-        elif col_dist <= 2 and row_dist <= 2:
-            return 0.5
-        else:
-            return 0.0
+
+        ref_similarity = self._text_similarity(ref1, ref2) if ref1 and ref2 else 0.0
+
+        pixels1 = coords1.get("pixel_coordinates")
+        pixels2 = coords2.get("pixel_coordinates")
+        pixel_similarity = 0.0
+        if (
+            isinstance(pixels1, (list, tuple))
+            and isinstance(pixels2, (list, tuple))
+            and len(pixels1) == 2
+            and len(pixels2) == 2
+        ):
+            dx = float(pixels1[0]) - float(pixels2[0])
+            dy = float(pixels1[1]) - float(pixels2[1])
+            distance = math.hypot(dx, dy)
+            if distance <= 10:
+                pixel_similarity = 1.0
+            elif distance <= 40:
+                pixel_similarity = 0.8
+            elif distance <= 100:
+                pixel_similarity = 0.5
+            else:
+                pixel_similarity = 0.0
+
+        if ref_similarity and pixel_similarity:
+            return 0.6 * ref_similarity + 0.4 * pixel_similarity
+        return max(ref_similarity, pixel_similarity)
 
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL."""

@@ -725,14 +725,6 @@ ENHANCED_HTML_TEMPLATE = """
                                                                 <div class="screenshot-label">After Action</div>
                                                             </div>
                                                             {% endif %}
-                                                            {% if action.screenshots.grid_overlay %}
-                                                            <div class="screenshot-item">
-                                                                <a href="file://{{ action.screenshots.grid_overlay }}" target="_blank">
-                                                                    <img src="file://{{ action.screenshots.grid_overlay }}" alt="Grid Overlay">
-                                                                </a>
-                                                                <div class="screenshot-label">Grid Overlay</div>
-                                                            </div>
-                                                            {% endif %}
                                                         </div>
                                                     </div>
                                                     {% endif %}
@@ -780,7 +772,7 @@ ENHANCED_HTML_TEMPLATE = """
 class EnhancedReporter:
     """Enhanced HTML report generator with hierarchical structure."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the enhanced reporter."""
         self.logger = logging.getLogger(__name__)
 
@@ -910,7 +902,11 @@ class EnhancedReporter:
                             "result": action.get("result"),
                             "ai_conversation": ai_conversation,
                             "automation_calls": action.get("automation_calls", []),
-                            "screenshots": action.get("screenshots", {})
+                            "screenshots": {
+                                k: v
+                                for k, v in (action.get("screenshots", {}) or {}).items()
+                                if k in {"before", "after"}
+                            },
                         })
 
                 # Calculate step duration
@@ -992,7 +988,7 @@ class EnhancedReporter:
         if not conversation or "messages" not in conversation:
             return conversation
 
-        cleaned_conversation = {"messages": []}
+        cleaned_conversation: dict[str, Any] = {"messages": []}
 
         for message in conversation.get("messages", []):
             cleaned_message = {

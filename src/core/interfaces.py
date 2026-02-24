@@ -9,8 +9,8 @@ from src.core.types import (
     ActionInstruction,
     ActionResult,
     AgentMessage,
-    GridAction,
-    GridCoordinate,
+    CoordinateReference,
+    ResolvedAction,
     TestPlan,
     TestState,
     TestStep,
@@ -113,32 +113,32 @@ class ActionAgent(Agent):
     @abstractmethod
     async def determine_action(
         self, screenshot: bytes, instruction: ActionInstruction
-    ) -> GridAction:
+    ) -> ResolvedAction:
         """
-        Determine grid coordinates for an action from a screenshot.
+        Determine coordinate metadata for an action from a screenshot.
 
         Args:
             screenshot: Screenshot of current state
             instruction: Action instruction to execute
 
         Returns:
-            Grid-based action with coordinates
+            Resolved action with coordinates
         """
         pass
 
     @abstractmethod
     async def refine_coordinates(
-        self, cropped_region: bytes, initial_coords: GridCoordinate
-    ) -> GridCoordinate:
+        self, cropped_region: bytes, initial_coords: CoordinateReference
+    ) -> CoordinateReference:
         """
-        Refine grid coordinates using adaptive refinement.
+        Refine coordinates using provider-neutral metadata.
 
         Args:
             cropped_region: Cropped screenshot region
-            initial_coords: Initial grid coordinates
+            initial_coords: Initial coordinate metadata
 
         Returns:
-            Refined grid coordinates with higher precision
+            Refined coordinates with higher precision
         """
         pass
 
@@ -236,62 +236,6 @@ class AutomationDriver(ABC):
     async def get_page_title(self) -> str:
         """Get the current page title."""
         pass
-
-
-class GridSystem(ABC):
-    """Abstract interface for grid overlay system."""
-
-    @abstractmethod
-    def initialize(self, width: int, height: int, grid_size: int = 60) -> None:
-        """
-        Initialize grid with viewport dimensions.
-
-        Args:
-            width: Viewport width in pixels
-            height: Viewport height in pixels
-            grid_size: Number of grid cells (default 60x60)
-        """
-        pass
-
-    @abstractmethod
-    def coordinate_to_pixels(self, coord: GridCoordinate) -> tuple[int, int]:
-        """
-        Convert grid coordinate to pixel position.
-
-        Args:
-            coord: Grid coordinate
-
-        Returns:
-            Tuple of (x, y) pixel coordinates
-        """
-        pass
-
-    @abstractmethod
-    def get_cell_bounds(self, cell: str) -> tuple[int, int, int, int]:
-        """
-        Get pixel bounds of a grid cell.
-
-        Args:
-            cell: Cell identifier (e.g., 'M23')
-
-        Returns:
-            Tuple of (x, y, width, height)
-        """
-        pass
-
-    @abstractmethod
-    def create_overlay_image(self, screenshot: bytes) -> bytes:
-        """
-        Create screenshot with grid overlay for debugging.
-
-        Args:
-            screenshot: Original screenshot
-
-        Returns:
-            Screenshot with grid overlay
-        """
-        pass
-
 
 class TestExecutor(ABC):
     """Abstract interface for test execution orchestration."""

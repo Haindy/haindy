@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
 
-from src.core.types import ActionType, GridAction
+from src.core.types import ActionType, ResolvedAction
 
 from .exceptions import HallucinationError
 
@@ -79,7 +79,7 @@ class ConfidenceScorer:
 
     def calculate_action_confidence(
         self,
-        action: GridAction,
+        action: ResolvedAction,
         screenshot_analysis: dict[str, Any] | None = None,
         historical_success_rate: float | None = None
     ) -> float:
@@ -87,17 +87,17 @@ class ConfidenceScorer:
         Calculate confidence score for an action.
 
         Factors considered:
-        - Grid coordinate precision
+        - Coordinate precision and target confidence
         - Element visibility/detectability
         - Historical success rate for similar actions
         - Screenshot analysis results
         """
-        scores = []
-        weights = []
+        scores: list[float] = []
+        weights: list[float] = []
 
-        # Grid coordinate confidence from the action's coordinate
-        if action.coordinate:
-            coord_confidence = action.coordinate.confidence
+        # Coordinate confidence from the resolved action target
+        if action.coordinates:
+            coord_confidence = action.coordinates.confidence
             scores.append(coord_confidence)
             weights.append(2.0)  # High weight for coordinates
 
@@ -125,31 +125,6 @@ class ConfidenceScorer:
         weighted_sum = sum(s * w for s, w in zip(scores, weights, strict=False))
 
         return min(1.0, max(0.0, weighted_sum / total_weight))
-
-    def _calculate_coordinate_confidence(
-        self,
-        grid_coords: dict[str, Any]
-    ) -> float:
-        """Calculate confidence based on grid coordinate data."""
-        confidence = 0.5  # Base confidence
-
-        # Check if refinement was applied
-        if grid_coords.get("refinement_applied"):
-            confidence += 0.2
-
-        # Check initial vs final confidence
-        initial = grid_coords.get("initial_confidence", 0.5)
-        final = grid_coords.get("final_confidence", initial)
-        improvement = final - initial
-
-        if improvement > 0:
-            confidence += min(0.2, improvement)
-
-        # Check for sub-cell precision
-        if "offset" in str(grid_coords.get("refined_coordinates", "")):
-            confidence += 0.1
-
-        return min(1.0, confidence)
 
     def _get_action_type_confidence(self, action_type: ActionType) -> float:
         """Get base confidence for action type."""
@@ -179,7 +154,7 @@ class ConfidenceScorer:
 class HallucinationDetector:
     """Detects potential hallucinations in AI agent outputs."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.hallucination_patterns = {
             HallucinationType.PHANTOM_ELEMENT: [
                 r"I can see .* button",
@@ -188,7 +163,6 @@ class HallucinationDetector:
             ],
             HallucinationType.WRONG_COORDINATES: [
                 r"coordinates?: \(-?\d+, -?\d+\)",  # Negative coordinates
-                r"grid position: [A-Z]\d{3,}",  # Grid position too large
             ],
             HallucinationType.FABRICATED_DATA: [
                 r"The (price|total|amount) is \$[\d,]+\.?\d*",
@@ -286,7 +260,7 @@ class HallucinationDetector:
 class ActionValidator:
     """Validates AI agent actions before execution."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.rules: list[ValidationRule] = []
         self.confidence_scorer = ConfidenceScorer()
         self.hallucination_detector = HallucinationDetector()
@@ -328,7 +302,7 @@ class ActionValidator:
 
     async def validate_action(
         self,
-        action: GridAction,
+        action: ResolvedAction,
         context: dict[str, Any]
     ) -> tuple[bool, list[ValidationResult]]:
         """
@@ -369,7 +343,7 @@ class ActionValidator:
 
     def _validate_action_type(self, data: dict[str, Any]) -> ValidationResult:
         """Validate action type is supported."""
-        action: GridAction = data["action"]
+        action: ResolvedAction = data["action"]
 
         if action.instruction.action_type not in ActionType:
             return ValidationResult(
@@ -388,18 +362,20 @@ class ActionValidator:
 
     def _validate_coordinates(self, data: dict[str, Any]) -> ValidationResult:
         """Validate coordinates are within viewport bounds."""
-        action: GridAction = data["action"]
+        action: ResolvedAction = data["action"]
         data["context"]
 
-        # Grid coordinates are already validated by the grid system
-        # This is a placeholder for additional coordinate validation if needed
-        if action.coordinate and action.coordinate.confidence < 0.3:
+        # Coordinate references can be low-confidence when the target is ambiguous.
+        if action.coordinates and action.coordinates.confidence < 0.3:
             return ValidationResult(
                 is_valid=False,
                 severity=ValidationSeverity.WARNING,
-                message=f"Low confidence grid coordinate: {action.coordinate.cell}",
+                message="Low confidence coordinate reference",
                 rule_name="coordinate_bounds",
-                details={"confidence": action.coordinate.confidence}
+                details={
+                    "confidence": action.coordinates.confidence,
+                    "target_reference": action.coordinates.target_reference,
+                },
             )
 
         return ValidationResult(
@@ -411,9 +387,9 @@ class ActionValidator:
 
     def _validate_selector(self, data: dict[str, Any]) -> ValidationResult:
         """Validate element selector format."""
-        action: GridAction = data["action"]
+        action: ResolvedAction = data["action"]
 
-        # In grid-based system, we use target from instruction instead of selector
+        # Validate target text if one is provided.
         if action.instruction.target:
             # Basic target validation
             if len(action.instruction.target.strip()) == 0:
@@ -433,7 +409,7 @@ class ActionValidator:
 
     def _validate_prerequisites(self, data: dict[str, Any]) -> ValidationResult:
         """Validate action prerequisites are met."""
-        action: GridAction = data["action"]
+        action: ResolvedAction = data["action"]
         context: dict[str, Any] = data["context"]
 
         # Check page is loaded for non-navigation actions

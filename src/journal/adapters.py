@@ -45,23 +45,23 @@ def enhanced_to_journal_action_result(
     # Extract coordinates as tuple
     coordinates: tuple[int, int] | None = None
     if enhanced_result.coordinates:
-        coordinates = enhanced_result.coordinates.grid_coordinates
+        coordinates = enhanced_result.coordinates.pixel_coordinates
 
-    # Extract grid coordinates as dict (for journal compatibility)
-    grid_coordinates: dict[str, Any] | None = None
+    # Extract coordinate metadata as dict for journaling
+    coordinate_metadata: dict[str, Any] | None = None
     if enhanced_result.coordinates:
-        grid_coordinates = {
-            "grid_cell": enhanced_result.coordinates.grid_cell,
-            "grid_coordinates": enhanced_result.coordinates.grid_coordinates,
-            "offset_x": enhanced_result.coordinates.offset_x,
-            "offset_y": enhanced_result.coordinates.offset_y,
+        coordinate_metadata = {
+            "target_reference": enhanced_result.coordinates.target_reference,
+            "pixel_coordinates": enhanced_result.coordinates.pixel_coordinates,
+            "relative_x": enhanced_result.coordinates.relative_x,
+            "relative_y": enhanced_result.coordinates.relative_y,
             "confidence": enhanced_result.coordinates.confidence,
-            "refined": enhanced_result.coordinates.refined
+            "adjusted": enhanced_result.coordinates.adjusted,
         }
 
-        # Add refinement details if available
-        if enhanced_result.coordinates.refinement_details:
-            grid_coordinates["refinement_details"] = enhanced_result.coordinates.refinement_details
+        # Add adjustment details if available
+        if enhanced_result.coordinates.adjustment_details:
+            coordinate_metadata["adjustment_details"] = enhanced_result.coordinates.adjustment_details
 
     # Extract automation command (would come from scripting system)
     automation_command: str | None = None
@@ -100,7 +100,7 @@ def enhanced_to_journal_action_result(
         action=action_type,
         confidence=confidence,
         coordinates=coordinates,
-        grid_coordinates=grid_coordinates,
+        coordinate_metadata=coordinate_metadata,
         automation_command=automation_command,
         selectors=selectors,
         input_text=input_text,
@@ -152,14 +152,14 @@ def extract_journal_context(enhanced_result: EnhancedActionResult) -> dict[str, 
         context["ai_anomalies"] = enhanced_result.ai_analysis.anomalies
         context["ai_matches_expected"] = enhanced_result.ai_analysis.matches_expected
 
-    # Add screenshot information
-    if enhanced_result.grid_screenshot_before:
-        context["has_grid_screenshot_before"] = True
-        context["grid_screenshot_before_size"] = len(enhanced_result.grid_screenshot_before)
+    # Add screenshot availability information
+    if enhanced_result.environment_state_before and enhanced_result.environment_state_before.screenshot:
+        context["has_screenshot_before"] = True
+        context["screenshot_before_size"] = len(enhanced_result.environment_state_before.screenshot)
 
-    if enhanced_result.grid_screenshot_highlighted:
-        context["has_grid_screenshot_highlighted"] = True
-        context["grid_screenshot_highlighted_size"] = len(enhanced_result.grid_screenshot_highlighted)
+    if enhanced_result.environment_state_after and enhanced_result.environment_state_after.screenshot:
+        context["has_screenshot_after"] = True
+        context["screenshot_after_size"] = len(enhanced_result.environment_state_after.screenshot)
 
     # Add timing information
     context["timestamp_start"] = enhanced_result.timestamp_start.isoformat()

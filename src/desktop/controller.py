@@ -1,21 +1,18 @@
-"""High-level desktop controller with grid support."""
+"""High-level desktop controller with plain coordinate interactions."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from src.config.settings import get_settings
-from src.core.types import GridCoordinate
 from src.desktop.driver import DesktopDriver
-from src.grid.overlay import GridOverlay
-from src.grid.refinement import GridRefinement
 from src.monitoring.logger import get_logger
 
 
 class DesktopController:
-    """High-level controller for desktop automation with grid support."""
+    """High-level controller for desktop automation."""
 
-    def __init__(self, grid_size: int | None = None) -> None:
+    def __init__(self) -> None:
         self.settings = get_settings()
         self.logger = get_logger("desktop.controller")
         self.driver = DesktopDriver(
@@ -31,14 +28,10 @@ class DesktopController:
             clipboard_hold_seconds=self.settings.desktop_clipboard_hold_seconds,
             max_screenshots=self.settings.max_screenshots,
         )
-        self.grid = GridOverlay(grid_size=grid_size)
-        self.refinement = GridRefinement(self.grid)
         self._initialized = False
 
     async def start(self) -> None:
         await self.driver.start()
-        width, height = await self.driver.get_viewport_size()
-        self.grid.initialize(width, height)
         self._initialized = True
         self.logger.info("Desktop controller started")
 
@@ -52,39 +45,20 @@ class DesktopController:
             raise RuntimeError("Controller not started. Call start() first.")
         await self.driver.press_key(key)
 
-    async def click_at_grid(
-        self,
-        coord: GridCoordinate,
-        refine: bool = True,
-    ) -> GridCoordinate:
+    async def click_at_coordinates(
+        self, x: int, y: int, button: str = "left", click_count: int = 1
+    ) -> tuple[int, int]:
         if not self._initialized:
             raise RuntimeError("Controller not started. Call start() first.")
 
-        if refine and self.refinement.should_refine(coord):
-            screenshot = await self.driver.screenshot()
-            coord = self.refinement.refine_coordinate(
-                screenshot,
-                coord,
-                target_description="click target",
-            )
+        await self.driver.click(x, y, button=button, click_count=click_count)
+        return x, y
 
-        x, y = self.grid.coordinate_to_pixels(coord)
-        await self.driver.click(x, y)
-        return coord
-
-    async def screenshot_with_grid(
-        self,
-        save_path: Path | None = None,
-        show_overlay: bool | None = None,
-    ) -> bytes:
+    async def capture_screenshot(self, save_path: Path | None = None) -> bytes:
         if not self._initialized:
             raise RuntimeError("Controller not started. Call start() first.")
 
         screenshot = await self.driver.screenshot()
-        if show_overlay is None:
-            show_overlay = self.settings.enable_grid_overlay
-        if show_overlay:
-            screenshot = self.grid.create_overlay_image(screenshot)
 
         if save_path:
             save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,13 +74,6 @@ class DesktopController:
             "url": await self.driver.get_page_url(),
             "title": await self.driver.get_page_title(),
             "viewport": {"width": width, "height": height},
-            "grid": {
-                "size": self.grid.grid_size,
-                "cell_size": {
-                    "width": self.grid.cell_width,
-                    "height": self.grid.cell_height,
-                },
-            },
         }
 
     async def __aenter__(self) -> DesktopController:

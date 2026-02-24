@@ -37,7 +37,7 @@ class JournalActionResult(BaseModel):
     action: ActionType | None = None
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     coordinates: tuple[int, int] | None = None
-    grid_coordinates: dict[str, Any] | None = None
+    coordinate_metadata: dict[str, Any] | None = None
     automation_command: str | None = None
     selectors: dict[str, str] | None = None
     input_text: str | None = None
@@ -55,10 +55,10 @@ class JournalEntry(BaseModel):
     step_reference: str
     action_taken: str
 
-    # Grid coordinates for visual mode
-    grid_coordinates: dict[str, Any] | None = Field(
+    # Coordinate metadata for visual mode
+    coordinate_metadata: dict[str, Any] | None = Field(
         default=None,
-        description="Grid coordinates used for visual interaction"
+        description="Coordinate metadata used for visual interaction",
     )
 
     # Scripted command for replay mode

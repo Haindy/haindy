@@ -1,16 +1,35 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-The core agent logic lives in `src/`, with subpackages for `agents/`, `orchestration/`, `browser/`, and `grid/`. Runtime configuration and environment handling sit under `src/config/` and `src/security/`. Automated test suites are in `tests/`, while reusable requirements docs and prompts live in `test_scenarios/` and `demo_journals/`. Visual assets and generated evidence land in `debug_screenshots/`, `reports/`, and `htmlcov/`. Keep experimental notebooks or analysis in `docs/` or `examples/` so the runtime modules stay focused.
+This file is intentionally minimal.
 
-## Build, Test, and Development Commands
-Install dependencies locally with `pip install -e ".[dev]"`, then provision Playwright using `playwright install chromium`. Run the CLI entry point via `python -m src.main --plan test_scenarios/wikipedia_search_simple.txt`. Execute the full test suite using `pytest`; deselect long scenarios with `pytest -m "not slow"`. Pre-flight checks should cover `ruff check`, `black .`, `isort .`, and `mypy src` (or run `pre-commit run --all-files`).
+## 1) Map: important files and docs
 
-## Coding Style & Naming Conventions
-Python code targets 3.10+ with 4-space indentation. Formatting follows Black (88-character lines) and isort’s Black profile; Ruff enforces linting and import rules. Favor descriptive `snake_case` for functions and variables, `PascalCase` for classes, and `SCREAMING_SNAKE_CASE` for constants. Type hints are required on public functions, matching the `mypy` configuration. Place new agents under `src/agents/` and shared utilities in `src/core/` to keep responsibilities clear.
+- `README.md`: setup + run quickstart.
+- `src/main.py`: CLI entrypoint.
+- `src/config/settings.py`: runtime configuration and env vars.
+- `src/agents/`: orchestration and action agents.
+- `src/agents/computer_use/session.py`: computer-use provider loop (OpenAI/Google).
+- `src/core/`: shared types and interfaces.
+- `src/journal/`: execution journaling and pattern matching.
+- `src/monitoring/`: report generation and logs.
+- `tests/`: automated tests.
+- `test_scenarios/`: sample requirement/context inputs.
+- `docs/RUNBOOK.md`: environment and operational notes.
+- `docs/plans/`: implementation/refactor plans.
 
-## Testing Guidelines
-Primary tests live in `tests/` with files named `test_*.py`; asynchronous cases use `pytest-asyncio`. Apply the `unit`, `integration`, and `slow` markers defined in `pytest.ini`. The default command `pytest --cov=src` must exceed the 60% coverage floor and produces HTML output in `htmlcov/index.html`. Scenario-driven regressions go in `test_scenarios/`, and long-running exploratory suites should surface evidence via `reports/` or `demo_output/` for review.
+## 2) Rules: keep it clean
 
-## Commit & Pull Request Guidelines
-Commits should be imperative, concise, and scoped (e.g., “Integrate Gemini 2.5 Flash for enhanced grid accuracy”). Reference related issues when available and include artifacts—logs, screenshots, coverage deltas—in the commit or PR description. Pull requests should describe the agent-level impact, list verification commands, and call out any new environment variables or Playwright requirements. When altering orchestration or agent behavior, attach a brief note in `docs/` or `GRID_TEST_PROGRESS.md` summarizing the change for downstream contributors.
+- Always use the local virtual environment:
+  - `source .venv/bin/activate`
+  - If missing: `python3 -m venv .venv`
+- Install dependencies before running tools:
+  - `.venv/bin/pip install -r requirements.lock`
+  - `.venv/bin/pip install -e ".[dev]"`
+- Install Playwright browser runtime:
+  - `.venv/bin/playwright install chromium`
+- Before finishing a change, run:
+  - `.venv/bin/ruff check .`
+  - `.venv/bin/ruff format .`
+  - `.venv/bin/mypy src`
+  - `.venv/bin/pytest`
+- Prefer small, targeted changes. Avoid compatibility fallbacks unless explicitly requested.

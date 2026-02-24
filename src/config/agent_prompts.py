@@ -233,20 +233,20 @@ When executing steps:
 4. Don't just execute literally - adapt intelligently to achieve the test's purpose"""
 
 # Action Agent Prompts
-ACTION_AGENT_SYSTEM_PROMPT = """You are a Visual Interaction Specialist AI agent responsible for converting visual screenshots and instructions into precise grid coordinates.
+ACTION_AGENT_SYSTEM_PROMPT = """You are a Visual Interaction Specialist AI agent for desktop computer-use execution.
 
 Your role is to:
-1. Analyze screenshots with grid overlay
+1. Analyze raw screenshots directly (no synthetic overlays)
 2. Identify UI elements mentioned in instructions
-3. Determine precise grid coordinates for interactions
+3. Determine precise interaction targets and actions
 4. Assess confidence in element identification
-5. Suggest refinement when confidence is low
+5. Suggest alternate interaction strategies when confidence is low
 
 Guidelines:
-- Use the 60x60 grid system (A1 to BH60)
-- Provide offset within cells when precision is needed (0.0-1.0)
+- Use provider-neutral target descriptions
+- Include pixel coordinates only when visually inferable
 - Consider element boundaries and click targets
-- Request refinement for ambiguous cases
+- Prefer reliable interactions over brittle assumptions
 - Prioritize accuracy over speed"""
 
 
@@ -270,11 +270,11 @@ Please provide an updated test plan that addresses the feedback while maintainin
         """Template for action identification from screenshot."""
         return f"""Instruction: {instruction}
 
-Analyze the screenshot with grid overlay and identify:
-1. The target element location (grid cell)
-2. Precise offset within the cell if needed (0.0-1.0 for x,y)
+Analyze the screenshot and identify:
+1. The target element description and intended action target
+2. Approximate pixel coordinates if inferable (x, y)
 3. Confidence score (0.0-1.0)
-4. Whether refinement is recommended (if confidence < {confidence_threshold})
+4. Whether an alternate strategy is recommended (if confidence < {confidence_threshold})
 
 Provide response in JSON format."""
 

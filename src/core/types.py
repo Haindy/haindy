@@ -54,21 +54,38 @@ class ConfidenceLevel(str, Enum):
     VERY_LOW = "very_low"  # 0-39%
 
 
-class GridCoordinate(BaseModel):
-    """Represents a coordinate in the grid system."""
+class CoordinateReference(BaseModel):
+    """Provider-neutral coordinate metadata for an interaction target."""
 
-    cell: str = Field(..., description="Grid cell identifier (e.g., 'M23')")
-    offset_x: float = Field(
-        0.5, ge=0.0, le=1.0, description="X offset within cell (0.0-1.0)"
+    target_reference: str | None = Field(
+        None,
+        description="Provider-neutral target reference when available",
     )
-    offset_y: float = Field(
-        0.5, ge=0.0, le=1.0, description="Y offset within cell (0.0-1.0)"
+    pixel_coordinates: tuple[int, int] | None = Field(
+        None,
+        description="Absolute pixel coordinates as (x, y)",
+    )
+    relative_x: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Normalized horizontal position within the selected target area",
+    )
+    relative_y: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Normalized vertical position within the selected target area",
     )
     confidence: float = Field(
-        ..., ge=0.0, le=1.0, description="Confidence score for this coordinate"
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for this coordinate reference",
     )
-    refined: bool = Field(
-        False, description="Whether adaptive refinement was applied"
+    adjusted: bool = Field(
+        False,
+        description="Whether post-selection coordinate adjustment was applied",
     )
 
 
@@ -87,11 +104,11 @@ class ActionInstruction(BaseModel):
     timeout: int = Field(5000, description="Timeout in milliseconds")
 
 
-class GridAction(BaseModel):
-    """A grid-based action to be performed."""
+class ResolvedAction(BaseModel):
+    """A resolved action with provider-neutral coordinate metadata."""
 
     instruction: ActionInstruction
-    coordinate: GridCoordinate
+    coordinates: CoordinateReference | None = None
     screenshot_before: str | None = Field(
         None, description="Path to screenshot before action"
     )
@@ -105,7 +122,7 @@ class ActionResult(BaseModel):
 
     action_id: UUID = Field(default_factory=uuid4)
     success: bool
-    action: GridAction
+    action: ResolvedAction
     screenshot_after: str | None = Field(
         None, description="Path to screenshot after action"
     )
@@ -358,8 +375,9 @@ class ExecutionJournal(BaseModel):
     test_scenario: str
     step_reference: str
     action_taken: str
-    grid_coordinates: dict[str, Any] = Field(
-        ..., description="Grid coordinate details including refinement"
+    coordinate_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-neutral coordinate metadata for visual interactions",
     )
     expected_result: str
     actual_result: str
@@ -419,7 +437,10 @@ class VisibilityResult(BaseModel):
     """Result of element visibility check."""
 
     status: VisibilityStatus
-    coordinates: GridCoordinate | None = Field(None, description="Grid coordinates if visible")
+    coordinates: CoordinateReference | None = Field(
+        None,
+        description="Coordinate metadata if the target is visible",
+    )
     visible_percentage: int | None = Field(None, description="Percentage visible if partial")
     suggested_direction: ScrollDirection | None = Field(None, description="Suggested scroll direction")
     direction_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Confidence in direction")
@@ -453,7 +474,7 @@ class ScrollResult(BaseModel):
 
     success: bool
     action_type: str = "scroll_to_element"
-    coordinates: GridCoordinate | None = None
+    coordinates: CoordinateReference | None = None
     confidence: float | None = None
     attempts: int | None = None
     total_scroll_distance: int | None = None

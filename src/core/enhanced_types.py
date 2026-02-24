@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from src.core.types import GridCoordinate, TestState, TestStep
+from src.core.types import CoordinateReference, TestState, TestStep
 
 
 class ValidationResult(BaseModel):
@@ -31,16 +31,32 @@ class ValidationResult(BaseModel):
 class CoordinateResult(BaseModel):
     """Result of coordinate determination phase."""
 
-    grid_cell: str = Field(..., description="Grid cell identifier (e.g., 'M23')")
-    grid_coordinates: tuple[int, int] = Field(..., description="Pixel coordinates (x, y)")
-    offset_x: float = Field(..., ge=0.0, le=1.0, description="X offset within cell")
-    offset_y: float = Field(..., ge=0.0, le=1.0, description="Y offset within cell")
+    target_reference: str = Field(
+        ...,
+        description="Provider-neutral target reference identifier",
+    )
+    pixel_coordinates: tuple[int, int] = Field(
+        ...,
+        description="Pixel coordinates (x, y)",
+    )
+    relative_x: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Normalized X coordinate within selected target bounds",
+    )
+    relative_y: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Normalized Y coordinate within selected target bounds",
+    )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Coordinate confidence score")
     reasoning: str = Field("", description="Explanation of coordinate selection")
-    refined: bool = Field(False, description="Whether adaptive refinement was applied")
-    refinement_details: dict[str, Any] | None = Field(
+    adjusted: bool = Field(False, description="Whether post-selection adjustment was applied")
+    adjustment_details: dict[str, Any] | None = Field(
         None,
-        description="Details about refinement process if applied"
+        description="Details about any coordinate adjustment process"
     )
 
 
@@ -190,16 +206,6 @@ class EnhancedActionResult(BaseModel):
         description="Environment state after action"
     )
 
-    # Grid screenshots
-    grid_screenshot_before: bytes | None = Field(
-        None,
-        description="Screenshot with grid overlay before action"
-    )
-    grid_screenshot_highlighted: bytes | None = Field(
-        None,
-        description="Screenshot with selected cell highlighted"
-    )
-
     # Execution
     execution: ExecutionResult | None = Field(
         None,
@@ -270,10 +276,10 @@ class EnhancedActionResult(BaseModel):
             "validation_passed": self.validation.valid,
             "validation_reasoning": self.validation.reasoning,
             "validation_confidence": self.validation.confidence,
-            "grid_cell": self.coordinates.grid_cell if self.coordinates else "",
-            "grid_coordinates": self.coordinates.grid_coordinates if self.coordinates else (0, 0),
-            "offset_x": self.coordinates.offset_x if self.coordinates else 0.5,
-            "offset_y": self.coordinates.offset_y if self.coordinates else 0.5,
+            "target_reference": self.coordinates.target_reference if self.coordinates else "",
+            "pixel_coordinates": self.coordinates.pixel_coordinates if self.coordinates else (0, 0),
+            "relative_x": self.coordinates.relative_x if self.coordinates else 0.5,
+            "relative_y": self.coordinates.relative_y if self.coordinates else 0.5,
             "coordinate_confidence": self.coordinates.confidence if self.coordinates else 0.0,
             "coordinate_reasoning": self.coordinates.reasoning if self.coordinates else "",
             "execution_success": self.execution.success if self.execution else False,
@@ -285,8 +291,6 @@ class EnhancedActionResult(BaseModel):
             "page_title_after": self.environment_state_after.title if self.environment_state_after else "",
             "screenshot_before": self.environment_state_before.screenshot if self.environment_state_before else None,
             "screenshot_after": self.environment_state_after.screenshot if self.environment_state_after else None,
-            "grid_screenshot_before": self.grid_screenshot_before,
-            "grid_screenshot_highlighted": self.grid_screenshot_highlighted,
             "test_context": self.test_context,
             "ai_analysis": self.ai_analysis.model_dump() if self.ai_analysis else {},
             "computer_actions": [
@@ -308,7 +312,7 @@ class ActionPattern(BaseModel):
     pattern_id: UUID = Field(default_factory=uuid4)
     action_type: str = Field(..., description="Type of action")
     target_description: str = Field(..., description="Description of target element")
-    grid_coordinates: CoordinateResult = Field(..., description="Successful coordinates")
+    coordinates: CoordinateResult = Field(..., description="Successful coordinates")
     automation_command: str | None = Field(
         None,
         description="Recorded Automation command for direct replay"
@@ -348,8 +352,6 @@ class BugReport(BaseModel):
     # Visual evidence
     screenshot_before: bytes | None = Field(None, description="Screenshot before action")
     screenshot_after: bytes | None = Field(None, description="Screenshot after action")
-    grid_screenshot: bytes | None = Field(None, description="Grid overlay screenshot with highlight")
-
     # AI analysis
     validation_result: ValidationResult | None = Field(None, description="Validation phase results")
     coordinate_result: CoordinateResult | None = Field(None, description="Coordinate determination results")
@@ -361,9 +363,15 @@ class BugReport(BaseModel):
     expected_outcome: str = Field(..., description="What was expected to happen")
     actual_outcome: str = Field(..., description="What actually happened")
 
-    # Grid interaction
-    grid_cell_targeted: str | None = Field(None, description="Grid cell that was targeted")
-    coordinates_used: GridCoordinate | None = Field(None, description="Exact coordinates used")
+    # Coordinate interaction
+    target_reference: str | None = Field(
+        None,
+        description="Provider-neutral target reference that was selected",
+    )
+    coordinates_used: CoordinateReference | None = Field(
+        None,
+        description="Exact coordinates used for the action",
+    )
 
     # Environment state
     url_before: str | None = Field(None, description="URL before action")

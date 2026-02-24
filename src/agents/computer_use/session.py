@@ -9,7 +9,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -158,7 +158,13 @@ class ComputerUseSession:
         self._automation_driver = automation_driver
         self._settings = settings
         self._debug_logger = debug_logger
-        self._provider = (provider or settings.cu_provider or "openai").lower()
+        raw_provider = provider if provider is not None else settings.cu_provider
+        self._provider = str(raw_provider or "").strip().lower()
+        if self._provider not in {"openai", "google"}:
+            raise ValueError(
+                f"Unsupported computer-use provider '{raw_provider}'. "
+                "Supported providers are 'openai' and 'google'."
+            )
         self._openai_model = (
             model
             if model and self._provider == "openai"
@@ -257,30 +263,29 @@ class ComputerUseSession:
         )
         try:
             if self._provider == "google":
-                try:
-                    return await self._run_google(
-                        goal=goal,
-                        metadata=metadata,
-                        environment=env_mode,
-                        cache_label=cache_label,
-                        cache_action=cache_action,
-                        use_cache=use_cache,
-                        model=self._google_model,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Google Computer Use provider failed; falling back to OpenAI",
-                        extra={"error": str(exc)},
-                    )
-            return await self._run_openai(
-                goal=goal,
-                initial_screenshot=initial_screenshot,
-                metadata=metadata,
-                environment=env_mode,
-                cache_label=cache_label,
-                cache_action=cache_action,
-                use_cache=use_cache,
-                model=self._openai_model,
+                return await self._run_google(
+                    goal=goal,
+                    metadata=metadata,
+                    environment=env_mode,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                    use_cache=use_cache,
+                    model=self._google_model,
+                )
+            if self._provider == "openai":
+                return await self._run_openai(
+                    goal=goal,
+                    initial_screenshot=initial_screenshot,
+                    metadata=metadata,
+                    environment=env_mode,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                    use_cache=use_cache,
+                    model=self._openai_model,
+                )
+            raise ComputerUseExecutionError(
+                f"Unsupported computer-use provider '{self._provider}'. "
+                "Supported providers are 'openai' and 'google'."
             )
         finally:
             self._allowed_actions = None
@@ -608,7 +613,7 @@ class ComputerUseSession:
                         metadata=metadata,
                         turn_index=turn_counter + 1,
                         normalized_coords=True,
-                        allow_unknown=True,
+                        allow_unknown=False,
                         environment=environment,
                         cache_label=cache_label,
                         cache_action=cache_action,
@@ -1557,7 +1562,7 @@ class ComputerUseSession:
                 return "<<attached screenshot>>"
             return value
 
-        return _scrub(payload)
+        return cast(dict[str, Any], _scrub(payload))
 
     def _build_google_initial_request(
         self,
@@ -1764,7 +1769,10 @@ class ComputerUseSession:
         get_url = getattr(self._automation_driver, "get_page_url", None)
         if callable(get_url):
             try:
-                return await get_url()
+                value = await get_url()
+                if value is None:
+                    return None
+                return str(value)
             except Exception:
                 logger.debug("Failed to retrieve current URL from automation driver", exc_info=True)
         return None
@@ -2158,7 +2166,7 @@ class ComputerUseSession:
         max_chars = 6000
         truncated = len(clipboard_text) > max_chars
         turn.metadata["clipboard_truncated"] = truncated
-        return clipboard_text[:max_chars]
+        return str(clipboard_text)[:max_chars]
 
     async def _navigate_via_address_bar(self, url: str) -> None:
         await self._automation_driver.press_key("ctrl+l")
@@ -2172,9 +2180,10 @@ class ComputerUseSession:
         if not self._debug_logger:
             return None
         name = f"computer_use_turn_{suffix}"
-        return self._debug_logger.save_screenshot(
+        screenshot_path = self._debug_logger.save_screenshot(
             screenshot_bytes, name=name, step_number=step_number
         )
+        return cast(str | None, screenshot_path)
 
     def _wrap_goal_for_google(self, goal: str, env_mode: str) -> str:
         """Wrap the goal with context for Google CU per environment."""
@@ -2310,10 +2319,10 @@ def normalize_response(response: Any) -> dict[str, Any]:
     if response is None:
         return {}
     if hasattr(response, "model_dump"):
-        return response.model_dump()
+        return cast(dict[str, Any], response.model_dump())
     if hasattr(response, "to_dict"):
         try:
-            return response.to_dict()
+            return cast(dict[str, Any], response.to_dict())
         except Exception:
             pass
     if isinstance(response, dict):

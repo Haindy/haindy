@@ -112,7 +112,7 @@ class DebugLogger:
         screenshot_bytes: bytes,
         name: str,
         step_number: int | None = None,
-        with_grid: bool = False
+        variant: str | None = None,
     ) -> str:
         """
         Save a screenshot to the debug directory.
@@ -121,7 +121,7 @@ class DebugLogger:
             screenshot_bytes: Screenshot data
             name: Descriptive name for the screenshot
             step_number: Test step number if applicable
-            with_grid: Whether this screenshot includes grid overlay
+            variant: Optional variant suffix for screenshot naming
 
         Returns:
             Path to saved screenshot
@@ -130,10 +130,10 @@ class DebugLogger:
 
         # Build filename
         timestamp = datetime.now().strftime("%H%M%S_%f")[:12]  # Include microseconds
-        grid_suffix = "_grid" if with_grid else ""
+        variant_suffix = f"_{variant}" if variant else ""
         step_prefix = f"step_{step_number}_" if step_number is not None else ""
 
-        filename = f"{step_prefix}{name}{grid_suffix}_{timestamp}.png"
+        filename = f"{step_prefix}{name}{variant_suffix}_{timestamp}.png"
         filepath = self.debug_dir / filename
 
         # Save screenshot
@@ -145,40 +145,11 @@ class DebugLogger:
             filepath,
             extra={
                 "step_number": step_number,
-                "with_grid": with_grid,
+                "variant": variant,
                 "screenshot_path": str(filepath),
             },
         )
         return str(filepath)
-
-    def save_grid_overlay(
-        self,
-        screenshot_bytes: bytes,
-        grid_cell: str,
-        coordinates: tuple,
-        step_number: int | None = None,
-        action_type: str = "click"
-    ) -> str:
-        """
-        Save a screenshot with grid overlay highlighting the selected cell.
-
-        Args:
-            screenshot_bytes: Screenshot with grid overlay
-            grid_cell: The grid cell selected (e.g., "B7")
-            coordinates: The (x, y) coordinates
-            step_number: Test step number
-            action_type: Type of action performed
-
-        Returns:
-            Path to saved screenshot
-        """
-        name = f"{action_type}_cell_{grid_cell}_at_{coordinates[0]}x{coordinates[1]}"
-        return self.save_screenshot(
-            screenshot_bytes,
-            name=name,
-            step_number=step_number,
-            with_grid=True
-        )
 
     def get_debug_summary(self) -> dict[str, Any]:
         """Get summary of debug information collected."""

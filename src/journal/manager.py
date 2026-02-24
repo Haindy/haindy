@@ -145,7 +145,11 @@ class JournalManager:
                 test_scenario=test_scenario,
                 step_reference=f"Step {step.step_number}: {step.description}",
                 action_taken=self._describe_action(step, journal_result),
-                grid_coordinates=journal_result.grid_coordinates if execution_mode == ExecutionMode.VISUAL else None,
+                coordinate_metadata=(
+                    journal_result.coordinate_metadata
+                    if execution_mode == ExecutionMode.VISUAL
+                    else None
+                ),
                 scripted_command=journal_result.automation_command,
                 selectors=journal_result.selectors,
                 execution_mode=execution_mode,
@@ -194,7 +198,10 @@ class JournalManager:
             "description": step.action,
             "element_text": context.get("element_text"),
             "url_pattern": context.get("url"),
-            "element_type": context.get("element_type")
+            "element_type": context.get("element_type"),
+            "coordinate_metadata": (
+                context.get("coordinate_metadata") or context.get("coordinates")
+            ),
         }
 
         # Find best match
@@ -317,14 +324,27 @@ class JournalManager:
         # Handle new structure without action_instruction
         description = step.action
 
-        if result.grid_coordinates:
-            coords = result.grid_coordinates
-            if coords.get("refined_coordinates"):
-                return f"{description} at {coords['refined_coordinates']} (refined from {coords['initial_selection']})"
-            else:
-                return f"{description} at {coords['initial_selection']}"
-        else:
+        if not result.coordinate_metadata:
             return description
+
+        coords = result.coordinate_metadata
+        target_reference = coords.get("target_reference")
+        pixel_coordinates = coords.get("pixel_coordinates")
+        adjusted = coords.get("adjusted", False)
+
+        location_parts: list[str] = []
+        if target_reference:
+            location_parts.append(str(target_reference))
+        if pixel_coordinates:
+            location_parts.append(f"({pixel_coordinates[0]}, {pixel_coordinates[1]})")
+
+        if not location_parts:
+            return description
+
+        location_text = " ".join(location_parts)
+        if adjusted:
+            return f"{description} at {location_text} (adjusted)"
+        return f"{description} at {location_text}"
 
     def _get_pattern_type(self, step: TestStep) -> PatternType:
         """Determine pattern type from test step."""
@@ -369,7 +389,7 @@ class JournalManager:
             visual_signature={
                 "action_type": result.action if result.action else ActionType.CLICK,
                 "description": step.action,
-                "grid_coordinates": result.grid_coordinates
+                "coordinate_metadata": result.coordinate_metadata,
             },
             automation_command=result.automation_command,
             selectors=result.selectors or {},

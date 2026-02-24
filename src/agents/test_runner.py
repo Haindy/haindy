@@ -1422,13 +1422,6 @@ Respond with a JSON object containing an "actions" array where every item follow
                 action_data["screenshots"]["before"] = result.environment_state_before.screenshot_path
             if result.environment_state_after and result.environment_state_after.screenshot_path:
                 action_data["screenshots"]["after"] = result.environment_state_after.screenshot_path
-            if result.grid_screenshot_highlighted:
-                # Get path from debug logger if available
-                from src.monitoring.debug_logger import get_debug_logger
-                debug_logger = get_debug_logger()
-                if debug_logger:
-                    # The highlighted screenshot was likely saved by action agent
-                    action_data["screenshots"]["grid_overlay"] = f"{debug_logger.debug_dir}/grid_highlighted_{action_id}.png"
 
             # Process result for compatibility
             success = (
@@ -1525,7 +1518,12 @@ Respond with a JSON object containing an "actions" array where every item follow
             # Add validation fields if present
             if validation:
                 for key, value in validation.items():
-                    if key not in ['grid_cell', 'offset']:  # Skip coordinate data
+                    if key not in [
+                        "target_reference",
+                        "pixel_coordinates",
+                        "relative_x",
+                        "relative_y",
+                    ]:  # Skip coordinate data
                         action_detail += f"\n    {key}: {value}"
 
             # Add AI analysis

@@ -124,17 +124,6 @@ class Settings(BaseSettings):
         description="Per-agent OpenAI model configuration",
     )
 
-    # Grid System Configuration
-    grid_size: int = Field(
-        default=60, ge=10, le=100, description="Grid size (NxN)"
-    )
-    grid_refinement_enabled: bool = Field(
-        default=True, description="Enable adaptive refinement"
-    )
-    grid_confidence_threshold: float = Field(
-        default=0.8, ge=0.0, le=1.0, description="Confidence threshold for refinement"
-    )
-
     # Desktop Configuration
     desktop_prefer_resolution: tuple[int, int] = Field(
         default=(1920, 1080),
@@ -256,11 +245,6 @@ class Settings(BaseSettings):
         return value
 
     # Computer Use Configuration
-    actions_use_computer_tool: bool = Field(
-        default=False,
-        description="Enable OpenAI Computer Use tool for action execution",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_USE_COMPUTER_TOOL"),
-    )
     computer_use_model: str = Field(
         default="computer-use-preview",
         description="OpenAI model for computer-use execution",
@@ -413,9 +397,6 @@ class Settings(BaseSettings):
     save_agent_conversations: bool = Field(
         default=True, description="Save agent conversation logs"
     )
-    enable_grid_overlay: bool = Field(
-        default=False, description="Show grid overlay in screenshots"
-    )
 
     @field_validator("log_level")
     def validate_log_level(cls, v: str) -> str:
@@ -458,7 +439,9 @@ class Settings(BaseSettings):
     def normalize_cu_provider(cls, value: str) -> str:
         normalized = (value or "").strip().lower()
         if normalized not in {"openai", "google"}:
-            return "openai"
+            raise ValueError(
+                f"Unsupported cu_provider '{value}'. Supported providers are 'openai' and 'google'."
+            )
         return normalized
 
     @field_validator("cu_safety_policy")
@@ -616,7 +599,7 @@ class ConfigManager(ConfigProvider):
 
     def get_all(self) -> dict[str, Any]:
         """Get all configuration values."""
-        return self.settings.model_dump()
+        return dict(self.settings.model_dump())
 
 
 @lru_cache

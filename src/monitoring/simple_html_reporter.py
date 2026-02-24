@@ -253,8 +253,8 @@ HTML_TEMPLATE = """
             margin: 10px 0;
         }
 
-        /* Grid Info */
-        .grid-info {
+        /* Coordinate Info */
+        .coordinate-info {
             display: inline-block;
             background: #e8eaf6;
             padding: 4px 8px;
@@ -394,14 +394,19 @@ HTML_TEMPLATE = """
                 </div>
                 {% endif %}
 
-                <!-- Grid Information -->
-                {% if bug.grid_cell_targeted %}
+                <!-- Coordinate Information -->
+                {% if bug.target_reference or bug.coordinates_used %}
                 <div class="bug-section">
-                    <h4>Grid Interaction</h4>
+                    <h4>Coordinate Context</h4>
                     <div>
-                        Targeted cell: <span class="grid-info">{{ bug.grid_cell_targeted }}</span>
+                        {% if bug.target_reference %}
+                        Target reference: <span class="coordinate-info">{{ bug.target_reference }}</span>
+                        {% endif %}
                         {% if bug.coordinates_used %}
-                        at offset ({{ "%.2f"|format(bug.coordinates_used.offset_x) }}, {{ "%.2f"|format(bug.coordinates_used.offset_y) }})
+                        {% if bug.coordinates_used.pixel_coordinates %}
+                        at ({{ bug.coordinates_used.pixel_coordinates[0] }}, {{ bug.coordinates_used.pixel_coordinates[1] }})
+                        {% endif %}
+                        at relative ({{ "%.2f"|format(bug.coordinates_used.relative_x) }}, {{ "%.2f"|format(bug.coordinates_used.relative_y) }})
                         {% endif %}
                     </div>
                 </div>
@@ -541,7 +546,7 @@ class SimpleHTMLReporter:
                 "failure_type": getattr(bug, "failure_type", "unknown"),
                 "detailed_error": getattr(bug, "detailed_error", None),
                 "confidence_scores": getattr(bug, "confidence_scores", {}) or {},
-                "grid_cell_targeted": getattr(bug, "grid_cell_targeted", None),
+                "target_reference": getattr(bug, "target_reference", None),
                 "coordinates_used": getattr(bug, "coordinates_used", None),
                 "ui_anomalies": getattr(bug, "ui_anomalies", []) or [],
                 "suggested_fixes": getattr(bug, "suggested_fixes", []) or [],
@@ -553,7 +558,6 @@ class SimpleHTMLReporter:
             }
 
             screenshots = [
-                ("Grid Screenshot (Highlighted)", getattr(bug, "grid_screenshot", None)),
                 ("Before Action", getattr(bug, "screenshot_before", None)),
                 ("After Action", getattr(bug, "screenshot_after", None)),
             ]
