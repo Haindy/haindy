@@ -104,40 +104,7 @@ See `docs/RUNBOOK.md` for setup details.
 
 ## Usage
 
-### Running Test Scenarios
-
-#### Run Existing Test Scenario
-```bash
-# Run a pre-defined test scenario from JSON file
-python -m src.main --json-test-plan test_scenarios/wikipedia_search.json
-
-# Short form
-python -m src.main -j test_scenarios/wikipedia_search.json
-
-# With debug output for detailed logging
-python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
-
-# Emit structured JSON logs (suitable for automation)
-python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --verbose
-```
-
-#### Desktop + Gemini Quickstart
-```bash
-export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
-export CU_PROVIDER=google
-export HAINDY_DRIVER_BACKEND=desktop
-python -m src.main -j test_scenarios/wikipedia_search.json
-```
-
-#### Interactive Mode
-```bash
-# Enter test requirements interactively
-python -m src.main --requirements
-
-# Short form
-python -m src.main -r
-```
-Opens an interactive prompt where you can paste or type multi-line test requirements.
+### Running Tests
 
 #### Document-based Testing
 ```bash
@@ -147,8 +114,22 @@ python -m src.main --plan requirements.md
 # Short form
 python -m src.main -p requirements.md
 
-# With URL specified in command
+# With debug output for detailed logging
+python -m src.main --plan requirements.md --debug
+
+# Emit structured JSON logs (suitable for automation)
+python -m src.main --plan requirements.md --verbose
+
+# With URL specified in command (overrides URL in file)
 python -m src.main --plan requirements.md --url https://example.com
+```
+
+#### Desktop + Gemini Quickstart
+```bash
+export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+export CU_PROVIDER=google
+export HAINDY_DRIVER_BACKEND=desktop
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```
 
 ### Execution Options
@@ -157,24 +138,21 @@ python -m src.main --plan requirements.md --url https://example.com
 ```bash
 # Fully autonomous mode - no confirmations
 python -m src.main --berserk --plan requirements.pdf
-
-# With existing test scenario
-python -m src.main --berserk -j test_scenarios/login_test.json
 ```
 
 #### Plan-Only Mode
 ```bash
 # Generate test plan without executing
-python -m src.main --plan-only -j test_scenarios/wikipedia_search.json
+python -m src.main --plan-only --plan test_scenarios/wikipedia_search_simple.txt
 ```
 
 #### Browser Options
 ```bash
 # Browser runs in headless mode by default
-python -m src.main -j test_scenarios/login_test.json
+python -m src.main --plan requirements.md
 
 # Force headless mode explicitly
-python -m src.main -j test_scenarios/login_test.json --headless
+python -m src.main --plan requirements.md --headless
 
 # Note: To show browser window, you need to modify the .env file or settings:
 # Add to .env: BROWSER_HEADLESS=false
@@ -186,16 +164,16 @@ python -m src.main -j test_scenarios/login_test.json --headless
 #### Report Formats
 ```bash
 # HTML report (default)
-python -m src.main -j test_scenarios/login_test.json --format html
+python -m src.main --plan requirements.md --format html
 
 # JSON report
-python -m src.main -j test_scenarios/login_test.json --format json
+python -m src.main --plan requirements.md --format json
 
 # Markdown report
-python -m src.main -j test_scenarios/login_test.json --format markdown
+python -m src.main --plan requirements.md --format markdown
 
 # Custom output directory
-python -m src.main -j test_scenarios/login_test.json --output custom_reports/
+python -m src.main --plan requirements.md --output custom_reports/
 ```
 
 ### Advanced Options
@@ -203,10 +181,10 @@ python -m src.main -j test_scenarios/login_test.json --output custom_reports/
 #### Timeouts and Limits
 ```bash
 # Set execution timeout (default: 7200 seconds)
-python -m src.main -j test_scenarios/complex_test.json --timeout 3600
+python -m src.main --plan requirements.md --timeout 3600
 
 # Set maximum steps (default: 50)
-python -m src.main -j test_scenarios/long_test.json --max-steps 100
+python -m src.main --plan requirements.md --max-steps 100
 ```
 
 ### Utility Commands
@@ -221,13 +199,12 @@ python -m src.main --version
 python -m src.main --help
 ```
 
-### Example Test Scenarios
+### Example Requirement Files
 
-The repository includes example test scenarios in the `test_scenarios/` directory:
+The repository includes sample requirement documents in `test_scenarios/`:
 
-- `wikipedia_search.json` - Search functionality test on Wikipedia
-- `checkout_flow.json` - E-commerce checkout process (example)
-- `login_test.json` - User authentication flow (example)
+- `wikipedia_search_simple.txt` - simple requirement prompt for a Wikipedia flow
+- `aubilities-bundles-fmc-admin.md` - longer-form scope document example
 
 ### Reports and Output
 
@@ -277,7 +254,7 @@ haindy/
 │   ├── monitoring/    # Logging and reporting
 │   └── config/        # Configuration management
 ├── tests/             # Unit and integration tests
-├── test_scenarios/    # Example test scenarios
+├── test_scenarios/    # Example requirements documents
 ├── data/             # Runtime data storage
 ├── reports/          # Test execution reports
 └── docs/             # Documentation

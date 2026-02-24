@@ -95,7 +95,7 @@ autonomous-ai-testing-agent/
 │       └─ validation.py   # config validation
 │
 ├─ tests/                  # unit tests & integration tests
-├─ test_scenarios/         # example test scenarios & PRDs
+├─ test_scenarios/         # example requirements docs & PRDs
 ├─ data/                   # captured screenshots & logs
 ├─ reports/                # test execution reports & analytics
 ├─ docs/                   # this file and extra docs

@@ -53,8 +53,8 @@ pytest tests/
 # Integration tests
 pytest tests/integration/
 
-# Run specific test scenarios
-python -m src.main --scenario test_scenarios/checkout_flow.json
+# Run specific requirement file
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```
 
 ### Linting and Code Quality
@@ -141,4 +141,3 @@ Test Report Generation
 - **Grid System**: Adaptive grid overlay with coordinate mapping and refinement
 - **Logging**: JSONL format with rich console output
 - **Packaging**: setuptools with pyproject.toml
-

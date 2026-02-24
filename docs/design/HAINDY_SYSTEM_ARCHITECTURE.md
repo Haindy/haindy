@@ -95,7 +95,7 @@ sequenceDiagram
 ## Component Breakdown
 
 ### CLI & Runtime Entry (`src/main.py`)
-- Parses CLI flags (`--plan`, `--requirements`, `--berserk`, etc.) and loads configuration via `get_settings`.
+- Parses CLI flags (`--plan`, `--berserk`, etc.) and loads configuration via `get_settings`.
 - Bootstraps logging, rate limiting, sanitization, OpenAI credentials, and debug logging directories.
 - Depending on mode, either generates plans, executes scenarios, or runs diagnostics.
 - Instantiates `WorkflowCoordinator`, `BrowserController`, `TestReporter`, and manages lifecycle (start/stop browser, persist artifacts).
@@ -147,7 +147,7 @@ sequenceDiagram
 - Browser runs with hardened Chromium flags (`--disable-extensions`, `--no-sandbox` where permitted) to reduce side effects.
 
 ### Data & Artifact Layout
-- `test_scenarios/` – curated JSON/JSONL/markdown scenarios for regression.
+- `test_scenarios/` – curated requirement documents and prompts for regression.
 - `reports/` – per-run folders containing HTML reports, action JSON, bug payloads.
 - `debug_screenshots/` – per-run before/after and per-turn captures.
 - `docs/design/` – architectural documentation (this file and the action-agent deep dive).

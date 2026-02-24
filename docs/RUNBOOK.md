@@ -168,56 +168,40 @@ python examples/orchestration_demo.py
 python examples/journaling_demo.py
 ```
 
-### Running Test Scenarios
-
-#### Run Existing Test Scenario
-```bash
-# Run a test scenario from JSON file
-python -m src.main --json-test-plan test_scenarios/wikipedia_search.json
-
-# Short form
-python -m src.main -j test_scenarios/wikipedia_search.json
-
-# With debug output
-python -m src.main -j test_scenarios/wikipedia_search.json --debug
-```
-
-#### Interactive Mode
-```bash
-# Enter requirements interactively
-python -m src.main --requirements
-python -m src.main -r
-```
+### Running Tests
 
 #### Document-based Testing
 ```bash
 # Extract requirements from document
 python -m src.main --plan requirements.md
 python -m src.main -p requirements.md
+
+# With debug output
+python -m src.main --plan requirements.md --debug
 ```
 
 #### Execution Options
 ```bash
 # Berserk mode (fully autonomous)
-python -m src.main --berserk -j test_scenarios/login_test.json
+python -m src.main --berserk --plan requirements.md
 
 # Plan-only mode (generate plan without executing)
-python -m src.main --plan-only -j test_scenarios/wikipedia_search.json
+python -m src.main --plan-only --plan test_scenarios/wikipedia_search_simple.txt
 
 # Browser runs headless by default
 # To show browser, set BROWSER_HEADLESS=false in .env file
 
 # Custom timeout (default: 7200 seconds)
-python -m src.main -j test_scenarios/complex_test.json --timeout 3600
+python -m src.main --plan requirements.md --timeout 3600
 
 # Custom output directory
-python -m src.main -j test_scenarios/login_test.json --output custom_reports/
+python -m src.main --plan requirements.md --output custom_reports/
 
 # Enable Computer Use and desktop driver (Gemini default)
 export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=google
 export HAINDY_DRIVER_BACKEND=desktop
-python -m src.main -j test_scenarios/wikipedia_search.json
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```
 
 ## Code Quality Checks
@@ -429,7 +413,7 @@ When running tests, the console output shows:
 
 2. **Console Output**: Run with `--debug` flag for verbose output
    ```bash
-   python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
+   python -m src.main --plan requirements.md --debug
    ```
 
 3. **Test Execution Flow**:

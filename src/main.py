@@ -5,7 +5,6 @@ Main entry point for the application.
 
 import argparse
 import asyncio
-import json
 import re
 import sys
 from datetime import datetime
@@ -15,7 +14,6 @@ from typing import Any, Dict, Optional, Tuple
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Prompt
 from rich.table import Table
 
 from src.browser.controller import BrowserController
@@ -180,6 +178,8 @@ class PlanGenerationStreamObserver(ResponseStreamObserver):
                 f"{self._last_delta_chars} chars)[/cyan]"
             )
         return f"[cyan]GPT-5 planning… {self.estimated_tokens} tokens[/cyan]"
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser."""
     parser = argparse.ArgumentParser(
@@ -187,14 +187,8 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Interactive requirements mode
-  python -m src.main --requirements
-  
   # Test from a document file (PRD, design doc, etc.)
   python -m src.main --plan requirements.md
-  
-  # Run existing test scenario
-  python -m src.main --json-test-plan test_scenarios/login_test.json
   
   # Berserk mode - full autonomous operation
   python -m src.main --berserk --plan requirements.pdf
@@ -207,19 +201,9 @@ Examples:
     # Input options
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument(
-        "-r", "--requirements",
-        action="store_true",
-        help="Interactive mode - enter test requirements via prompt",
-    )
-    input_group.add_argument(
         "-p", "--plan",
         type=Path,
         help="Path to document file with test requirements (any format)",
-    )
-    input_group.add_argument(
-        "-j", "--json-test-plan",
-        type=Path,
-        help="Path to existing test scenario JSON file",
     )
     
     # Utility commands
@@ -307,30 +291,6 @@ Examples:
     )
     
     return parser
-
-
-def load_scenario(scenario_path: Path) -> dict:
-    """Load test scenario from JSON file."""
-    try:
-        with open(scenario_path, "r") as f:
-            scenario = json.load(f)
-        
-        # Validate required fields
-        required_fields = ["name", "requirements"]
-        missing_fields = [f for f in required_fields if f not in scenario]
-        if missing_fields:
-            raise ValueError(f"Scenario missing required fields: {missing_fields}")
-        
-        return scenario
-    except FileNotFoundError:
-        console.print(f"[red]Error: Scenario file not found: {scenario_path}[/red]")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        console.print(f"[red]Error: Invalid JSON in scenario file: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Error loading scenario: {e}[/red]")
-        sys.exit(1)
 
 
 def _create_planning_agents(settings) -> Tuple[ScopeTriageAgent, TestPlannerAgent]:
@@ -893,43 +853,6 @@ def _print_plan_storage_locations(test_plan) -> None:
         console.print(line, soft_wrap=True)
 
 
-def get_interactive_requirements() -> tuple[str, Optional[str]]:
-    """Get test requirements interactively from user."""
-    console.print("\n[bold cyan]HAINDY Interactive Mode[/bold cyan]")
-    console.print("Enter your test requirements. You can paste multi-line text.")
-    console.print("[dim]Press Enter twice on an empty line when done:[/dim]\n")
-    
-    lines = []
-    empty_count = 0
-    
-    while True:
-        try:
-            line = input()
-            if line == "":
-                empty_count += 1
-                if empty_count >= 2:
-                    break
-            else:
-                empty_count = 0
-            lines.append(line)
-        except (EOFError, KeyboardInterrupt):
-            break
-    
-    requirements = "\n".join(lines).strip()
-    
-    if not requirements:
-        console.print("[red]Error: No requirements provided[/red]")
-        sys.exit(1)
-    
-    override_url = Prompt.ask(
-        "\n[cyan]Enter the starting URL for testing (leave blank to auto-detect)[/cyan]",
-        default="",
-        show_default=False,
-    ).strip()
-    
-    return requirements, override_url or None
-
-
 async def test_api_connection() -> int:
     """Test OpenAI API connection."""
     console.print("\n[bold cyan]Testing OpenAI API Connection[/bold cyan]")
@@ -1028,20 +951,11 @@ async def async_main(args: Optional[list[str]] = None) -> int:
     rate_limiter = RateLimiter()
     sanitizer = DataSanitizer()
     
-    # Handle different input modes
+    # Handle input mode
     override_url = parsed_args.url
-    if parsed_args.requirements:
-        # Interactive mode
-        requirements, interactive_url = get_interactive_requirements()
-        override_url = override_url or interactive_url
-    elif parsed_args.plan:
+    if parsed_args.plan:
         # Read requirements from plan file
         requirements = await read_plan_file(parsed_args.plan)
-    elif parsed_args.json_test_plan:
-        # Load from JSON scenario file
-        scenario = load_scenario(parsed_args.json_test_plan)
-        requirements = scenario["requirements"]
-        override_url = override_url or scenario.get("url")
     else:
         # No input provided
         parser.print_help()
