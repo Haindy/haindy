@@ -4,14 +4,13 @@ End-to-end integration tests for the complete HAINDY workflow.
 
 import asyncio
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.browser.controller import BrowserController
 from src.core.types import ScopeTriageResult, TestState, TestStatus
-from src.main import async_main, load_scenario
+from src.main import async_main
 from src.monitoring.reporter import TestReporter
 from src.orchestration.communication import MessageBus
 from src.orchestration.coordinator import WorkflowCoordinator
@@ -215,117 +214,84 @@ class TestEndToEndIntegration:
         
         return mock_state
     
-    def test_load_scenario(self, tmp_path):
-        """Test loading test scenario from JSON."""
-        # Create test scenario file
-        scenario_data = {
-            "name": "Test Scenario",
-            "requirements": "Test requirements",
-            "url": "https://example.com",
-        }
-        scenario_file = tmp_path / "test_scenario.json"
-        scenario_file.write_text(json.dumps(scenario_data))
-        
-        # Load scenario
-        scenario = load_scenario(scenario_file)
-        
-        assert scenario["name"] == "Test Scenario"
-        assert scenario["requirements"] == "Test requirements"
-        assert scenario["url"] == "https://example.com"
-    
-    def test_load_scenario_missing_fields(self, tmp_path):
-        """Test loading scenario with missing required fields."""
-        # Create invalid scenario file
-        scenario_data = {
-            "name": "Test Scenario",
-            # Missing 'requirements' and 'url'
-        }
-        scenario_file = tmp_path / "invalid_scenario.json"
-        scenario_file.write_text(json.dumps(scenario_data))
-        
-        # Should exit with error
-        with pytest.raises(SystemExit):
-            load_scenario(scenario_file)
-    
     @pytest.mark.asyncio
-    async def test_main_with_requirements(
+    async def test_main_with_plan_file(
         self,
         mock_browser_controller,
         mock_coordinator,
         sample_test_state,
         tmp_path,
     ):
-        """Test main execution with requirements argument."""
+        """Test main execution with --plan input."""
+        plan_file = tmp_path / "requirements.md"
+        plan_file.write_text("https://example.com\nTest the login flow")
+
         # Mock the test execution
         mock_coordinator.execute_test_from_requirements.return_value = sample_test_state
-        
-        # Mock interactive input
-        with patch("src.main.get_interactive_requirements") as mock_get_req:
-            mock_get_req.return_value = ("Test the login flow", "https://example.com")
-            
-            from src.core.types import TestPlan
 
-            test_plan = TestPlan(
-                name="Sample Plan",
-                description="Plan description",
-                requirements_source="Test requirements",
-                test_cases=[],
-            )
-            triage_result = ScopeTriageResult()
+        from src.core.types import TestPlan
 
-            pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
-            mock_coordinator.get_scope_triage_result.return_value = triage_result
-            
-            with patch("src.main.BrowserController", return_value=mock_browser_controller):
-                with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    with patch("src.main.run_scope_triage_and_plan", pipeline_mock):
-                        # Run main with requirements
-                        exit_code = await async_main([
-                            "--requirements",
-                            "--output", str(tmp_path),
-                            "--format", "json",
-                        ])
-        
+        test_plan = TestPlan(
+            name="Sample Plan",
+            description="Plan description",
+            requirements_source="Test requirements",
+            test_cases=[],
+        )
+        triage_result = ScopeTriageResult()
+
+        pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
+        mock_coordinator.get_scope_triage_result.return_value = triage_result
+
+        with patch("src.main.BrowserController", return_value=mock_browser_controller):
+            with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
+                with patch("src.main.run_scope_triage_and_plan", pipeline_mock):
+                    exit_code = await async_main(
+                        [
+                            "--plan",
+                            str(plan_file),
+                            "--output",
+                            str(tmp_path),
+                            "--format",
+                            "json",
+                        ]
+                    )
+
         # Verify success
         assert exit_code == 0
-        
-        # Verify interactive mode was called
-        mock_get_req.assert_called_once()
-        
+
         # Verify components were initialized
         mock_browser_controller.start.assert_called_once()
         mock_coordinator.initialize.assert_called_once()
-        
+
         # Verify test was executed
         mock_coordinator.execute_test_from_requirements.assert_called_once()
+        call_kwargs = mock_coordinator.execute_test_from_requirements.call_args.kwargs
+        assert "Test the login flow" in call_kwargs["requirements"]
+        assert call_kwargs["initial_url"] == "https://example.com"
 
         pipeline_mock.assert_awaited_once()
-        
+
         # Verify report was generated
         reports = list(tmp_path.glob("test_report_*.json"))
         assert len(reports) == 1
-    
+
     @pytest.mark.asyncio
-    async def test_main_with_scenario_file(
+    async def test_main_with_plan_file_and_url_override(
         self,
         mock_browser_controller,
         mock_coordinator,
         sample_test_state,
         tmp_path,
     ):
-        """Test main execution with scenario file."""
-        # Create scenario file
-        scenario_data = {
-            "name": "Test Scenario",
-            "requirements": "Test the application",
-            "url": "https://example.com",
-        }
-        scenario_file = tmp_path / "test_scenario.json"
-        scenario_file.write_text(json.dumps(scenario_data))
-        
+        """Test --url override takes precedence over requirement text URL."""
+        plan_file = tmp_path / "requirements.md"
+        plan_file.write_text(
+            "https://example.com\nNavigate to dashboard and verify overview widgets."
+        )
+
         # Mock the test execution
         mock_coordinator.execute_test_from_requirements.return_value = sample_test_state
-        
+
         from src.core.types import TestPlan
 
         test_plan = TestPlan(
@@ -342,20 +308,22 @@ class TestEndToEndIntegration:
         with patch("src.main.BrowserController", return_value=mock_browser_controller):
             with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
                 with patch("src.main.run_scope_triage_and_plan", pipeline_mock):
-                    # Run main with scenario file
                     exit_code = await async_main([
-                        "--json-test-plan", str(scenario_file),
+                        "--plan",
+                        str(plan_file),
+                        "--url",
+                        "https://override.example.com",
                         "--output", str(tmp_path),
                     ])
-        
+
         # Verify success
         assert exit_code == 0
-        
-        # Verify test was executed with scenario data and precomputed plan
+
+        # Verify test was executed with plan data and precomputed plan
         mock_coordinator.execute_test_from_requirements.assert_called_once()
         call_kwargs = mock_coordinator.execute_test_from_requirements.call_args.kwargs
-        assert call_kwargs["requirements"] == "Test the application"
-        assert call_kwargs["initial_url"] == "https://example.com"
+        assert "Navigate to dashboard" in call_kwargs["requirements"]
+        assert call_kwargs["initial_url"] == "https://override.example.com"
         assert call_kwargs["precomputed_plan"] == test_plan
         assert call_kwargs["triage_result"] == triage_result
 
@@ -369,6 +337,9 @@ class TestEndToEndIntegration:
         tmp_path,
     ):
         """Test main execution in plan-only mode."""
+        plan_file = tmp_path / "requirements.md"
+        plan_file.write_text("https://example.com\nTest login")
+
         from src.core.types import TestPlan, TestStep, ActionInstruction
         
         # Mock test plan
@@ -422,22 +393,21 @@ class TestEndToEndIntegration:
             blocking_questions=[],
         )
         pipeline_mock = AsyncMock(return_value=(mock_plan, triage_result))
-        
-        # Mock interactive input
-        with patch("src.main.get_interactive_requirements") as mock_get_req:
-            mock_get_req.return_value = ("Test login", "https://example.com")
-            
-            with patch("src.main.BrowserController", return_value=mock_browser_controller):
-                with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    with patch("src.main.ScopeTriageAgent", return_value=MagicMock()), \
-                         patch("src.main.TestPlannerAgent", return_value=planner_instance), \
-                         patch("src.main.run_scope_triage_and_plan", pipeline_mock):
-                        # Run main in plan-only mode
-                        exit_code = await async_main([
-                            "--requirements",
+
+        with patch("src.main.BrowserController", return_value=mock_browser_controller):
+            with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
+                with patch("src.main.ScopeTriageAgent", return_value=MagicMock()), \
+                     patch("src.main.TestPlannerAgent", return_value=planner_instance), \
+                     patch("src.main.run_scope_triage_and_plan", pipeline_mock):
+                    # Run main in plan-only mode
+                    exit_code = await async_main(
+                        [
+                            "--plan",
+                            str(plan_file),
                             "--plan-only",
-                        ])
-        
+                        ]
+                    )
+
         # Verify success
         assert exit_code == 0
         
@@ -454,6 +424,9 @@ class TestEndToEndIntegration:
         tmp_path,
     ):
         """Test main execution with timeout."""
+        plan_file = tmp_path / "requirements.md"
+        plan_file.write_text("https://example.com\nTest login")
+
         # Mock timeout during execution
         mock_coordinator.execute_test_from_requirements.side_effect = asyncio.TimeoutError()
 
@@ -499,22 +472,22 @@ class TestEndToEndIntegration:
         )
         pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
         mock_coordinator.get_scope_triage_result.return_value = triage_result
-        
-        # Mock interactive input
-        with patch("src.main.get_interactive_requirements") as mock_get_req:
-            mock_get_req.return_value = ("Test login", "https://example.com")
-            
-            with patch("src.main.BrowserController", return_value=mock_browser_controller):
-                with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
-                    with patch("src.main.ScopeTriageAgent", return_value=MagicMock()), \
-                         patch("src.main.TestPlannerAgent", return_value=MagicMock()), \
-                         patch("src.main.run_scope_triage_and_plan", pipeline_mock):
-                        # Run main with short timeout
-                        exit_code = await async_main([
-                            "--requirements",
-                            "--timeout", "1",
-                        ])
-        
+
+        with patch("src.main.BrowserController", return_value=mock_browser_controller):
+            with patch("src.main.WorkflowCoordinator", return_value=mock_coordinator):
+                with patch("src.main.ScopeTriageAgent", return_value=MagicMock()), \
+                     patch("src.main.TestPlannerAgent", return_value=MagicMock()), \
+                     patch("src.main.run_scope_triage_and_plan", pipeline_mock):
+                    # Run main with short timeout
+                    exit_code = await async_main(
+                        [
+                            "--plan",
+                            str(plan_file),
+                            "--timeout",
+                            "1",
+                        ]
+                    )
+
         # Verify timeout exit code
         assert exit_code == 2
     
@@ -556,17 +529,8 @@ class TestEndToEndIntegration:
         assert json_data["steps"]["passed"] == 3
     
     @pytest.mark.asyncio
-    async def test_full_workflow_integration(self, tmp_path):
+    async def test_full_workflow_integration(self):
         """Test the complete workflow with real components (mocked browser)."""
-        # Create test scenario
-        scenario_data = {
-            "name": "Integration Test",
-            "requirements": "Navigate to test page and verify title",
-            "url": "https://example.com",
-        }
-        scenario_file = tmp_path / "integration_test.json"
-        scenario_file.write_text(json.dumps(scenario_data))
-        
         # Mock browser driver
         mock_driver = MagicMock()
         mock_driver.navigate = AsyncMock()
@@ -605,6 +569,7 @@ class TestEndToEndIntegration:
         
         captured = capsys.readouterr()
         assert "HAINDY - Autonomous AI Testing Agent" in captured.out
-        assert "--requirements" in captured.out
-        assert "--json-test-plan" in captured.out
+        assert "--plan" in captured.out
+        assert "--requirements" not in captured.out
+        assert "--json-test-plan" not in captured.out
         assert "Examples:" in captured.out

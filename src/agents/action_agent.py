@@ -37,7 +37,7 @@ from src.core.types import (
 )
 from src.core.enhanced_types import (
     EnhancedActionResult, ValidationResult, CoordinateResult,
-    ExecutionResult, BrowserState, AIAnalysis
+    ExecutionResult, BrowserState, AIAnalysis, ComputerToolTurn
 )
 
 OBSERVE_ONLY_ALLOWED_ACTIONS: Set[str] = frozenset({"screenshot", "wait", "scroll"})
@@ -45,6 +45,8 @@ from src.grid.overlay import GridOverlay
 from src.grid.refinement import GridRefinement
 from src.monitoring.logger import get_logger
 from src.monitoring.debug_logger import get_debug_logger
+from src.desktop.cache import CoordinateCache
+from src.desktop.execution_replay import DriverActionError, normalize_driver_action
 
 logger = get_logger(__name__)
 
@@ -91,6 +93,7 @@ class ActionAgent(BaseAgent):
         self.confidence_threshold = settings.grid_confidence_threshold
         self.refinement_enabled = settings.grid_refinement_enabled
         self.use_computer_tool = settings.actions_use_computer_tool
+        self._coordinate_cache = CoordinateCache(settings.desktop_coordinate_cache_path)
         env_override = os.getenv("HAINDY_ACTIONS_USE_COMPUTER_TOOL")
         if env_override is None:
             env_override = os.getenv("ACTIONS_USE_COMPUTER_TOOL")
@@ -101,7 +104,7 @@ class ActionAgent(BaseAgent):
                 "yes",
                 "on",
             }
-        self._computer_use_model = "computer-use-preview"
+        self._computer_use_model = settings.computer_use_model
         
         # Conversation state - one conversation per action
         self.conversation_history: List[Dict[str, Any]] = []
@@ -335,12 +338,24 @@ class ActionAgent(BaseAgent):
         if not self.browser_driver:
             raise ComputerUseExecutionError("Browser driver is not available.")
 
+        environment = "desktop" if self.settings.driver_backend == "desktop" else "browser"
+        model_override = (
+            self._computer_use_model if self.settings.cu_provider == "openai" else None
+        )
+        cache = self._coordinate_cache
+        if hasattr(self.browser_driver, "coordinate_cache"):
+            try:
+                cache = getattr(self.browser_driver, "coordinate_cache")
+            except Exception:
+                cache = self._coordinate_cache
         return ComputerUseSession(
             client=self.client.client,
             browser=self.browser_driver,
             settings=self.settings,
             debug_logger=debug_logger,
-            model=self._computer_use_model,
+            model=model_override,
+            environment=environment,
+            coordinate_cache=cache,
         )
 
     async def _execute_computer_tool_workflow(
@@ -348,6 +363,7 @@ class ActionAgent(BaseAgent):
         test_step: TestStep,
         test_context: Dict[str, Any],
         screenshot: Optional[bytes] = None,
+        record_driver_actions: bool = False,
     ) -> EnhancedActionResult:
         """Execute an action using the Computer Use tool and return a rich result."""
         if not test_step.action_instruction:
@@ -392,6 +408,10 @@ class ActionAgent(BaseAgent):
             "value": instruction.value,
         }
         session_metadata["interaction_mode"] = interaction_mode
+        session_metadata["step_goal"] = test_step.description
+        session_metadata["environment"] = (
+            "desktop" if self.settings.driver_backend == "desktop" else "browser"
+        )
 
         safety_identifier = self._resolve_safety_identifier(test_step, context_lookup)
         session_metadata["safety_identifier"] = safety_identifier
@@ -407,20 +427,68 @@ class ActionAgent(BaseAgent):
         # Track goal in conversation history for downstream tooling
         self.conversation_history.append({"role": "user", "content": goal})
 
+        cache_label: Optional[str] = None
+        cache_action = "click"
+        if instruction.action_type in {ActionType.CLICK, ActionType.TYPE}:
+            cache_label = (
+                instruction.target
+                or instruction.description
+                or test_step.description
+            )
+        if isinstance(test_context, dict):
+            cache_label = test_context.get("cache_label") or cache_label
+            cache_action = test_context.get("cache_action") or cache_action
+
         allowed_actions: Optional[Set[str]] = None
         if is_assert_step:
             allowed_actions = OBSERVE_ONLY_ALLOWED_ACTIONS
 
         start_ts = time.perf_counter()
+        session_environment = session_metadata.get("environment")
         try:
             session_result = await session.run(
                 goal,
                 initial_screenshot,
                 session_metadata,
                 allowed_actions=allowed_actions,
+                environment=session_environment,
+                cache_label=cache_label,
+                cache_action=cache_action,
             )
         except Exception as exc:
-            raise ComputerUseExecutionError(str(exc)) from exc
+            if cache_label:
+                logger.warning(
+                    "Computer Use failed; invalidating cache and retrying once",
+                    extra={
+                        "step_number": test_step.step_number,
+                        "cache_label": cache_label,
+                        "cache_action": cache_action,
+                        "error": str(exc),
+                    },
+                )
+                try:
+                    await session.invalidate_cache(cache_label, cache_action)
+                except Exception:
+                    logger.debug(
+                        "Computer Use cache invalidation failed", exc_info=True
+                    )
+                retry_metadata = dict(session_metadata)
+                retry_metadata["retry"] = "no_cache"
+                try:
+                    session_result = await session.run(
+                        goal,
+                        initial_screenshot,
+                        retry_metadata,
+                        allowed_actions=allowed_actions,
+                        environment=session_environment,
+                        cache_label=cache_label,
+                        cache_action=cache_action,
+                        use_cache=False,
+                    )
+                except Exception as retry_exc:
+                    raise ComputerUseExecutionError(str(retry_exc)) from exc
+            else:
+                raise ComputerUseExecutionError(str(exc)) from exc
 
         duration_ms = (time.perf_counter() - start_ts) * 1000
 
@@ -438,7 +506,12 @@ class ActionAgent(BaseAgent):
         )
 
         execution_error = None
-        if failing_action and failing_action.error_message:
+        if session_result.terminal_status == "failed":
+            execution_error = (
+                session_result.terminal_failure_reason
+                or "Computer Use session terminated with a failure state."
+            )
+        elif failing_action and failing_action.error_message:
             execution_error = failing_action.error_message
         elif failing_action:
             execution_error = (
@@ -497,8 +570,19 @@ class ActionAgent(BaseAgent):
                 additional_context={
                     "step_number": test_step.step_number,
                     "response_ids": session_result.response_ids,
+                    "terminal_status": session_result.terminal_status,
+                    "terminal_failure_code": session_result.terminal_failure_code,
                 },
             )
+
+        cache_hit, cache_coordinates, cache_resolution = self._extract_cache_metadata(
+            session_result.actions, cache_label, cache_action
+        )
+        driver_actions = (
+            self._extract_driver_actions(session_result.actions)
+            if record_driver_actions
+            else []
+        )
 
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
@@ -515,9 +599,248 @@ class ActionAgent(BaseAgent):
             safety_events=session_result.safety_events,
             final_model_output=session_result.final_output,
             response_ids=session_result.response_ids,
+            cache_label=cache_label,
+            cache_action=cache_action if cache_label else None,
+            cache_hit=cache_hit,
+            cache_coordinates=cache_coordinates,
+            cache_resolution=cache_resolution,
+            driver_actions=driver_actions,
         )
         result.timestamp_end = datetime.now(timezone.utc)
         return result
+
+    @staticmethod
+    def _extract_cache_metadata(
+        turns: List[ComputerToolTurn],
+        cache_label: Optional[str],
+        cache_action: str,
+    ) -> tuple[bool, Optional[tuple[int, int]], Optional[tuple[int, int]]]:
+        """Derive cache usage and coordinates from executed turns."""
+        if not cache_label:
+            return False, None, None
+
+        cache_hit = False
+        coordinates: Optional[tuple[int, int]] = None
+        resolution: Optional[tuple[int, int]] = None
+        for turn in turns:
+            meta = getattr(turn, "metadata", {}) or {}
+            if meta.get("cache_label") and meta.get("cache_label") != cache_label:
+                continue
+            if meta.get("cache_action") and meta.get("cache_action") != cache_action:
+                continue
+            cache_hit = bool(meta.get("cache_hit", False))
+            x = meta.get("x") if meta.get("x") is not None else meta.get("start_x")
+            y = meta.get("y") if meta.get("y") is not None else meta.get("start_y")
+            if x is not None and y is not None:
+                try:
+                    coordinates = (int(x), int(y))
+                except Exception:
+                    coordinates = None
+            res_raw = meta.get("resolution")
+            if isinstance(res_raw, (list, tuple)) and len(res_raw) == 2:
+                try:
+                    resolution = (int(res_raw[0]), int(res_raw[1]))
+                except Exception:
+                    resolution = None
+
+        return cache_hit, coordinates, resolution
+
+    @classmethod
+    def _extract_driver_actions(cls, turns: List[ComputerToolTurn]) -> List[Dict[str, Any]]:
+        recorded: List[Dict[str, Any]] = []
+        for turn in turns:
+            if getattr(turn, "status", None) != "executed":
+                continue
+            action_type = str(getattr(turn, "action_type", "") or "").strip().lower()
+            params = getattr(turn, "parameters", {}) or {}
+            meta = getattr(turn, "metadata", {}) or {}
+            normalized_coords = bool(meta.get("normalized_coords", False))
+
+            if action_type in {"click", "click_at", "move_mouse_and_click"}:
+                x = meta.get("x")
+                y = meta.get("y")
+                if x is None or y is None:
+                    continue
+                recorded.append(
+                    {
+                        "type": "click",
+                        "x": x,
+                        "y": y,
+                        "button": (params.get("button", "left") or "left"),
+                        "click_count": params.get("click_count", 1),
+                    }
+                )
+            elif action_type == "double_click":
+                x = meta.get("x")
+                y = meta.get("y")
+                if x is None or y is None:
+                    continue
+                recorded.append(
+                    {"type": "click", "x": x, "y": y, "button": "left", "click_count": 2}
+                )
+            elif action_type == "right_click":
+                x = meta.get("x")
+                y = meta.get("y")
+                if x is None or y is None:
+                    continue
+                recorded.append(
+                    {"type": "click", "x": x, "y": y, "button": "right", "click_count": 1}
+                )
+            elif action_type in {"move", "hover_at"}:
+                x = meta.get("x")
+                y = meta.get("y")
+                if x is None or y is None:
+                    continue
+                recorded.append({"type": "move", "x": x, "y": y})
+            elif action_type in {"drag", "drag_and_drop"}:
+                start_x = meta.get("start_x")
+                start_y = meta.get("start_y")
+                end_x = meta.get("end_x")
+                end_y = meta.get("end_y")
+                if None in {start_x, start_y, end_x, end_y}:
+                    continue
+                recorded.append(
+                    {
+                        "type": "drag",
+                        "start_x": start_x,
+                        "start_y": start_y,
+                        "end_x": end_x,
+                        "end_y": end_y,
+                    }
+                )
+            elif action_type == "scroll":
+                scroll_x = meta.get("scroll_x")
+                scroll_y = meta.get("scroll_y")
+                if scroll_x is None and scroll_y is None:
+                    direction = meta.get("scroll_direction") or params.get("direction") or ""
+                    magnitude = meta.get("scroll_magnitude") or params.get("magnitude")
+                    if magnitude is None:
+                        continue
+                    try:
+                        dx, dy = cls._scroll_xy(str(direction), int(magnitude))
+                    except Exception:
+                        continue
+                    recorded.append({"type": "scroll_by_pixels", "x": dx, "y": dy})
+                else:
+                    recorded.append(
+                        {"type": "scroll_by_pixels", "x": scroll_x or 0, "y": scroll_y or 0}
+                    )
+            elif action_type == "scroll_document":
+                direction = meta.get("scroll_direction") or params.get("direction") or ""
+                magnitude = meta.get("scroll_magnitude") or params.get("magnitude")
+                if magnitude is None:
+                    continue
+                try:
+                    dx, dy = cls._scroll_xy(str(direction), int(magnitude))
+                except Exception:
+                    continue
+                recorded.append({"type": "scroll_by_pixels", "x": dx, "y": dy})
+            elif action_type == "scroll_at":
+                x = meta.get("x")
+                y = meta.get("y")
+                if x is not None and y is not None:
+                    recorded.append({"type": "move", "x": x, "y": y})
+                direction = meta.get("scroll_direction") or params.get("direction") or ""
+                magnitude = meta.get("scroll_magnitude") or params.get("magnitude")
+                if magnitude is None:
+                    continue
+                try:
+                    dx, dy = cls._scroll_xy(str(direction), int(magnitude))
+                except Exception:
+                    continue
+                recorded.append({"type": "scroll_by_pixels", "x": dx, "y": dy})
+            elif action_type == "type":
+                text_payload = params.get("text") or params.get("value") or params.get("input")
+                if text_payload is None:
+                    continue
+                recorded.append({"type": "type_text", "text": str(text_payload)})
+            elif action_type == "type_text_at":
+                x = meta.get("x")
+                y = meta.get("y")
+                if x is None or y is None:
+                    continue
+                text_payload = params.get("text")
+                if text_payload is None:
+                    continue
+                press_enter_default = False if normalized_coords else True
+                press_enter = bool(params.get("press_enter", press_enter_default))
+                clear_before = bool(params.get("clear_before_typing", True))
+                recorded.append({"type": "click", "x": x, "y": y, "button": "left", "click_count": 1})
+                if clear_before:
+                    recorded.append({"type": "press_key", "keys": "ctrl+a"})
+                    recorded.append({"type": "press_key", "keys": "backspace"})
+                recorded.append({"type": "type_text", "text": str(text_payload)})
+                if press_enter:
+                    recorded.append({"type": "press_key", "keys": "enter"})
+            elif action_type in {"keypress", "key_combination"}:
+                keys = params.get("key") or params.get("value") or params.get("keys")
+                if keys is None:
+                    continue
+                normalized_keys = cls._canonicalize_replay_keys(keys)
+                if not normalized_keys:
+                    continue
+                recorded.append({"type": "press_key", "keys": normalized_keys})
+            elif action_type == "wait":
+                duration_ms = meta.get("duration_ms") or params.get("duration_ms")
+                if duration_ms is None:
+                    continue
+                recorded.append({"type": "wait", "duration_ms": duration_ms})
+            elif action_type == "wait_5_seconds":
+                recorded.append({"type": "wait", "duration_ms": 5000})
+            elif action_type == "go_back":
+                recorded.append({"type": "press_key", "keys": "alt+left"})
+            elif action_type == "go_forward":
+                recorded.append({"type": "press_key", "keys": "alt+right"})
+            elif action_type == "navigate":
+                url = params.get("url")
+                if not url:
+                    continue
+                recorded.append({"type": "press_key", "keys": "ctrl+l"})
+                recorded.append({"type": "type_text", "text": str(url)})
+                recorded.append({"type": "press_key", "keys": "enter"})
+            elif action_type == "search":
+                recorded.append({"type": "press_key", "keys": "ctrl+l"})
+                recorded.append({"type": "type_text", "text": "https://www.google.com/"})
+                recorded.append({"type": "press_key", "keys": "enter"})
+
+        normalized: List[Dict[str, Any]] = []
+        for action in recorded:
+            try:
+                normalized.append(normalize_driver_action(action))
+            except DriverActionError:
+                logger.debug(
+                    "ActionAgent: skipping invalid driver action",
+                    exc_info=True,
+                    extra={"action": action},
+                )
+        return normalized
+
+    @staticmethod
+    def _scroll_xy(direction: str, magnitude: int) -> tuple[int, int]:
+        direction_norm = str(direction or "").strip().lower()
+        amount = abs(int(magnitude))
+        if direction_norm == "down":
+            return (0, amount)
+        if direction_norm == "up":
+            return (0, -amount)
+        if direction_norm == "right":
+            return (amount, 0)
+        if direction_norm == "left":
+            return (-amount, 0)
+        raise ValueError(f"Invalid scroll direction: {direction!r}")
+
+    @staticmethod
+    def _canonicalize_replay_keys(raw_keys: Any) -> Optional[str]:
+        """Normalize replay key payloads into a single driver-compatible string."""
+        if raw_keys is None:
+            return None
+        if isinstance(raw_keys, (list, tuple)):
+            pieces = [str(part).strip() for part in raw_keys if str(part).strip()]
+            if not pieces:
+                return None
+            return "+".join(pieces)
+        text = str(raw_keys).strip()
+        return text or None
 
     async def _execute_skip_navigation_workflow(
         self,
@@ -578,7 +901,8 @@ class ActionAgent(BaseAgent):
         self,
         test_step: TestStep,
         test_context: Dict[str, Any],
-        screenshot: Optional[bytes] = None
+        screenshot: Optional[bytes] = None,
+        record_driver_actions: bool = False,
     ) -> EnhancedActionResult:
         """
         Execute a complete action with multi-step workflow support.
@@ -615,6 +939,7 @@ class ActionAgent(BaseAgent):
                     test_step=test_step,
                     test_context=test_context,
                     screenshot=screenshot,
+                    record_driver_actions=record_driver_actions,
                 )
             except ComputerUseExecutionError as exc:
                 logger.error(

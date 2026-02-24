@@ -2,12 +2,15 @@
 Tests for the Computer Use session orchestration.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.agents.computer_use import ComputerUseSession
+import src.agents.computer_use.session as cu_session_module
+from src.agents.computer_use.session import ComputerUseSessionResult
 
 
 class DummyResponse:
@@ -21,7 +24,7 @@ class DummyResponse:
 
 
 @pytest.fixture
-def session_settings():
+def session_settings(tmp_path):
     """Provide minimal settings required by the session."""
     return SimpleNamespace(
         openai_request_timeout_seconds=900,
@@ -32,6 +35,18 @@ def session_settings():
         actions_computer_tool_fail_fast_on_safety=True,
         actions_computer_tool_allowed_domains=[],
         actions_computer_tool_blocked_domains=[],
+        scroll_turn_multiplier=3.0,
+        scroll_default_magnitude=450,
+        scroll_max_magnitude=600,
+        cu_provider="openai",
+        google_cu_model="gemini-2.5-computer-use-preview-10-2025",
+        vertex_api_key="",
+        vertex_project="",
+        vertex_location="us-central1",
+        cu_safety_policy="auto_approve",
+        model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
+        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        max_screenshots=12,
     )
 
 
@@ -121,6 +136,7 @@ async def test_computer_use_session_executes_actions_successfully(
     mock_browser.click.assert_awaited_once_with(250, 180, button="left", click_count=1)
     assert result.final_output == "Action completed successfully."
     assert not result.safety_events
+    assert result.terminal_status == "success"
     assert mock_client.responses.create.await_count == 2
 
 
@@ -235,8 +251,167 @@ async def test_computer_use_session_fail_fast_on_safety(
     assert len(result.actions) == 1
     assert result.actions[0].status == "failed"
     assert result.safety_events
+    assert result.terminal_status == "failed"
+    assert result.terminal_failure_code == "safety_fail_fast"
     assert mock_browser.click.await_count == 0
     mock_client.responses.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
+    mock_client, mock_browser, session_settings
+):
+    """Pending safety checks should continue when fail-fast is disabled and policy is auto_approve."""
+    session_settings.actions_computer_tool_fail_fast_on_safety = False
+    session_settings.cu_safety_policy = "auto_approve"
+
+    first_response = DummyResponse(
+        {
+            "id": "resp_safe_continue_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_safe_continue",
+                    "action": {"type": "click", "x": 11, "y": 22},
+                    "pending_safety_checks": [
+                        {
+                            "id": "sc1",
+                            "code": "review_required",
+                            "message": "Safety review requested.",
+                        }
+                    ],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    second_response = DummyResponse(
+        {
+            "id": "resp_safe_continue_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Done."}],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [first_response, second_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+    result = await session.run(
+        goal="Click continue.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 6},
+    )
+
+    assert result.safety_events == []
+    assert result.terminal_status == "success"
+    mock_browser.click.assert_awaited_once_with(11, 22, button="left", click_count=1)
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_per_call_fallback_is_not_sticky(
+    mock_client, mock_browser, session_settings
+):
+    """Google fallback to OpenAI should apply only to one run() call."""
+    session_settings.cu_provider = "google"
+    session_settings.vertex_api_key = "dummy-key"
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+        provider="google",
+    )
+
+    google_success = ComputerUseSessionResult(final_output="google-success")
+    openai_fallback = ComputerUseSessionResult(final_output="openai-fallback")
+    session._run_google = AsyncMock(  # type: ignore[assignment]
+        side_effect=[RuntimeError("google failed"), google_success]
+    )
+    session._run_openai = AsyncMock(return_value=openai_fallback)  # type: ignore[assignment]
+
+    first = await session.run(
+        goal="Run once",
+        initial_screenshot=b"initial",
+        metadata={"step_number": 1},
+    )
+    second = await session.run(
+        goal="Run twice",
+        initial_screenshot=b"initial",
+        metadata={"step_number": 2},
+    )
+
+    assert first.final_output == "openai-fallback"
+    assert second.final_output == "google-success"
+    assert session._provider == "google"
+    assert session._run_google.await_count == 2  # type: ignore[attr-defined]
+    assert session._run_openai.await_count == 1  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_marks_terminal_failure_on_max_turns(
+    mock_client, mock_browser, session_settings
+):
+    """OpenAI max-turn exits should emit terminal failed state."""
+    session_settings.actions_computer_tool_max_turns = 1
+
+    first_response = DummyResponse(
+        {
+            "id": "resp_turn_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_turn_1",
+                    "action": {"type": "click", "x": 1, "y": 1},
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    second_response = DummyResponse(
+        {
+            "id": "resp_turn_2",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_turn_2",
+                    "action": {"type": "click", "x": 2, "y": 2},
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [first_response, second_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+    result = await session.run(
+        goal="Click repeatedly.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 10},
+    )
+
+    assert result.terminal_status == "failed"
+    assert result.terminal_failure_code == "max_turns_exceeded"
+    assert any(
+        action.action_type == "system_notice" and action.status == "failed"
+        for action in result.actions
+    )
 
 
 @pytest.mark.asyncio
@@ -355,3 +530,56 @@ async def test_computer_use_session_records_execution_failure(
     assert turn.error_message == "click failed"
     assert result.final_output == "Could not click the button."
     assert mock_client.responses.create.await_count == 2
+
+
+def test_computer_use_session_google_client_uses_vertex_project_location(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google client should consume VERTEX_PROJECT and VERTEX_LOCATION when configured."""
+    session_settings.cu_provider = "google"
+    session_settings.vertex_project = "demo-project"
+    session_settings.vertex_location = "us-east5"
+    session_settings.vertex_api_key = ""
+    client_factory = MagicMock(return_value=object())
+    monkeypatch.setattr(
+        cu_session_module, "genai", SimpleNamespace(Client=client_factory)
+    )
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        provider="google",
+        debug_logger=None,
+    )
+    session._ensure_google_client()
+
+    client_factory.assert_called_once_with(
+        vertexai=True,
+        project="demo-project",
+        location="us-east5",
+    )
+
+
+def test_computer_use_session_google_client_uses_api_key_mode(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google client should use API-key mode when no project is provided."""
+    session_settings.cu_provider = "google"
+    session_settings.vertex_project = ""
+    session_settings.vertex_api_key = "vertex-key"
+    client_factory = MagicMock(return_value=object())
+    monkeypatch.setattr(
+        cu_session_module, "genai", SimpleNamespace(Client=client_factory)
+    )
+
+    session = ComputerUseSession(
+        client=mock_client,
+        browser=mock_browser,
+        settings=session_settings,
+        provider="google",
+        debug_logger=None,
+    )
+    session._ensure_google_client()
+
+    client_factory.assert_called_once_with(api_key="vertex-key")

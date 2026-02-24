@@ -227,6 +227,25 @@ class EnhancedActionResult(BaseModel):
         default_factory=list,
         description="OpenAI response IDs involved in this action loop",
     )
+    cache_label: Optional[str] = Field(
+        None, description="Cache label used for coordinate caching"
+    )
+    cache_action: Optional[str] = Field(
+        None, description="Cache action type associated with the label"
+    )
+    cache_hit: bool = Field(
+        False, description="Whether the coordinate cache was used"
+    )
+    cache_coordinates: Optional[tuple[int, int]] = Field(
+        None, description="Cached pixel coordinates used for the action"
+    )
+    cache_resolution: Optional[tuple[int, int]] = Field(
+        None, description="Resolution associated with cached coordinates"
+    )
+    driver_actions: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Recorded driver actions for execution replay",
+    )
     
     # Overall status
     overall_success: bool = Field(

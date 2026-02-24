@@ -5,7 +5,6 @@ Main entry point for the application.
 
 import argparse
 import asyncio
-import json
 import re
 import sys
 from datetime import datetime
@@ -15,7 +14,6 @@ from typing import Any, Dict, Optional, Tuple
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Prompt
 from rich.table import Table
 
 from src.browser.controller import BrowserController
@@ -24,7 +22,7 @@ from src.agents.test_planner import TestPlannerAgent
 from src.config.settings import get_settings
 from src.error_handling import ScopeTriageBlockedError
 from src.models.openai_client import ResponseStreamObserver
-from src.monitoring.logger import get_logger, setup_logging
+from src.monitoring.logger import get_logger, setup_logging, get_run_id
 from src.monitoring.reporter import TestReporter
 from src.monitoring.debug_logger import initialize_debug_logger
 from src.orchestration.communication import MessageBus
@@ -34,6 +32,7 @@ from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
+from src.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
 
 console = Console()
 logger = get_logger("main")
@@ -179,6 +178,8 @@ class PlanGenerationStreamObserver(ResponseStreamObserver):
                 f"{self._last_delta_chars} chars)[/cyan]"
             )
         return f"[cyan]GPT-5 planning… {self.estimated_tokens} tokens[/cyan]"
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser."""
     parser = argparse.ArgumentParser(
@@ -186,14 +187,8 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Interactive requirements mode
-  python -m src.main --requirements
-  
   # Test from a document file (PRD, design doc, etc.)
   python -m src.main --plan requirements.md
-  
-  # Run existing test scenario
-  python -m src.main --json-test-plan test_scenarios/login_test.json
   
   # Berserk mode - full autonomous operation
   python -m src.main --berserk --plan requirements.pdf
@@ -206,19 +201,9 @@ Examples:
     # Input options
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument(
-        "-r", "--requirements",
-        action="store_true",
-        help="Interactive mode - enter test requirements via prompt",
-    )
-    input_group.add_argument(
         "-p", "--plan",
         type=Path,
         help="Path to document file with test requirements (any format)",
-    )
-    input_group.add_argument(
-        "-j", "--json-test-plan",
-        type=Path,
-        help="Path to existing test scenario JSON file",
     )
     
     # Utility commands
@@ -263,6 +248,20 @@ Examples:
         action="store_true",
         help="Enable verbose structured logging output (JSON)",
     )
+    record_group = parser.add_mutually_exclusive_group()
+    record_group.add_argument(
+        "--record",
+        action="store_true",
+        dest="record",
+        help="Force-enable desktop screen recording for this run",
+    )
+    record_group.add_argument(
+        "--no-record",
+        action="store_false",
+        dest="record",
+        help="Force-disable desktop screen recording for this run",
+    )
+    parser.set_defaults(record=None)
     
     # Output options
     parser.add_argument(
@@ -292,30 +291,6 @@ Examples:
     )
     
     return parser
-
-
-def load_scenario(scenario_path: Path) -> dict:
-    """Load test scenario from JSON file."""
-    try:
-        with open(scenario_path, "r") as f:
-            scenario = json.load(f)
-        
-        # Validate required fields
-        required_fields = ["name", "requirements"]
-        missing_fields = [f for f in required_fields if f not in scenario]
-        if missing_fields:
-            raise ValueError(f"Scenario missing required fields: {missing_fields}")
-        
-        return scenario
-    except FileNotFoundError:
-        console.print(f"[red]Error: Scenario file not found: {scenario_path}[/red]")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        console.print(f"[red]Error: Invalid JSON in scenario file: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Error loading scenario: {e}[/red]")
-        sys.exit(1)
 
 
 def _create_planning_agents(settings) -> Tuple[ScopeTriageAgent, TestPlannerAgent]:
@@ -352,6 +327,7 @@ async def run_test(
     timeout: int = 7200,
     max_steps: int = 50,
     berserk: bool = False,
+    record_override: Optional[bool] = None,
 ) -> int:
     """
     Run a test with the given requirements.
@@ -361,13 +337,17 @@ async def run_test(
     """
     browser_controller = None
     coordinator = None
+    screen_recorder: Optional[ScreenRecorder] = None
+    recording_artifact_path: Optional[Path] = None
     test_plan: Optional[TestPlan] = None
     triage_result: Optional[ScopeTriageResult] = None
     settings = get_settings()
     use_progress = settings.log_format == "json"
 
     try:
-        test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        test_run_id = get_run_id()
+        if test_run_id == "unknown":
+            test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         debug_logger = initialize_debug_logger(test_run_id)
         console.print(f"[dim]Debug logging initialized for run: {test_run_id}[/dim]")
@@ -424,6 +404,35 @@ async def run_test(
             )
             console.print("[green]Components initialized.[/green]")
 
+        should_record = bool(settings.enable_screen_recording)
+        if record_override is not None:
+            should_record = bool(record_override)
+        if should_record and settings.driver_backend != "desktop":
+            logger.info(
+                "Screen recording requested but skipped for non-desktop backend",
+                extra={"driver_backend": settings.driver_backend},
+            )
+        if should_record and settings.driver_backend == "desktop":
+            screen_recorder = ScreenRecorder(
+                output_dir=settings.screen_recording_output_dir,
+                framerate=settings.screen_recording_framerate,
+                draw_cursor=settings.screen_recording_draw_cursor,
+                filename_prefix=settings.screen_recording_prefix,
+            )
+            try:
+                recording_artifact_path = screen_recorder.start()
+                console.print(
+                    f"[dim]Screen recording started:[/dim] {recording_artifact_path}"
+                )
+            except ScreenRecorderError as exc:
+                logger.warning(
+                    "Unable to start screen recording",
+                    exc_info=True,
+                    extra={"error": str(exc)},
+                )
+                screen_recorder = None
+                recording_artifact_path = None
+
         console.print(f"\n[cyan]Navigating to:[/cyan] {initial_url}")
         await browser_controller.navigate(initial_url)
 
@@ -456,6 +465,19 @@ async def run_test(
                 timeout=timeout,
             )
             console.print("[green]Test run completed.[/green]")
+        if screen_recorder:
+            try:
+                stopped_path = screen_recorder.stop()
+                if stopped_path:
+                    recording_artifact_path = stopped_path
+            except ScreenRecorderError as exc:
+                logger.warning(
+                    "Unable to stop screen recording cleanly",
+                    exc_info=True,
+                    extra={"error": str(exc)},
+                )
+            finally:
+                screen_recorder = None
 
         console.print("\n[bold]Test Execution Summary:[/bold]")
 
@@ -467,6 +489,8 @@ async def run_test(
 
         report = getattr(test_state, "test_report", None)
         if report:
+            if recording_artifact_path:
+                report.artifacts["screen_recording_path"] = str(recording_artifact_path)
             test_cases = getattr(report, "test_cases", [])
             total_test_cases = len(test_cases)
             completed_test_cases = len(
@@ -554,6 +578,15 @@ async def run_test(
         logger.exception("Test execution failed")
         return 1
     finally:
+        if screen_recorder:
+            try:
+                stopped_path = screen_recorder.stop()
+                if stopped_path:
+                    recording_artifact_path = stopped_path
+            except ScreenRecorderError:
+                logger.warning(
+                    "Screen recording stop failed during cleanup", exc_info=True
+                )
         if coordinator:
             await coordinator.cleanup()
         if browser_controller:
@@ -820,43 +853,6 @@ def _print_plan_storage_locations(test_plan) -> None:
         console.print(line, soft_wrap=True)
 
 
-def get_interactive_requirements() -> tuple[str, Optional[str]]:
-    """Get test requirements interactively from user."""
-    console.print("\n[bold cyan]HAINDY Interactive Mode[/bold cyan]")
-    console.print("Enter your test requirements. You can paste multi-line text.")
-    console.print("[dim]Press Enter twice on an empty line when done:[/dim]\n")
-    
-    lines = []
-    empty_count = 0
-    
-    while True:
-        try:
-            line = input()
-            if line == "":
-                empty_count += 1
-                if empty_count >= 2:
-                    break
-            else:
-                empty_count = 0
-            lines.append(line)
-        except (EOFError, KeyboardInterrupt):
-            break
-    
-    requirements = "\n".join(lines).strip()
-    
-    if not requirements:
-        console.print("[red]Error: No requirements provided[/red]")
-        sys.exit(1)
-    
-    override_url = Prompt.ask(
-        "\n[cyan]Enter the starting URL for testing (leave blank to auto-detect)[/cyan]",
-        default="",
-        show_default=False,
-    ).strip()
-    
-    return requirements, override_url or None
-
-
 async def test_api_connection() -> int:
     """Test OpenAI API connection."""
     console.print("\n[bold cyan]Testing OpenAI API Connection[/bold cyan]")
@@ -955,20 +951,11 @@ async def async_main(args: Optional[list[str]] = None) -> int:
     rate_limiter = RateLimiter()
     sanitizer = DataSanitizer()
     
-    # Handle different input modes
+    # Handle input mode
     override_url = parsed_args.url
-    if parsed_args.requirements:
-        # Interactive mode
-        requirements, interactive_url = get_interactive_requirements()
-        override_url = override_url or interactive_url
-    elif parsed_args.plan:
+    if parsed_args.plan:
         # Read requirements from plan file
         requirements = await read_plan_file(parsed_args.plan)
-    elif parsed_args.json_test_plan:
-        # Load from JSON scenario file
-        scenario = load_scenario(parsed_args.json_test_plan)
-        requirements = scenario["requirements"]
-        override_url = override_url or scenario.get("url")
     else:
         # No input provided
         parser.print_help()
@@ -985,6 +972,7 @@ async def async_main(args: Optional[list[str]] = None) -> int:
         timeout=parsed_args.timeout,
         max_steps=parsed_args.max_steps,
         berserk=parsed_args.berserk,
+        record_override=parsed_args.record,
     )
 
 

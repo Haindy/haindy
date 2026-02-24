@@ -44,7 +44,8 @@ class TestExecutionReport:
         test_metrics: TestMetrics,
         error_report: Optional[ErrorReport] = None,
         journal: Optional[ExecutionJournal] = None,
-        config: Optional[ReportConfig] = None
+        config: Optional[ReportConfig] = None,
+        artifacts: Optional[Dict[str, Any]] = None,
     ):
         self.test_metrics = test_metrics
         self.error_report = error_report
@@ -52,6 +53,7 @@ class TestExecutionReport:
         self.config = config or ReportConfig()
         self.generated_at = datetime.now(timezone.utc)
         self.bug_reports: List[Dict[str, Any]] = []  # Will be populated after initialization
+        self.artifacts = artifacts or {}
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert report to dictionary."""
@@ -109,6 +111,8 @@ class TestExecutionReport:
         # Add bug reports
         if self.bug_reports:
             report["bug_reports"] = self.bug_reports
+        if self.artifacts:
+            report["artifacts"] = self.artifacts
         
         return report
     
@@ -665,7 +669,8 @@ class TestReporter:
             test_metrics=test_metrics,
             error_report=self._extract_error_report(test_state),
             journal=None,  # TODO: Extract journal if available
-            config=self.config
+            config=self.config,
+            artifacts=test_state.test_report.artifacts if test_state.test_report else None,
         )
         
         # Add bug reports to the report data

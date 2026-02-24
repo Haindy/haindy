@@ -23,12 +23,14 @@ class TestSettings:
         assert settings.grid_size == 60
         assert settings.grid_refinement_enabled is True
         assert settings.browser_headless is True
-        assert settings.browser_viewport_width == 1920
-        assert settings.browser_viewport_height == 1080
+        assert settings.browser_viewport_width == 1440
+        assert settings.browser_viewport_height == 900
         assert settings.max_test_steps == 100
         assert settings.log_level == "INFO"
         assert settings.debug_mode is False
         assert settings.openai_request_timeout_seconds == 900
+        assert settings.cu_provider == "google"
+        assert settings.desktop_prefer_resolution == (1440, 900)
         assert settings.agent_models["test_planner"].model == "gpt-5"
         assert settings.agent_models["test_runner"].model == "gpt-5"
         assert settings.agent_models["action_agent"].model == "gpt-5"
@@ -160,6 +162,7 @@ class TestSettings:
             reports_dir=tmp_path / "reports",
             screenshots_dir=tmp_path / "screenshots",
             cache_dir=tmp_path / "cache",
+            screen_recording_output_dir=tmp_path / "recordings",
         )
         
         # Directories shouldn't exist yet
@@ -174,6 +177,7 @@ class TestSettings:
         assert (tmp_path / "reports").exists()
         assert (tmp_path / "screenshots").exists()
         assert (tmp_path / "cache").exists()
+        assert (tmp_path / "recordings").exists()
 
 
 class TestConfigManager:

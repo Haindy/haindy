@@ -277,14 +277,8 @@ This was a major refactoring phase that significantly improved the system archit
 
 **New CLI Features**:
 ```bash
-# Interactive requirements mode
-python -m src.main --requirements
-
 # File-based plan input
 python -m src.main --plan <file>
-
-# Direct JSON execution
-python -m src.main --json-test-plan <json-file>
 
 # Utility commands
 python -m src.main --test-api

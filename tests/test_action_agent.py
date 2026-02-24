@@ -7,6 +7,7 @@ getting into implementation details that may change.
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
@@ -40,9 +41,22 @@ def mock_settings():
     settings.openai_request_timeout_seconds = 900
     settings.actions_use_computer_tool = False
     settings.actions_computer_tool_max_turns = 12
+    settings.actions_computer_tool_loop_detection_window = 3
     settings.actions_computer_tool_action_timeout_ms = 7000
     settings.actions_computer_tool_stabilization_wait_ms = 1000
     settings.actions_computer_tool_fail_fast_on_safety = True
+    settings.scroll_turn_multiplier = 3.0
+    settings.scroll_default_magnitude = 450
+    settings.scroll_max_magnitude = 600
+    settings.cu_provider = "openai"
+    settings.google_cu_model = "gemini-2.5-computer-use-preview-10-2025"
+    settings.vertex_api_key = ""
+    settings.vertex_project = ""
+    settings.vertex_location = "us-central1"
+    settings.cu_safety_policy = "auto_approve"
+    settings.driver_backend = "playwright"
+    settings.desktop_coordinate_cache_path = Path("data/desktop_cache/coordinates.json")
+    settings.model_log_path = Path("data/model_logs/model_calls.jsonl")
     return settings
 
 

@@ -37,8 +37,18 @@ from src.core.types import (
     TestStep,
     TestSummary,
 )
-from src.monitoring.logger import get_logger
+from src.monitoring.logger import get_logger, get_run_id
 from src.browser.instrumented_driver import InstrumentedBrowserDriver
+from src.desktop.cache import CoordinateCache
+from src.desktop.execution_replay import replay_driver_actions
+from src.runtime.execution_replay_cache import (
+    ExecutionReplayCache,
+    ExecutionReplayCacheKey,
+)
+from src.runtime.task_cache import TaskPlanCache
+from src.runtime.trace import RunTraceWriter, load_model_calls_for_run
+from src.runtime.evidence import EvidenceManager
+from src.utils.model_logging import get_model_logger
 
 logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
@@ -107,6 +117,28 @@ class TestRunner(BaseAgent):
         self._initial_url: Optional[str] = None
         self._execution_history: List[Dict[str, Any]] = []
         self._settings = get_settings()
+        self._task_plan_cache = TaskPlanCache(self._settings.task_plan_cache_path)
+        self._execution_replay_cache = ExecutionReplayCache(
+            self._settings.execution_replay_cache_path
+        )
+        self._environment = (
+            "desktop" if self._settings.driver_backend == "desktop" else "browser"
+        )
+        self._model_logger = get_model_logger(
+            self._settings.model_log_path,
+            max_screenshots=getattr(self._settings, "max_screenshots", None),
+        )
+        run_id = get_run_id()
+        if run_id == "unknown":
+            run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8]
+        self._trace = RunTraceWriter(run_id)
+        self._evidence: Optional[EvidenceManager] = None
+        if self.browser_driver and hasattr(self.browser_driver, "coordinate_cache"):
+            self._coordinate_cache = getattr(self.browser_driver, "coordinate_cache")
+        else:
+            self._coordinate_cache = CoordinateCache(
+                self._settings.desktop_coordinate_cache_path
+            )
         self._initial_screenshot_bytes: Optional[bytes] = None
         self._initial_screenshot_path: Optional[str] = None
         self._latest_screenshot_bytes: Optional[bytes] = None
@@ -270,6 +302,48 @@ class TestRunner(BaseAgent):
                 "execution_mode": "enhanced"
             }
         )
+
+        if self._trace:
+            self._trace.set_run_metadata(
+                {
+                    "test_plan_id": str(test_plan.plan_id),
+                    "test_plan_name": test_plan.name,
+                    "initial_url": initial_url,
+                    "driver_backend": self._settings.driver_backend,
+                    "model_log_path": str(self._settings.model_log_path),
+                    "task_plan_cache_path": str(self._settings.task_plan_cache_path),
+                    "execution_replay_cache_path": str(
+                        self._settings.execution_replay_cache_path
+                    ),
+                    "coordinate_cache_path": str(
+                        self._settings.desktop_coordinate_cache_path
+                    ),
+                }
+            )
+
+        if self._test_report:
+            screenshots_dir = None
+            from src.monitoring.debug_logger import get_debug_logger
+
+            debug_logger = get_debug_logger()
+            if debug_logger and getattr(debug_logger, "debug_dir", None):
+                screenshots_dir = str(debug_logger.debug_dir)
+            else:
+                screenshots_dir = str(self._settings.screenshots_dir)
+            self._test_report.artifacts.update(
+                {
+                    "model_log_path": str(self._settings.model_log_path),
+                    "trace_path": str(self._trace.path) if self._trace else None,
+                    "task_plan_cache_path": str(self._settings.task_plan_cache_path),
+                    "execution_replay_cache_path": str(
+                        self._settings.execution_replay_cache_path
+                    ),
+                    "coordinate_cache_path": str(
+                        self._settings.desktop_coordinate_cache_path
+                    ),
+                    "screenshots_dir": screenshots_dir,
+                }
+            )
         
         # Attach the test report to the test state
         test_state.test_report = self._test_report
@@ -356,7 +430,25 @@ class TestRunner(BaseAgent):
         
         finally:
             # Final report will be saved by the caller using TestReporter
-            
+            if self._trace:
+                try:
+                    self._trace.set_model_calls(
+                        load_model_calls_for_run(
+                            self._settings.model_log_path,
+                            run_id=self._trace.run_id,
+                        )
+                    )
+                    success = (
+                        self._test_report.status == TestStatus.PASSED
+                        if self._test_report
+                        else False
+                    )
+                    self._trace.finalize(success=success)
+                    self._trace.write()
+                    logger.info("Run trace written", extra={"path": str(self._trace.path)})
+                except Exception:
+                    logger.debug("Failed to write run trace", exc_info=True)
+
             # Print summary to console
             self._print_summary()
         
@@ -504,6 +596,9 @@ class TestRunner(BaseAgent):
         )
         screenshot_before: Optional[bytes] = None
         screenshot_after: Optional[bytes] = None
+        attempt = 1
+        plan_cache_hit = False
+        replay_used = False
        
         try:
             # Check dependencies
@@ -520,91 +615,19 @@ class TestRunner(BaseAgent):
                     f"tc{test_case.test_id}_step{step.step_number}_before"
                 )
                 step_result.screenshot_before = str(screenshot_path)
-            
-            # Interpret step and decompose into actions
-            actions = await self._interpret_step(step, test_case, case_result)
-            
-            # Execute each action
-            success = True
-            action_results = []  # Store full action results
-            forced_blocker_reason: Optional[str] = None
-            
-            for action in actions:
-                logger.debug("Executing sub-action", extra={
-                    "action_type": action["type"],
-                    "description": action.get("description", "")
-                })
-                
-                action_result = await self._execute_action(action, step)
-                step_result.actions_performed.append(action_result)
-                
-                # Store full action data
-                action_results.append({
-                    "action": action,
-                    "result": action_result,
-                    "full_data": self._current_step_actions[-1] if self._current_step_actions else {}
-                })
-                
-                if forced_blocker_reason is None:
-                    error_text = action_result.get("error")
-                    if not error_text:
-                        full_data = action_results[-1]["full_data"]
-                        if isinstance(full_data, dict):
-                            result_blob = full_data.get("result", {})
-                            if isinstance(result_blob, dict):
-                                exec_blob = result_blob.get("execution") or {}
-                                error_text = (
-                                    result_blob.get("error")
-                                    or exec_blob.get("error_message")
-                                )
-                    if error_text and isinstance(error_text, str) and (
-                        error_text.startswith(MAX_TURN_ERROR_PREFIX)
-                        or error_text.startswith(LOOP_ERROR_PREFIX)
-                    ):
-                        forced_blocker_reason = error_text
-                        success = False
-                        logger.error(
-                            "Action aborted due to Computer Use limit or loop",
-                            extra={
-                                "step_number": step.step_number,
-                                "action_description": action.get("description", ""),
-                                "reason": error_text,
-                            },
-                        )
-                        self._current_step_data["blocker_reasoning"] = error_text
-                        self._current_step_data["forced_blocker_reason"] = error_text
-                
-                if not action_result.get("success", False):
-                    success = False
-                    
-                    # Determine if we should continue with remaining actions
-                    if action.get("critical", True):
-                        break
-            
-            # Capture after screenshot
-            if self.browser_driver:
-                await asyncio.sleep(1)  # Brief wait for UI to stabilize
-                screenshot_after = await self.browser_driver.screenshot()
-                screenshot_path = self._save_screenshot(
-                    screenshot_after,
-                    f"tc{test_case.test_id}_step{step.step_number}_after"
-                )
-                step_result.screenshot_after = str(screenshot_path)
-                self._latest_screenshot_bytes = screenshot_after
-                self._latest_screenshot_path = str(screenshot_path)
-                self._latest_screenshot_origin = f"step_{step.step_number}_after"
-            
-            # Build execution history for this test case
+
+            # Build execution history and next test case context (used for replay/verification)
             execution_history = []
             for prev_step in case_result.step_results:
-                execution_history.append({
-                    "step_number": prev_step.step_number,
-                    "action": prev_step.action,
-                    "status": prev_step.status,
-                    "actual_result": prev_step.actual_result
-                })
-            
-            # Get next test case for blocker determination
+                execution_history.append(
+                    {
+                        "step_number": prev_step.step_number,
+                        "action": prev_step.action,
+                        "status": prev_step.status,
+                        "actual_result": prev_step.actual_result,
+                    }
+                )
+
             next_test_case = None
             if self._current_test_plan:
                 current_idx = None
@@ -614,65 +637,250 @@ class TestRunner(BaseAgent):
                         break
                 if current_idx is not None and current_idx < len(self._current_test_plan.test_cases) - 1:
                     next_test_case = self._current_test_plan.test_cases[current_idx + 1]
-            
-            # Always produce a verification decision for reporting
-            try:
-                if forced_blocker_reason:
-                    verification = {
-                        "verdict": "FAIL",
-                        "reasoning": forced_blocker_reason,
-                        "actual_result": forced_blocker_reason,
-                        "confidence": 1.0,
-                        "is_blocker": True,
-                        "blocker_reasoning": forced_blocker_reason,
-                    }
-                    self._current_step_data["verification_mode"] = "runner_short_circuit"
-                elif step.intent == StepIntent.SETUP:
-                    verification = self._evaluate_setup_step(success, action_results)
-                    self._current_step_data["verification_mode"] = "runner_short_circuit"
-                else:
-                    verification = await self._verify_expected_outcome(
-                        test_case=test_case,
-                        step=step,
-                        action_results=action_results,
-                        screenshot_before=screenshot_before,
-                        screenshot_after=screenshot_after,
-                        execution_history=execution_history,
-                        next_test_case=next_test_case
+
+            replay_result = await self._try_execution_replay(
+                step=step,
+                test_case=test_case,
+                step_result=step_result,
+                screenshot_before=screenshot_before,
+                execution_history=execution_history,
+                next_test_case=next_test_case,
+            )
+            if replay_result is not None:
+                replay_used = True
+                return replay_result
+            latest_action_results: List[Dict[str, Any]] = []
+
+            while True:
+                actions, plan_cache_hit = await self._interpret_step(
+                    step, test_case, case_result, use_cache=(attempt == 1)
+                )
+
+                # Execute each action
+                success = True
+                action_results: List[Dict[str, Any]] = []
+                forced_blocker_reason = None
+                step_result.actions_performed = []
+
+                for action in actions:
+                    logger.debug(
+                        "Executing sub-action",
+                        extra={
+                            "action_type": action["type"],
+                            "description": action.get("description", ""),
+                        },
                     )
-                    self._current_step_data["verification_mode"] = "ai"
-                
-                # Store verification result for bug reporting
-                self._current_step_data["verification_result"] = verification
-                
-                # Set step result based on verdict
-                if verification["verdict"] == "PASS":
-                    step_result.status = TestStatus.PASSED
-                else:
+
+                    action_result = await self._execute_action(
+                        action, step, record_driver_actions=self._replay_enabled(step)
+                    )
+                    step_result.actions_performed.append(action_result)
+
+                    # Store full action data
+                    action_results.append(
+                        {
+                            "action": action,
+                            "result": action_result,
+                            "full_data": self._current_step_actions[-1]
+                            if self._current_step_actions
+                            else {},
+                        }
+                    )
+
+                    if forced_blocker_reason is None:
+                        error_text = action_result.get("error")
+                        if not error_text:
+                            full_data = action_results[-1]["full_data"]
+                            if isinstance(full_data, dict):
+                                result_blob = full_data.get("result", {})
+                                if isinstance(result_blob, dict):
+                                    exec_blob = result_blob.get("execution") or {}
+                                    error_text = (
+                                        result_blob.get("error")
+                                        or exec_blob.get("error_message")
+                                    )
+                        if error_text and isinstance(error_text, str) and (
+                            error_text.startswith(MAX_TURN_ERROR_PREFIX)
+                            or error_text.startswith(LOOP_ERROR_PREFIX)
+                        ):
+                            forced_blocker_reason = error_text
+                            success = False
+                            logger.error(
+                                "Action aborted due to Computer Use limit or loop",
+                                extra={
+                                    "step_number": step.step_number,
+                                    "action_description": action.get("description", ""),
+                                    "reason": error_text,
+                                },
+                            )
+                            self._current_step_data["blocker_reasoning"] = error_text
+                            self._current_step_data["forced_blocker_reason"] = error_text
+
+                    if not action_result.get("success", False):
+                        success = False
+
+                        # Determine if we should continue with remaining actions
+                        if action.get("critical", True):
+                            break
+
+                latest_action_results = action_results
+                self._current_step_data["plan_cache_hit"] = plan_cache_hit
+
+                # Capture after screenshot
+                if self.browser_driver:
+                    await asyncio.sleep(1)  # Brief wait for UI to stabilize
+                    screenshot_after = await self.browser_driver.screenshot()
+                    screenshot_path = self._save_screenshot(
+                        screenshot_after,
+                        f"tc{test_case.test_id}_step{step.step_number}_after",
+                    )
+                    step_result.screenshot_after = str(screenshot_path)
+                    self._latest_screenshot_bytes = screenshot_after
+                    self._latest_screenshot_path = str(screenshot_path)
+                    self._latest_screenshot_origin = (
+                        f"step_{step.step_number}_after"
+                    )
+
+                # Always produce a verification decision for reporting
+                try:
+                    if forced_blocker_reason:
+                        verification = {
+                            "verdict": "FAIL",
+                            "reasoning": forced_blocker_reason,
+                            "actual_result": forced_blocker_reason,
+                            "confidence": 1.0,
+                            "is_blocker": True,
+                            "blocker_reasoning": forced_blocker_reason,
+                        }
+                        self._current_step_data["verification_mode"] = (
+                            "runner_short_circuit"
+                        )
+                    elif step.intent == StepIntent.SETUP:
+                        verification = self._evaluate_setup_step(
+                            success, action_results
+                        )
+                        self._current_step_data["verification_mode"] = (
+                            "runner_short_circuit"
+                        )
+                    else:
+                        verification = await self._verify_expected_outcome(
+                            test_case=test_case,
+                            step=step,
+                            action_results=action_results,
+                            screenshot_before=screenshot_before,
+                            screenshot_after=screenshot_after,
+                            execution_history=execution_history,
+                            next_test_case=next_test_case,
+                        )
+                        self._current_step_data["verification_mode"] = "ai"
+
+                    # Store verification result for bug reporting
+                    self._current_step_data["verification_result"] = verification
+
+                    # Set step result based on verdict
+                    if verification["verdict"] == "PASS":
+                        step_result.status = TestStatus.PASSED
+                    else:
+                        step_result.status = TestStatus.FAILED
+
+                    step_result.actual_result = verification["actual_result"]
+                    step_result.error_message = (
+                        verification["reasoning"]
+                        if verification["verdict"] == "FAIL"
+                        else None
+                    )
+                    step_result.confidence = verification.get("confidence", 0.0)
+
+                    # Store blocker status
+                    if verification["verdict"] == "FAIL":
+                        self._current_step_data["is_blocker"] = verification.get(
+                            "is_blocker", False
+                        )
+                        self._current_step_data["blocker_reasoning"] = verification.get(
+                            "blocker_reasoning", ""
+                        )
+
+                except Exception as e:
+                    # AI verification failed - this is a fatal error
+                    logger.error(
+                        "AI verification failed - marking test as failed",
+                        extra={
+                            "error": str(e),
+                            "step_number": step.step_number,
+                            "test_case": test_case.name,
+                        },
+                    )
                     step_result.status = TestStatus.FAILED
-                
-                step_result.actual_result = verification["actual_result"]
-                step_result.error_message = verification["reasoning"] if verification["verdict"] == "FAIL" else None
-                step_result.confidence = verification.get("confidence", 0.0)
-                
-                # Store blocker status
-                if verification["verdict"] == "FAIL":
-                    self._current_step_data["is_blocker"] = verification.get("is_blocker", False)
-                    self._current_step_data["blocker_reasoning"] = verification.get("blocker_reasoning", "")
-                
-            except Exception as e:
-                # AI verification failed - this is a fatal error
-                logger.error("AI verification failed - marking test as failed", extra={
-                    "error": str(e),
-                    "step_number": step.step_number,
-                    "test_case": test_case.name
-                })
-                step_result.status = TestStatus.FAILED
-                step_result.actual_result = "Verification failed due to AI error"
-                step_result.error_message = f"AI verification failed: {str(e)}"
-                step_result.confidence = 0.0
-                # Re-raise to trigger the outer exception handler
-                raise
+                    step_result.actual_result = "Verification failed due to AI error"
+                    step_result.error_message = (
+                        f"AI verification failed: {str(e)}"
+                    )
+                    step_result.confidence = 0.0
+                    # Re-raise to trigger the outer exception handler
+                    raise
+
+                if (
+                    verification["verdict"] == "PASS"
+                    or not plan_cache_hit
+                    or attempt >= 2
+                ):
+                    break
+
+                cache_key = self._current_step_data.get("plan_cache_key")
+                cache_context = self._current_step_data.get("plan_cache_context")
+                if cache_key and cache_context:
+                    logger.warning(
+                        "Cached plan failed; invalidating and retrying without cache",
+                        extra={"step": cache_key, "attempt": attempt},
+                    )
+                    try:
+                        self._task_plan_cache.invalidate(cache_key, cache_context)
+                        if self._trace:
+                            self._trace.record_cache_event(
+                                {
+                                    "type": "task_plan_cache_invalidate",
+                                    "scenario": self._current_test_plan.name
+                                    if self._current_test_plan
+                                    else "",
+                                    "step": cache_key,
+                                    "reason": "validation_failed_with_cached_plan",
+                                }
+                            )
+                    except Exception:
+                        logger.debug(
+                            "Failed to invalidate task plan cache",
+                            exc_info=True,
+                        )
+
+                attempt += 1
+
+            cache_key = self._current_step_data.get("plan_cache_key")
+            cache_context = self._current_step_data.get("plan_cache_context")
+            if step_result.status == TestStatus.PASSED:
+                if cache_key and cache_context and not plan_cache_hit:
+                    try:
+                        self._task_plan_cache.store(cache_key, cache_context, actions)
+                        if self._trace:
+                            self._trace.record_cache_event(
+                                {
+                                    "type": "task_plan_cache_store",
+                                    "scenario": self._current_test_plan.name
+                                    if self._current_test_plan
+                                    else "",
+                                    "step": cache_key,
+                                }
+                            )
+                    except Exception:
+                        logger.debug(
+                            "Failed to store task plan cache", exc_info=True
+                        )
+
+                await self._store_execution_replay(
+                    step, test_case, latest_action_results
+                )
+                await self._persist_coordinate_cache(latest_action_results)
+            else:
+                await self._invalidate_coordinate_cache(latest_action_results)
             
         except Exception as e:
             logger.error("Step execution failed", extra={
@@ -702,6 +910,17 @@ class TestRunner(BaseAgent):
                 "result": step_result.status.value,
                 "timestamp": step_result.completed_at
             })
+
+            if self._trace and not replay_used:
+                self._trace.record_step(
+                    scenario_name=self._current_test_plan.name
+                    if self._current_test_plan
+                    else "",
+                    step=step,
+                    step_result=step_result,
+                    attempt=attempt,
+                    plan_cache_hit=plan_cache_hit,
+                )
         
         return step_result
     
@@ -745,8 +964,9 @@ class TestRunner(BaseAgent):
         self,
         step: TestStep,
         test_case: TestCase,
-        case_result: TestCaseResult
-    ) -> List[Dict[str, Any]]:
+        case_result: TestCaseResult,
+        use_cache: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], bool]:
         """
         Interpret a test step and decompose it into executable actions.
         
@@ -850,6 +1070,49 @@ class TestRunner(BaseAgent):
         ]
         case_outline_text = "\n".join(f"- {line}" for line in case_outline_lines)
 
+        cache_context = {
+            "test_case_id": test_case.test_id,
+            "test_case_name": test_case.name,
+            "step_number": step.step_number,
+            "step_action": step.action,
+            "expected_result": step.expected_result,
+            "intent": step.intent.value,
+            "previous_step_summary": previous_step_summary,
+            "next_step_summary": next_step_summary,
+            "previous_test_case": previous_case_summary,
+            "case_outline": case_outline_lines,
+        }
+        step_cache_key = self._plan_cache_key(step, test_case)
+        if hasattr(self, "_current_step_data"):
+            self._current_step_data["plan_cache_key"] = step_cache_key
+            self._current_step_data["plan_cache_context"] = cache_context
+        if use_cache:
+            cached_actions = self._task_plan_cache.lookup(step_cache_key, cache_context)
+            if cached_actions:
+                logger.info(
+                    "Using cached action plan for step",
+                    extra={"step": step_cache_key, "action_count": len(cached_actions)},
+                )
+                if self._trace:
+                    self._trace.record_cache_event(
+                        {
+                            "type": "task_plan_cache_hit",
+                            "scenario": self._current_test_plan.name if self._current_test_plan else "",
+                            "step": step_cache_key,
+                        }
+                    )
+                if hasattr(self, "_current_step_data"):
+                    self._current_step_data["plan_cache_hit"] = True
+                    self._current_step_data["test_runner_interpretation"] = {
+                        "prompt": None,
+                        "response": {"actions": cached_actions},
+                        "screenshot_path": None,
+                        "screenshot_source": "plan_cache",
+                        "context": cache_context,
+                        "cache_key": step_cache_key,
+                    }
+                return cached_actions, True
+
         screenshot_bytes, screenshot_path, screenshot_source = await self._get_interpretation_screenshot(
             step,
             test_case,
@@ -925,6 +1188,8 @@ Respond with a JSON object containing an "actions" array where every item follow
         }
         if hasattr(self, "_current_step_data"):
             self._current_step_data["interpretation_context"] = interpretation_context_payload
+            self._current_step_data["plan_cache_hit"] = False
+            self._current_step_data["plan_cache_key"] = step_cache_key
 
         # Log what we're sending to AI
         logger.info("Interpreting step with AI", extra={
@@ -943,6 +1208,32 @@ Respond with a JSON object containing an "actions" array where every item follow
                 response = await self.call_openai(
                     messages=[{"role": "user", "content": message_content}],
                     response_format={"type": "json_object"}
+                )
+
+                log_message_content = [{"type": "input_text", "text": prompt}]
+                if screenshot_bytes:
+                    log_message_content.append(
+                        {"type": "input_image", "image_url": "<<attached screenshot>>"}
+                    )
+                await self._model_logger.log_call(
+                    agent="test_runner.interpret_step",
+                    model=self.model,
+                    prompt=prompt,
+                    request_payload={
+                        "messages": [{"role": "user", "content": log_message_content}],
+                        "response_format": {"type": "json_object"},
+                    },
+                    response=response,
+                    screenshots=(
+                        [("test_runner_interpretation", screenshot_bytes)]
+                        if screenshot_bytes
+                        else None
+                    ),
+                    metadata={
+                        "step_number": step.step_number,
+                        "test_case": test_case.name,
+                        "cache_key": step_cache_key,
+                    },
                 )
                 
                 logger.debug("OpenAI API call successful", extra={
@@ -988,7 +1279,7 @@ Respond with a JSON object containing an "actions" array where every item follow
                 "decomposed_actions": len(actions)
             })
             
-            return actions
+            return actions, False
             
         except Exception as e:
             logger.error("Failed to interpret step with AI", extra={
@@ -1004,7 +1295,8 @@ Respond with a JSON object containing an "actions" array where every item follow
     async def _execute_action(
         self,
         action: Dict[str, Any],
-        step: TestStep
+        step: TestStep,
+        record_driver_actions: bool = False,
     ) -> Dict[str, Any]:
         """Execute a single decomposed action with comprehensive tracking."""
         action_type = action.get("type", "assert")
@@ -1074,6 +1366,10 @@ Respond with a JSON object containing an "actions" array where every item follow
                 "recent_actions": self._execution_history[-3:],
                 "step_intent": step.intent.value,
             }
+            test_context["cache_label"] = (
+                step.cache_label or action.get("target") or action.get("description")
+            )
+            test_context["cache_action"] = step.cache_action or "click"
             
             # Get screenshot before action
             screenshot = await self.browser_driver.screenshot()
@@ -1082,7 +1378,8 @@ Respond with a JSON object containing an "actions" array where every item follow
             result = await self.action_agent.execute_action(
                 test_step=action_step,
                 test_context=test_context,
-                screenshot=screenshot
+                screenshot=screenshot,
+                record_driver_actions=record_driver_actions,
             )
             
             # Stop capturing browser calls
@@ -1101,12 +1398,28 @@ Respond with a JSON object containing an "actions" array where every item follow
             
             # Store comprehensive result
             action_data["result"] = {
-                "success": (result.validation.valid if result.validation else False) and 
-                          (result.execution.success if result.execution else False),
-                "validation": result.validation.model_dump() if result.validation else None,
-                "coordinates": result.coordinates.model_dump() if result.coordinates else None,
-                "execution": result.execution.model_dump() if result.execution else None,
-                "ai_analysis": result.ai_analysis.model_dump() if result.ai_analysis else None
+                "success": (result.validation.valid if result.validation else False)
+                and (result.execution.success if result.execution else False),
+                "validation": result.validation.model_dump()
+                if result.validation
+                else None,
+                "coordinates": result.coordinates.model_dump()
+                if result.coordinates
+                else None,
+                "execution": result.execution.model_dump()
+                if result.execution
+                else None,
+                "ai_analysis": result.ai_analysis.model_dump()
+                if result.ai_analysis
+                else None,
+                "cache": {
+                    "label": result.cache_label,
+                    "action": result.cache_action,
+                    "hit": result.cache_hit,
+                    "coordinates": result.cache_coordinates,
+                    "resolution": result.cache_resolution,
+                },
+                "driver_actions": result.driver_actions,
             }
             
             # Store screenshot paths
@@ -1139,7 +1452,13 @@ Respond with a JSON object containing an "actions" array where every item follow
                 "target": action.get("target", ""),
                 "outcome": outcome,
                 "confidence": result.ai_analysis.confidence if result.ai_analysis else 0.0,
-                "error": result.execution.error_message if (result.execution and not success) else None
+                "error": result.execution.error_message if (result.execution and not success) else None,
+                "cache_label": result.cache_label,
+                "cache_action": result.cache_action,
+                "cache_hit": result.cache_hit,
+                "cache_coordinates": result.cache_coordinates,
+                "cache_resolution": result.cache_resolution,
+                "driver_actions": result.driver_actions,
             }
             
             action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
@@ -1231,13 +1550,7 @@ Respond with a JSON object containing an "actions" array where every item follow
             actions_context.append(action_detail)
         
         # Build the prompt with screenshots
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"""I'm executing a test case: "{test_case.name}"
+        prompt_text = f"""I'm executing a test case: "{test_case.name}"
 Test case description: {test_case.description or 'N/A'}
 
 Previous steps in this test case:
@@ -1267,8 +1580,10 @@ Respond with JSON:
   "is_blocker": true/false,
   "blocker_reasoning": "Why this would/wouldn't block the next test case"
 }}"""
-                    }
-                ]
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt_text}],
             }
         ]
         
@@ -1301,6 +1616,43 @@ Respond with JSON:
             response = await self.call_openai(
                 messages=messages,
                 response_format={"type": "json_object"}
+            )
+
+            log_messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt_text}],
+                }
+            ]
+            if screenshot_before:
+                log_messages[0]["content"].append(
+                    {"type": "image_url", "image_url": "<<attached screenshot>>"}
+                )
+            if screenshot_after:
+                log_messages[0]["content"].append(
+                    {"type": "image_url", "image_url": "<<attached screenshot>>"}
+                )
+
+            screenshots: List[Tuple[str, bytes]] = []
+            if screenshot_before:
+                screenshots.append(("verification_before", screenshot_before))
+            if screenshot_after:
+                screenshots.append(("verification_after", screenshot_after))
+
+            await self._model_logger.log_call(
+                agent="test_runner.verify_step",
+                model=self.model,
+                prompt=prompt_text,
+                request_payload={
+                    "messages": log_messages,
+                    "response_format": {"type": "json_object"},
+                },
+                response=response,
+                screenshots=screenshots or None,
+                metadata={
+                    "step_number": step.step_number,
+                    "test_case": test_case.name,
+                },
             )
             
             content = response.get("content", "{}")
@@ -1416,6 +1768,20 @@ Respond with JSON:
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
+        await self._model_logger.log_call(
+            agent="test_runner.bug_plan_assessment",
+            model=self.model,
+            prompt=prompt,
+            request_payload={
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+            },
+            response=response,
+            metadata={
+                "step_number": step.step_number,
+                "test_case": test_case.name,
+            },
+        )
 
         content = response.get("content", "{}")
         if isinstance(content, str):
@@ -1469,6 +1835,20 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
             response = await self.call_openai(
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}
+            )
+            await self._model_logger.log_call(
+                agent="test_runner.bug_report",
+                model=self.model,
+                prompt=prompt,
+                request_payload={
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                },
+                response=response,
+                metadata={
+                    "step_number": step.step_number,
+                    "test_case": test_case.name,
+                },
             )
             
             # Content is already a dict when using json_object response format
@@ -1765,12 +2145,401 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         from src.monitoring.debug_logger import get_debug_logger
         debug_logger = get_debug_logger()
         if debug_logger:
-            return debug_logger.save_screenshot(screenshot, name)
+            path = Path(debug_logger.save_screenshot(screenshot, name))
+            self._register_evidence(path)
+            return path
         # Fallback to temp directory
         from tempfile import NamedTemporaryFile
         with NamedTemporaryFile(mode='wb', suffix='.png', delete=False) as f:
             f.write(screenshot)
-            return Path(f.name)
+            path = Path(f.name)
+            self._register_evidence(path)
+            return path
+
+    def _register_evidence(self, path: Path) -> None:
+        if not path:
+            return
+        if self._evidence is None:
+            self._evidence = EvidenceManager(path.parent, self._settings.max_screenshots)
+        self._evidence.register([str(path)])
+
+    @staticmethod
+    def _plan_cache_key(step: TestStep, test_case: TestCase) -> str:
+        return f"{test_case.test_id}:{step.step_number}:{step.action}".strip()
+
+    def _replay_enabled(self, step: TestStep) -> bool:
+        if not self._settings.enable_execution_replay_cache:
+            return False
+        if getattr(step, "loop", False):
+            return False
+        can_replay = getattr(step, "can_be_replayed", None)
+        if can_replay is False:
+            return False
+        return self.browser_driver is not None
+
+    async def _execution_replay_key(
+        self, step: TestStep, test_case: TestCase
+    ) -> Optional[ExecutionReplayCacheKey]:
+        if not self.browser_driver:
+            return None
+        try:
+            viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+        except Exception:
+            logger.debug(
+                "TestRunner: failed to read viewport for execution replay cache",
+                exc_info=True,
+            )
+            return None
+        environment = (step.environment or self._environment or "browser").strip()
+        keyboard_layout = (
+            getattr(self.browser_driver, "keyboard_layout", None)
+            or self._settings.desktop_keyboard_layout
+        )
+        return ExecutionReplayCacheKey(
+            scenario=self._current_test_plan.name if self._current_test_plan else "",
+            step=self._plan_cache_key(step, test_case),
+            environment=environment,
+            resolution=(int(viewport_width), int(viewport_height)),
+            keyboard_layout=str(keyboard_layout),
+        )
+
+    async def _try_execution_replay(
+        self,
+        *,
+        step: TestStep,
+        test_case: TestCase,
+        step_result: StepResult,
+        screenshot_before: Optional[bytes],
+        execution_history: List[Dict[str, Any]],
+        next_test_case: Optional[TestCase],
+    ) -> Optional[StepResult]:
+        if not self._replay_enabled(step):
+            return None
+        key = await self._execution_replay_key(step, test_case)
+        if not key:
+            return None
+        entry = self._execution_replay_cache.lookup(key)
+        if not entry:
+            return None
+        if self._trace:
+            self._trace.record_cache_event(
+                {
+                    "type": "execution_replay_cache_hit",
+                    "scenario": key.scenario,
+                    "step": key.step,
+                    "environment": key.environment,
+                    "resolution": key.resolution,
+                    "keyboard_layout": key.keyboard_layout,
+                    "action_count": len(entry.actions),
+                }
+            )
+        try:
+            await replay_driver_actions(
+                self.browser_driver,
+                entry.actions,
+                stabilization_wait_ms=int(
+                    self._settings.actions_computer_tool_stabilization_wait_ms
+                ),
+                action_timeout_seconds=max(
+                    self._settings.actions_computer_tool_action_timeout_ms / 1000.0,
+                    0.5,
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "TestRunner: execution replay failed; invalidating cache",
+                extra={"step": key.step, "error": str(exc)},
+            )
+            try:
+                self._execution_replay_cache.invalidate(key)
+                if self._trace:
+                    self._trace.record_cache_event(
+                        {
+                            "type": "execution_replay_cache_invalidate",
+                            "scenario": key.scenario,
+                            "step": key.step,
+                            "environment": key.environment,
+                            "resolution": key.resolution,
+                            "keyboard_layout": key.keyboard_layout,
+                            "reason": "action_error",
+                            "error": str(exc),
+                        }
+                    )
+            except Exception:
+                logger.debug(
+                    "TestRunner: execution replay cache invalidation failed",
+                    exc_info=True,
+                )
+            if self._trace:
+                self._trace.record_cache_event(
+                    {
+                        "type": "execution_replay_fallback_to_cu",
+                        "scenario": key.scenario,
+                        "step": key.step,
+                    }
+                )
+            return None
+
+        replay_action = {
+            "action": {
+                "type": "execution_replay",
+                "description": f"Replay cached actions for {key.step}",
+            },
+            "result": {
+                "success": True,
+                "outcome": f"Replayed {len(entry.actions)} cached driver action(s).",
+                "driver_actions": entry.actions,
+            },
+            "full_data": {
+                "action_type": "execution_replay",
+                "result": {"success": True, "driver_actions": entry.actions},
+            },
+        }
+        step_result.actions_performed = [
+            {
+                "success": True,
+                "action_type": "execution_replay",
+                "outcome": f"Replayed {len(entry.actions)} cached driver action(s).",
+                "confidence": 1.0,
+                "driver_actions": entry.actions,
+            }
+        ]
+        self._current_step_actions.append(
+            {
+                "action_id": f"execution_replay_{uuid4()}",
+                "action_type": "execution_replay",
+                "target": "",
+                "value": None,
+                "description": replay_action["action"]["description"],
+                "timestamp_start": datetime.now(timezone.utc).isoformat(),
+                "timestamp_end": datetime.now(timezone.utc).isoformat(),
+                "ai_conversation": {
+                    "test_runner_interpretation": None,
+                    "action_agent_execution": None,
+                },
+                "browser_calls": [],
+                "result": replay_action["result"],
+                "screenshots": {},
+            }
+        )
+
+        screenshot_after = None
+        if self.browser_driver:
+            screenshot_after = await self.browser_driver.screenshot()
+            screenshot_path = self._save_screenshot(
+                screenshot_after,
+                f"tc{test_case.test_id}_step{step.step_number}_after",
+            )
+            step_result.screenshot_after = str(screenshot_path)
+            self._latest_screenshot_bytes = screenshot_after
+            self._latest_screenshot_path = str(screenshot_path)
+            self._latest_screenshot_origin = f"step_{step.step_number}_after"
+
+        if step.intent == StepIntent.SETUP:
+            verification = self._evaluate_setup_step(True, [replay_action])
+            self._current_step_data["verification_mode"] = "runner_short_circuit"
+        else:
+            verification = await self._verify_expected_outcome(
+                test_case=test_case,
+                step=step,
+                action_results=[replay_action],
+                screenshot_before=screenshot_before,
+                screenshot_after=screenshot_after,
+                execution_history=execution_history,
+                next_test_case=next_test_case,
+            )
+            self._current_step_data["verification_mode"] = "ai"
+
+        self._current_step_data["verification_result"] = verification
+
+        if verification["verdict"] == "PASS":
+            step_result.status = TestStatus.PASSED
+        else:
+            step_result.status = TestStatus.FAILED
+
+        step_result.actual_result = verification["actual_result"]
+        step_result.error_message = (
+            verification["reasoning"]
+            if verification["verdict"] == "FAIL"
+            else None
+        )
+        step_result.confidence = verification.get("confidence", 0.0)
+
+        if verification["verdict"] == "FAIL":
+            logger.info(
+                "Execution replay validation failed; invalidating cache",
+                extra={
+                    "step": key.step,
+                    "message": verification.get("reasoning"),
+                },
+            )
+            try:
+                self._execution_replay_cache.invalidate(key)
+                if self._trace:
+                    self._trace.record_cache_event(
+                        {
+                            "type": "execution_replay_cache_invalidate",
+                            "scenario": key.scenario,
+                            "step": key.step,
+                            "environment": key.environment,
+                            "resolution": key.resolution,
+                            "keyboard_layout": key.keyboard_layout,
+                            "reason": "validation_failed",
+                            "message": verification.get("reasoning"),
+                        }
+                    )
+            except Exception:
+                logger.debug(
+                    "TestRunner: execution replay cache invalidation failed",
+                    exc_info=True,
+                )
+            if self._trace:
+                self._trace.record_cache_event(
+                    {
+                        "type": "execution_replay_fallback_to_cu",
+                        "scenario": key.scenario,
+                        "step": key.step,
+                    }
+                )
+            return None
+
+        if self._trace:
+            self._trace.record_step(
+                scenario_name=key.scenario,
+                step=step,
+                step_result=step_result,
+                attempt=1,
+                plan_cache_hit=None,
+            )
+        return step_result
+
+    async def _store_execution_replay(
+        self,
+        step: TestStep,
+        test_case: TestCase,
+        action_results: List[Dict[str, Any]],
+    ) -> None:
+        if not self._replay_enabled(step) or not action_results:
+            return
+        recorded: List[dict] = []
+        for result in action_results:
+            recorded.extend(result.get("driver_actions") or [])
+        if not recorded:
+            return
+        key = await self._execution_replay_key(step, test_case)
+        if not key:
+            return
+        try:
+            self._execution_replay_cache.store(key, recorded)
+            if self._trace:
+                self._trace.record_cache_event(
+                    {
+                        "type": "execution_replay_cache_store",
+                        "scenario": key.scenario,
+                        "step": key.step,
+                        "environment": key.environment,
+                        "resolution": key.resolution,
+                        "keyboard_layout": key.keyboard_layout,
+                        "action_count": len(recorded),
+                    }
+                )
+        except Exception:
+            logger.debug(
+                "TestRunner: failed to store execution replay cache", exc_info=True
+            )
+
+    async def _persist_coordinate_cache(
+        self, action_results: List[Dict[str, Any]]
+    ) -> None:
+        if not self._coordinate_cache or not action_results:
+            return
+        for result in action_results:
+            label = result.get("cache_label")
+            coords = result.get("cache_coordinates")
+            action = result.get("cache_action") or "click"
+            if not label or not coords:
+                continue
+            resolution = result.get("cache_resolution")
+            if not resolution:
+                if not self.browser_driver:
+                    continue
+                try:
+                    resolution = await self.browser_driver.get_viewport_size()
+                except Exception:
+                    logger.debug(
+                        "Failed to read viewport for cache persistence",
+                        exc_info=True,
+                    )
+                    continue
+            try:
+                x, y = coords
+                self._coordinate_cache.add(label, action, x, y, resolution)
+                if self._trace:
+                    self._trace.record_cache_event(
+                        {
+                            "type": "coordinate_cache_add",
+                            "scenario": self._current_test_plan.name
+                            if self._current_test_plan
+                            else "",
+                            "step": self._current_step_data.get("plan_cache_key"),
+                            "cache_label": label,
+                            "cache_action": action,
+                            "x": x,
+                            "y": y,
+                            "resolution": resolution,
+                        }
+                    )
+            except Exception:
+                logger.debug(
+                    "Failed to append coordinate cache", exc_info=True
+                )
+
+    async def _invalidate_coordinate_cache(
+        self, action_results: List[Dict[str, Any]]
+    ) -> None:
+        if not self._coordinate_cache or not action_results:
+            return
+        hits = [
+            result
+            for result in action_results
+            if result.get("cache_hit") and result.get("cache_label")
+        ]
+        if not hits:
+            return
+        for result in hits:
+            label = result.get("cache_label")
+            action = result.get("cache_action") or "click"
+            resolution = result.get("cache_resolution")
+            if not resolution:
+                if not self.browser_driver:
+                    continue
+                try:
+                    resolution = await self.browser_driver.get_viewport_size()
+                except Exception:
+                    logger.debug(
+                        "Failed to read viewport for cache invalidation",
+                        exc_info=True,
+                    )
+                    continue
+            try:
+                self._coordinate_cache.invalidate(label, action, resolution)
+                if self._trace:
+                    self._trace.record_cache_event(
+                        {
+                            "type": "coordinate_cache_invalidate",
+                            "scenario": self._current_test_plan.name
+                            if self._current_test_plan
+                            else "",
+                            "step": self._current_step_data.get("plan_cache_key"),
+                            "cache_label": label,
+                            "cache_action": action,
+                            "resolution": resolution,
+                        }
+                    )
+            except Exception:
+                logger.debug(
+                    "Failed to invalidate coordinate cache", exc_info=True
+                )
     
     
     def _print_summary(self) -> None:

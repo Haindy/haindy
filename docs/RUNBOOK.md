@@ -27,6 +27,59 @@ playwright install chromium
 Create a `.env` file in the project root:
 ```
 OPENAI_API_KEY=your-api-key-here
+CU_PROVIDER=google
+GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
+VERTEX_API_KEY=your-vertex-api-key
+VERTEX_PROJECT=your-vertex-project
+VERTEX_LOCATION=us-central1
+CU_SAFETY_POLICY=auto_approve
+HAINDY_DRIVER_BACKEND=playwright
+```
+
+### Desktop Automation Dependencies (Linux/X11)
+Desktop automation uses OS-level input and screen capture. Install:
+- `ffmpeg` (x11grab) for screenshots
+- `xrandr` (x11-xserver-utils) for resolution switching
+- `/dev/uinput` permissions for soft keyboard/mouse
+- `xclip` for clipboard read/write
+- `gdbus` (glib2.0) for optional GNOME screen recording
+
+Example (Ubuntu/Debian):
+```bash
+sudo apt-get install ffmpeg x11-xserver-utils xclip libglib2.0-bin
+sudo modprobe uinput
+sudo usermod -aG input $USER
+```
+
+Log out/in after updating group membership.
+
+### Desktop Driver Configuration
+Use `HAINDY_DRIVER_BACKEND=desktop` to enable OS-level control.
+Common overrides:
+```
+HAINDY_DRIVER_BACKEND=desktop
+HAINDY_DESKTOP_RESOLUTION=1440,900
+HAINDY_DESKTOP_KEYBOARD_LAYOUT=us
+HAINDY_DESKTOP_KEYBOARD_SCANCODES=true
+HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH=true
+HAINDY_DESKTOP_SCREENSHOT_DIR=data/screenshots/desktop
+HAINDY_DESKTOP_COORDINATE_CACHE_PATH=data/desktop_cache/coordinates.json
+```
+
+### Caching and Trace Artifacts
+Backported caches and logs are stored under `data/` by default:
+- `data/task_plan_cache.json`
+- `data/execution_replay_cache.json`
+- `data/desktop_cache/coordinates.json`
+- `data/model_logs/model_calls.jsonl`
+- `data/traces/<run_id>.json`
+
+Control replay caching with:
+```
+HAINDY_ENABLE_EXECUTION_REPLAY_CACHE=true
+HAINDY_TASK_PLAN_CACHE_PATH=data/task_plan_cache.json
+HAINDY_EXECUTION_REPLAY_CACHE_PATH=data/execution_replay_cache.json
+MODEL_LOG_PATH=data/model_logs/model_calls.jsonl
 ```
 
 ## Running Tests
@@ -115,50 +168,40 @@ python examples/orchestration_demo.py
 python examples/journaling_demo.py
 ```
 
-### Running Test Scenarios
-
-#### Run Existing Test Scenario
-```bash
-# Run a test scenario from JSON file
-python -m src.main --json-test-plan test_scenarios/wikipedia_search.json
-
-# Short form
-python -m src.main -j test_scenarios/wikipedia_search.json
-
-# With debug output
-python -m src.main -j test_scenarios/wikipedia_search.json --debug
-```
-
-#### Interactive Mode
-```bash
-# Enter requirements interactively
-python -m src.main --requirements
-python -m src.main -r
-```
+### Running Tests
 
 #### Document-based Testing
 ```bash
 # Extract requirements from document
 python -m src.main --plan requirements.md
 python -m src.main -p requirements.md
+
+# With debug output
+python -m src.main --plan requirements.md --debug
 ```
 
 #### Execution Options
 ```bash
 # Berserk mode (fully autonomous)
-python -m src.main --berserk -j test_scenarios/login_test.json
+python -m src.main --berserk --plan requirements.md
 
 # Plan-only mode (generate plan without executing)
-python -m src.main --plan-only -j test_scenarios/wikipedia_search.json
+python -m src.main --plan-only --plan test_scenarios/wikipedia_search_simple.txt
 
 # Browser runs headless by default
 # To show browser, set BROWSER_HEADLESS=false in .env file
 
 # Custom timeout (default: 7200 seconds)
-python -m src.main -j test_scenarios/complex_test.json --timeout 3600
+python -m src.main --plan requirements.md --timeout 3600
 
 # Custom output directory
-python -m src.main -j test_scenarios/login_test.json --output custom_reports/
+python -m src.main --plan requirements.md --output custom_reports/
+
+# Enable Computer Use and desktop driver (Gemini default)
+export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+export CU_PROVIDER=google
+export HAINDY_DRIVER_BACKEND=desktop
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```
 
 ## Code Quality Checks
@@ -370,7 +413,7 @@ When running tests, the console output shows:
 
 2. **Console Output**: Run with `--debug` flag for verbose output
    ```bash
-   python -m src.main --json-test-plan test_scenarios/wikipedia_search.json --debug
+   python -m src.main --plan requirements.md --debug
    ```
 
 3. **Test Execution Flow**:

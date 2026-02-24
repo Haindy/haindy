@@ -466,6 +466,20 @@ ENHANCED_HTML_TEMPLATE = """
                         <span class="metadata-label">Environment:</span>
                         <span class="metadata-value"><pre>{{ environment }}</pre></span>
                     </div>
+                    {% if artifacts %}
+                    <div class="metadata-item">
+                        <span class="metadata-label">Artifacts:</span>
+                        <span class="metadata-value">
+                            <ul>
+                            {% for key, value in artifacts.items() %}
+                                {% if value %}
+                                <li><strong>{{ key }}:</strong> {{ value }}</li>
+                                {% endif %}
+                            {% endfor %}
+                            </ul>
+                        </span>
+                    </div>
+                    {% endif %}
                 </div>
                 
                 <!-- Test Cases -->
@@ -971,7 +985,8 @@ class EnhancedReporter:
             "duration": round(duration, 2),
             "success_rate": round(success_rate, 1),
             "test_cases": test_cases_data,
-            "generated_at": datetime.now(timezone.utc).isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "artifacts": test_report.artifacts or {},
         }
     
     def _clean_ai_conversation(self, conversation: Dict[str, Any]) -> Dict[str, Any]:

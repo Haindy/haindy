@@ -3,10 +3,10 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.interfaces import ConfigProvider
@@ -115,6 +115,11 @@ class Settings(BaseSettings):
     )
 
     # Browser Configuration
+    driver_backend: str = Field(
+        default="playwright",
+        description="Automation driver backend (playwright or desktop)",
+        env="HAINDY_DRIVER_BACKEND",
+    )
     browser_headless: bool = Field(
         default=True, description="Run browser in headless mode"
     )
@@ -126,6 +131,102 @@ class Settings(BaseSettings):
     )
     browser_viewport_height: int = Field(
         default=1080, ge=600, description="Browser viewport height"
+    )
+
+    # Desktop Configuration
+    desktop_prefer_resolution: Tuple[int, int] = Field(
+        default=(1920, 1080),
+        description="Preferred resolution for desktop sessions",
+        env="HAINDY_DESKTOP_RESOLUTION",
+    )
+    desktop_keyboard_layout: str = Field(
+        default="us",
+        description="Keyboard layout for desktop automation (us, es)",
+        env="HAINDY_DESKTOP_KEYBOARD_LAYOUT",
+    )
+    desktop_enable_keyboard_scancodes: bool = Field(
+        default=True,
+        description="Emit MSC_SCAN scancodes for key events",
+        env="HAINDY_DESKTOP_KEYBOARD_SCANCODES",
+    )
+    desktop_keyboard_key_delay_ms: int = Field(
+        default=12,
+        ge=0,
+        description="Delay between key events when sending combos",
+        env="HAINDY_DESKTOP_KEY_DELAY_MS",
+    )
+    desktop_enable_resolution_switch: bool = Field(
+        default=True,
+        description="Allow resolution downshift for desktop runs",
+        env="HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH",
+    )
+    desktop_screenshot_dir: Path = Field(
+        default=Path("data/screenshots/desktop"),
+        description="Directory for desktop screenshots",
+        env="HAINDY_DESKTOP_SCREENSHOT_DIR",
+    )
+    desktop_coordinate_cache_path: Path = Field(
+        default=Path("data/desktop_cache/coordinates.json"),
+        description="Coordinate cache path for desktop actions",
+        env="HAINDY_DESKTOP_COORDINATE_CACHE_PATH",
+    )
+    task_plan_cache_path: Path = Field(
+        default=Path("data/task_plan_cache.json"),
+        description="Task planning cache path",
+        env="HAINDY_TASK_PLAN_CACHE_PATH",
+    )
+    enable_execution_replay_cache: bool = Field(
+        default=True,
+        description="Enable execution replay cache (record/replay driver actions per step)",
+        env="HAINDY_ENABLE_EXECUTION_REPLAY_CACHE",
+    )
+    execution_replay_cache_path: Path = Field(
+        default=Path("data/execution_replay_cache.json"),
+        description="Execution replay cache path",
+        env="HAINDY_EXECUTION_REPLAY_CACHE_PATH",
+    )
+    desktop_display: Optional[str] = Field(
+        default=None,
+        description="X11 display override for desktop capture",
+        env="HAINDY_DESKTOP_DISPLAY",
+    )
+    desktop_clipboard_timeout_seconds: float = Field(
+        default=3.0,
+        ge=0.5,
+        description="Timeout for desktop clipboard reads",
+        env="HAINDY_DESKTOP_CLIPBOARD_TIMEOUT_SECONDS",
+    )
+    desktop_clipboard_hold_seconds: float = Field(
+        default=15.0,
+        ge=0.5,
+        description="Max time to hold clipboard owner process",
+        env="HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS",
+    )
+    enable_screen_recording: bool = Field(
+        default=False,
+        description="Enable GNOME desktop screen recording during test execution",
+        env="HAINDY_ENABLE_SCREEN_RECORDING",
+    )
+    screen_recording_output_dir: Path = Field(
+        default=Path("reports/recordings"),
+        description="Directory for optional desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
+    )
+    screen_recording_framerate: int = Field(
+        default=30,
+        ge=1,
+        description="Framerate for GNOME desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_FRAMERATE",
+    )
+    screen_recording_draw_cursor: bool = Field(
+        default=True,
+        description="Draw cursor in GNOME desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_DRAW_CURSOR",
+    )
+    screen_recording_prefix: str = Field(
+        default="haindy-agent",
+        description="Filename prefix for desktop screen recordings",
+        env="HAINDY_SCREEN_RECORDING_PREFIX",
     )
 
     # Execution Configuration
@@ -147,6 +248,41 @@ class Settings(BaseSettings):
         default=False,
         description="Enable OpenAI Computer Use tool for action execution",
         env="HAINDY_ACTIONS_USE_COMPUTER_TOOL",
+    )
+    computer_use_model: str = Field(
+        default="computer-use-preview",
+        description="OpenAI model for computer-use execution",
+        validation_alias=AliasChoices("HAINDY_COMPUTER_USE_MODEL", "COMPUTER_USE_MODEL"),
+    )
+    cu_provider: str = Field(
+        default="google",
+        description="Computer-use provider to run actions (openai or google)",
+        validation_alias=AliasChoices("CU_PROVIDER", "HAINDY_CU_PROVIDER"),
+    )
+    google_cu_model: str = Field(
+        default="gemini-2.5-computer-use-preview-10-2025",
+        description="Google Gemini computer-use model name",
+        validation_alias=AliasChoices("GOOGLE_CU_MODEL", "HAINDY_GOOGLE_CU_MODEL"),
+    )
+    vertex_api_key: str = Field(
+        default="",
+        description="API key for Google Vertex computer-use",
+        validation_alias=AliasChoices("VERTEX_API_KEY", "HAINDY_VERTEX_API_KEY"),
+    )
+    vertex_project: str = Field(
+        default="",
+        description="Vertex project for Google computer-use runs",
+        validation_alias=AliasChoices("VERTEX_PROJECT", "HAINDY_VERTEX_PROJECT"),
+    )
+    vertex_location: str = Field(
+        default="us-central1",
+        description="Vertex location for Google computer-use runs",
+        validation_alias=AliasChoices("VERTEX_LOCATION", "HAINDY_VERTEX_LOCATION"),
+    )
+    cu_safety_policy: str = Field(
+        default="auto_approve",
+        description="Handling for provider safety confirmations (auto_approve, auto_deny, error)",
+        validation_alias=AliasChoices("CU_SAFETY_POLICY", "HAINDY_CU_SAFETY_POLICY"),
     )
     actions_computer_tool_max_turns: int = Field(
         default=12,
@@ -175,7 +311,9 @@ class Settings(BaseSettings):
     )
     actions_computer_tool_fail_fast_on_safety: bool = Field(
         default=True,
-        description="Abort immediately when Computer Use returns pending safety checks",
+        description=(
+            "Abort immediately on pending safety checks before cu_safety_policy is applied"
+        ),
         env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
     )
     actions_computer_tool_allowed_domains: List[str] = Field(
@@ -187,6 +325,24 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Domains the Computer Use tool must never interact with",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS",
+    )
+    scroll_turn_multiplier: float = Field(
+        default=3.0,
+        ge=1.0,
+        description="Multiplier for extra scroll turns before max-turn enforcement",
+        env="HAINDY_SCROLL_TURN_MULTIPLIER",
+    )
+    scroll_default_magnitude: int = Field(
+        default=450,
+        ge=1,
+        description="Default scroll magnitude (pixels) when not specified",
+        env="HAINDY_SCROLL_DEFAULT_MAGNITUDE",
+    )
+    scroll_max_magnitude: int = Field(
+        default=600,
+        ge=1,
+        description="Maximum per-scroll magnitude/pixel delta",
+        env="HAINDY_SCROLL_MAX_MAGNITUDE",
     )
 
     # Logging Configuration
@@ -200,6 +356,17 @@ class Settings(BaseSettings):
     )
     log_file: Optional[str] = Field(
         default=None, description="Log file path"
+    )
+    model_log_path: Path = Field(
+        default=Path("data/model_logs/model_calls.jsonl"),
+        description="Log file for raw model prompts/responses",
+        validation_alias=AliasChoices("MODEL_LOG_PATH", "HAINDY_MODEL_LOG_PATH"),
+    )
+    max_screenshots: int = Field(
+        default=12,
+        ge=1,
+        description="Cap on retained screenshots per run",
+        env="HAINDY_MAX_SCREENSHOTS",
     )
 
     # Storage Configuration
@@ -253,6 +420,51 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid log format: {v}")
         return v
 
+    @field_validator("driver_backend")
+    @classmethod
+    def validate_driver_backend(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"playwright", "desktop"}:
+            raise ValueError("driver_backend must be 'playwright' or 'desktop'")
+        return normalized
+
+    @field_validator("desktop_prefer_resolution", mode="before")
+    @classmethod
+    def parse_desktop_resolution(cls, value: Any) -> Tuple[int, int]:
+        if isinstance(value, tuple) and len(value) == 2:
+            return int(value[0]), int(value[1])
+        if isinstance(value, list) and len(value) == 2:
+            return int(value[0]), int(value[1])
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",") if part.strip()]
+            if len(parts) == 2 and all(part.isdigit() for part in parts):
+                return int(parts[0]), int(parts[1])
+        return (1920, 1080)
+
+    @field_validator("desktop_keyboard_layout")
+    @classmethod
+    def normalize_keyboard_layout(cls, value: str) -> str:
+        normalized = (value or "us").strip().lower()
+        if normalized in {"us", "es"}:
+            return normalized
+        return "us"
+
+    @field_validator("cu_provider")
+    @classmethod
+    def normalize_cu_provider(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"openai", "google"}:
+            return "openai"
+        return normalized
+
+    @field_validator("cu_safety_policy")
+    @classmethod
+    def normalize_cu_safety_policy(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"auto_approve", "auto_deny", "error"}:
+            return "auto_approve"
+        return normalized
+
     @model_validator(mode="after")
     def normalize_domain_settings(self) -> "Settings":
         """Coerce allow/block domain lists into normalized string lists."""
@@ -262,6 +474,20 @@ class Settings(BaseSettings):
         self.actions_computer_tool_blocked_domains = self._coerce_domain_list(
             self.actions_computer_tool_blocked_domains
         )
+        return self
+
+    @model_validator(mode="after")
+    def apply_computer_use_defaults(self) -> "Settings":
+        """Apply provider-specific defaults for computer-use sessions."""
+        if self.cu_provider == "google":
+            if self.desktop_prefer_resolution == (1920, 1080):
+                self.desktop_prefer_resolution = (1440, 900)
+            if (
+                self.browser_viewport_width == 1920
+                and self.browser_viewport_height == 1080
+            ):
+                self.browser_viewport_width = 1440
+                self.browser_viewport_height = 900
         return self
 
     @staticmethod
@@ -290,7 +516,13 @@ class Settings(BaseSettings):
             self.data_dir,
             self.reports_dir,
             self.screenshots_dir,
+            self.desktop_screenshot_dir,
             self.cache_dir,
+            self.desktop_coordinate_cache_path.parent,
+            self.task_plan_cache_path.parent,
+            self.execution_replay_cache_path.parent,
+            self.model_log_path.parent,
+            self.screen_recording_output_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
 

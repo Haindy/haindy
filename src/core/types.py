@@ -140,6 +140,28 @@ class TestStep(BaseModel):
         description="Execution intent that guides runner heuristics",
     )
     max_retries: int = Field(3, description="Maximum retry attempts")
+    cache_label: Optional[str] = Field(
+        None, description="Cache label for coordinate caching and replay"
+    )
+    cache_action: str = Field(
+        "click", description="Cache action type for coordinate caching"
+    )
+    environment: Optional[str] = Field(
+        None, description="Execution environment override (desktop or browser)"
+    )
+    can_be_replayed: Optional[bool] = Field(
+        None, description="Allow execution replay cache for this step"
+    )
+    loop: bool = Field(False, description="Repeat the step until validated")
+    scroll_policy: str = Field(
+        "auto", description="Scroll policy override (auto/allow/disallow)"
+    )
+    capture_clipboard: bool = Field(
+        False, description="Capture clipboard output during execution"
+    )
+    clipboard_output_key: Optional[str] = Field(
+        None, description="Key to attach clipboard output to action results"
+    )
 
 
 class TestCasePriority(str, Enum):
@@ -540,4 +562,7 @@ class TestReport(BaseModel):
     summary: Optional[TestSummary] = None
     bugs: List[BugReport] = Field(default_factory=list)
     environment: Dict[str, Any] = Field(default_factory=dict, description="Test environment details")
+    artifacts: Dict[str, Any] = Field(
+        default_factory=dict, description="Paths to additional run artifacts"
+    )
     created_by: str = Field("HAINDY Test Runner", description="Who/what executed the tests")

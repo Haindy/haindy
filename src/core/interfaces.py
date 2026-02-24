@@ -149,6 +149,16 @@ class BrowserDriver(ABC):
     """Abstract interface for browser automation."""
 
     @abstractmethod
+    async def start(self) -> None:
+        """Start the automation session."""
+        pass
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the automation session."""
+        pass
+
+    @abstractmethod
     async def navigate(self, url: str) -> None:
         """Navigate to a URL."""
         pass
