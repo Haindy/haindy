@@ -310,10 +310,13 @@ class OpenAIClient:
         """Return True when the Responses API should be used."""
         return model.startswith("gpt-5") or model.startswith("gpt-4.1")
 
-    def _supports_responses_temperature(self, model: str) -> bool:
-        """Return True if the Responses model accepts temperature parameter."""
-        # Reasoning models such as GPT-5 ignore temperature; omit it to avoid 400s.
-        return not model.startswith("gpt-5")
+    def _supports_responses_temperature(
+        self, model: str, reasoning_level: str | None
+    ) -> bool:
+        """Return True if the Responses model accepts the temperature parameter."""
+        # For GPT-5.2+ usage in this project, temperature is only used when
+        # reasoning effort is explicitly set to none.
+        return model.startswith("gpt-5.2") and (reasoning_level or "medium") == "none"
 
     async def _call_chat_completions(
         self,
@@ -390,7 +393,7 @@ class OpenAIClient:
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
 
-        if self._supports_responses_temperature(self.model):
+        if self._supports_responses_temperature(self.model, reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
         response = await self.client.responses.create(
@@ -461,7 +464,7 @@ class OpenAIClient:
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
 
-        if self._supports_responses_temperature(self.model):
+        if self._supports_responses_temperature(self.model, reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
         usage_totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}

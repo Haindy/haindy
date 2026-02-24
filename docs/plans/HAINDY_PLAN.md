@@ -36,7 +36,7 @@
 | Action Agent | `gpt-5.2` | Low (vision-enabled, escalates as needed) | 0.25 |
 
 Per-agent overrides live in `.env` (`HAINDY_TEST_*` variables) and fall back to
-global `OPENAI_MODEL`/`OPENAI_TEMPERATURE` for compatibility.
+`OPENAI_MODEL` only.
 
 ## 3  Folder Structure
 

@@ -61,7 +61,7 @@ cp .env.example .env
 
 Core model settings:
 - `OPENAI_API_KEY` (required)
-- `OPENAI_MODEL`, `OPENAI_TEMPERATURE`, `OPENAI_REQUEST_TIMEOUT_SECONDS`
+- `OPENAI_MODEL`, `OPENAI_REQUEST_TIMEOUT_SECONDS`
 - `OPENAI_MAX_RETRIES`
 
 Optional per-agent overrides use the `HAINDY_<AGENT>_*` namespace:
@@ -74,7 +74,7 @@ Optional per-agent overrides use the `HAINDY_<AGENT>_*` namespace:
 Supported `*_REASONING_LEVEL` values: `none`, `minimal`, `low`, `medium`,
 `high`, and `xhigh`.
 
-`*_TEMPERATURE`, `*_MODEL`, and `*_MODALITIES` on an agent override global values when set.
+`*_TEMPERATURE`, `*_MODEL`, and `*_MODALITIES` on an agent override the built-in defaults when set.
 
 Computer Use options use either OpenAI or Google provider:
 - `HAINDY_ACTIONS_USE_COMPUTER_TOOL`

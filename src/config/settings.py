@@ -100,9 +100,6 @@ class Settings(BaseSettings):
     openai_model: str = Field(
         default="gpt-5.2", description="Default OpenAI model"
     )
-    openai_temperature: float = Field(
-        default=0.7, ge=0.0, le=2.0, description="Default temperature"
-    )
     openai_max_retries: int = Field(
         default=3, ge=1, description="Maximum API retry attempts"
     )
@@ -513,7 +510,6 @@ class Settings(BaseSettings):
 
         configured_models: dict[str, AgentModelConfig] = {}
         openai_model_env_set = "OPENAI_MODEL" in env
-        openai_temperature_env_set = "OPENAI_TEMPERATURE" in env
 
         # Preserve user supplied mapping while ensuring defaults exist
         existing_models = self.agent_models.copy()
@@ -536,8 +532,6 @@ class Settings(BaseSettings):
                     raise ValueError(
                         f"Invalid temperature for {agent_name}: {temperature_override}"
                     ) from exc
-            elif openai_temperature_env_set:
-                config_payload["temperature"] = self.openai_temperature
 
             reasoning_override = env.get(f"{prefix}_REASONING_LEVEL")
             if reasoning_override:
@@ -568,7 +562,7 @@ class Settings(BaseSettings):
 
         return AgentModelConfig(
             model=self.openai_model,
-            temperature=self.openai_temperature,
+            temperature=0.7,
             reasoning_level="medium",
         )
 

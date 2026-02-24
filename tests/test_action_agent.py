@@ -32,7 +32,6 @@ def mock_settings():
     settings.grid_refinement_enabled = True
     settings.openai_api_key = "test-key"
     settings.openai_model = "gpt-5.2"
-    settings.openai_temperature = 1.0
     settings.openai_max_retries = 3
     settings.openai_request_timeout_seconds = 900
     settings.actions_use_computer_tool = False
