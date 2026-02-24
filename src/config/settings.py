@@ -528,15 +528,6 @@ class Settings(BaseSettings):
             elif openai_model_env_set:
                 config_payload["model"] = self.openai_model
 
-            temperature_override = env.get(f"{prefix}_TEMPERATURE")
-            if temperature_override:
-                try:
-                    config_payload["temperature"] = float(temperature_override)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Invalid temperature for {agent_name}: {temperature_override}"
-                    ) from exc
-
             reasoning_override = env.get(f"{prefix}_REASONING_LEVEL")
             if reasoning_override:
                 config_payload["reasoning_level"] = reasoning_override.lower()

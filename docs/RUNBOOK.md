@@ -105,9 +105,6 @@ python -m pytest --cov=src --cov-report=term-missing
 # Phase 1: Core Foundation
 python -m pytest tests/test_base_agent.py tests/test_types.py tests/test_interfaces.py -v
 
-# Phase 2: Browser & Grid
-python -m pytest tests/test_grid_overlay.py tests/test_grid_coordinator.py tests/test_browser_driver.py -v
-
 # Phase 3: Test Planner Agent
 python -m pytest tests/test_planner_agent.py -v
 
@@ -146,9 +143,6 @@ python -m pytest -m "unit" -v
 ```bash
 # Activate virtual environment first
 source venv/bin/activate
-
-# Phase 2: Grid System Demo
-python examples/grid_demo.py
 
 # Phase 3: Test Planner Demo
 python examples/planner_demo.py
