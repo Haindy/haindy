@@ -3,9 +3,7 @@ Grid overlay system for visual interaction.
 """
 
 import io
-from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from src.config.settings import get_settings
@@ -16,7 +14,7 @@ from src.core.types import GridCoordinate
 class GridOverlay(GridSystem):
     """Adaptive grid overlay system for browser interaction."""
 
-    def __init__(self, grid_size: Optional[int] = None) -> None:
+    def __init__(self, grid_size: int | None = None) -> None:
         """
         Initialize grid overlay.
 
@@ -25,7 +23,7 @@ class GridOverlay(GridSystem):
         """
         settings = get_settings()
         self.grid_size = grid_size or settings.grid_size
-        
+
         # Lazy import to avoid circular dependency
         from src.monitoring.logger import get_logger
         self.logger = get_logger("grid.overlay")
@@ -39,7 +37,7 @@ class GridOverlay(GridSystem):
         # Grid cell naming (A-Z, AA-AZ, etc. for columns, 1-N for rows)
         self._column_names = self._generate_column_names()
 
-    def initialize(self, width: int, height: int, grid_size: Optional[int] = None) -> None:
+    def initialize(self, width: int, height: int, grid_size: int | None = None) -> None:
         """
         Initialize grid with viewport dimensions.
 
@@ -57,7 +55,7 @@ class GridOverlay(GridSystem):
         self.cell_height = height / self.grid_size
 
         self.logger.info(
-            f"Grid initialized",
+            "Grid initialized",
             extra={
                 "viewport": f"{width}x{height}",
                 "grid_size": f"{self.grid_size}x{self.grid_size}",
@@ -65,7 +63,7 @@ class GridOverlay(GridSystem):
             },
         )
 
-    def coordinate_to_pixels(self, coord: GridCoordinate) -> Tuple[int, int]:
+    def coordinate_to_pixels(self, coord: GridCoordinate) -> tuple[int, int]:
         """
         Convert grid coordinate to pixel position.
 
@@ -95,7 +93,7 @@ class GridOverlay(GridSystem):
 
         return pixel_x, pixel_y
 
-    def get_cell_bounds(self, cell: str) -> Tuple[int, int, int, int]:
+    def get_cell_bounds(self, cell: str) -> tuple[int, int, int, int]:
         """
         Get pixel bounds of a grid cell.
 
@@ -152,7 +150,7 @@ class GridOverlay(GridSystem):
         # Try to load a font for labels (fallback to default if not available)
         try:
             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-        except:
+        except OSError:
             font = ImageFont.load_default()
 
         # Add cell labels (only for cells that fit labels)
@@ -196,7 +194,7 @@ class GridOverlay(GridSystem):
 
         return self._get_cell_name(col_idx, row_idx)
 
-    def get_neighboring_cells(self, cell: str) -> List[str]:
+    def get_neighboring_cells(self, cell: str) -> list[str]:
         """
         Get the 8 neighboring cells for refinement.
 
@@ -223,7 +221,7 @@ class GridOverlay(GridSystem):
 
         return neighbors
 
-    def get_refinement_region(self, cell: str) -> Tuple[int, int, int, int]:
+    def get_refinement_region(self, cell: str) -> tuple[int, int, int, int]:
         """
         Get pixel bounds for a 3x3 refinement region around a cell.
 
@@ -248,7 +246,7 @@ class GridOverlay(GridSystem):
 
         return x, y, width, height
 
-    def _generate_column_names(self) -> List[str]:
+    def _generate_column_names(self) -> list[str]:
         """Generate column names (A-Z, AA-AZ, BA-BZ, etc.)."""
         names = []
         for i in range(self.grid_size * 2):  # Generate more than needed
@@ -276,7 +274,7 @@ class GridOverlay(GridSystem):
         row_name = str(row_idx + 1)  # 1-based row numbers
         return f"{col_name}{row_name}"
 
-    def _parse_cell_identifier(self, cell: str) -> Tuple[int, int]:
+    def _parse_cell_identifier(self, cell: str) -> tuple[int, int]:
         """
         Parse cell identifier into column and row indices.
 
@@ -306,8 +304,8 @@ class GridOverlay(GridSystem):
         # Convert row number to index
         try:
             row_idx = int(row_part) - 1  # Convert to 0-based
-        except ValueError:
-            raise ValueError(f"Invalid row number in cell identifier: {cell}")
+        except ValueError as exc:
+            raise ValueError(f"Invalid row number in cell identifier: {cell}") from exc
 
         if col_idx < 0 or col_idx >= self.grid_size or row_idx < 0 or row_idx >= self.grid_size:
             raise ValueError(f"Cell {cell} is out of grid bounds (0-{self.grid_size - 1})")

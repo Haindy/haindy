@@ -2,16 +2,21 @@
 Tests for enhanced types models.
 """
 
-import pytest
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
+import pytest
+
 from src.core.enhanced_types import (
-    ValidationResult, CoordinateResult, ExecutionResult,
-    AIAnalysis, EnvironmentState, EnhancedActionResult,
-    ActionPattern
+    ActionPattern,
+    AIAnalysis,
+    CoordinateResult,
+    EnhancedActionResult,
+    EnvironmentState,
+    ExecutionResult,
+    ValidationResult,
 )
-from src.core.types import TestStep, ActionType
+from src.core.types import TestStep
 
 
 @pytest.fixture
@@ -39,7 +44,7 @@ def sample_test_context():
 
 class TestValidationResult:
     """Tests for ValidationResult model."""
-    
+
     def test_validation_result_creation(self):
         """Test creating a validation result."""
         result = ValidationResult(
@@ -49,14 +54,14 @@ class TestValidationResult:
             concerns=[],
             suggestions=[]
         )
-        
+
         assert result.valid is True
         assert result.confidence == 0.95
         assert result.reasoning == "Login button is clearly visible"
         assert result.concerns == []
         assert result.suggestions == []
         assert isinstance(result.timestamp, datetime)
-    
+
     def test_validation_result_with_failures(self):
         """Test validation result with failures."""
         result = ValidationResult(
@@ -66,7 +71,7 @@ class TestValidationResult:
             concerns=["Button not visible", "Page may not have loaded"],
             suggestions=["Wait for page load", "Check if on correct page"]
         )
-        
+
         assert result.valid is False
         assert result.confidence == 0.3
         assert len(result.concerns) == 2
@@ -75,7 +80,7 @@ class TestValidationResult:
 
 class TestCoordinateResult:
     """Tests for CoordinateResult model."""
-    
+
     def test_coordinate_result_creation(self):
         """Test creating a coordinate result."""
         result = CoordinateResult(
@@ -87,14 +92,14 @@ class TestCoordinateResult:
             reasoning="Button found in center",
             refined=False
         )
-        
+
         assert result.grid_cell == "M23"
         assert result.grid_coordinates == (960, 540)
         assert result.offset_x == 0.5
         assert result.offset_y == 0.5
         assert result.confidence == 0.92
         assert result.refined is False
-    
+
     def test_coordinate_result_with_refinement(self):
         """Test coordinate result with refinement."""
         result = CoordinateResult(
@@ -107,25 +112,25 @@ class TestCoordinateResult:
             refined=True,
             refinement_details={"method": "zoom", "iterations": 1}
         )
-        
+
         assert result.refined is True
         assert result.refinement_details == {"method": "zoom", "iterations": 1}
 
 
 class TestExecutionResult:
     """Tests for ExecutionResult model."""
-    
+
     def test_execution_success(self):
         """Test successful execution result."""
         result = ExecutionResult(
             success=True,
             execution_time_ms=523.4
         )
-        
+
         assert result.success is True
         assert result.execution_time_ms == 523.4
         assert result.error_message is None
-    
+
     def test_execution_failure(self):
         """Test failed execution result."""
         result = ExecutionResult(
@@ -134,7 +139,7 @@ class TestExecutionResult:
             error_message="Element not clickable",
             error_traceback="Traceback..."
         )
-        
+
         assert result.success is False
         assert result.error_message == "Element not clickable"
         assert result.error_traceback == "Traceback..."
@@ -142,7 +147,7 @@ class TestExecutionResult:
 
 class TestAIAnalysis:
     """Tests for AIAnalysis model."""
-    
+
     def test_ai_analysis_creation(self):
         """Test creating AI analysis."""
         analysis = AIAnalysis(
@@ -154,7 +159,7 @@ class TestAIAnalysis:
             recommendations=[],
             anomalies=[]
         )
-        
+
         assert analysis.success is True
         assert analysis.confidence == 0.9
         assert analysis.matches_expected is True
@@ -163,7 +168,7 @@ class TestAIAnalysis:
 
 class TestEnvironmentState:
     """Tests for EnvironmentState model."""
-    
+
     def test_environment_state_creation(self):
         """Test creating browser state."""
         state = EnvironmentState(
@@ -172,7 +177,7 @@ class TestEnvironmentState:
             viewport_size=(1920, 1080),
             screenshot=b"fake_screenshot_data"
         )
-        
+
         assert state.url == "https://example.com/login"
         assert state.title == "Login Page"
         assert state.viewport_size == (1920, 1080)
@@ -181,7 +186,7 @@ class TestEnvironmentState:
 
 class TestEnhancedActionResult:
     """Tests for EnhancedActionResult model."""
-    
+
     def test_enhanced_result_creation(self, sample_test_step, sample_test_context):
         """Test creating enhanced action result."""
         result = EnhancedActionResult(
@@ -194,13 +199,13 @@ class TestEnhancedActionResult:
                 reasoning="Action is valid"
             )
         )
-        
+
         assert isinstance(result.action_id, UUID)
         assert result.test_step_id == sample_test_step.step_id
         assert result.test_step == sample_test_step
         assert result.validation.valid is True
         assert result.overall_success is False  # No execution yet
-    
+
     def test_enhanced_result_full_success(self, sample_test_step, sample_test_context):
         """Test enhanced result with full success."""
         result = EnhancedActionResult(
@@ -236,10 +241,10 @@ class TestEnhancedActionResult:
             ),
             overall_success=True
         )
-        
+
         assert result.overall_success is True
         assert result.failure_phase is None
-    
+
     def test_enhanced_result_dict_compatibility(self, sample_test_step, sample_test_context):
         """Test backward compatibility dictionary conversion."""
         result = EnhancedActionResult(
@@ -260,10 +265,10 @@ class TestEnhancedActionResult:
                 reasoning="Found"
             )
         )
-        
+
         # Convert to dict
         dict_result = result.dict_for_compatibility()
-        
+
         # Check key fields
         assert dict_result["action_type"] == "click"
         assert dict_result["validation_passed"] is True
@@ -275,7 +280,7 @@ class TestEnhancedActionResult:
 
 class TestActionPattern:
     """Tests for ActionPattern model."""
-    
+
     def test_action_pattern_creation(self):
         """Test creating action pattern."""
         pattern = ActionPattern(
@@ -294,7 +299,7 @@ class TestActionPattern:
             success_count=5,
             failure_count=1
         )
-        
+
         assert pattern.action_type == "click"
         assert pattern.success_count == 5
         assert pattern.failure_count == 1

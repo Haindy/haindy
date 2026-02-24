@@ -5,8 +5,8 @@ Provides a structured exception hierarchy that enables proper error categorizati
 retry logic, and recovery strategies.
 """
 
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.core.types import ScopeTriageResult
@@ -14,13 +14,13 @@ if TYPE_CHECKING:
 
 class HAINDYError(Exception):
     """Base exception for all HAINDY errors."""
-    
+
     def __init__(
         self,
         message: str,
-        error_code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        cause: Optional[Exception] = None
+        error_code: str | None = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None
     ):
         super().__init__(message)
         self.message = message
@@ -28,8 +28,8 @@ class HAINDYError(Exception):
         self.details = details or {}
         self.cause = cause
         self.timestamp = datetime.now(timezone.utc)
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for logging/serialization."""
         return {
             "error_type": self.__class__.__name__,
@@ -43,7 +43,7 @@ class HAINDYError(Exception):
 
 class RetryableError(HAINDYError):
     """Base class for errors that can be retried."""
-    
+
     def __init__(
         self,
         message: str,
@@ -55,11 +55,11 @@ class RetryableError(HAINDYError):
         self.max_retries = max_retries
         self.retry_delay_ms = retry_delay_ms
         self.retry_count = 0
-    
+
     def increment_retry(self) -> None:
         """Increment retry counter."""
         self.retry_count += 1
-    
+
     def can_retry(self) -> bool:
         """Check if error can be retried."""
         return self.retry_count < self.max_retries
@@ -72,7 +72,7 @@ class NonRetryableError(HAINDYError):
 
 class AgentError(HAINDYError):
     """Error raised by AI agents during test execution."""
-    
+
     def __init__(
         self,
         message: str,
@@ -91,13 +91,13 @@ class AgentError(HAINDYError):
 
 class AutomationError(RetryableError):
     """Error related to environment automation."""
-    
+
     def __init__(
         self,
         message: str,
-        url: Optional[str] = None,
-        selector: Optional[str] = None,
-        action: Optional[str] = None,
+        url: str | None = None,
+        selector: str | None = None,
+        action: str | None = None,
         **kwargs
     ):
         super().__init__(message, **kwargs)
@@ -113,12 +113,12 @@ class AutomationError(RetryableError):
 
 class ValidationError(NonRetryableError):
     """Error raised when validation fails."""
-    
+
     def __init__(
         self,
         message: str,
         validation_type: str,
-        failed_rules: Optional[List[str]] = None,
+        failed_rules: list[str] | None = None,
         **kwargs
     ):
         super().__init__(message, **kwargs)
@@ -132,12 +132,12 @@ class ValidationError(NonRetryableError):
 
 class RecoveryError(HAINDYError):
     """Error raised when recovery strategies fail."""
-    
+
     def __init__(
         self,
         message: str,
         recovery_strategy: str,
-        original_error: Optional[Exception] = None,
+        original_error: Exception | None = None,
         **kwargs
     ):
         super().__init__(message, cause=original_error, **kwargs)
@@ -151,14 +151,14 @@ class RecoveryError(HAINDYError):
 
 class HallucinationError(NonRetryableError):
     """Error raised when AI agent hallucination is detected."""
-    
+
     def __init__(
         self,
         message: str,
         agent_name: str,
         hallucination_type: str,
         confidence_score: float,
-        evidence: Optional[List[str]] = None,
+        evidence: list[str] | None = None,
         **kwargs
     ):
         super().__init__(message, **kwargs)
@@ -176,7 +176,7 @@ class HallucinationError(NonRetryableError):
 
 class TimeoutError(RetryableError):
     """Error raised when operations timeout."""
-    
+
     def __init__(
         self,
         message: str,
@@ -195,11 +195,11 @@ class TimeoutError(RetryableError):
 
 class CoordinationError(HAINDYError):
     """Error raised during multi-agent coordination."""
-    
+
     def __init__(
         self,
         message: str,
-        agents_involved: List[str],
+        agents_involved: list[str],
         coordination_phase: str,
         **kwargs
     ):
@@ -217,12 +217,12 @@ class ScopeTriageBlockedError(NonRetryableError):
 
     def __init__(
         self,
-        message: Optional[str] = None,
+        message: str | None = None,
         triage_result: Optional["ScopeTriageResult"] = None,
         **kwargs
     ):
-        blocking_questions: List[str] = []
-        ambiguous_points: List[str] = []
+        blocking_questions: list[str] = []
+        ambiguous_points: list[str] = []
 
         if triage_result is not None:
             blocking_questions = list(getattr(triage_result, "blocking_questions", []) or [])

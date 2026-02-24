@@ -2,14 +2,13 @@
 Tests for the Computer Use session orchestration.
 """
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.computer_use import ComputerUseSession
 import src.agents.computer_use.session as cu_session_module
+from src.agents.computer_use import ComputerUseSession
 from src.agents.computer_use.session import ComputerUseSessionResult
 
 

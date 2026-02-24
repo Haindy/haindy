@@ -7,7 +7,7 @@ import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.core.types import StepResult, TestStep
 
@@ -24,7 +24,7 @@ def _now_iso() -> str:
     )
 
 
-def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
+def _sanitize_for_json(value: Any, *, _seen: set[int] | None = None) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, (bytes, bytearray, memoryview)):
@@ -49,7 +49,7 @@ def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
     _seen.add(value_id)
 
     if isinstance(value, dict):
-        sanitized: Dict[str, Any] = {}
+        sanitized: dict[str, Any] = {}
         for key, item in value.items():
             sanitized[str(key)] = _sanitize_for_json(item, _seen=_seen)
         return sanitized
@@ -70,11 +70,11 @@ def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
     return str(value)
 
 
-def load_model_calls_for_run(log_path: Path, *, run_id: str) -> List[Dict[str, Any]]:
+def load_model_calls_for_run(log_path: Path, *, run_id: str) -> list[dict[str, Any]]:
     """Read model_calls.jsonl and return entries for the provided run id."""
     if not log_path.exists():
         return []
-    entries: List[Dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     try:
         with log_path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -100,7 +100,7 @@ class RunTraceWriter:
         self.run_id = run_id
         self._path = (trace_dir or Path("data/traces")) / f"{run_id}.json"
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._data: Dict[str, Any] = {
+        self._data: dict[str, Any] = {
             "trace_version": TRACE_VERSION,
             "run_id": run_id,
             "started_at": _now_iso(),
@@ -116,7 +116,7 @@ class RunTraceWriter:
     def path(self) -> Path:
         return self._path
 
-    def set_run_metadata(self, metadata: Dict[str, Any]) -> None:
+    def set_run_metadata(self, metadata: dict[str, Any]) -> None:
         self._data["run_metadata"] = _sanitize_for_json(metadata)
 
     def record_step(
@@ -125,8 +125,8 @@ class RunTraceWriter:
         scenario_name: str,
         step: TestStep,
         step_result: StepResult,
-        attempt: Optional[int] = None,
-        plan_cache_hit: Optional[bool] = None,
+        attempt: int | None = None,
+        plan_cache_hit: bool | None = None,
     ) -> None:
         try:
             entry = {
@@ -146,7 +146,7 @@ class RunTraceWriter:
         except Exception:
             logger.debug("RunTraceWriter: failed to record step", exc_info=True)
 
-    def record_cache_event(self, event: Dict[str, Any]) -> None:
+    def record_cache_event(self, event: dict[str, Any]) -> None:
         try:
             event_with_timestamp = dict(event)
             event_with_timestamp.setdefault("timestamp", _now_iso())
@@ -154,10 +154,10 @@ class RunTraceWriter:
         except Exception:
             logger.debug("RunTraceWriter: failed to record cache event", exc_info=True)
 
-    def set_model_calls(self, model_calls: List[Dict[str, Any]]) -> None:
+    def set_model_calls(self, model_calls: list[dict[str, Any]]) -> None:
         self._data["model_calls"] = _sanitize_for_json(model_calls)
 
-    def finalize(self, *, success: bool, ended_at: Optional[str] = None) -> None:
+    def finalize(self, *, success: bool, ended_at: str | None = None) -> None:
         self._data["ended_at"] = ended_at or _now_iso()
         self._data["success"] = bool(success)
 

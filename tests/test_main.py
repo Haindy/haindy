@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.main import async_main, create_parser, read_context_file, read_plan_file, run_test
+from src.main import (
+    async_main,
+    create_parser,
+    read_context_file,
+    read_plan_file,
+    run_test,
+)
 
 
 class TestCLIParser:

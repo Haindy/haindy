@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from src.core.interfaces import AutomationDriver
 
@@ -38,7 +39,7 @@ def _normalize_key_sequence(value: object) -> str:
     return normalized_single
 
 
-def _scroll_xy(direction: str, magnitude: int) -> Tuple[int, int]:
+def _scroll_xy(direction: str, magnitude: int) -> tuple[int, int]:
     direction_norm = str(direction or "").strip().lower()
     amount = abs(int(magnitude))
     if direction_norm == "down":
@@ -52,7 +53,7 @@ def _scroll_xy(direction: str, magnitude: int) -> Tuple[int, int]:
     raise DriverActionError(f"Invalid scroll direction: {direction!r}")
 
 
-def normalize_driver_action(raw: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_driver_action(raw: dict[str, Any]) -> dict[str, Any]:
     """Return a canonical driver action dict (v1 schema)."""
     if not isinstance(raw, dict):
         raise DriverActionError("Driver action must be a dict")
@@ -116,16 +117,16 @@ def normalize_driver_action(raw: Dict[str, Any]) -> Dict[str, Any]:
     raise DriverActionError(f"Unsupported driver action type: {action_type}")
 
 
-def normalize_driver_actions(actions: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def normalize_driver_actions(actions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [normalize_driver_action(action) for action in actions]
 
 
 async def replay_driver_actions(
     driver: AutomationDriver,
-    actions: List[Dict[str, Any]],
+    actions: list[dict[str, Any]],
     *,
     stabilization_wait_ms: int,
-    action_timeout_seconds: Optional[float] = None,
+    action_timeout_seconds: float | None = None,
 ) -> None:
     """Replay recorded driver actions using the browser driver."""
     stabilization = max(int(stabilization_wait_ms), 0)

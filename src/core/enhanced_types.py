@@ -6,23 +6,23 @@ capturing the full lifecycle of action execution from validation through result 
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from src.core.types import ActionInstruction, GridCoordinate, TestStep, TestState
+from src.core.types import GridCoordinate, TestState, TestStep
 
 
 class ValidationResult(BaseModel):
     """Result of action validation phase."""
-    
+
     valid: bool = Field(..., description="Whether the action is valid to execute")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Validation confidence score")
     reasoning: str = Field(..., description="Detailed explanation of validation decision")
-    concerns: List[str] = Field(default_factory=list, description="List of validation concerns")
-    suggestions: List[str] = Field(
-        default_factory=list, 
+    concerns: list[str] = Field(default_factory=list, description="List of validation concerns")
+    suggestions: list[str] = Field(
+        default_factory=list,
         description="Alternative approaches if validation failed"
     )
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -30,7 +30,7 @@ class ValidationResult(BaseModel):
 
 class CoordinateResult(BaseModel):
     """Result of coordinate determination phase."""
-    
+
     grid_cell: str = Field(..., description="Grid cell identifier (e.g., 'M23')")
     grid_coordinates: tuple[int, int] = Field(..., description="Pixel coordinates (x, y)")
     offset_x: float = Field(..., ge=0.0, le=1.0, description="X offset within cell")
@@ -38,57 +38,57 @@ class CoordinateResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Coordinate confidence score")
     reasoning: str = Field("", description="Explanation of coordinate selection")
     refined: bool = Field(False, description="Whether adaptive refinement was applied")
-    refinement_details: Optional[Dict[str, Any]] = Field(
-        None, 
+    refinement_details: dict[str, Any] | None = Field(
+        None,
         description="Details about refinement process if applied"
     )
 
 
 class ExecutionResult(BaseModel):
     """Result of action execution phase."""
-    
+
     success: bool = Field(..., description="Whether the action executed successfully")
     execution_time_ms: float = Field(..., description="Execution duration in milliseconds")
-    error_message: Optional[str] = Field(None, description="Error message if execution failed")
-    error_traceback: Optional[str] = Field(None, description="Full error traceback if available")
-    environment_logs: List[str] = Field(default_factory=list, description="Environment logs")
-    network_activity: List[Dict[str, Any]] = Field(
-        default_factory=list, 
+    error_message: str | None = Field(None, description="Error message if execution failed")
+    error_traceback: str | None = Field(None, description="Full error traceback if available")
+    environment_logs: list[str] = Field(default_factory=list, description="Environment logs")
+    network_activity: list[dict[str, Any]] = Field(
+        default_factory=list,
         description="Network requests during execution"
     )
 
 
 class AIAnalysis(BaseModel):
     """AI analysis of action results."""
-    
+
     success: bool = Field(..., description="AI assessment of action success")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Analysis confidence score")
     actual_outcome: str = Field(..., description="Description of what actually happened")
     matches_expected: bool = Field(..., description="Whether outcome matches expectations")
-    ui_changes: List[str] = Field(
-        default_factory=list, 
+    ui_changes: list[str] = Field(
+        default_factory=list,
         description="List of observed UI changes"
     )
-    recommendations: List[str] = Field(
-        default_factory=list, 
+    recommendations: list[str] = Field(
+        default_factory=list,
         description="AI recommendations for next steps"
     )
-    anomalies: List[str] = Field(
-        default_factory=list, 
+    anomalies: list[str] = Field(
+        default_factory=list,
         description="Unexpected behaviors or UI states detected"
     )
 
 
 class EnvironmentState(BaseModel):
     """Environment state at a point in time."""
-    
+
     url: str = Field(..., description="Current page URL")
     title: str = Field(..., description="Page title")
     viewport_size: tuple[int, int] = Field(..., description="Viewport dimensions (width, height)")
-    screenshot: Optional[bytes] = Field(None, description="Screenshot data")
-    screenshot_path: Optional[str] = Field(None, description="Path to saved screenshot")
-    dom_ready_state: Optional[str] = Field(None, description="Document ready state")
-    active_element: Optional[str] = Field(None, description="Currently focused element")
+    screenshot: bytes | None = Field(None, description="Screenshot data")
+    screenshot_path: str | None = Field(None, description="Path to saved screenshot")
+    dom_ready_state: str | None = Field(None, description="Document ready state")
+    active_element: str | None = Field(None, description="Currently focused element")
 
 
 class ComputerToolTurn(BaseModel):
@@ -96,7 +96,7 @@ class ComputerToolTurn(BaseModel):
 
     call_id: str = Field(..., description="OpenAI computer_call identifier")
     action_type: str = Field(..., description="Type of action requested by the model")
-    parameters: Dict[str, Any] = Field(
+    parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Raw action payload supplied by the model",
     )
@@ -104,16 +104,16 @@ class ComputerToolTurn(BaseModel):
         "pending",
         description="Execution status (pending|executed|failed|skipped)",
     )
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         None, description="Error captured during execution or validation"
     )
-    screenshot_path: Optional[str] = Field(
+    screenshot_path: str | None = Field(
         None, description="Path to screenshot captured after this action"
     )
-    response_id: Optional[str] = Field(
+    response_id: str | None = Field(
         None, description="Response ID that produced this action"
     )
-    pending_safety_checks: List[Dict[str, Any]] = Field(
+    pending_safety_checks: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Safety checks returned alongside this action",
     )
@@ -124,10 +124,10 @@ class ComputerToolTurn(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when the action was processed",
     )
-    latency_ms: Optional[float] = Field(
+    latency_ms: float | None = Field(
         None, description="Latency of executing the action in milliseconds"
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata for observability"
     )
 
@@ -141,7 +141,7 @@ class SafetyEvent(BaseModel):
     acknowledged: bool = Field(
         False, description="Whether the event was acknowledged by the system"
     )
-    response_id: Optional[str] = Field(
+    response_id: str | None = Field(
         None, description="Response ID where the safety event originated"
     )
     timestamp: datetime = Field(
@@ -153,114 +153,114 @@ class SafetyEvent(BaseModel):
 class EnhancedActionResult(BaseModel):
     """
     Comprehensive result of action execution with full debugging information.
-    
+
     This model captures the complete lifecycle of an action from validation
     through execution and analysis, providing rich context for debugging
     and error reporting.
     """
-    
+
     # Identifiers
     action_id: UUID = Field(default_factory=uuid4)
     test_step_id: UUID = Field(..., description="ID of the test step being executed")
-    
+
     # Timestamps
     timestamp_start: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    timestamp_end: Optional[datetime] = Field(None)
-    
+    timestamp_end: datetime | None = Field(None)
+
     # Original request
     test_step: TestStep = Field(..., description="Original test step")
-    test_context: Dict[str, Any] = Field(..., description="Test execution context")
-    
+    test_context: dict[str, Any] = Field(..., description="Test execution context")
+
     # Validation phase
     validation: ValidationResult = Field(..., description="Validation phase results")
-    
+
     # Coordinate determination
-    coordinates: Optional[CoordinateResult] = Field(
-        None, 
+    coordinates: CoordinateResult | None = Field(
+        None,
         description="Coordinate determination results"
     )
-    
+
     # Environment states
-    environment_state_before: Optional[EnvironmentState] = Field(
-        None, 
+    environment_state_before: EnvironmentState | None = Field(
+        None,
         description="Environment state before action"
     )
-    environment_state_after: Optional[EnvironmentState] = Field(
-        None, 
+    environment_state_after: EnvironmentState | None = Field(
+        None,
         description="Environment state after action"
     )
-    
+
     # Grid screenshots
-    grid_screenshot_before: Optional[bytes] = Field(
-        None, 
+    grid_screenshot_before: bytes | None = Field(
+        None,
         description="Screenshot with grid overlay before action"
     )
-    grid_screenshot_highlighted: Optional[bytes] = Field(
-        None, 
+    grid_screenshot_highlighted: bytes | None = Field(
+        None,
         description="Screenshot with selected cell highlighted"
     )
-    
+
     # Execution
-    execution: Optional[ExecutionResult] = Field(
-        None, 
+    execution: ExecutionResult | None = Field(
+        None,
         description="Execution phase results"
     )
-    
+
     # AI Analysis
-    ai_analysis: Optional[AIAnalysis] = Field(
-        None, 
+    ai_analysis: AIAnalysis | None = Field(
+        None,
         description="AI analysis of results"
     )
-    computer_actions: List[ComputerToolTurn] = Field(
+    computer_actions: list[ComputerToolTurn] = Field(
         default_factory=list,
         description="Sequence of Computer Use tool actions executed",
     )
-    safety_events: List[SafetyEvent] = Field(
+    safety_events: list[SafetyEvent] = Field(
         default_factory=list,
         description="Safety check events encountered during execution",
     )
-    final_model_output: Optional[str] = Field(
+    final_model_output: str | None = Field(
         None,
         description="Final assistant message returned by the model after completion",
     )
-    response_ids: List[str] = Field(
+    response_ids: list[str] = Field(
         default_factory=list,
         description="OpenAI response IDs involved in this action loop",
     )
-    cache_label: Optional[str] = Field(
+    cache_label: str | None = Field(
         None, description="Cache label used for coordinate caching"
     )
-    cache_action: Optional[str] = Field(
+    cache_action: str | None = Field(
         None, description="Cache action type associated with the label"
     )
     cache_hit: bool = Field(
         False, description="Whether the coordinate cache was used"
     )
-    cache_coordinates: Optional[tuple[int, int]] = Field(
+    cache_coordinates: tuple[int, int] | None = Field(
         None, description="Cached pixel coordinates used for the action"
     )
-    cache_resolution: Optional[tuple[int, int]] = Field(
+    cache_resolution: tuple[int, int] | None = Field(
         None, description="Resolution associated with cached coordinates"
     )
-    driver_actions: List[Dict[str, Any]] = Field(
+    driver_actions: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Recorded driver actions for execution replay",
     )
-    
+
     # Overall status
     overall_success: bool = Field(
-        False, 
+        False,
         description="Whether the entire action completed successfully"
     )
-    failure_phase: Optional[str] = Field(
-        None, 
+    failure_phase: str | None = Field(
+        None,
         description="Which phase failed: validation|coordinates|execution|analysis"
     )
-    
-    def dict_for_compatibility(self) -> Dict[str, Any]:
+
+    def dict_for_compatibility(self) -> dict[str, Any]:
         """
         Convert to dictionary format compatible with existing code.
-        
+
         This method provides backward compatibility while we transition
         to the new model structure.
         """
@@ -301,24 +301,24 @@ class EnhancedActionResult(BaseModel):
 class ActionPattern(BaseModel):
     """
     Reusable pattern for successful actions.
-    
+
     Used for caching and optimizing repeated actions.
     """
-    
+
     pattern_id: UUID = Field(default_factory=uuid4)
     action_type: str = Field(..., description="Type of action")
     target_description: str = Field(..., description="Description of target element")
     grid_coordinates: CoordinateResult = Field(..., description="Successful coordinates")
-    automation_command: Optional[str] = Field(
-        None, 
+    automation_command: str | None = Field(
+        None,
         description="Recorded Automation command for direct replay"
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Pattern confidence")
     success_count: int = Field(0, description="Number of successful uses")
     failure_count: int = Field(0, description="Number of failed attempts")
     last_used: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    screenshot_hash: Optional[str] = Field(
-        None, 
+    screenshot_hash: str | None = Field(
+        None,
         description="Hash of screenshot for visual similarity matching"
     )
 
@@ -326,111 +326,111 @@ class ActionPattern(BaseModel):
 class BugReport(BaseModel):
     """
     Comprehensive bug report for failed test steps.
-    
+
     Captures all relevant information for debugging test failures,
     including screenshots, AI reasoning, and execution details.
     """
-    
+
     bug_id: UUID = Field(default_factory=uuid4, description="Unique bug identifier")
     test_step: TestStep = Field(..., description="The test step that failed")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
+
     # Failure details
     failure_type: str = Field(..., description="Type of failure: validation|execution|evaluation")
     error_message: str = Field(..., description="Primary error message")
-    detailed_error: Optional[str] = Field(None, description="Detailed error with stack trace")
-    
+    detailed_error: str | None = Field(None, description="Detailed error with stack trace")
+
     # Execution context
     test_plan_name: str = Field(..., description="Name of the test plan")
     step_number: int = Field(..., description="Step number in the test plan")
     execution_mode: str = Field("visual", description="How the step was executed")
-    
+
     # Visual evidence
-    screenshot_before: Optional[bytes] = Field(None, description="Screenshot before action")
-    screenshot_after: Optional[bytes] = Field(None, description="Screenshot after action")
-    grid_screenshot: Optional[bytes] = Field(None, description="Grid overlay screenshot with highlight")
-    
+    screenshot_before: bytes | None = Field(None, description="Screenshot before action")
+    screenshot_after: bytes | None = Field(None, description="Screenshot after action")
+    grid_screenshot: bytes | None = Field(None, description="Grid overlay screenshot with highlight")
+
     # AI analysis
-    validation_result: Optional[ValidationResult] = Field(None, description="Validation phase results")
-    coordinate_result: Optional[CoordinateResult] = Field(None, description="Coordinate determination results")
-    execution_result: Optional[ExecutionResult] = Field(None, description="Execution phase results")
-    ai_analysis: Optional[AIAnalysis] = Field(None, description="AI evaluation of results")
-    
+    validation_result: ValidationResult | None = Field(None, description="Validation phase results")
+    coordinate_result: CoordinateResult | None = Field(None, description="Coordinate determination results")
+    execution_result: ExecutionResult | None = Field(None, description="Execution phase results")
+    ai_analysis: AIAnalysis | None = Field(None, description="AI evaluation of results")
+
     # Action details
     attempted_action: str = Field(..., description="What action was attempted")
     expected_outcome: str = Field(..., description="What was expected to happen")
     actual_outcome: str = Field(..., description="What actually happened")
-    
+
     # Grid interaction
-    grid_cell_targeted: Optional[str] = Field(None, description="Grid cell that was targeted")
-    coordinates_used: Optional[GridCoordinate] = Field(None, description="Exact coordinates used")
-    
+    grid_cell_targeted: str | None = Field(None, description="Grid cell that was targeted")
+    coordinates_used: GridCoordinate | None = Field(None, description="Exact coordinates used")
+
     # Environment state
-    url_before: Optional[str] = Field(None, description="URL before action")
-    url_after: Optional[str] = Field(None, description="URL after action")
-    page_title_before: Optional[str] = Field(None, description="Page title before action")
-    page_title_after: Optional[str] = Field(None, description="Page title after action")
-    
+    url_before: str | None = Field(None, description="URL before action")
+    url_after: str | None = Field(None, description="URL after action")
+    page_title_before: str | None = Field(None, description="Page title before action")
+    page_title_after: str | None = Field(None, description="Page title after action")
+
     # Debugging aids
-    confidence_scores: Dict[str, float] = Field(
+    confidence_scores: dict[str, float] = Field(
         default_factory=dict,
         description="Confidence scores at each phase"
     )
-    ui_anomalies: List[str] = Field(
+    ui_anomalies: list[str] = Field(
         default_factory=list,
         description="Detected UI anomalies or unexpected states"
     )
-    suggested_fixes: List[str] = Field(
+    suggested_fixes: list[str] = Field(
         default_factory=list,
         description="AI-suggested fixes or workarounds"
     )
-    
+
     # Categorization
     severity: str = Field("medium", description="Bug severity: low|medium|high|critical")
     is_blocking: bool = Field(False, description="Whether this blocks test continuation")
     is_flaky: bool = Field(False, description="Whether this appears to be a flaky failure")
-    
+
     def to_summary(self) -> str:
         """Generate a concise summary of the bug report."""
         severity_upper = self.severity.upper()
         blocking_text = " [BLOCKING]" if self.is_blocking else ""
-        
+
         summary = f"BUG [{severity_upper}]{blocking_text}"
-        
+
         if self.step_number:
             summary += f" Step {self.step_number}: {self.test_step.description}\n"
         else:
             summary += f" {self.test_step.description}\n"
-        
+
         summary += f"  Error: {self.error_message}\n"
-        
+
         if self.expected_outcome and self.actual_outcome:
             summary += f"  Expected: {self.expected_outcome}\n"
             summary += f"  Actual: {self.actual_outcome}\n"
-        
+
         if self.ai_analysis:
             summary += f"  Confidence: {self.ai_analysis.confidence*100:.0f}%\n"
         elif self.confidence_scores.get('overall'):
             summary += f"  Confidence: {self.confidence_scores.get('overall', 0.0):.0%}\n"
-        
+
         return summary
 
 
 class EnhancedTestState(TestState):
     """Extended test state with enhanced tracking capabilities."""
-    execution_history: List[EnhancedActionResult] = Field(
+    execution_history: list[EnhancedActionResult] = Field(
         default_factory=list,
         description="Detailed history of all action executions"
     )
-    bug_reports: List[BugReport] = Field(
+    bug_reports: list[BugReport] = Field(
         default_factory=list,
         description="Collection of bug reports for failed steps"
     )
-    performance_metrics: Dict[str, Any] = Field(
+    performance_metrics: dict[str, Any] = Field(
         default_factory=dict,
         description="Performance metrics for the test execution"
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata for test execution"
     )

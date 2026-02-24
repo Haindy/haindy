@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
 
 from evdev import AbsInfo, UInput, ecodes
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Scancode map (set 1 / Linux input) keyed by EV_KEY code. Extended (E0-prefixed)
 # scancodes are encoded as single integers, e.g., 0xE01D for right control.
-DEFAULT_SCANCODE_MAP: Dict[int, int] = {
+DEFAULT_SCANCODE_MAP: dict[int, int] = {
     ecodes.KEY_ESC: 0x01,
     ecodes.KEY_1: 0x02,
     ecodes.KEY_2: 0x03,
@@ -138,12 +138,12 @@ class VirtualInput:
 
     def __init__(
         self,
-        viewport: Tuple[int, int],
+        viewport: tuple[int, int],
         device_name: str = "haindy-virtual-input",
         keyboard_layout: str = "us",
         emit_scancodes: bool = True,
         key_delay_ms: int = 12,
-        uinput_device: Optional[UInput] = None,
+        uinput_device: UInput | None = None,
     ) -> None:
         width, height = viewport
         abs_caps = [
@@ -203,7 +203,7 @@ class VirtualInput:
             await asyncio.sleep(0.02)
 
     async def drag(
-        self, start: Tuple[int, int], end: Tuple[int, int], steps: int = 1
+        self, start: tuple[int, int], end: tuple[int, int], steps: int = 1
     ) -> None:
         """Drag from start to end coordinates."""
         start_x, start_y = self._clamp(*start)
@@ -295,7 +295,7 @@ class VirtualInput:
         direction = 1 if pixels < 0 else -1
         return direction * max(abs(pixels) // 120, 1)
 
-    def _lookup_scancode(self, key_code: int) -> Optional[int]:
+    def _lookup_scancode(self, key_code: int) -> int | None:
         if not self._emit_scancodes:
             return None
         scancode = self._scancode_map.get(key_code)
@@ -315,8 +315,8 @@ class VirtualInput:
         self._ui.write(ecodes.EV_KEY, key_code, value)
 
     @staticmethod
-    def _normalize_key_sequence(key: str | Iterable[str]) -> List[str]:
-        sequence: List[str] = []
+    def _normalize_key_sequence(key: str | Iterable[str]) -> list[str]:
+        sequence: list[str] = []
         if isinstance(key, str):
             if "+" in key:
                 sequence = [part.strip() for part in key.split("+") if part.strip()]
@@ -326,7 +326,7 @@ class VirtualInput:
             sequence = [k for k in key if k]
         return sequence
 
-    def _clamp(self, x: int, y: int) -> Tuple[int, int]:
+    def _clamp(self, x: int, y: int) -> tuple[int, int]:
         width, height = self._viewport
         x_clamped = max(0, min(int(x), max(width - 1, 0)))
         y_clamped = max(0, min(int(y), max(height - 1, 0)))
@@ -341,7 +341,7 @@ class VirtualInput:
         return normalized
 
     @staticmethod
-    def _keyboard_keys() -> List[int]:
+    def _keyboard_keys() -> list[int]:
         keys = {
             ecodes.BTN_LEFT,
             ecodes.BTN_RIGHT,
@@ -435,14 +435,14 @@ class VirtualInput:
 
         return sorted(keys)
 
-    def _char_to_key(self, char: str) -> Tuple[Optional[int], Tuple[int, ...]]:
+    def _char_to_key(self, char: str) -> tuple[int | None, tuple[int, ...]]:
         """Map character to keycode and modifier sequence for the configured layout."""
         if self._keyboard_layout == "es":
             return self._char_to_key_es(char)
         return self._char_to_key_us(char)
 
     @staticmethod
-    def _char_to_key_us(char: str) -> Tuple[Optional[int], Tuple[int, ...]]:
+    def _char_to_key_us(char: str) -> tuple[int | None, tuple[int, ...]]:
         """US layout mapping (default)."""
         if not char:
             return None, ()
@@ -453,7 +453,7 @@ class VirtualInput:
             key = getattr(ecodes, f"KEY_{char}", None)
             return key, ()
 
-        digit_shift_map: Dict[str, Tuple[int, Tuple[int, ...]]] = {
+        digit_shift_map: dict[str, tuple[int, tuple[int, ...]]] = {
             "!": (ecodes.KEY_1, (ecodes.KEY_LEFTSHIFT,)),
             "@": (ecodes.KEY_2, (ecodes.KEY_LEFTSHIFT,)),
             "#": (ecodes.KEY_3, (ecodes.KEY_LEFTSHIFT,)),
@@ -468,7 +468,7 @@ class VirtualInput:
         if char in digit_shift_map:
             return digit_shift_map[char]
 
-        mapping: Dict[str, Tuple[int, Tuple[int, ...]]] = {
+        mapping: dict[str, tuple[int, tuple[int, ...]]] = {
             " ": (ecodes.KEY_SPACE, ()),
             "\n": (ecodes.KEY_ENTER, ()),
             "\t": (ecodes.KEY_TAB, ()),
@@ -498,7 +498,7 @@ class VirtualInput:
         return mapping.get(char, (None, ()))
 
     @staticmethod
-    def _char_to_key_es(char: str) -> Tuple[Optional[int], Tuple[int, ...]]:
+    def _char_to_key_es(char: str) -> tuple[int | None, tuple[int, ...]]:
         """Spanish (Spain) layout mapping using AltGr where required."""
         if not char:
             return None, ()
@@ -517,7 +517,7 @@ class VirtualInput:
             key = getattr(ecodes, f"KEY_{char}", None)
             return key, ()
 
-        mapping: Dict[str, Tuple[int, Tuple[int, ...]]] = {
+        mapping: dict[str, tuple[int, tuple[int, ...]]] = {
             " ": (ecodes.KEY_SPACE, ()),
             "\n": (ecodes.KEY_ENTER, ()),
             "\t": (ecodes.KEY_TAB, ()),
@@ -561,7 +561,7 @@ class VirtualInput:
         return mapping.get(char, (None, ()))
 
     @staticmethod
-    def _lookup_key_code(name: str) -> Optional[int]:
+    def _lookup_key_code(name: str) -> int | None:
         normalized = name.strip().lower()
         meta_key = getattr(ecodes, "KEY_LEFTMETA", None)
         right_meta_key = getattr(ecodes, "KEY_RIGHTMETA", None)

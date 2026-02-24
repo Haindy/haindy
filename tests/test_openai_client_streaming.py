@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -16,10 +16,10 @@ class RecordingObserver(ResponseStreamObserver):
     def __init__(self) -> None:
         self.started = False
         self.ended = False
-        self.deltas: List[Dict[str, int]] = []
-        self.totals: Dict[str, int] | None = None
-        self.errors: List[Any] = []
-        self.token_updates: List[Dict[str, int]] = []
+        self.deltas: list[dict[str, int]] = []
+        self.totals: dict[str, int] | None = None
+        self.errors: list[Any] = []
+        self.token_updates: list[dict[str, int]] = []
 
     def on_stream_start(self) -> None:  # pragma: no cover - simple flag
         self.started = True
@@ -27,10 +27,10 @@ class RecordingObserver(ResponseStreamObserver):
     def on_text_delta(self, delta: str) -> None:  # pragma: no cover - ignored in tests
         return
 
-    def on_usage_delta(self, delta: Dict[str, int]) -> None:
+    def on_usage_delta(self, delta: dict[str, int]) -> None:
         self.deltas.append(delta)
 
-    def on_usage_total(self, totals: Dict[str, int]) -> None:
+    def on_usage_total(self, totals: dict[str, int]) -> None:
         self.totals = totals
 
     def on_error(self, error: Any) -> None:  # pragma: no cover - defensive logging path
@@ -54,11 +54,11 @@ class RecordingObserver(ResponseStreamObserver):
 class FakeStream:
     """Async stream stub returning predetermined events and final response."""
 
-    def __init__(self, events: List[Any], final_response: Any) -> None:
+    def __init__(self, events: list[Any], final_response: Any) -> None:
         self._events = events
         self._final_response = final_response
 
-    async def __aenter__(self) -> "FakeStream":
+    async def __aenter__(self) -> FakeStream:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -78,10 +78,10 @@ class FakeStream:
 class FakeResponses:
     """Stub for AsyncOpenAI.responses that captures kwargs."""
 
-    def __init__(self, events: List[Any], final_response: Any) -> None:
+    def __init__(self, events: list[Any], final_response: Any) -> None:
         self._events = events
         self._final_response = final_response
-        self.last_kwargs: Dict[str, Any] | None = None
+        self.last_kwargs: dict[str, Any] | None = None
 
     def stream(self, **kwargs: Any) -> FakeStream:
         self.last_kwargs = kwargs

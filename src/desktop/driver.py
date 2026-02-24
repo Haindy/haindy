@@ -7,8 +7,8 @@ import contextlib
 import logging
 import shutil
 from asyncio import subprocess as aio_subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
 
 from src.core.interfaces import AutomationDriver
 from src.desktop.cache import CoordinateCache
@@ -26,15 +26,15 @@ class DesktopDriver(AutomationDriver):
         self,
         screenshot_dir: Path,
         cache_path: Path,
-        prefer_resolution: Tuple[int, int] = (1920, 1080),
+        prefer_resolution: tuple[int, int] = (1920, 1080),
         enable_resolution_switch: bool = False,
-        display: Optional[str] = None,
+        display: str | None = None,
         keyboard_layout: str = "us",
         keyboard_emit_scancodes: bool = True,
         keyboard_key_delay_ms: int = 12,
         clipboard_timeout_seconds: float = 3.0,
         clipboard_hold_seconds: float = 15.0,
-        max_screenshots: Optional[int] = None,
+        max_screenshots: int | None = None,
     ) -> None:
         self.resolution_manager = ResolutionManager(
             preferred_width=prefer_resolution[0],
@@ -51,7 +51,7 @@ class DesktopDriver(AutomationDriver):
         self.keyboard_emit_scancodes = keyboard_emit_scancodes
         self.keyboard_key_delay_ms = keyboard_key_delay_ms
         self.coordinate_cache = CoordinateCache(cache_path)
-        self.virtual_input: Optional[VirtualInput] = None
+        self.virtual_input: VirtualInput | None = None
         self._started = False
         self._clipboard_timeout_seconds = max(float(clipboard_timeout_seconds), 0.5)
         self._clipboard_hold_seconds = max(float(clipboard_hold_seconds), 0.5)
@@ -84,7 +84,7 @@ class DesktopDriver(AutomationDriver):
         self.virtual_input = None
         self._started = False
 
-    async def __aenter__(self) -> "DesktopDriver":
+    async def __aenter__(self) -> DesktopDriver:
         await self.start()
         return self
 
@@ -164,7 +164,7 @@ class DesktopDriver(AutomationDriver):
         await asyncio.sleep(milliseconds / 1000.0)
         self._capture_call("wait", {"milliseconds": milliseconds})
 
-    async def get_viewport_size(self) -> Tuple[int, int]:
+    async def get_viewport_size(self) -> tuple[int, int]:
         return self.resolution_manager.viewport_size()
 
     async def get_page_url(self) -> str:
@@ -181,7 +181,7 @@ class DesktopDriver(AutomationDriver):
     async def wait_for_load_state(self, state: str = "networkidle") -> None:
         return
 
-    async def capture(self, label: str) -> Tuple[bytes, str]:
+    async def capture(self, label: str) -> tuple[bytes, str]:
         """Capture a screenshot with the given label."""
         bytes_, path = await self._capture(label)
         self._capture_call("capture", {"label": label, "path": path})
@@ -213,10 +213,10 @@ class DesktopDriver(AutomationDriver):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self._clipboard_timeout_seconds
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.communicate()
-            raise RuntimeError("Clipboard read timed out.")
+            raise RuntimeError("Clipboard read timed out.") from exc
         if proc.returncode != 0:
             stderr_text = (stderr or b"").decode("utf-8", errors="ignore")
             raise RuntimeError(f"Clipboard read failed: {stderr_text.strip()}")
@@ -259,7 +259,7 @@ class DesktopDriver(AutomationDriver):
             stderr_text = (stderr or b"").decode("utf-8", errors="ignore")
             raise RuntimeError(f"Clipboard write failed: {stderr_text.strip()}")
 
-    async def _capture(self, label: str) -> Tuple[bytes, str]:
+    async def _capture(self, label: str) -> tuple[bytes, str]:
         await self._ensure_ready()
         return self.screen_capture.capture(label)
 
@@ -281,13 +281,13 @@ class DesktopDriver(AutomationDriver):
             )
 
     @staticmethod
-    def _clipboard_read_command() -> Optional[list[str]]:
+    def _clipboard_read_command() -> list[str] | None:
         if shutil.which("xclip"):
             return ["xclip", "-selection", "clipboard", "-o"]
         return None
 
     @staticmethod
-    def _clipboard_write_command() -> Optional[list[str]]:
+    def _clipboard_write_command() -> list[str] | None:
         if shutil.which("xclip"):
             # xclip defaults to backgrounding itself; force foreground so the agent can
             # manage its lifetime and avoid orphaned clipboard owner processes.

@@ -3,9 +3,7 @@ Grid refinement logic for adaptive precision.
 """
 
 import io
-from typing import Optional, Tuple
 
-import numpy as np
 from PIL import Image
 
 from src.config.settings import get_settings
@@ -55,7 +53,7 @@ class GridRefinement:
             return initial_coord
 
         self.logger.info(
-            f"Refining coordinate",
+            "Refining coordinate",
             extra={
                 "initial_cell": initial_coord.cell,
                 "initial_confidence": initial_coord.confidence,
@@ -68,12 +66,12 @@ class GridRefinement:
 
         # Crop the screenshot to the refinement region
         img = Image.open(io.BytesIO(screenshot))
-        cropped = img.crop((x, y, x + width, y + height))
+        img.crop((x, y, x + width, y + height))
 
         # Create a finer grid over the cropped region (9x9 for 3x3 cells)
         fine_grid_size = 9
-        cell_width = width / fine_grid_size
-        cell_height = height / fine_grid_size
+        width / fine_grid_size
+        height / fine_grid_size
 
         # In a real implementation, this would use the AI to analyze the cropped region
         # For now, we'll simulate refinement by adjusting the offset
@@ -109,7 +107,7 @@ class GridRefinement:
         )
 
         self.logger.info(
-            f"Coordinate refined",
+            "Coordinate refined",
             extra={
                 "cell": refined_coord.cell,
                 "refined_offset": f"({refined_coord.offset_x:.2f}, {refined_coord.offset_y:.2f})",
@@ -140,7 +138,7 @@ class GridRefinement:
 
     def crop_refinement_region(
         self, screenshot: bytes, cell: str
-    ) -> Tuple[bytes, Tuple[int, int, int, int]]:
+    ) -> tuple[bytes, tuple[int, int, int, int]]:
         """
         Crop screenshot to refinement region around a cell.
 
@@ -225,10 +223,10 @@ class GridRefinement:
     def calculate_refined_pixel_position(
         self,
         original_coord: GridCoordinate,
-        refinement_bounds: Tuple[int, int, int, int],
-        fine_grid_position: Tuple[int, int],
+        refinement_bounds: tuple[int, int, int, int],
+        fine_grid_position: tuple[int, int],
         fine_grid_size: int = 9,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         Calculate absolute pixel position from refinement results.
 

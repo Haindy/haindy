@@ -5,7 +5,6 @@ and blocking questions from mixed requirement bundles.
 """
 
 import re
-from typing import Dict, List, Optional
 
 from src.agents.base_agent import BaseAgent
 from src.config.agent_prompts import SCOPE_TRIAGE_SYSTEM_PROMPT
@@ -27,7 +26,7 @@ class ScopeTriageAgent(BaseAgent):
     async def triage_scope(
         self,
         requirements: str,
-        context: Optional[Dict[str, str]] = None,
+        context: dict[str, str] | None = None,
     ) -> ScopeTriageResult:
         """
         Analyze the requirements bundle and extract a curated testing scope.
@@ -72,10 +71,10 @@ class ScopeTriageAgent(BaseAgent):
     def _build_triage_message(
         self,
         requirements: str,
-        context: Optional[Dict[str, str]] = None,
+        context: dict[str, str] | None = None,
     ) -> str:
         """Construct the user message for the triage pass."""
-        message_lines: List[str] = [
+        message_lines: list[str] = [
             "Review the following requirements bundle and extract the testing scope.",
             "",
             "Return a JSON object that matches the keys requested.",
@@ -95,7 +94,7 @@ class ScopeTriageAgent(BaseAgent):
 
         return "\n".join(message_lines)
 
-    def _parse_triage_response(self, response: Dict) -> ScopeTriageResult:
+    def _parse_triage_response(self, response: dict) -> ScopeTriageResult:
         """Parse the JSON response into a ScopeTriageResult."""
         import json
 
@@ -110,7 +109,7 @@ class ScopeTriageAgent(BaseAgent):
         else:
             raise ValueError("Scope triage response missing JSON payload.")
 
-        def _ensure_list(value: Optional[object]) -> List[str]:
+        def _ensure_list(value: object | None) -> list[str]:
             if not value:
                 return []
             if isinstance(value, list):
@@ -150,7 +149,7 @@ class ScopeTriageAgent(BaseAgent):
             ]
 
         # Drop ambiguity notes that simply speculate about seeded data.
-        cleaned_ambiguities: List[str] = []
+        cleaned_ambiguities: list[str] = []
         for point in result.ambiguous_points:
             lowered = point.lower()
             if "seed" in lowered:

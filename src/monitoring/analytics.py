@@ -8,13 +8,12 @@ into test execution patterns.
 import asyncio
 import json
 import logging
-import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Deque, Set, Tuple
+from typing import Any
 from uuid import UUID
 
 import numpy as np
@@ -44,9 +43,9 @@ class MetricValue:
     """A single metric value with metadata."""
     value: float
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    tags: Dict[str, str] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
+    tags: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "value": self.value,
@@ -61,8 +60,8 @@ class TestMetrics:
     test_id: UUID
     test_name: str
     start_time: datetime
-    end_time: Optional[datetime] = None
-    outcome: Optional[TestOutcome] = None
+    end_time: datetime | None = None
+    outcome: TestOutcome | None = None
     steps_total: int = 0
     steps_passed: int = 0
     steps_failed: int = 0
@@ -70,24 +69,24 @@ class TestMetrics:
     api_calls: int = 0
     automation_actions: int = 0
     screenshots_taken: int = 0
-    errors: List[str] = field(default_factory=list)
-    performance_metrics: Dict[str, float] = field(default_factory=dict)
-    
+    errors: list[str] = field(default_factory=list)
+    performance_metrics: dict[str, float] = field(default_factory=dict)
+
     @property
-    def duration_seconds(self) -> Optional[float]:
+    def duration_seconds(self) -> float | None:
         """Get test duration in seconds."""
         if self.end_time:
             return (self.end_time - self.start_time).total_seconds()
         return None
-    
+
     @property
     def success_rate(self) -> float:
         """Calculate step success rate."""
         if self.steps_total == 0:
             return 0.0
         return self.steps_passed / self.steps_total
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "test_id": str(self.test_id),
@@ -115,25 +114,25 @@ class TestMetrics:
 
 class MetricsCollector:
     """Collects and aggregates metrics."""
-    
+
     def __init__(self, window_size_minutes: int = 60):
         """
         Initialize metrics collector.
-        
+
         Args:
             window_size_minutes: Size of sliding window for rate calculations
         """
         self.window_size = timedelta(minutes=window_size_minutes)
-        self.metrics: Dict[str, Deque[MetricValue]] = defaultdict(lambda: deque(maxlen=10000))
-        self.test_metrics: Dict[UUID, TestMetrics] = {}
-        self.active_tests: Set[UUID] = set()
+        self.metrics: dict[str, deque[MetricValue]] = defaultdict(lambda: deque(maxlen=10000))
+        self.test_metrics: dict[UUID, TestMetrics] = {}
+        self.active_tests: set[UUID] = set()
         self._lock = asyncio.Lock()
-    
+
     async def start_test(
         self,
         test_id: UUID,
         test_name: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None
     ) -> None:
         """Record test start."""
         async with self._lock:
@@ -144,37 +143,37 @@ class MetricsCollector:
             )
             self.test_metrics[test_id] = metrics
             self.active_tests.add(test_id)
-            
+
             # Record as counter
             await self.record_counter("tests.started", tags={"test_name": test_name})
-    
+
     async def end_test(
         self,
         test_id: UUID,
         outcome: TestOutcome,
-        error_message: Optional[str] = None
+        error_message: str | None = None
     ) -> None:
         """Record test end."""
         async with self._lock:
             if test_id not in self.test_metrics:
                 logger.warning(f"Ending unknown test: {test_id}")
                 return
-            
+
             metrics = self.test_metrics[test_id]
             metrics.end_time = datetime.now(timezone.utc)
             metrics.outcome = outcome
-            
+
             if error_message:
                 metrics.errors.append(error_message)
-            
+
             self.active_tests.discard(test_id)
-            
+
             # Record outcome
             await self.record_counter(
                 f"tests.{outcome.value}",
                 tags={"test_name": metrics.test_name}
             )
-            
+
             # Record duration
             if metrics.duration_seconds:
                 await self.record_timer(
@@ -182,41 +181,41 @@ class MetricsCollector:
                     metrics.duration_seconds,
                     tags={"test_name": metrics.test_name, "outcome": outcome.value}
                 )
-    
+
     async def record_step_outcome(
         self,
         test_id: UUID,
         step_name: str,
         success: bool,
-        duration_ms: Optional[int] = None
+        duration_ms: int | None = None
     ) -> None:
         """Record step execution outcome."""
         async with self._lock:
             if test_id not in self.test_metrics:
                 return
-            
+
             metrics = self.test_metrics[test_id]
             metrics.steps_total += 1
-            
+
             if success:
                 metrics.steps_passed += 1
             else:
                 metrics.steps_failed += 1
-            
+
             # Record step metrics
             outcome = "passed" if success else "failed"
             await self.record_counter(
                 f"steps.{outcome}",
                 tags={"test_id": str(test_id), "step_name": step_name}
             )
-            
+
             if duration_ms:
                 await self.record_timer(
                     "step.duration",
                     duration_ms / 1000,  # Convert to seconds
                     tags={"outcome": outcome}
                 )
-    
+
     async def record_api_call(
         self,
         test_id: UUID,
@@ -228,18 +227,18 @@ class MetricsCollector:
         async with self._lock:
             if test_id in self.test_metrics:
                 self.test_metrics[test_id].api_calls += 1
-            
+
             await self.record_counter(
                 "api.calls",
                 tags={"api": api_name, "success": str(success)}
             )
-            
+
             await self.record_timer(
                 "api.duration",
                 duration_ms / 1000,
                 tags={"api": api_name}
             )
-    
+
     async def record_automation_action(
         self,
         test_id: UUID,
@@ -251,60 +250,60 @@ class MetricsCollector:
         async with self._lock:
             if test_id in self.test_metrics:
                 self.test_metrics[test_id].automation_actions += 1
-            
+
             await self.record_counter(
                 "automation.actions",
                 tags={"action": action_type, "success": str(success)}
             )
-            
+
             await self.record_timer(
                 "automation.action_duration",
                 duration_ms / 1000,
                 tags={"action": action_type}
             )
-    
+
     async def record_screenshot(self, test_id: UUID) -> None:
         """Record screenshot taken."""
         async with self._lock:
             if test_id in self.test_metrics:
                 self.test_metrics[test_id].screenshots_taken += 1
-            
+
             await self.record_counter("screenshots.taken")
-    
+
     async def record_counter(
         self,
         name: str,
         value: float = 1.0,
-        tags: Optional[Dict[str, str]] = None
+        tags: dict[str, str] | None = None
     ) -> None:
         """Record a counter metric."""
         metric = MetricValue(value=value, tags=tags or {})
         self.metrics[f"counter.{name}"].append(metric)
-    
+
     async def record_gauge(
         self,
         name: str,
         value: float,
-        tags: Optional[Dict[str, str]] = None
+        tags: dict[str, str] | None = None
     ) -> None:
         """Record a gauge metric."""
         metric = MetricValue(value=value, tags=tags or {})
         self.metrics[f"gauge.{name}"].append(metric)
-    
+
     async def record_timer(
         self,
         name: str,
         duration_seconds: float,
-        tags: Optional[Dict[str, str]] = None
+        tags: dict[str, str] | None = None
     ) -> None:
         """Record a timer metric."""
         metric = MetricValue(value=duration_seconds, tags=tags or {})
         self.metrics[f"timer.{name}"].append(metric)
-    
-    def get_metric_summary(self, metric_name: str) -> Dict[str, Any]:
+
+    def get_metric_summary(self, metric_name: str) -> dict[str, Any]:
         """Get summary statistics for a metric."""
         values = [m.value for m in self.metrics.get(metric_name, [])]
-        
+
         if not values:
             return {
                 "count": 0,
@@ -316,7 +315,7 @@ class MetricsCollector:
                 "p95": 0,
                 "p99": 0
             }
-        
+
         return {
             "count": len(values),
             "sum": sum(values),
@@ -327,30 +326,30 @@ class MetricsCollector:
             "p95": np.percentile(values, 95),
             "p99": np.percentile(values, 99)
         }
-    
-    def get_rate(self, metric_name: str, window_minutes: Optional[int] = None) -> float:
+
+    def get_rate(self, metric_name: str, window_minutes: int | None = None) -> float:
         """Calculate rate per minute for a counter."""
         window = timedelta(minutes=window_minutes) if window_minutes else self.window_size
         cutoff = datetime.now(timezone.utc) - window
-        
+
         values = self.metrics.get(f"counter.{metric_name}", [])
         recent_values = [m for m in values if m.timestamp > cutoff]
-        
+
         if not recent_values:
             return 0.0
-        
+
         total = sum(m.value for m in recent_values)
         duration_minutes = window.total_seconds() / 60
-        
+
         return total / duration_minutes
-    
-    def get_test_summary(self) -> Dict[str, Any]:
+
+    def get_test_summary(self) -> dict[str, Any]:
         """Get summary of all test executions."""
         completed_tests = [
             m for m in self.test_metrics.values()
             if m.outcome is not None
         ]
-        
+
         if not completed_tests:
             return {
                 "total_tests": 0,
@@ -360,11 +359,11 @@ class MetricsCollector:
                 "avg_duration": 0.0,
                 "active_tests": len(self.active_tests)
             }
-        
+
         passed = sum(1 for t in completed_tests if t.outcome == TestOutcome.PASSED)
         failed = sum(1 for t in completed_tests if t.outcome == TestOutcome.FAILED)
         durations = [t.duration_seconds for t in completed_tests if t.duration_seconds]
-        
+
         return {
             "total_tests": len(completed_tests),
             "passed": passed,
@@ -377,8 +376,8 @@ class MetricsCollector:
                 for outcome in TestOutcome
             }
         }
-    
-    def get_performance_summary(self) -> Dict[str, Any]:
+
+    def get_performance_summary(self) -> dict[str, Any]:
         """Get performance metrics summary."""
         return {
             "api_calls": {
@@ -397,15 +396,15 @@ class MetricsCollector:
                 "rate_per_minute": self.get_rate("screenshots.taken")
             }
         }
-    
+
     def _calculate_step_success_rate(self) -> float:
         """Calculate overall step success rate."""
         passed = sum(m.value for m in self.metrics.get("counter.steps.passed", []))
         failed = sum(m.value for m in self.metrics.get("counter.steps.failed", []))
         total = passed + failed
-        
+
         return passed / total if total > 0 else 0.0
-    
+
     def export_metrics(self, filepath: Path) -> None:
         """Export all metrics to JSON file."""
         data = {
@@ -420,10 +419,10 @@ class MetricsCollector:
                 for name in self.metrics.keys()
             }
         }
-        
+
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2)
-    
+
     def reset(self) -> None:
         """Reset all metrics."""
         self.metrics.clear()
@@ -441,12 +440,12 @@ async def start_test(test_id: UUID, test_name: str, **metadata) -> None:
     await _metrics_collector.start_test(test_id, test_name, metadata)
 
 
-async def end_test(test_id: UUID, outcome: TestOutcome, error: Optional[str] = None) -> None:
+async def end_test(test_id: UUID, outcome: TestOutcome, error: str | None = None) -> None:
     """End test tracking."""
     await _metrics_collector.end_test(test_id, outcome, error)
 
 
-async def record_step(test_id: UUID, step_name: str, success: bool, duration_ms: Optional[int] = None) -> None:
+async def record_step(test_id: UUID, step_name: str, success: bool, duration_ms: int | None = None) -> None:
     """Record step outcome."""
     await _metrics_collector.record_step_outcome(test_id, step_name, success, duration_ms)
 

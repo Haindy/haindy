@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from src.core.interfaces import AutomationDriver
-from src.core.types import ActionType, TestStep
+from src.core.types import TestStep
 from src.journal.models import ActionRecord, ExecutionMode, JournalActionResult
 from src.monitoring.logger import get_logger
 
@@ -35,9 +34,9 @@ class DualModeExecutor:
     async def execute_action(
         self,
         step: TestStep,
-        pattern: Optional[ActionRecord] = None,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[JournalActionResult, ExecutionMode, int]:
+        pattern: ActionRecord | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> tuple[JournalActionResult, ExecutionMode, int]:
         del context
         started = time.time()
 
@@ -180,9 +179,9 @@ class DualModeExecutor:
         return False
 
     @staticmethod
-    def _parse_key_value_args(raw_args: str) -> Dict[str, str]:
+    def _parse_key_value_args(raw_args: str) -> dict[str, str]:
         """Parse command args formatted as `key=value` pairs."""
-        parsed: Dict[str, str] = {}
+        parsed: dict[str, str] = {}
         for key, value in re.findall(
             r"(\w+)=('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"|[^\s]+)", raw_args or ""
         ):
@@ -197,7 +196,7 @@ class DualModeExecutor:
         return parsed
 
     @staticmethod
-    def _to_int(value: Optional[str]) -> Optional[int]:
+    def _to_int(value: str | None) -> int | None:
         """Convert a string value to int when possible."""
         if value is None:
             return None
@@ -206,7 +205,7 @@ class DualModeExecutor:
         except (TypeError, ValueError):
             return None
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get execution statistics."""
         attempts = self.stats["scripted_attempts"]
         successes = self.stats["scripted_successes"]

@@ -7,7 +7,6 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +19,11 @@ class CachedCoordinate:
     action: str
     x: int
     y: int
-    resolution: Tuple[int, int]
-    screenshot_hash: Optional[str] = None
+    resolution: tuple[int, int]
+    screenshot_hash: str | None = None
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "CachedCoordinate":
+    def from_dict(cls, payload: dict) -> CachedCoordinate:
         return cls(
             label=str(payload.get("label", "")).strip(),
             action=str(payload.get("action", "")).strip(),
@@ -42,7 +41,7 @@ class CoordinateCache:
         self.cache_path = cache_path
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load(self) -> List[CachedCoordinate]:
+    def _load(self) -> list[CachedCoordinate]:
         if not self.cache_path.exists():
             return []
         try:
@@ -51,7 +50,7 @@ class CoordinateCache:
             logger.debug("Failed to parse coordinate cache; starting empty.", exc_info=True)
             return []
 
-        entries: List[CachedCoordinate] = []
+        entries: list[CachedCoordinate] = []
         if isinstance(raw, list):
             for item in raw:
                 try:
@@ -61,7 +60,7 @@ class CoordinateCache:
                     continue
         return entries
 
-    def _save(self, entries: List[CachedCoordinate]) -> None:
+    def _save(self, entries: list[CachedCoordinate]) -> None:
         serializable = [asdict(entry) for entry in entries]
         self.cache_path.write_text(json.dumps(serializable, indent=2))
 
@@ -69,12 +68,12 @@ class CoordinateCache:
         self,
         label: str,
         action: str,
-        resolution: Tuple[int, int],
-        screenshot_bytes: Optional[bytes] = None,
-    ) -> Optional[CachedCoordinate]:
+        resolution: tuple[int, int],
+        screenshot_bytes: bytes | None = None,
+    ) -> CachedCoordinate | None:
         """Return the newest cached coordinate matching the lookup key."""
         screenshot_hash = self._hash_bytes(screenshot_bytes) if screenshot_bytes else None
-        candidates: List[CachedCoordinate] = []
+        candidates: list[CachedCoordinate] = []
         for entry in self._load():
             if entry.label.lower().strip() != label.lower().strip():
                 continue
@@ -96,8 +95,8 @@ class CoordinateCache:
         action: str,
         x: int,
         y: int,
-        resolution: Tuple[int, int],
-        screenshot_bytes: Optional[bytes] = None,
+        resolution: tuple[int, int],
+        screenshot_bytes: bytes | None = None,
     ) -> CachedCoordinate:
         """Persist a new coordinate without truncation."""
         entries = self._load()
@@ -113,7 +112,7 @@ class CoordinateCache:
         self._save(entries)
         return entry
 
-    def invalidate(self, label: str, action: str, resolution: Tuple[int, int]) -> None:
+    def invalidate(self, label: str, action: str, resolution: tuple[int, int]) -> None:
         """Remove entries matching the failing label/action/resolution."""
         entries = [
             item

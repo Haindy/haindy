@@ -3,8 +3,9 @@ Unit tests for grid overlay system.
 """
 
 import io
-from PIL import Image
+
 import pytest
+from PIL import Image
 
 from src.core.types import GridCoordinate
 from src.grid.overlay import GridOverlay

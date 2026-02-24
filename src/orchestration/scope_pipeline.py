@@ -2,7 +2,7 @@
 Shared helpers for the two-pass scope triage and test planning workflow.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from src.agents.scope_triage import ScopeTriageAgent
 from src.agents.test_planner import TestPlannerAgent
@@ -17,9 +17,9 @@ async def run_scope_triage_and_plan(
     requirements: str,
     planner: TestPlannerAgent,
     triage_agent: ScopeTriageAgent,
-    context: Optional[Dict[str, str]] = None,
-    planner_kwargs: Optional[Dict[str, Any]] = None,
-) -> Tuple[TestPlan, ScopeTriageResult]:
+    context: dict[str, str] | None = None,
+    planner_kwargs: dict[str, Any] | None = None,
+) -> tuple[TestPlan, ScopeTriageResult]:
     """
     Execute the two-pass planning pipeline.
 

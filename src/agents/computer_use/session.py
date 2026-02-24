@@ -9,7 +9,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -21,12 +21,11 @@ except Exception:  # pragma: no cover - optional dependency
     genai = None
 
 from src.config.settings import Settings
-from src.desktop.cache import CoordinateCache
 from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
 from src.core.interfaces import AutomationDriver
+from src.desktop.cache import CoordinateCache
 from src.monitoring.debug_logger import DebugLogger
 from src.utils.model_logging import ModelCallLogger, get_model_logger
-
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ class InteractionConstraints:
             lines.append("- Do NOT scroll (no scroll actions; no mouse wheel).")
         return "\n".join(lines)
 
-    def apply_overrides(self, metadata: Optional[Dict[str, Any]]) -> "InteractionConstraints":
+    def apply_overrides(self, metadata: dict[str, Any] | None) -> InteractionConstraints:
         """Apply optional constraint overrides supplied via runtime metadata."""
         if not metadata:
             return self
@@ -69,7 +68,7 @@ class InteractionConstraints:
         return self
 
     @staticmethod
-    def from_text(text: str) -> "InteractionConstraints":
+    def from_text(text: str) -> InteractionConstraints:
         lowered = (text or "").lower()
         strict_no_scroll = any(
             phrase in lowered
@@ -119,14 +118,14 @@ class InteractionConstraints:
 class ComputerUseSessionResult:
     """Result of executing a Computer Use session."""
 
-    actions: List[ComputerToolTurn] = field(default_factory=list)
-    safety_events: List[SafetyEvent] = field(default_factory=list)
-    final_output: Optional[str] = None
-    response_ids: List[str] = field(default_factory=list)
-    last_response: Optional[Dict[str, Any]] = None
+    actions: list[ComputerToolTurn] = field(default_factory=list)
+    safety_events: list[SafetyEvent] = field(default_factory=list)
+    final_output: str | None = None
+    response_ids: list[str] = field(default_factory=list)
+    last_response: dict[str, Any] | None = None
     terminal_status: Literal["success", "failed"] = "success"
-    terminal_failure_reason: Optional[str] = None
-    terminal_failure_code: Optional[str] = None
+    terminal_failure_reason: str | None = None
+    terminal_failure_code: str | None = None
 
 
 class ComputerUseSession:
@@ -147,13 +146,13 @@ class ComputerUseSession:
         client: AsyncOpenAI,
         automation_driver: AutomationDriver,
         settings: Settings,
-        debug_logger: Optional[DebugLogger] = None,
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
-        google_client: Optional[Any] = None,
+        debug_logger: DebugLogger | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        google_client: Any | None = None,
         environment: str = "browser",
-        coordinate_cache: Optional[CoordinateCache] = None,
-        model_logger: Optional[ModelCallLogger] = None,
+        coordinate_cache: CoordinateCache | None = None,
+        model_logger: ModelCallLogger | None = None,
     ) -> None:
         self._client = client
         self._automation_driver = automation_driver
@@ -182,14 +181,14 @@ class ComputerUseSession:
             self._settings.model_log_path,
             max_screenshots=getattr(self._settings, "max_screenshots", None),
         )
-        self._allowed_actions: Optional[Set[str]] = None
-        self._allowed_domains: Set[str] = self._normalize_domain_set(
+        self._allowed_actions: set[str] | None = None
+        self._allowed_domains: set[str] = self._normalize_domain_set(
             settings.actions_computer_tool_allowed_domains
         )
-        self._blocked_domains: Set[str] = self._normalize_domain_set(
+        self._blocked_domains: set[str] = self._normalize_domain_set(
             settings.actions_computer_tool_blocked_domains
         )
-        self._stateful_actions: Set[str] = {
+        self._stateful_actions: set[str] = {
             "click",
             "double_click",
             "right_click",
@@ -221,11 +220,11 @@ class ComputerUseSession:
     async def run(
         self,
         goal: str,
-        initial_screenshot: Optional[bytes],
-        metadata: Optional[Dict[str, Any]] = None,
-        allowed_actions: Optional[Set[str]] = None,
-        environment: Optional[str] = None,
-        cache_label: Optional[str] = None,
+        initial_screenshot: bytes | None,
+        metadata: dict[str, Any] | None = None,
+        allowed_actions: set[str] | None = None,
+        environment: str | None = None,
+        cache_label: str | None = None,
         cache_action: str = "click",
         use_cache: bool = True,
     ) -> ComputerUseSessionResult:
@@ -290,10 +289,10 @@ class ComputerUseSession:
         self,
         *,
         goal: str,
-        initial_screenshot: Optional[bytes],
-        metadata: Dict[str, Any],
+        initial_screenshot: bytes | None,
+        metadata: dict[str, Any],
         environment: str,
-        cache_label: Optional[str],
+        cache_label: str | None,
         cache_action: str,
         use_cache: bool,
         model: str,
@@ -333,7 +332,7 @@ class ComputerUseSession:
         turn_counter = 0
         previous_response_id = response_dict.get("id")
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
-        loop_history: Deque[Tuple[Tuple[str, ...], str]] = deque(maxlen=loop_window)
+        loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
             computer_calls = extract_computer_calls(response_dict)
@@ -484,7 +483,7 @@ class ComputerUseSession:
             )
 
             response = await self._create_response(follow_up_payload)
-            follow_up_screenshot: Optional[bytes] = None
+            follow_up_screenshot: bytes | None = None
             try:
                 image_url = (
                     follow_up_payload.get("input", [{}])[0]
@@ -518,9 +517,9 @@ class ComputerUseSession:
         self,
         *,
         goal: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         environment: str,
-        cache_label: Optional[str],
+        cache_label: str | None,
         cache_action: str,
         use_cache: bool,
         model: str,
@@ -539,7 +538,7 @@ class ComputerUseSession:
             environment=environment,
         )
 
-        history: List[Any] = list(contents)
+        history: list[Any] = list(contents)
         initial_request = {"model": model, "contents": contents, "config": config}
         response = await self._create_google_response(initial_request)
         await self._model_logger.log_call(
@@ -570,12 +569,12 @@ class ComputerUseSession:
         scroll_turns = 0
         consecutive_ignored = 0
         max_turn_hit = False
-        max_turn_reason: Optional[str] = None
-        max_turn_code: Optional[str] = None
-        last_assistant_text: Optional[str] = None
-        last_response_dict: Optional[Dict[str, Any]] = None
+        max_turn_reason: str | None = None
+        max_turn_code: str | None = None
+        last_assistant_text: str | None = None
+        last_response_dict: dict[str, Any] | None = None
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
-        loop_history: Deque[Tuple[Tuple[str, ...], str]] = deque(maxlen=loop_window)
+        loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
             calls = extract_google_function_calls(response)
@@ -589,7 +588,7 @@ class ComputerUseSession:
             if not calls:
                 break
 
-            executed_turns: List[ComputerToolTurn] = []
+            executed_turns: list[ComputerToolTurn] = []
             for call in calls:
                 turn = ComputerToolTurn(
                     call_id=str(getattr(call, "name", "") or ""),
@@ -773,12 +772,12 @@ class ComputerUseSession:
     async def _execute_tool_action(
         self,
         turn: ComputerToolTurn,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         turn_index: int,
         normalized_coords: bool = False,
         allow_unknown: bool = False,
         environment: str = "browser",
-        cache_label: Optional[str] = None,
+        cache_label: str | None = None,
         cache_action: str = "click",
         use_cache: bool = True,
     ) -> None:
@@ -913,7 +912,7 @@ class ComputerUseSession:
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "drag":
-                    def _coerce_float(value: Any) -> Optional[float]:
+                    def _coerce_float(value: Any) -> float | None:
                         if value is None:
                             return None
                         try:
@@ -1237,7 +1236,7 @@ class ComputerUseSession:
     async def _record_turn_snapshot(
         self,
         turn: ComputerToolTurn,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         turn_index: int,
     ) -> None:
         """Capture screenshot and update metadata after action execution."""
@@ -1256,7 +1255,7 @@ class ComputerUseSession:
         )
 
     async def _execute_click(
-        self, action: Dict[str, Any], viewport_width: int, viewport_height: int
+        self, action: dict[str, Any], viewport_width: int, viewport_height: int
     ) -> None:
         """Execute a primary click event."""
         x, y = normalize_coordinates(
@@ -1270,7 +1269,7 @@ class ComputerUseSession:
         )
 
     async def _execute_special_click(
-        self, action: Dict[str, Any], viewport_width: int, viewport_height: int
+        self, action: dict[str, Any], viewport_width: int, viewport_height: int
     ) -> None:
         """Execute double or right click events."""
         x, y = normalize_coordinates(
@@ -1288,7 +1287,7 @@ class ComputerUseSession:
                 timeout=self._action_timeout_seconds,
             )
 
-    async def _execute_scroll(self, action: Dict[str, Any]) -> None:
+    async def _execute_scroll(self, action: dict[str, Any]) -> None:
         """Execute a scroll event via pixel deltas."""
         scroll_x = int(action.get("scroll_x", 0))
         scroll_y = int(action.get("scroll_y", 0))
@@ -1299,12 +1298,12 @@ class ComputerUseSession:
 
     async def _build_follow_up_request(
         self,
-        previous_response_id: Optional[str],
+        previous_response_id: str | None,
         call: ComputerToolTurn,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         environment: str = "browser",
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Build the payload for a follow-up request after executing an action."""
         screenshot_b64 = call.metadata.get("screenshot_base64")
         if not screenshot_b64:
@@ -1313,7 +1312,7 @@ class ComputerUseSession:
 
         viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
             "tools": [
@@ -1383,9 +1382,9 @@ class ComputerUseSession:
     def _update_loop_history(
         self,
         turn: ComputerToolTurn,
-        history: Deque[Tuple[Tuple[str, ...], str]],
+        history: deque[tuple[tuple[str, ...], str]],
         window: int,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Track repeated Computer Use turns and detect loops."""
         if window < 2:
             return None
@@ -1417,7 +1416,7 @@ class ComputerUseSession:
             }
         return None
 
-    def _compute_turn_signature(self, turn: ComputerToolTurn) -> Optional[Tuple[str, ...]]:
+    def _compute_turn_signature(self, turn: ComputerToolTurn) -> tuple[str, ...] | None:
         """Build a lightweight signature representing the Computer Use turn."""
         action_type_raw = turn.action_type or turn.parameters.get("type")
         if not action_type_raw:
@@ -1427,7 +1426,7 @@ class ComputerUseSession:
             return None
 
         params = turn.parameters or {}
-        signature: List[str] = [action_type]
+        signature: list[str] = [action_type]
 
         def append_coord(label: str, x_value: Any, y_value: Any) -> None:
             coord = self._format_coordinate(x_value, y_value)
@@ -1461,7 +1460,7 @@ class ComputerUseSession:
         return tuple(component for component in signature if component)
 
     @staticmethod
-    def _format_coordinate(x_value: Any, y_value: Any) -> Optional[str]:
+    def _format_coordinate(x_value: Any, y_value: Any) -> str | None:
         """Format coordinate pairs for signature comparison."""
         if x_value is None or y_value is None:
             return None
@@ -1473,7 +1472,7 @@ class ComputerUseSession:
             return f"{x_value}:{y_value}"
 
     @staticmethod
-    def _hash_base64(value: Optional[str]) -> Optional[str]:
+    def _hash_base64(value: str | None) -> str | None:
         """Hash base64 strings for quick comparison without storing raw data."""
         if not value or not isinstance(value, str):
             return None
@@ -1488,10 +1487,10 @@ class ComputerUseSession:
         screenshot_b64: str,
         viewport_width: int,
         viewport_height: int,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         environment: str = "browser",
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Build the payload for the initial Computer Use request."""
         context_lines = []
         if metadata.get("test_plan_name"):
@@ -1513,7 +1512,7 @@ class ComputerUseSession:
         if context_lines:
             context_text = f"{goal}\n\nContext:\n" + "\n".join(f"- {line}" for line in context_lines)
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "tools": [
                 {
@@ -1548,7 +1547,7 @@ class ComputerUseSession:
         return payload
 
     @staticmethod
-    def _sanitize_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_payload_for_log(payload: dict[str, Any]) -> dict[str, Any]:
         def _scrub(value: Any) -> Any:
             if isinstance(value, dict):
                 return {k: _scrub(v) for k, v in value.items()}
@@ -1567,7 +1566,7 @@ class ComputerUseSession:
         viewport_width: int,
         viewport_height: int,
         environment: str = "desktop",
-    ) -> Tuple[List[Any], Any]:
+    ) -> tuple[list[Any], Any]:
         from google.genai import types  # type: ignore
 
         contents = [
@@ -1591,11 +1590,11 @@ class ComputerUseSession:
     async def _build_google_follow_up_request(
         self,
         goal: str,
-        history: List[Any],
-        turns: List[ComputerToolTurn],
+        history: list[Any],
+        turns: list[ComputerToolTurn],
         environment: str = "desktop",
-        model: Optional[str] = None,
-    ) -> Tuple[Dict[str, Any], Any, bytes]:
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], Any, bytes]:
         from google.genai import types  # type: ignore
 
         screenshot_bytes = await self._automation_driver.screenshot()
@@ -1606,7 +1605,7 @@ class ComputerUseSession:
             page_url = ""
         if not page_url:
             page_url = "desktop://"
-        parts: List[Any] = []
+        parts: list[Any] = []
         for turn in turns:
             response_payload = {
                 "status": turn.status,
@@ -1655,13 +1654,13 @@ class ComputerUseSession:
             screenshot_bytes,
         )
 
-    async def _create_response(self, payload: Dict[str, Any]) -> Any:
+    async def _create_response(self, payload: dict[str, Any]) -> Any:
         """Call the OpenAI Responses API with the provided payload."""
         timeout = float(self._settings.openai_request_timeout_seconds)
         logger.debug("Calling OpenAI Responses API", extra={"model": payload.get("model")})
         return await self._client.responses.create(timeout=timeout, **payload)
 
-    async def _create_google_response(self, payload: Dict[str, Any]) -> Any:
+    async def _create_google_response(self, payload: dict[str, Any]) -> Any:
         client = self._ensure_google_client()
         if not client:
             raise ComputerUseExecutionError(
@@ -1676,7 +1675,7 @@ class ComputerUseSession:
                     model=payload.get("model"), contents=contents, config=config
                 )
             if hasattr(client, "responses"):
-                responses = getattr(client, "responses")
+                responses = client.responses
                 if hasattr(responses, "generate"):
                     return responses.generate(**payload)
                 if hasattr(responses, "create"):
@@ -1687,7 +1686,7 @@ class ComputerUseSession:
 
         return await asyncio.to_thread(_call)
 
-    def _ensure_google_client(self) -> Optional[Any]:
+    def _ensure_google_client(self) -> Any | None:
         if self._provider != "google":
             return None
         if self._google_client:
@@ -1706,7 +1705,7 @@ class ComputerUseSession:
                     "VERTEX_LOCATION is required when VERTEX_PROJECT is configured."
                 )
             try:
-                vertex_kwargs: Dict[str, Any] = {
+                vertex_kwargs: dict[str, Any] = {
                     "vertexai": True,
                     "project": vertex_project,
                     "location": vertex_location,
@@ -1760,7 +1759,7 @@ class ComputerUseSession:
         if wait_ms > 0:
             await self._automation_driver.wait(wait_ms)
 
-    async def _maybe_get_current_url(self) -> Optional[str]:
+    async def _maybe_get_current_url(self) -> str | None:
         """Attempt to retrieve the current page URL from the automation driver."""
         get_url = getattr(self._automation_driver, "get_page_url", None)
         if callable(get_url):
@@ -1771,7 +1770,7 @@ class ComputerUseSession:
         return None
 
     @staticmethod
-    def _canonicalize_action_type(action_type: Optional[str]) -> Optional[str]:
+    def _canonicalize_action_type(action_type: str | None) -> str | None:
         """Normalize OpenAI action types to the automation driver's expectations."""
         if not action_type:
             return action_type
@@ -1800,9 +1799,9 @@ class ComputerUseSession:
 
     def _resolve_key_sequence(
         self,
-        action: Dict[str, Any],
-        metadata: Dict[str, Any],
-    ) -> List[str]:
+        action: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> list[str]:
         """Resolve keyboard keys to press from the tool payload or fallback metadata."""
         keys = action.get("keys")
         if isinstance(keys, list) and keys:
@@ -1850,11 +1849,11 @@ class ComputerUseSession:
 
     async def _build_confirmation_request(
         self,
-        previous_response_id: Optional[str],
-        metadata: Dict[str, Any],
+        previous_response_id: str | None,
+        metadata: dict[str, Any],
         environment: str = "browser",
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
         confirmation_text = (
             "Yes, proceed. Execute the requested action now without asking for additional confirmation."
@@ -1865,7 +1864,7 @@ class ComputerUseSession:
 
         viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
             "tools": [
@@ -1893,7 +1892,7 @@ class ComputerUseSession:
 
         return payload
 
-    def _is_action_allowed(self, action_type: Optional[str]) -> tuple[bool, Optional[str]]:
+    def _is_action_allowed(self, action_type: str | None) -> tuple[bool, str | None]:
         """Determine if the requested action type is permitted in the current mode."""
         if not action_type:
             return False, "Computer Use response omitted action type information."
@@ -1969,12 +1968,12 @@ class ComputerUseSession:
         self,
         *,
         result: ComputerUseSessionResult,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         reason: str,
         code: str,
-        response_id: Optional[str],
-        parameters: Optional[Dict[str, Any]] = None,
-        metadata_updates: Optional[Dict[str, Any]] = None,
+        response_id: str | None,
+        parameters: dict[str, Any] | None = None,
+        metadata_updates: dict[str, Any] | None = None,
         call_id_prefix: str = "terminal",
     ) -> ComputerToolTurn:
         """Append a terminal failed system notice turn and mark the result as failed."""
@@ -2002,7 +2001,7 @@ class ComputerUseSession:
         result.terminal_failure_code = code
         return failure_turn
 
-    async def _enforce_domain_policy(self, action_type: Optional[str]) -> None:
+    async def _enforce_domain_policy(self, action_type: str | None) -> None:
         """Prevent interactions with domains outside defined allow/block lists."""
         if (not self._allowed_domains and not self._blocked_domains) or not action_type:
             return
@@ -2036,8 +2035,8 @@ class ComputerUseSession:
 
     @classmethod
     def _disallowed_action_reason(
-        cls, action_type: Optional[str], environment: str
-    ) -> Optional[str]:
+        cls, action_type: str | None, environment: str
+    ) -> str | None:
         if not action_type:
             return None
         env_mode = cls._normalize_environment_name(environment)
@@ -2054,13 +2053,13 @@ class ComputerUseSession:
 
     def _resolve_coordinates(
         self,
-        action: Dict[str, Any],
+        action: dict[str, Any],
         viewport_width: int,
         viewport_height: int,
         *,
         prefix: str = "",
         normalized: bool = False,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         x = action.get(f"{prefix}x")
         y = action.get(f"{prefix}y")
 
@@ -2084,7 +2083,7 @@ class ComputerUseSession:
         return normalize_coordinates(x, y, viewport_width, viewport_height)
 
     @staticmethod
-    def _action_matches_cache(action_type: Optional[str], cache_action: str) -> bool:
+    def _action_matches_cache(action_type: str | None, cache_action: str) -> bool:
         if not action_type:
             return False
         normalized_action = action_type.lower().strip()
@@ -2102,7 +2101,7 @@ class ComputerUseSession:
         return False
 
     @staticmethod
-    def _extract_scroll_direction(action_type: str, action: Dict[str, Any]) -> Optional[str]:
+    def _extract_scroll_direction(action_type: str, action: dict[str, Any]) -> str | None:
         normalized = (action_type or "").lower()
         if normalized in {"scroll_document", "scroll_at", "scroll_window"}:
             direction = (action.get("direction") or "").lower()
@@ -2144,7 +2143,7 @@ class ComputerUseSession:
             return True
         return False
 
-    async def _maybe_read_clipboard(self, turn: ComputerToolTurn) -> Optional[str]:
+    async def _maybe_read_clipboard(self, turn: ComputerToolTurn) -> str | None:
         reader = getattr(self._automation_driver, "read_clipboard", None)
         if not callable(reader):
             return None
@@ -2167,8 +2166,8 @@ class ComputerUseSession:
         await self._automation_driver.press_key("enter")
 
     def _save_turn_screenshot(
-        self, screenshot_bytes: bytes, suffix: str, step_number: Optional[int]
-    ) -> Optional[str]:
+        self, screenshot_bytes: bytes, suffix: str, step_number: int | None
+    ) -> str | None:
         """Persist a screenshot for observability if a debug logger is available."""
         if not self._debug_logger:
             return None
@@ -2246,7 +2245,7 @@ class ComputerUseSession:
         return '{"' in raw_text or "[{" in raw_text
 
     @staticmethod
-    def _normalize_environment_name(environment: Optional[str]) -> str:
+    def _normalize_environment_name(environment: str | None) -> str:
         value = (environment or "desktop").strip().lower()
         if value in {"unspecified", "env_unspecified", "default"}:
             return "unspecified"
@@ -2273,15 +2272,15 @@ class ComputerUseSession:
         return types.Environment.ENVIRONMENT_UNSPECIFIED
 
     @staticmethod
-    def _is_scroll_action(action_type: Optional[str]) -> bool:
+    def _is_scroll_action(action_type: str | None) -> bool:
         if not action_type:
             return False
         normalized = action_type.lower()
         return normalized in {"scroll", "scroll_at", "scroll_document", "scroll_window"}
 
     @staticmethod
-    def _normalize_domain_set(domains: List[str]) -> Set[str]:
-        normalized: Set[str] = set()
+    def _normalize_domain_set(domains: list[str]) -> set[str]:
+        normalized: set[str] = set()
         for domain in domains or []:
             if not domain:
                 continue
@@ -2306,7 +2305,7 @@ def encode_png_base64(data: bytes) -> str:
     return base64.b64encode(data).decode("utf-8")
 
 
-def normalize_response(response: Any) -> Dict[str, Any]:
+def normalize_response(response: Any) -> dict[str, Any]:
     """Normalize OpenAI response objects into standard dictionaries."""
     if response is None:
         return {}
@@ -2388,7 +2387,7 @@ def normalize_key_sequence(key: str) -> str:
     return normalize_single(key.strip())
 
 
-def extract_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+def extract_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract computer_call items from a response."""
     return [
         item
@@ -2397,9 +2396,9 @@ def extract_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]
     ]
 
 
-def extract_google_function_calls(response_obj: Any) -> List[Any]:
+def extract_google_function_calls(response_obj: Any) -> list[Any]:
     """Extract function_call parts from a Google response object."""
-    calls: List[Any] = []
+    calls: list[Any] = []
     candidates = getattr(response_obj, "candidates", []) or []
     for candidate in candidates:
         content = getattr(candidate, "content", None)
@@ -2413,9 +2412,9 @@ def extract_google_function_calls(response_obj: Any) -> List[Any]:
     return calls
 
 
-def extract_google_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+def extract_google_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract function/call items from a Google response."""
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
     output_items = response_dict.get("output", [])
     for item in output_items:
         if item.get("type") in {"function_call", "computer_call"}:
@@ -2444,14 +2443,14 @@ def extract_google_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[st
     return calls
 
 
-def extract_assistant_text(response_dict: Dict[str, Any]) -> Optional[str]:
+def extract_assistant_text(response_dict: dict[str, Any]) -> str | None:
     """Extract assistant text output from a response."""
     messages = [
         item
         for item in response_dict.get("output", [])
         if item.get("type") == "message"
     ]
-    texts: List[str] = []
+    texts: list[str] = []
     for message in messages:
         for content in message.get("content", []):
             if content.get("type") == "output_text":
@@ -2469,7 +2468,7 @@ def extract_assistant_text(response_dict: Dict[str, Any]) -> Optional[str]:
     return combined or None
 
 
-def _inject_context_metadata(turn: ComputerToolTurn, metadata: Dict[str, Any]) -> None:
+def _inject_context_metadata(turn: ComputerToolTurn, metadata: dict[str, Any]) -> None:
     """Copy high-level context into the turn metadata for observability."""
     if not isinstance(turn.metadata, dict):
         return
@@ -2483,8 +2482,8 @@ def _inject_context_metadata(turn: ComputerToolTurn, metadata: Dict[str, Any]) -
 
 
 def normalize_coordinates(
-    x: Optional[float],
-    y: Optional[float],
+    x: float | None,
+    y: float | None,
     viewport_width: int,
     viewport_height: int,
 ) -> tuple[int, int]:
@@ -2498,8 +2497,8 @@ def normalize_coordinates(
 
 
 def denormalize_coordinates(
-    x: Optional[float],
-    y: Optional[float],
+    x: float | None,
+    y: float | None,
     viewport_width: int,
     viewport_height: int,
 ) -> tuple[int, int]:

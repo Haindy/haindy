@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from src.runtime.evidence import EvidenceManager
 
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 try:
     from src.monitoring.logger import get_run_id
 except Exception:  # pragma: no cover - defensive import
-    get_run_id = lambda: "unknown"  # type: ignore[assignment]
+    def get_run_id():
+        return "unknown"  # type: ignore[assignment]
 
 
 def _now_iso() -> str:
@@ -47,7 +49,7 @@ def _normalize_response_obj(response: Any) -> Any:
     return str(response)
 
 
-def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
+def _sanitize_for_json(value: Any, *, _seen: set[int] | None = None) -> Any:
     """Recursively coerce values into JSON-serializable shapes."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -68,7 +70,7 @@ def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
     _seen.add(value_id)
 
     if isinstance(value, dict):
-        sanitized: Dict[str, Any] = {}
+        sanitized: dict[str, Any] = {}
         for key, item in value.items():
             sanitized[str(key)] = _sanitize_for_json(item, _seen=_seen)
         return sanitized
@@ -92,13 +94,13 @@ def _sanitize_for_json(value: Any, *, _seen: Optional[set[int]] = None) -> Any:
 class ModelCallLogger:
     """Append-only logger for model inputs/outputs with optional screenshots."""
 
-    def __init__(self, log_path: Path, max_screenshots: Optional[int] = None) -> None:
+    def __init__(self, log_path: Path, max_screenshots: int | None = None) -> None:
         self._log_path = log_path
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._screenshot_dir = self._log_path.parent / "screenshots"
         self._screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
-        self._evidence: Optional[EvidenceManager] = None
+        self._evidence: EvidenceManager | None = None
         if max_screenshots is not None and int(max_screenshots) > 0:
             self._evidence = EvidenceManager(self._screenshot_dir, int(max_screenshots))
 
@@ -108,13 +110,13 @@ class ModelCallLogger:
         agent: str,
         model: str,
         prompt: str,
-        request_payload: Optional[Any],
+        request_payload: Any | None,
         response: Any,
-        screenshots: Optional[Sequence[Tuple[str, bytes]]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        screenshots: Sequence[tuple[str, bytes]] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
-        screenshot_entries: List[Dict[str, str]] = []
-        screenshot_errors: List[Dict[str, str]] = []
+        screenshot_entries: list[dict[str, str]] = []
+        screenshot_errors: list[dict[str, str]] = []
         if screenshots:
             for label, data in screenshots:
                 if not data:
@@ -176,15 +178,15 @@ class ModelCallLogger:
         return str(path)
 
 
-_LOGGER_CACHE: Dict[Tuple[Path, Optional[int]], ModelCallLogger] = {}
+_LOGGER_CACHE: dict[tuple[Path, int | None], ModelCallLogger] = {}
 
 
 def get_model_logger(
-    log_path: Path, max_screenshots: Optional[int] = None
+    log_path: Path, max_screenshots: int | None = None
 ) -> ModelCallLogger:
     """Return a singleton logger instance per log file path."""
     resolved = log_path.resolve()
-    normalized_max: Optional[int] = None
+    normalized_max: int | None = None
     if max_screenshots is not None:
         try:
             candidate = int(max_screenshots)

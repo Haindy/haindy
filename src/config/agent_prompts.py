@@ -253,7 +253,7 @@ Guidelines:
 # Prompt Templates
 class PromptTemplates:
     """Reusable prompt templates for agents."""
-    
+
     @staticmethod
     def test_plan_refinement(current_plan: str, feedback: str) -> str:
         """Template for refining an existing test plan."""
@@ -264,7 +264,7 @@ Feedback/Additional Requirements:
 {feedback}
 
 Please provide an updated test plan that addresses the feedback while maintaining the same JSON format."""
-    
+
     @staticmethod
     def action_identification(instruction: str, confidence_threshold: float = 0.8) -> str:
         """Template for action identification from screenshot."""
@@ -277,7 +277,7 @@ Analyze the screenshot with grid overlay and identify:
 4. Whether refinement is recommended (if confidence < {confidence_threshold})
 
 Provide response in JSON format."""
-    
+
     @staticmethod
     def result_evaluation(expected_outcome: str) -> str:
         """Template for evaluating test results."""

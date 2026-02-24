@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from src.config.settings import get_settings
 from src.core.types import GridCoordinate
@@ -16,7 +15,7 @@ from src.monitoring.logger import get_logger
 class DesktopController:
     """High-level controller for desktop automation with grid support."""
 
-    def __init__(self, grid_size: Optional[int] = None) -> None:
+    def __init__(self, grid_size: int | None = None) -> None:
         self.settings = get_settings()
         self.logger = get_logger("desktop.controller")
         self.driver = DesktopDriver(
@@ -75,8 +74,8 @@ class DesktopController:
 
     async def screenshot_with_grid(
         self,
-        save_path: Optional[Path] = None,
-        show_overlay: Optional[bool] = None,
+        save_path: Path | None = None,
+        show_overlay: bool | None = None,
     ) -> bytes:
         if not self._initialized:
             raise RuntimeError("Controller not started. Call start() first.")
@@ -110,7 +109,7 @@ class DesktopController:
             },
         }
 
-    async def __aenter__(self) -> "DesktopController":
+    async def __aenter__(self) -> DesktopController:
         await self.start()
         return self
 

@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.browser.controller import BrowserController
+
 from src.config.settings import get_settings
 from src.core.types import GridCoordinate
 
@@ -20,7 +21,7 @@ from src.core.types import GridCoordinate
 async def main():
     """Run grid system demonstration."""
     settings = get_settings()
-    
+
     print("HAINDY Grid System Demonstration")
     print("=" * 50)
     print(f"Grid Size: {settings.grid_size}x{settings.grid_size}")
@@ -65,7 +66,7 @@ async def main():
 
         # Demonstrate clicking at various grid positions
         print("4. Demonstrating grid clicks...")
-        
+
         # Click positions with descriptions
         click_positions = [
             ("M10", 0.5, 0.5, "Center of page (M10)"),
@@ -80,15 +81,15 @@ async def main():
                 offset_y=offset_y,
                 confidence=0.7,  # Medium confidence to trigger refinement
             )
-            
+
             print(f"   - Clicking at {description}")
             result = await controller.click_at_grid(coord)
-            
+
             if result.refined:
                 print(f"     ✓ Coordinate refined: confidence {coord.confidence:.2f} → {result.confidence:.2f}")
             else:
-                print(f"     - Used original coordinate")
-            
+                print("     - Used original coordinate")
+
             await asyncio.sleep(0.5)
         print()
 

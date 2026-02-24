@@ -7,7 +7,7 @@ import json
 import re
 import shlex
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from src.agents.base_agent import BaseAgent
@@ -34,11 +34,11 @@ class SituationalAssessment:
 
     target_type: str = "desktop_app"
     sufficient: bool = False
-    missing_items: List[str] = field(default_factory=list)
+    missing_items: list[str] = field(default_factory=list)
     setup: SetupInstructions = field(default_factory=SetupInstructions)
-    notes: List[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
-    def as_blocking_questions(self) -> List[str]:
+    def as_blocking_questions(self) -> list[str]:
         if self.missing_items:
             return [f"Missing required context: {item}" for item in self.missing_items]
         return ["Context file is insufficient for entrypoint setup."]
@@ -92,7 +92,7 @@ class SituationalAgent(BaseAgent):
         self,
         requirements: str,
         context_text: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         prompt = (
             "REQUIREMENTS:\n"
             f"{requirements.strip()}\n\n"
@@ -122,7 +122,7 @@ class SituationalAgent(BaseAgent):
 
     def _parse_assessment(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         context_text: str,
     ) -> SituationalAssessment:
         if not payload:
@@ -159,7 +159,7 @@ class SituationalAgent(BaseAgent):
                 missing_items.append("desktop application name or launch command")
                 sufficient = False
 
-        missing_items = sorted(set(item.strip() for item in missing_items if item.strip()))
+        missing_items = sorted({item.strip() for item in missing_items if item.strip()})
         if missing_items:
             sufficient = False
 
@@ -179,7 +179,7 @@ class SituationalAgent(BaseAgent):
             launch_command=self._extract_launch_command(context_text) or "",
             maximize=not self._contains_no_maximize_instruction(context_text),
         )
-        missing_items: List[str] = []
+        missing_items: list[str] = []
         if target_type == "web" and not setup.web_url:
             missing_items.append("web_url")
         if target_type == "desktop_app" and not (setup.launch_command or setup.app_name):
@@ -193,7 +193,7 @@ class SituationalAgent(BaseAgent):
         )
 
     @staticmethod
-    def _ensure_string_list(raw: Any) -> List[str]:
+    def _ensure_string_list(raw: Any) -> list[str]:
         if not raw:
             return []
         if isinstance(raw, list):
@@ -213,7 +213,7 @@ class SituationalAgent(BaseAgent):
         return default
 
     @staticmethod
-    def _extract_url(text: str) -> Optional[str]:
+    def _extract_url(text: str) -> str | None:
         match = re.search(r"https?://[^\s<>'\"()]+", text or "")
         if not match:
             return None
@@ -224,7 +224,7 @@ class SituationalAgent(BaseAgent):
         return candidate
 
     @staticmethod
-    def _extract_launch_command(text: str) -> Optional[str]:
+    def _extract_launch_command(text: str) -> str | None:
         patterns = [
             r"(?:launch[_\s-]*command|start[_\s-]*command)\s*[:=]\s*(.+)",
             r"(?:run|launch)\s+command\s*[:=]\s*(.+)",
@@ -236,7 +236,7 @@ class SituationalAgent(BaseAgent):
         return None
 
     @staticmethod
-    def _extract_app_name(text: str) -> Optional[str]:
+    def _extract_app_name(text: str) -> str | None:
         patterns = [
             r"(?:app[_\s-]*name|application[_\s-]*name|window[_\s-]*name)\s*[:=]\s*(.+)",
             r"(?:focus|open)\s+([A-Za-z0-9._ -]{3,})",
@@ -289,7 +289,7 @@ class SituationalAgent(BaseAgent):
             ["xdotool", "getactivewindow", "windowsize", "100%", "100%"]
         )
 
-    async def _run_best_effort(self, cmd: List[str]) -> None:
+    async def _run_best_effort(self, cmd: list[str]) -> None:
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,

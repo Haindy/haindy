@@ -8,7 +8,7 @@ comprehensive HTML reports with bug details.
 import base64
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 from jinja2 import Template
 
@@ -45,7 +45,7 @@ HTML_TEMPLATE = """
         h1, h2, h3 { color: #333; }
         h1 { margin-bottom: 10px; }
         .test-info { color: #666; margin-bottom: 20px; }
-        
+
         /* Summary Section */
         .summary {
             display: grid;
@@ -70,13 +70,13 @@ HTML_TEMPLATE = """
             text-transform: uppercase;
             letter-spacing: 1px;
         }
-        
+
         /* Status Colors */
         .passed { color: #4caf50; }
         .failed { color: #f44336; }
         .skipped { color: #ff9800; }
         .in-progress { color: #2196f3; }
-        
+
         /* Steps Table */
         table {
             width: 100%;
@@ -97,7 +97,7 @@ HTML_TEMPLATE = """
         tr:hover {
             background: #f9f9f9;
         }
-        
+
         /* Bug Reports */
         .bug-reports {
             margin-top: 40px;
@@ -127,7 +127,7 @@ HTML_TEMPLATE = """
             align-items: center;
             flex-wrap: wrap;
         }
-        
+
         /* Severity Badges */
         .severity-badge {
             padding: 4px 12px;
@@ -152,7 +152,7 @@ HTML_TEMPLATE = """
             background: #2196f3;
             color: white;
         }
-        
+
         /* Confidence Scores */
         .confidence-scores {
             display: flex;
@@ -173,7 +173,7 @@ HTML_TEMPLATE = """
         .confidence-high { color: #4caf50; }
         .confidence-medium { color: #ff9800; }
         .confidence-low { color: #f44336; }
-        
+
         /* Bug Details */
         .bug-section {
             margin: 20px 0;
@@ -200,7 +200,7 @@ HTML_TEMPLATE = """
             overflow-x: auto;
             margin: 10px 0;
         }
-        
+
         /* Screenshots */
         .screenshots {
             display: grid;
@@ -229,7 +229,7 @@ HTML_TEMPLATE = """
         .screenshot-container img:hover {
             transform: scale(1.02);
         }
-        
+
         /* AI Analysis */
         .ai-analysis {
             background: #e8f5e9;
@@ -252,7 +252,7 @@ HTML_TEMPLATE = """
             border-left: 4px solid #2196f3;
             margin: 10px 0;
         }
-        
+
         /* Grid Info */
         .grid-info {
             display: inline-block;
@@ -263,7 +263,7 @@ HTML_TEMPLATE = """
             font-size: 0.9em;
             margin: 0 5px;
         }
-        
+
         /* Lists */
         ul {
             margin: 10px 0;
@@ -272,7 +272,7 @@ HTML_TEMPLATE = """
         li {
             margin: 5px 0;
         }
-        
+
         /* Footer */
         .footer {
             margin-top: 40px;
@@ -288,11 +288,11 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>Test Execution Report</h1>
         <div class="test-info">
-            <strong>{{ test_name }}</strong> | 
-            Generated: {{ generated_at }} | 
+            <strong>{{ test_name }}</strong> |
+            Generated: {{ generated_at }} |
             Duration: {{ duration }}s
         </div>
-        
+
         <!-- Summary Section -->
         <div class="summary">
             <div class="metric">
@@ -318,7 +318,7 @@ HTML_TEMPLATE = """
                 <div class="metric-label">Success Rate</div>
             </div>
         </div>
-        
+
         <!-- Test Steps -->
         <h2>Test Steps</h2>
         <table>
@@ -345,7 +345,7 @@ HTML_TEMPLATE = """
                 {% endfor %}
             </tbody>
         </table>
-        
+
         <!-- Bug Reports -->
         {% if bug_reports %}
         <div class="bug-reports">
@@ -362,7 +362,7 @@ HTML_TEMPLATE = """
                         <span>{{ bug.failure_type }} failure</span>
                     </div>
                 </div>
-                
+
                 <!-- Confidence Scores -->
                 {% if bug.confidence_scores %}
                 <div class="confidence-scores">
@@ -376,7 +376,7 @@ HTML_TEMPLATE = """
                     {% endfor %}
                 </div>
                 {% endif %}
-                
+
                 <!-- Expected vs Actual -->
                 <div class="bug-section">
                     <h4>Expected vs Actual</h4>
@@ -385,7 +385,7 @@ HTML_TEMPLATE = """
                         <strong>Actual:</strong> {{ bug.actual_outcome }}
                     </div>
                 </div>
-                
+
                 <!-- Error Details -->
                 {% if bug.detailed_error %}
                 <div class="bug-section">
@@ -393,7 +393,7 @@ HTML_TEMPLATE = """
                     <div class="error-message">{{ bug.detailed_error }}</div>
                 </div>
                 {% endif %}
-                
+
                 <!-- Grid Information -->
                 {% if bug.grid_cell_targeted %}
                 <div class="bug-section">
@@ -406,7 +406,7 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 {% endif %}
-                
+
                 <!-- Screenshots -->
                 {% if bug.screenshots %}
                 <div class="bug-section">
@@ -415,7 +415,7 @@ HTML_TEMPLATE = """
                         {% for screenshot in bug.screenshots %}
                         <div class="screenshot-container">
                             <div class="screenshot-label">{{ screenshot.label }}</div>
-                            <img src="data:image/png;base64,{{ screenshot.data }}" 
+                            <img src="data:image/png;base64,{{ screenshot.data }}"
                                  alt="{{ screenshot.label }}"
                                  onclick="window.open(this.src, '_blank')">
                         </div>
@@ -423,7 +423,7 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 {% endif %}
-                
+
                 <!-- UI Anomalies -->
                 {% if bug.ui_anomalies %}
                 <div class="bug-section">
@@ -437,7 +437,7 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 {% endif %}
-                
+
                 <!-- AI Recommendations -->
                 {% if bug.suggested_fixes %}
                 <div class="bug-section">
@@ -451,7 +451,7 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 {% endif %}
-                
+
                 <!-- Browser State -->
                 <div class="bug-section">
                     <h4>Browser State</h4>
@@ -466,7 +466,7 @@ HTML_TEMPLATE = """
             {% endfor %}
         </div>
         {% endif %}
-        
+
         <div class="footer">
             Generated by HAINDY Test Automation System
         </div>
@@ -478,56 +478,56 @@ HTML_TEMPLATE = """
 
 class SimpleHTMLReporter:
     """Generate HTML reports from test execution results."""
-    
+
     def __init__(self):
         """Initialize the reporter."""
         self.logger = logger
-    
+
     def generate_report(
         self,
         test_state: TestState,
-        execution_history: List[TestStepResult],
+        execution_history: list[TestStepResult],
         output_path: Path
     ) -> Path:
         """
         Generate HTML report from test state and execution history.
-        
+
         Args:
             test_state: The test state with plan information
             execution_history: List of test step results
             output_path: Path to save the HTML report
-            
+
         Returns:
             Path to the generated report
         """
         # Prepare template data
         template_data = self._prepare_template_data(test_state, execution_history)
-        
+
         # Render template
         template = Template(HTML_TEMPLATE)
         html_content = template.render(**template_data)
-        
+
         # Save to file
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(html_content)
-        
+
         self.logger.info(f"Generated HTML report: {output_path}")
         return output_path
-    
+
     def _prepare_template_data(
         self,
         test_state: TestState,
-        execution_history: List[TestStepResult]
+        execution_history: list[TestStepResult]
     ) -> dict:
         """Prepare data for template rendering."""
 
-        def _encode_image(image_bytes: Optional[bytes]) -> Optional[str]:
+        def _encode_image(image_bytes: bytes | None) -> str | None:
             if not image_bytes:
                 return None
             return base64.b64encode(image_bytes).decode()
 
-        def _build_bug_entry(bug: Optional[Any]) -> Optional[dict]:
+        def _build_bug_entry(bug: Any | None) -> dict | None:
             if bug is None:
                 return None
 
@@ -585,7 +585,7 @@ class SimpleHTMLReporter:
             failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
             success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
 
-            steps: List[dict] = []
+            steps: list[dict] = []
             for test_case in test_report.test_cases:
                 for step_result in test_case.step_results:
                     status_value = getattr(step_result, "status", "in_progress")
@@ -626,7 +626,7 @@ class SimpleHTMLReporter:
             failed_steps = len(getattr(test_state, "failed_steps", []))
             success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
 
-            steps: List[dict] = []
+            steps: list[dict] = []
             for index, step_result in enumerate(execution_history, start=1):
                 step = getattr(step_result, "step", None)
                 step_number = getattr(step, "step_number", index)
@@ -672,7 +672,7 @@ class SimpleHTMLReporter:
                     except TypeError:
                         bug = creator()
                 elif hasattr(entry, "bug_report"):
-                    bug = getattr(entry, "bug_report")
+                    bug = entry.bug_report
 
                 bug_entry = _build_bug_entry(bug)
                 if bug_entry:

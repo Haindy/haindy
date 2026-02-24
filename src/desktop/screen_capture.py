@@ -7,7 +7,6 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Tuple
 from uuid import uuid4
 
 from src.desktop.resolution_manager import ResolutionManager
@@ -23,18 +22,18 @@ class ScreenCapture:
         self,
         resolution_manager: ResolutionManager,
         screenshot_dir: Path,
-        display: Optional[str] = None,
-        max_screenshots: Optional[int] = None,
+        display: str | None = None,
+        max_screenshots: int | None = None,
     ) -> None:
         self.resolution_manager = resolution_manager
         self.screenshot_dir = screenshot_dir
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self.display = display or os.environ.get("DISPLAY", ":0")
-        self._evidence: Optional[EvidenceManager] = None
+        self._evidence: EvidenceManager | None = None
         if max_screenshots is not None and int(max_screenshots) > 0:
             self._evidence = EvidenceManager(self.screenshot_dir, int(max_screenshots))
 
-    def capture(self, label: str) -> Tuple[bytes, str]:
+    def capture(self, label: str) -> tuple[bytes, str]:
         """Capture a single frame and persist it for debugging."""
         width, height = self.resolution_manager.viewport_size()
         cmd = [
@@ -61,8 +60,7 @@ class ScreenCapture:
         )
         result = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
         if result.returncode != 0 or not result.stdout:

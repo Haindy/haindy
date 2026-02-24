@@ -1,7 +1,7 @@
 """Base implementation for AI agents in the HAINDY framework."""
 
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from src.core.interfaces import Agent
 from src.core.types import AgentMessage, ConfidenceLevel
@@ -15,10 +15,10 @@ class BaseAgent(Agent):
         self,
         name: str,
         model: str = "gpt-5.2",
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         temperature: float = 0.7,
         reasoning_level: str = "medium",
-        modalities: Optional[Set[str]] = None,
+        modalities: set[str] | None = None,
     ) -> None:
         """
         Initialize the base agent.
@@ -35,7 +35,7 @@ class BaseAgent(Agent):
         self.temperature = temperature
         self.reasoning_level = reasoning_level
         self.modalities = modalities or {"text"}
-        self._client: Optional[OpenAIClient] = None
+        self._client: OpenAIClient | None = None
 
     def _get_default_system_prompt(self) -> str:
         """Get default system prompt for the agent."""
@@ -56,7 +56,7 @@ class BaseAgent(Agent):
             )
         return self._client
 
-    async def process(self, message: AgentMessage) -> Optional[AgentMessage]:
+    async def process(self, message: AgentMessage) -> AgentMessage | None:
         """
         Process an incoming message.
 
@@ -93,7 +93,7 @@ class BaseAgent(Agent):
 
     async def _generate_response(
         self, message: AgentMessage
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Generate response content for a message.
 
@@ -153,14 +153,14 @@ class BaseAgent(Agent):
 
     async def call_openai(
         self,
-        messages: List[Dict[str, str]],
-        temperature: Optional[float] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-        reasoning_level: Optional[str] = None,
-        modalities: Optional[Set[str]] = None,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        response_format: dict[str, Any] | None = None,
+        reasoning_level: str | None = None,
+        modalities: set[str] | None = None,
         stream: bool = False,
-        stream_observer: Optional[ResponseStreamObserver] = None,
-    ) -> Dict[str, Any]:
+        stream_observer: ResponseStreamObserver | None = None,
+    ) -> dict[str, Any]:
         """
         Make a call to OpenAI API.
 
@@ -194,9 +194,9 @@ class BaseAgent(Agent):
     def build_messages(
         self,
         user_content: str,
-        assistant_content: Optional[str] = None,
+        assistant_content: str | None = None,
         include_history: bool = False,
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """
         Build message list for OpenAI API.
 

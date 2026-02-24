@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +30,9 @@ class ScreenRecorder:
         self.framerate = max(1, framerate)
         self.draw_cursor = draw_cursor
         self.filename_prefix = filename_prefix
-        self._session_path: Optional[str] = None
-        self._file_path: Optional[Path] = None
-        self._gdbus_path: Optional[str] = shutil.which("gdbus")
+        self._session_path: str | None = None
+        self._file_path: Path | None = None
+        self._gdbus_path: str | None = shutil.which("gdbus")
 
     def start(self) -> Path:
         """Start recording and return the destination file path."""
@@ -81,7 +80,7 @@ class ScreenRecorder:
         self._file_path = file_path
         return file_path
 
-    def stop(self) -> Optional[Path]:
+    def stop(self) -> Path | None:
         """Stop recording and return the recorded file path."""
         if not self._session_path:
             return self._file_path
@@ -132,7 +131,7 @@ class ScreenRecorder:
         return path
 
     @staticmethod
-    def _parse_session_path(output: str) -> Optional[str]:
+    def _parse_session_path(output: str) -> str | None:
         matches = re.findall(r"'([^']+)'", output)
         if len(matches) >= 2:
             return matches[1]

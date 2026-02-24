@@ -13,27 +13,26 @@ import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from uuid import uuid4
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.types import ActionType, GridAction, ActionInstruction, GridCoordinate
+from src.core.types import ActionInstruction, ActionType, GridAction, GridCoordinate
 from src.error_handling import (
-    # Exceptions
-    AgentError, BrowserError, ValidationError, TimeoutError,
-    RetryableError, NonRetryableError, HallucinationError,
-    
-    # Recovery
-    RecoveryManager, ExponentialBackoffStrategy, LinearBackoffStrategy,
-    
     # Validation
-    ActionValidator, ConfidenceScorer, HallucinationDetector,
-    ValidationSeverity,
-    
+    ActionValidator,
+    # Exceptions
+    AgentError,
+    BrowserError,
+    ConfidenceScorer,
     # Aggregation
-    ErrorAggregator, ErrorReport
+    ErrorAggregator,
+    ExponentialBackoffStrategy,
+    HallucinationDetector,
+    LinearBackoffStrategy,
+    RecoveryManager,
+    TimeoutError,
+    ValidationError,
 )
 from src.monitoring.logger import setup_logging
 
@@ -44,15 +43,15 @@ async def demonstrate_retry_strategies():
     """Demonstrate different retry strategies."""
     print("\n1. Retry Strategies Demo")
     print("=" * 50)
-    
+
     recovery_manager = RecoveryManager()
-    
+
     # Simulate a flaky operation
     attempt_count = 0
     async def flaky_browser_operation():
         nonlocal attempt_count
         attempt_count += 1
-        
+
         if attempt_count < 3:
             print(f"  Attempt {attempt_count}: Operation failed (simulated)")
             raise BrowserError(
@@ -64,7 +63,7 @@ async def demonstrate_retry_strategies():
         else:
             print(f"  Attempt {attempt_count}: Operation succeeded!")
             return "Success"
-    
+
     # Test exponential backoff
     print("\n  Exponential Backoff Strategy:")
     strategy = ExponentialBackoffStrategy(
@@ -72,7 +71,7 @@ async def demonstrate_retry_strategies():
         max_attempts=5,
         jitter=True
     )
-    
+
     try:
         result = await recovery_manager.execute_with_recovery(
             flaky_browser_operation,
@@ -82,7 +81,7 @@ async def demonstrate_retry_strategies():
         print(f"  Result: {result}")
     except Exception as e:
         print(f"  Failed after all retries: {e}")
-    
+
     # Test linear backoff
     print("\n  Linear Backoff Strategy:")
     attempt_count = 0  # Reset
@@ -90,7 +89,7 @@ async def demonstrate_retry_strategies():
         delay_increment_ms=200,
         max_attempts=4
     )
-    
+
     try:
         result = await recovery_manager.execute_with_recovery(
             flaky_browser_operation,
@@ -100,7 +99,7 @@ async def demonstrate_retry_strategies():
         print(f"  Result: {result}")
     except Exception as e:
         print(f"  Failed: {e}")
-    
+
     # Show statistics
     stats = recovery_manager.get_statistics()
     print("\n  Recovery Statistics:")
@@ -115,9 +114,9 @@ async def demonstrate_hallucination_detection():
     """Demonstrate AI hallucination detection."""
     print("\n\n2. Hallucination Detection Demo")
     print("=" * 50)
-    
+
     detector = HallucinationDetector()
-    
+
     # Test cases
     test_cases = [
         {
@@ -141,35 +140,35 @@ async def demonstrate_hallucination_detection():
             "description": "Agent provides valid coordinates"
         }
     ]
-    
+
     for i, test_case in enumerate(test_cases, 1):
         print(f"\n  Test {i}: {test_case['description']}")
         print(f"  Agent output: \"{test_case['agent_output']}\"")
-        
+
         error = detector.detect_hallucinations(
             test_case["agent_output"],
             "test_agent",
             screenshot_elements=test_case.get("screenshot_elements"),
             viewport_size=test_case.get("viewport_size")
         )
-        
+
         if error:
-            print(f"  ❌ Hallucination detected!")
+            print("  ❌ Hallucination detected!")
             print(f"     Type: {error.hallucination_type}")
             print(f"     Confidence: {error.confidence_score:.2f}")
             print(f"     Evidence: {error.evidence}")
         else:
-            print(f"  ✓ No hallucination detected")
+            print("  ✓ No hallucination detected")
 
 
 async def demonstrate_action_validation():
     """Demonstrate action validation before execution."""
     print("\n\n3. Action Validation Demo")
     print("=" * 50)
-    
+
     validator = ActionValidator()
     scorer = ConfidenceScorer()
-    
+
     # Test actions using proper GridAction structure
     actions = [
         {
@@ -234,27 +233,27 @@ async def demonstrate_action_validation():
             "description": "Missing selector and element"
         }
     ]
-    
+
     for i, test in enumerate(actions, 1):
         print(f"\n  Test {i}: {test['description']}")
-        
+
         # Calculate confidence
         confidence = scorer.calculate_action_confidence(
             test["action"],
             screenshot_analysis={"confidence": 0.8}
         )
         confidence_level = scorer.get_confidence_level(confidence)
-        
+
         print(f"  Confidence: {confidence:.2f} ({confidence_level})")
-        
+
         # Validate action
         is_valid, results = await validator.validate_action(
             test["action"],
             test["context"]
         )
-        
+
         print(f"  Validation: {'✓ PASSED' if is_valid else '❌ FAILED'}")
-        
+
         # Show validation details
         for result in results:
             if not result.is_valid:
@@ -265,12 +264,12 @@ async def demonstrate_error_aggregation():
     """Demonstrate error aggregation and reporting."""
     print("\n\n4. Error Aggregation Demo")
     print("=" * 50)
-    
+
     aggregator = ErrorAggregator("demo_test_123", "Error Handling Demo")
-    
+
     # Simulate test execution with various errors
     print("\n  Simulating test execution with errors...")
-    
+
     # Agent errors
     for i in range(4):
         error = AgentError(
@@ -284,7 +283,7 @@ async def demonstrate_error_aggregation():
             operation="process_instruction",
             recovered=(i < 2)  # First 2 recovered
         )
-    
+
     # Browser errors
     for i in range(3):
         error = BrowserError(
@@ -297,9 +296,9 @@ async def demonstrate_error_aggregation():
             operation="click_element",
             recovered=True  # All recovered
         )
-    
+
     # Timeout errors
-    for i in range(2):
+    for _i in range(2):
         error = TimeoutError(
             "Operation timed out",
             operation="page_load",
@@ -310,7 +309,7 @@ async def demonstrate_error_aggregation():
             operation="load_page",
             recovered=False  # None recovered
         )
-    
+
     # Validation error
     aggregator.add_error(
         ValidationError(
@@ -320,28 +319,28 @@ async def demonstrate_error_aggregation():
         ),
         operation="validate_action"
     )
-    
+
     # Generate report
     report = aggregator.generate_report()
-    
-    print(f"\n  Test Summary:")
+
+    print("\n  Test Summary:")
     print(f"    - Test ID: {report.test_id}")
     print(f"    - Duration: {(report.end_time - report.start_time).total_seconds():.2f}s")
     print(f"    - Total errors: {report.total_errors}")
-    
-    print(f"\n  Errors by Category:")
+
+    print("\n  Errors by Category:")
     for category, count in report.errors_by_category.items():
         print(f"    - {category.name}: {count}")
-    
-    print(f"\n  Critical Errors:")
+
+    print("\n  Critical Errors:")
     if report.critical_errors:
         for error in report.critical_errors:
             print(f"    - {error['error_type']}: {error['count']} occurrences")
             print(f"      Recovery rate: {error['recovery_rate']:.1%}")
     else:
         print("    None (no errors exceeded critical threshold)")
-    
-    print(f"\n  Recovery Summary:")
+
+    print("\n  Recovery Summary:")
     summary = report.recovery_summary
     print(f"    - Total attempts: {summary['total_recovery_attempts']}")
     print(f"    - Successful recoveries: {summary['total_recovery_successes']}")
@@ -350,14 +349,14 @@ async def demonstrate_error_aggregation():
         print(f"    - Best recovery: {summary['best_recovery']}")
     if summary['worst_recovery']:
         print(f"    - Worst recovery: {summary['worst_recovery']}")
-    
-    print(f"\n  Recommendations:")
+
+    print("\n  Recommendations:")
     if report.recommendations:
         for rec in report.recommendations:
             print(f"    - {rec}")
     else:
         print("    No specific recommendations")
-    
+
     # Save report
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
@@ -370,9 +369,9 @@ async def demonstrate_fallback_mechanisms():
     """Demonstrate fallback mechanisms."""
     print("\n\n5. Fallback Mechanisms Demo")
     print("=" * 50)
-    
+
     recovery_manager = RecoveryManager()
-    
+
     # Primary operation that always fails
     async def primary_operation():
         print("  Primary: Attempting browser automation...")
@@ -381,20 +380,20 @@ async def demonstrate_fallback_mechanisms():
             selector="#dynamic-button",
             max_retries=1  # Only retry once
         )
-    
+
     # Fallback using grid coordinates
     async def fallback_operation():
         print("  Fallback: Using grid-based interaction...")
         return "Clicked via grid coordinates"
-    
+
     # Execute with fallback
     print("\n  Executing operation with fallback strategy:")
-    
+
     strategy = LinearBackoffStrategy(
         delay_increment_ms=100,
         max_attempts=2
     )
-    
+
     try:
         result = await recovery_manager.execute_with_recovery(
             primary_operation,
@@ -417,14 +416,14 @@ async def main():
     print("- Pre-execution action validation")
     print("- Comprehensive error aggregation and reporting")
     print("- Fallback mechanisms for resilient test execution")
-    
+
     try:
         await demonstrate_retry_strategies()
         await demonstrate_hallucination_detection()
         await demonstrate_action_validation()
         await demonstrate_error_aggregation()
         await demonstrate_fallback_mechanisms()
-        
+
         print("\n\nDemo Summary")
         print("=" * 50)
         print("✓ Retry strategies ensure resilient test execution")
@@ -433,7 +432,7 @@ async def main():
         print("✓ Error aggregation provides actionable insights")
         print("✓ Fallback mechanisms maximize test success rates")
         print("\nThe error handling system is ready for production use!")
-        
+
     except Exception as e:
         print(f"\nError during demo: {e}")
         import traceback

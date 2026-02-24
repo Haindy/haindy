@@ -5,41 +5,34 @@ This tests the enhanced typing functionality that ensures proper focus
 before typing, with multiple click strategies and focus validation.
 """
 
-import asyncio
-import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from src.agents.action_agent import ActionAgent
-from src.core.interfaces import AutomationDriver
-from src.core.types import (
-    ActionType,
-    ActionInstruction,
-    TestStep,
-    GridCoordinate
-)
 from src.core.enhanced_types import (
-    ValidationResult,
+    AIAnalysis,
     CoordinateResult,
-    ExecutionResult,
     EnvironmentState,
-    AIAnalysis
+    ExecutionResult,
+    ValidationResult,
 )
+from src.core.types import ActionInstruction, ActionType, GridCoordinate, TestStep
 
 
 @pytest.fixture
 def mock_browser_driver():
     """Create a mock browser driver."""
     # Create a minimal valid PNG image
-    from PIL import Image
     import io
+
+    from PIL import Image
     img = Image.new('RGB', (1920, 1080), color='white')
     buffer = io.BytesIO()
     img.save(buffer, format='PNG')
     fake_screenshot = buffer.getvalue()
-    
+
     driver = AsyncMock()
     driver.get_viewport_size = AsyncMock(return_value=(1920, 1080))
     driver.get_page_url = AsyncMock(return_value="https://wikipedia.org")
@@ -55,13 +48,14 @@ def mock_browser_driver():
 def mock_grid_overlay():
     """Create a mock grid overlay."""
     # Create a minimal valid PNG image for overlay
-    from PIL import Image
     import io
+
+    from PIL import Image
     overlay_img = Image.new('RGB', (1920, 1080), color='white')
     buffer = io.BytesIO()
     overlay_img.save(buffer, format='PNG')
     overlay_png_bytes = buffer.getvalue()
-    
+
     overlay = MagicMock()
     overlay.viewport_width = 1920
     overlay.viewport_height = 1080
@@ -88,7 +82,7 @@ def action_agent(mock_browser_driver, mock_grid_overlay):
     agent.use_computer_tool = False
     agent.settings.actions_use_computer_tool = False
     agent.grid_overlay = mock_grid_overlay
-    
+
     # Mock the grid refinement to avoid low confidence issues
     from unittest.mock import MagicMock
     agent.grid_refinement = MagicMock()
@@ -99,10 +93,10 @@ def action_agent(mock_browser_driver, mock_grid_overlay):
         confidence=0.9,
         refined=True
     )
-    
+
     # Disable refinement or set high threshold to ensure our mocked coordinates are used
     agent.refinement_enabled = False
-    
+
     return agent
 
 
@@ -129,22 +123,15 @@ def type_test_step():
 
 class TestEnhancedTypingAction:
     """Test enhanced typing functionality with focus validation."""
-    
+
     @pytest.mark.asyncio
     async def test_type_with_successful_focus_on_first_click(
         self, action_agent, type_test_step, mock_browser_driver
     ):
         """Test typing succeeds when focus is achieved on first click."""
         # Mock the entire execute_action method to return a successful result
-        from src.core.enhanced_types import (
-            EnhancedActionResult,
-            ValidationResult,
-            CoordinateResult,
-            ExecutionResult,
-            EnvironmentState,
-            AIAnalysis
-        )
-        
+        from src.core.enhanced_types import EnhancedActionResult
+
         # Create a successful result
         successful_result = EnhancedActionResult(
             test_step_id=type_test_step.step_id,
@@ -190,7 +177,7 @@ class TestEnhancedTypingAction:
             ),
             overall_success=True
         )
-        
+
         # Mock execute_action to simulate proper execution
         async def mock_execute_action(test_step, context):
             # Simulate the focus click
@@ -198,41 +185,34 @@ class TestEnhancedTypingAction:
             # Simulate typing
             await mock_browser_driver.type_text("Artificial Intelligence")
             return successful_result
-        
+
         with patch.object(action_agent, 'execute_action', new=mock_execute_action):
             # Execute action
             result = await action_agent.execute_action(
                 type_test_step,
                 {"test_plan_name": "Wikipedia Search Test"}
             )
-            
+
             # Verify results
             assert result.overall_success is True
             assert result.validation.valid is True
             assert result.execution.success is True
-            
+
             # Verify click was called once for focus
             assert mock_browser_driver.click.call_count == 1
             mock_browser_driver.click.assert_called_with(960, 540)
-            
+
             # Verify text was typed
             mock_browser_driver.type_text.assert_called_once_with("Artificial Intelligence")
-    
+
     @pytest.mark.asyncio
     async def test_type_with_double_click_strategy(
         self, action_agent, type_test_step, mock_browser_driver
     ):
         """Test typing falls back to double-click when single click doesn't focus."""
         # Mock the entire execute_action method
-        from src.core.enhanced_types import (
-            EnhancedActionResult,
-            ValidationResult,
-            CoordinateResult,
-            ExecutionResult,
-            EnvironmentState,
-            AIAnalysis
-        )
-        
+        from src.core.enhanced_types import EnhancedActionResult
+
         click_count = 0
         async def mock_execute_action(test_step, context):
             nonlocal click_count
@@ -245,7 +225,7 @@ class TestEnhancedTypingAction:
                 await mock_browser_driver.click(960, 540)  # Third click (double-click)
             # Type the text
             await mock_browser_driver.type_text("Artificial Intelligence")
-            
+
             return EnhancedActionResult(
                 test_step_id=type_test_step.step_id,
                 test_step=type_test_step,
@@ -290,38 +270,31 @@ class TestEnhancedTypingAction:
                 ),
                 overall_success=True
             )
-        
+
         with patch.object(action_agent, 'execute_action', new=mock_execute_action):
             # Execute action
             result = await action_agent.execute_action(
                 type_test_step,
                 {"test_plan_name": "Wikipedia Search Test"}
             )
-            
+
             # Verify results
             assert result.overall_success is True
-            
+
             # Verify double-click strategy was used (3 clicks total)
             assert mock_browser_driver.click.call_count == 3
-            
+
             # Verify text was typed
             mock_browser_driver.type_text.assert_called_once_with("Artificial Intelligence")
-    
+
     @pytest.mark.asyncio
     async def test_type_with_long_wait_strategy(
         self, action_agent, type_test_step, mock_browser_driver
     ):
         """Test typing falls back to click with longer wait for slow-loading pages."""
         # Mock the entire execute_action method
-        from src.core.enhanced_types import (
-            EnhancedActionResult,
-            ValidationResult,
-            CoordinateResult,
-            ExecutionResult,
-            EnvironmentState,
-            AIAnalysis
-        )
-        
+        from src.core.enhanced_types import EnhancedActionResult
+
         async def mock_execute_action(test_step, context):
             # Simulate multiple focus attempts with waits
             await mock_browser_driver.click(960, 540)  # First click
@@ -333,7 +306,7 @@ class TestEnhancedTypingAction:
             await mock_browser_driver.wait(1000)       # Long wait
             # Type the text
             await mock_browser_driver.type_text("Artificial Intelligence")
-            
+
             return EnhancedActionResult(
                 test_step_id=type_test_step.step_id,
                 test_step=type_test_step,
@@ -378,42 +351,35 @@ class TestEnhancedTypingAction:
                 ),
                 overall_success=True
             )
-        
+
         with patch.object(action_agent, 'execute_action', new=mock_execute_action):
             # Execute action
             result = await action_agent.execute_action(
                 type_test_step,
                 {"test_plan_name": "Wikipedia Search Test"}
             )
-            
+
             # Verify results
             assert result.overall_success is True
-            
+
             # Verify all click strategies were tried (4 clicks total)
             assert mock_browser_driver.click.call_count == 4
-            
+
             # Verify long wait was used
             wait_calls = mock_browser_driver.wait.call_args_list
             assert any(call[0][0] == 1000 for call in wait_calls), "Long wait (1000ms) should be used"
-            
+
             # Verify text was typed
             mock_browser_driver.type_text.assert_called_once_with("Artificial Intelligence")
-    
+
     @pytest.mark.asyncio
     async def test_type_fails_when_element_not_focusable(
         self, action_agent, type_test_step, mock_browser_driver
     ):
         """Test typing fails properly when element cannot be focused."""
         # Mock the entire execute_action method to return a failure
-        from src.core.enhanced_types import (
-            EnhancedActionResult,
-            ValidationResult,
-            CoordinateResult,
-            ExecutionResult,
-            EnvironmentState,
-            AIAnalysis
-        )
-        
+        from src.core.enhanced_types import EnhancedActionResult
+
         async def mock_execute_action(test_step, context):
             # Simulate multiple failed focus attempts
             await mock_browser_driver.click(960, 540)  # Try various click strategies
@@ -424,7 +390,7 @@ class TestEnhancedTypingAction:
             await mock_browser_driver.click(960, 540)
             await mock_browser_driver.wait(1000)
             # Do not call type_text since focus failed
-            
+
             return EnhancedActionResult(
                 test_step_id=type_test_step.step_id,
                 test_step=type_test_step,
@@ -470,40 +436,33 @@ class TestEnhancedTypingAction:
                 overall_success=False,
                 failure_phase="execution"
             )
-        
+
         with patch.object(action_agent, 'execute_action', new=mock_execute_action):
             # Execute action
             result = await action_agent.execute_action(
                 type_test_step,
                 {"test_plan_name": "Wikipedia Search Test"}
             )
-            
+
             # Verify failure
             assert result.overall_success is False
             assert result.failure_phase == "execution"
             assert "Failed to type text - element not focusable" in result.execution.error_message
-            
+
             # Verify text was NOT typed
             mock_browser_driver.type_text.assert_not_called()
-    
+
     @pytest.mark.asyncio
     async def test_validation_checks_focusability_for_type_actions(
         self, action_agent, type_test_step, mock_browser_driver
     ):
         """Test validation phase checks if element is focusable for type actions."""
         # Mock the entire execute_action method to return validation failure
-        from src.core.enhanced_types import (
-            EnhancedActionResult,
-            ValidationResult,
-            CoordinateResult,
-            ExecutionResult,
-            EnvironmentState,
-            AIAnalysis
-        )
-        
+        from src.core.enhanced_types import EnhancedActionResult
+
         async def mock_execute_action(test_step, context):
             # Do not perform any browser actions since validation failed
-            
+
             return EnhancedActionResult(
                 test_step_id=type_test_step.step_id,
                 test_step=type_test_step,
@@ -526,20 +485,20 @@ class TestEnhancedTypingAction:
                 overall_success=False,
                 failure_phase="validation"
             )
-        
+
         with patch.object(action_agent, 'execute_action', new=mock_execute_action):
             # Execute action
             result = await action_agent.execute_action(
                 type_test_step,
                 {"test_plan_name": "Wikipedia Search Test"}
             )
-            
+
             # Verify validation failed
             assert result.overall_success is False
             assert result.failure_phase == "validation"
             assert not result.validation.valid
             assert "not a text input field" in result.validation.reasoning
-            
+
             # Verify no clicks or typing occurred
             mock_browser_driver.click.assert_not_called()
             mock_browser_driver.type_text.assert_not_called()
@@ -547,7 +506,7 @@ class TestEnhancedTypingAction:
 
 class TestClickWithFocus:
     """Test enhanced click functionality."""
-    
+
     @pytest.mark.asyncio
     async def test_click_action_uses_enhanced_focus(
         self, action_agent, mock_browser_driver
@@ -568,23 +527,16 @@ class TestClickWithFocus:
             dependencies=[],
             optional=False
         )
-        
+
         # Mock the entire execute_action method for click action
-        from src.core.enhanced_types import (
-            EnhancedActionResult,
-            ValidationResult,
-            CoordinateResult,
-            ExecutionResult,
-            EnvironmentState,
-            AIAnalysis
-        )
-        
+        from src.core.enhanced_types import EnhancedActionResult
+
         async def mock_execute_action(test_step, context):
             # Simulate enhanced click with waits
             await mock_browser_driver.wait(50)   # Pre-click wait
             await mock_browser_driver.click(1056, 540)  # Click at P15 coordinates
             await mock_browser_driver.wait(150)  # Post-click wait
-            
+
             return EnhancedActionResult(
                 test_step_id=click_step.step_id,
                 test_step=click_step,
@@ -629,17 +581,17 @@ class TestClickWithFocus:
                 ),
                 overall_success=True
             )
-        
+
         with patch.object(action_agent, 'execute_action', new=mock_execute_action):
             # Execute action
             result = await action_agent.execute_action(
                 click_step,
                 {"test_plan_name": "Wikipedia Search Test"}
             )
-            
+
             # Verify results
             assert result.overall_success is True
-            
+
             # Verify enhanced click was used
             assert mock_browser_driver.click.call_count == 1
             assert mock_browser_driver.wait.call_count >= 2  # Wait after click

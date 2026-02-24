@@ -99,7 +99,7 @@ class TestTestStep:
 
     def test_create_step(self):
         """Test creating a test step."""
-        instruction = ActionInstruction(
+        ActionInstruction(
             action_type=ActionType.NAVIGATE,
             description="Go to login page",
             value="https://example.com/login",
@@ -119,8 +119,8 @@ class TestTestStep:
 
     def test_step_with_dependencies(self):
         """Test creating a step with dependencies."""
-        dep_id = UUID("12345678-1234-5678-1234-567812345678")
-        instruction = ActionInstruction(
+        UUID("12345678-1234-5678-1234-567812345678")
+        ActionInstruction(
             action_type=ActionType.CLICK,
             description="Submit form",
             expected_outcome="Form submitted",
@@ -144,7 +144,7 @@ class TestTestPlan:
 
     def test_create_test_plan(self):
         """Test creating a test plan."""
-        steps = [
+        [
             TestStep(
                 step_number=1,
                 description="Navigate to site",
@@ -205,7 +205,7 @@ class TestTestState:
             test_cases=[],
         )
         step_id = UUID("12345678-1234-5678-1234-567812345678")
-        
+
         state = TestState(
             test_plan=plan,
             status=TestStatus.IN_PROGRESS,
@@ -248,14 +248,14 @@ class TestActionResult:
                 confidence=0.9,
             ),
         )
-        
+
         result = ActionResult(
             success=True,
             action=action,
             execution_time_ms=150,
             confidence=0.95,
         )
-        
+
         assert result.success is True
         assert result.action == action
         assert result.execution_time_ms == 150
@@ -277,7 +277,7 @@ class TestActionResult:
                 confidence=0.9,
             ),
         )
-        
+
         result = ActionResult(
             success=False,
             action=action,
@@ -285,7 +285,7 @@ class TestActionResult:
             confidence=0.3,
             error_message="Element not found at specified coordinates",
         )
-        
+
         assert result.success is False
         assert result.error_message == "Element not found at specified coordinates"
         assert result.confidence == 0.3

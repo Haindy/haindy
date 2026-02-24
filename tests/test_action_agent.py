@@ -5,25 +5,21 @@ These tests focus on the core functionality of the Action Agent without
 getting into implementation details that may change.
 """
 
-import asyncio
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
 from PIL import Image
-from io import BytesIO
 
 from src.agents.action_agent import ActionAgent
-from src.core.interfaces import AutomationDriver
+from src.core.enhanced_types import EnhancedActionResult, ValidationResult
 from src.core.types import (
-    ActionInstruction, ActionType, TestStep,
-    ScrollDirection, VisibilityStatus
-)
-from src.core.enhanced_types import (
-    EnhancedActionResult, ValidationResult, CoordinateResult,
-    ExecutionResult, EnvironmentState, AIAnalysis
+    ActionInstruction,
+    ActionType,
+    TestStep,
 )
 
 
@@ -130,7 +126,7 @@ def test_context():
 
 class TestActionAgentBasics:
     """Basic tests for Action Agent functionality."""
-    
+
     def test_initialization(self, action_agent):
         """Test that action agent initializes correctly."""
         assert action_agent.name == "ActionAgent"
@@ -139,18 +135,18 @@ class TestActionAgentBasics:
         assert action_agent.grid_refinement is not None
         assert action_agent.confidence_threshold == 0.8
         assert action_agent.refinement_enabled is True
-    
+
     def test_conversation_reset(self, action_agent):
         """Test conversation history reset."""
         # Add some dummy history
         action_agent.conversation_history = [{"role": "user", "content": "test"}]
-        
+
         # Reset
         action_agent.reset_conversation()
-        
+
         # Verify cleared
         assert len(action_agent.conversation_history) == 0
-    
+
     @pytest.mark.asyncio
     async def test_execute_action_returns_result(
         self, action_agent, test_step, test_context, sample_screenshot
@@ -169,18 +165,18 @@ class TestActionAgentBasics:
                 reasoning="Test validation"
             )
         )
-        
+
         with patch.object(action_agent, '_execute_click_workflow', AsyncMock(return_value=mock_result)):
             result = await action_agent.execute_action(
                 test_step=test_step,
                 test_context=test_context,
                 screenshot=sample_screenshot
             )
-            
+
             # Verify result
             assert isinstance(result, EnhancedActionResult)
             assert result.test_step_id == test_step.step_id
-    
+
     @pytest.mark.asyncio
     async def test_execute_action_routes_correctly(
         self, action_agent, test_context
@@ -200,12 +196,12 @@ class TestActionAgentBasics:
                 expected_outcome="Page loaded"
             )
         )
-        
+
         # Mock the navigate workflow
         with patch.object(action_agent, '_execute_navigate_workflow', AsyncMock()) as mock_nav:
             await action_agent.execute_action(nav_step, test_context)
             mock_nav.assert_called_once()
-        
+
         # Test click routing
         click_step = TestStep(
             step_number=1,
@@ -219,7 +215,7 @@ class TestActionAgentBasics:
                 expected_outcome="Button clicked"
             )
         )
-        
+
         with patch.object(action_agent, '_execute_click_workflow', AsyncMock()) as mock_click:
             await action_agent.execute_action(click_step, test_context)
             mock_click.assert_called_once()
@@ -265,7 +261,7 @@ class TestActionAgentBasics:
         assert result.execution.success is True
         assert result.validation.valid is True
         assert result.execution.error_message is None
-    
+
     @pytest.mark.asyncio
     async def test_determine_action_basic(
         self, action_agent, sample_screenshot
@@ -277,18 +273,18 @@ class TestActionAgentBasics:
             target="Button",
             expected_outcome="Button clicked"
         )
-        
+
         # Mock the response
         mock_response = {
             "content": '{"cell": "M23", "offset_x": 0.5, "offset_y": 0.5, "confidence": 0.9, "reasoning": "Found button"}'
         }
-        
+
         with patch.object(action_agent, 'call_openai_with_debug', AsyncMock(return_value=mock_response)):
             result = await action_agent.determine_action(
                 screenshot=sample_screenshot,
                 instruction=instruction
             )
-            
+
             # Just verify it returns a result with coordinates
             assert result.coordinate is not None
             assert hasattr(result.coordinate, 'cell')
@@ -297,7 +293,7 @@ class TestActionAgentBasics:
 
 class TestActionAgentIntegration:
     """Integration-style tests that don't rely on specific implementation details."""
-    
+
     @pytest.mark.asyncio
     async def test_navigate_action_workflow(
         self, action_agent, test_context
@@ -316,7 +312,7 @@ class TestActionAgentIntegration:
                 expected_outcome="Login page is loaded"
             )
         )
-        
+
         # Mock the workflow to return a successful result
         mock_result = EnhancedActionResult(
             test_step_id=nav_step.step_id,
@@ -330,32 +326,32 @@ class TestActionAgentIntegration:
                 reasoning="Navigation successful"
             )
         )
-        
+
         with patch.object(action_agent, '_execute_navigate_workflow', AsyncMock(return_value=mock_result)):
             result = await action_agent.execute_action(
                 test_step=nav_step,
                 test_context=test_context
             )
-            
+
             # Basic checks
             assert isinstance(result, EnhancedActionResult)
             assert result.test_step_id == nav_step.step_id
             assert result.overall_success is True
-    
-    @pytest.mark.asyncio 
+
+    @pytest.mark.asyncio
     async def test_error_handling_captures_exceptions(
         self, action_agent, test_step, test_context
     ):
         """Test that exceptions are captured in the result."""
         # Make the browser driver raise an exception
         action_agent.automation_driver.screenshot.side_effect = Exception("Test error")
-        
+
         # Execute - should not raise, but capture error
         result = await action_agent.execute_action(
             test_step=test_step,
             test_context=test_context
         )
-        
+
         # Verify error was captured
         assert isinstance(result, EnhancedActionResult)
         assert result.execution is not None
@@ -365,7 +361,7 @@ class TestActionAgentIntegration:
 
 class TestActionAgentScrolling:
     """Test scrolling functionality basics."""
-    
+
     @pytest.mark.asyncio
     async def test_scroll_action_routes_correctly(
         self, action_agent, test_context
@@ -383,7 +379,7 @@ class TestActionAgentScrolling:
                 expected_outcome="Submit button is visible"
             )
         )
-        
+
         # Mock the scroll workflow
         with patch.object(action_agent, '_execute_scroll_to_element_workflow', AsyncMock()) as mock_scroll:
             await action_agent.execute_action(scroll_step, test_context)
@@ -392,14 +388,14 @@ class TestActionAgentScrolling:
 
 class TestActionAgentUtilities:
     """Test utility methods."""
-    
+
     def test_create_overlay_image(self, action_agent, sample_screenshot):
         """Test overlay image creation doesn't crash."""
         # Just verify it returns bytes and doesn't crash
         result = action_agent._create_overlay_image(sample_screenshot)
         assert isinstance(result, bytes)
         assert len(result) > 0
-    
+
     def test_build_analysis_prompt(self, action_agent):
         """Test prompt building."""
         instruction = ActionInstruction(
@@ -408,9 +404,9 @@ class TestActionAgentUtilities:
             target="Submit button",
             expected_outcome="Form is submitted"
         )
-        
+
         prompt = action_agent._build_analysis_prompt(instruction)
-        
+
         # Basic checks
         assert isinstance(prompt, str)
         assert "submit button" in prompt.lower()

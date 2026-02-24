@@ -2,26 +2,24 @@
 Tests for enhanced error reporting functionality.
 """
 
-import pytest
-from pathlib import Path
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
+from src.core.enhanced_types import AIAnalysis, BugReport
 from src.core.types import (
-    StepResult,
     ActionInstruction,
     ActionType,
-    TestPlan,
-    TestStep,
     TestCase,
     TestCasePriority,
+    TestPlan,
     TestState,
     TestStatus,
-    GridCoordinate
+    TestStep,
 )
-from src.core.enhanced_types import BugReport, AIAnalysis
 from src.monitoring.simple_html_reporter import SimpleHTMLReporter
-from types import SimpleNamespace
 
 
 @pytest.fixture
@@ -75,7 +73,7 @@ def sample_test_plan():
             optional=False
         )
     ]
-    
+
     test_case = TestCase(
         test_id="TC001",
         name="Wikipedia Search Test",
@@ -84,7 +82,7 @@ def sample_test_plan():
         steps=steps,
         tags=["search", "wikipedia"]
     )
-    
+
     return TestPlan(
         plan_id=uuid4(),
         name="Wikipedia Search Test",
@@ -101,7 +99,7 @@ def sample_test_plan():
 def failed_step_result(sample_test_plan):
     """Create a failed step result with detailed error information."""
     step = sample_test_plan.steps[1]  # Click search box step
-    
+
     # Simulate detailed action result from Action Agent
     action_result_details = {
         "action_type": "click",
@@ -141,7 +139,7 @@ def failed_step_result(sample_test_plan):
             ]
         }
     }
-    
+
     # Create a mock TestStepResult since this class doesn't exist in the codebase
     return SimpleNamespace(
         step=step,
@@ -208,7 +206,7 @@ def failed_step_result(sample_test_plan):
 def successful_step_result(sample_test_plan):
     """Create a successful step result."""
     step = sample_test_plan.steps[0]  # Navigate step
-    
+
     action_result_details = {
         "action_type": "navigate",
         "validation_passed": True,
@@ -219,7 +217,7 @@ def successful_step_result(sample_test_plan):
             "actual_outcome": "Successfully navigated to Wikipedia homepage"
         }
     }
-    
+
     # Create a mock TestStepResult for successful case
     return SimpleNamespace(
         step=step,
@@ -234,11 +232,11 @@ def successful_step_result(sample_test_plan):
 
 class TestBugReportCreation:
     """Test BugReport creation from TestStepResult."""
-    
+
     def test_create_bug_report_from_failed_step(self, failed_step_result, sample_test_plan):
         """Test creating a bug report from a failed step."""
         bug_report = failed_step_result.create_bug_report(sample_test_plan.name)
-        
+
         assert bug_report is not None
         assert isinstance(bug_report, BugReport)
         assert bug_report.step_number == 2
@@ -248,28 +246,28 @@ class TestBugReportCreation:
         assert bug_report.grid_cell_targeted == "M15"
         assert bug_report.severity == "critical"  # Non-optional step
         assert bug_report.is_blocking is True
-        
+
         # Check confidence scores
         assert bug_report.confidence_scores["validation"] == 0.95
         assert bug_report.confidence_scores["coordinate"] == 0.85
         assert bug_report.confidence_scores["execution"] == 0.0
         assert bug_report.confidence_scores["evaluation"] == 0.2
-        
+
         # Check AI analysis data
         assert len(bug_report.ui_anomalies) == 2
         assert len(bug_report.suggested_fixes) == 3
         assert "search box not responding" in bug_report.actual_outcome.lower()
-    
+
     def test_no_bug_report_for_successful_step(self, successful_step_result, sample_test_plan):
         """Test that successful steps don't create bug reports."""
         bug_report = successful_step_result.create_bug_report(sample_test_plan.name)
         assert bug_report is None
-    
+
     def test_bug_report_summary(self, failed_step_result, sample_test_plan):
         """Test bug report summary generation."""
         bug_report = failed_step_result.create_bug_report(sample_test_plan.name)
         summary = bug_report.to_summary()
-        
+
         assert "BUG [CRITICAL]" in summary
         assert "Step 2:" in summary
         assert "Click failed" in summary
@@ -280,7 +278,7 @@ class TestBugReportCreation:
 
 class TestSimpleHTMLReporter:
     """Test the simple HTML reporter."""
-    
+
     def test_generate_html_report(self, sample_test_plan, successful_step_result, failed_step_result, tmp_path):
         """Test generating an HTML report with bug details."""
         # Create test state
@@ -296,19 +294,19 @@ class TestSimpleHTMLReporter:
             error_count=1,
             warning_count=0
         )
-        
+
         # Create execution history
         execution_history = [successful_step_result, failed_step_result]
-        
+
         # Generate report
         reporter = SimpleHTMLReporter()
         output_path = tmp_path / "test_report.html"
         result_path = reporter.generate_report(test_state, execution_history, output_path)
-        
+
         # Verify report was created
         assert result_path.exists()
         assert result_path == output_path
-        
+
         # Check content
         content = result_path.read_text()
         assert "Wikipedia Search Test" in content
@@ -320,7 +318,7 @@ class TestSimpleHTMLReporter:
         assert "85%" in content  # Coordinate confidence
         assert "Recommended Fixes" in content
         assert "Try clicking at a different offset" in content
-    
+
     def test_report_without_bugs(self, sample_test_plan, successful_step_result, tmp_path):
         """Test generating a report with no failures."""
         # Create test state with all steps passed
@@ -336,15 +334,15 @@ class TestSimpleHTMLReporter:
             error_count=0,
             warning_count=0
         )
-        
+
         # Create execution history with only successful results
         execution_history = [successful_step_result] * 3
-        
+
         # Generate report
         reporter = SimpleHTMLReporter()
         output_path = tmp_path / "success_report.html"
         result_path = reporter.generate_report(test_state, execution_history, output_path)
-        
+
         # Check content
         content = result_path.read_text()
         assert "Wikipedia Search Test" in content

@@ -3,13 +3,12 @@ Core interfaces and abstract base classes for the HAINDY framework.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.core.types import (
     ActionInstruction,
     ActionResult,
     AgentMessage,
-    EvaluationResult,
     GridAction,
     GridCoordinate,
     TestPlan,
@@ -31,10 +30,10 @@ class Agent(ABC):
         """
         self.name = name
         self.model = model
-        self._message_history: List[AgentMessage] = []
+        self._message_history: list[AgentMessage] = []
 
     @abstractmethod
-    async def process(self, message: AgentMessage) -> Optional[AgentMessage]:
+    async def process(self, message: AgentMessage) -> AgentMessage | None:
         """
         Process an incoming message and optionally return a response.
 
@@ -50,7 +49,7 @@ class Agent(ABC):
         """Add a message to the agent's history."""
         self._message_history.append(message)
 
-    def get_history(self) -> List[AgentMessage]:
+    def get_history(self) -> list[AgentMessage]:
         """Get the agent's message history."""
         return self._message_history.copy()
 
@@ -78,7 +77,7 @@ class TestRunnerAgent(Agent):
     @abstractmethod
     async def get_next_action(
         self, test_plan: TestPlan, current_state: TestState
-    ) -> Optional[ActionInstruction]:
+    ) -> ActionInstruction | None:
         """
         Determine the next action to execute based on current state.
 
@@ -224,7 +223,7 @@ class AutomationDriver(ABC):
         pass
 
     @abstractmethod
-    async def get_viewport_size(self) -> Tuple[int, int]:
+    async def get_viewport_size(self) -> tuple[int, int]:
         """Get current viewport dimensions."""
         pass
 
@@ -255,7 +254,7 @@ class GridSystem(ABC):
         pass
 
     @abstractmethod
-    def coordinate_to_pixels(self, coord: GridCoordinate) -> Tuple[int, int]:
+    def coordinate_to_pixels(self, coord: GridCoordinate) -> tuple[int, int]:
         """
         Convert grid coordinate to pixel position.
 
@@ -268,7 +267,7 @@ class GridSystem(ABC):
         pass
 
     @abstractmethod
-    def get_cell_bounds(self, cell: str) -> Tuple[int, int, int, int]:
+    def get_cell_bounds(self, cell: str) -> tuple[int, int, int, int]:
         """
         Get pixel bounds of a grid cell.
 
@@ -341,6 +340,6 @@ class ConfigProvider(ABC):
         pass
 
     @abstractmethod
-    def get_all(self) -> Dict[str, Any]:
+    def get_all(self) -> dict[str, Any]:
         """Get all configuration values."""
         pass

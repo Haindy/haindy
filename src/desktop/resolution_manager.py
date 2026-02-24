@@ -6,7 +6,6 @@ import logging
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +16,8 @@ class DisplayMode:
 
     width: int
     height: int
-    refresh: Optional[float] = None
-    raw: Optional[str] = None
+    refresh: float | None = None
+    raw: str | None = None
 
 
 class ResolutionManager:
@@ -33,9 +32,9 @@ class ResolutionManager:
         self.preferred_width = preferred_width
         self.preferred_height = preferred_height
         self.enable_switch = enable_switch
-        self._original_mode: Optional[str] = None
-        self._original_output: Optional[str] = None
-        self._current_mode: Optional[DisplayMode] = None
+        self._original_mode: str | None = None
+        self._original_output: str | None = None
+        self._current_mode: DisplayMode | None = None
 
     def detect_current_mode(self) -> DisplayMode:
         """Detect the current resolution using xrandr."""
@@ -59,7 +58,7 @@ class ResolutionManager:
         self._current_mode = mode
         return mode
 
-    def maybe_downshift(self) -> Optional[DisplayMode]:
+    def maybe_downshift(self) -> DisplayMode | None:
         """Optionally switch to preferred resolution when allowed."""
         if not self.enable_switch:
             return self.detect_current_mode()
@@ -148,14 +147,14 @@ class ResolutionManager:
         except Exception as exc:
             logger.warning("Failed to restore original resolution", extra={"error": str(exc)})
 
-    def viewport_size(self) -> Tuple[int, int]:
+    def viewport_size(self) -> tuple[int, int]:
         """Return the current viewport size."""
         if self._current_mode:
             return self._current_mode.width, self._current_mode.height
         mode = self.detect_current_mode()
         return mode.width, mode.height
 
-    def _resolve_primary_output(self, output: str) -> Tuple[Optional[str], Optional[str]]:
+    def _resolve_primary_output(self, output: str) -> tuple[str | None, str | None]:
         for line in output.splitlines():
             if " primary " in line:
                 parts = line.split()
@@ -184,7 +183,7 @@ class ResolutionManager:
                 modes.append(match.group(1))
         return modes
 
-    def _fallback_mode(self, modes: list[str]) -> Optional[str]:
+    def _fallback_mode(self, modes: list[str]) -> str | None:
         """Choose the closest available mode not exceeding the preferred size."""
         if not modes:
             return None
@@ -227,8 +226,7 @@ class ResolutionManager:
     def _run(command: list[str]) -> str:
         result = subprocess.run(
             command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             check=False,
         )

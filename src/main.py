@@ -7,7 +7,7 @@ import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -137,7 +137,7 @@ Examples:
 
 def _create_planning_agents(
     settings,
-) -> Tuple[ScopeTriageAgent, TestPlannerAgent, SituationalAgent]:
+) -> tuple[ScopeTriageAgent, TestPlannerAgent, SituationalAgent]:
     """Instantiate planning + setup agents from current settings."""
     triage_cfg = settings.get_agent_model_config("scope_triage")
     planner_cfg = settings.get_agent_model_config("test_planner")
@@ -170,18 +170,18 @@ def _create_planning_agents(
 async def run_test(
     requirements: str,
     context_text: str,
-    output_dir: Optional[Path] = None,
+    output_dir: Path | None = None,
     report_format: str = "html",
     timeout: int = 7200,
     max_steps: int = 50,
     berserk: bool = False,
-    record_override: Optional[bool] = None,
+    record_override: bool | None = None,
 ) -> int:
     """Run a test with mandatory requirements and context inputs."""
-    desktop_controller: Optional[DesktopController] = None
-    coordinator: Optional[WorkflowCoordinator] = None
-    screen_recorder: Optional[ScreenRecorder] = None
-    recording_artifact_path: Optional[Path] = None
+    desktop_controller: DesktopController | None = None
+    coordinator: WorkflowCoordinator | None = None
+    screen_recorder: ScreenRecorder | None = None
+    recording_artifact_path: Path | None = None
     settings = get_settings()
 
     try:
@@ -361,7 +361,7 @@ async def run_test(
 
 async def _create_coordinator_stack(
     max_steps: int,
-) -> Tuple[DesktopController, WorkflowCoordinator]:
+) -> tuple[DesktopController, WorkflowCoordinator]:
     """Build and initialize the desktop/coordinator stack."""
     desktop_controller = DesktopController()
     await desktop_controller.start()
@@ -382,8 +382,8 @@ async def _run_with_timeout(
     precomputed_plan: TestPlan,
     triage_result: ScopeTriageResult,
     timeout: int,
-    context: Optional[Dict[str, Any]] = None,
-    initial_url: Optional[str] = None,
+    context: dict[str, Any] | None = None,
+    initial_url: str | None = None,
 ) -> TestState:
     """Execute the coordinator run with a timeout guard."""
     return await asyncio.wait_for(
@@ -398,7 +398,7 @@ async def _run_with_timeout(
     )
 
 
-def _print_scope_triage_followups(triage_result: Optional[ScopeTriageResult]) -> None:
+def _print_scope_triage_followups(triage_result: ScopeTriageResult | None) -> None:
     """Display exclusions and ambiguities identified during gating/planning."""
     if triage_result is None:
         return
@@ -523,7 +523,7 @@ async def read_context_file(file_path: Path) -> str:
     return content
 
 
-async def async_main(args: Optional[list[str]] = None) -> int:
+async def async_main(args: list[str] | None = None) -> int:
     """Async main entrypoint."""
     parser = create_parser()
     parsed_args = parser.parse_args(args)
@@ -571,7 +571,7 @@ async def async_main(args: Optional[list[str]] = None) -> int:
     )
 
 
-def main(args: Optional[list[str]] = None) -> int:
+def main(args: list[str] | None = None) -> int:
     """Main entry point for HAINDY."""
     try:
         return asyncio.run(async_main(args))

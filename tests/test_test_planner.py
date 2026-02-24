@@ -3,13 +3,17 @@ Unit tests for Test Planner Agent.
 """
 
 import json
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.agents.test_planner import TestPlannerAgent
-from src.agents.formatters import TestPlanFormatter
-from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep
+from src.core.types import (
+    TestCase,
+    TestCasePriority,
+    TestPlan,
+    TestStep,
+)
 
 
 class TestTestPlannerAgent:
@@ -120,7 +124,7 @@ class TestTestPlannerAgent:
         """Test creating a basic test plan."""
         # Mock the OpenAI call
         agent.call_openai = AsyncMock(return_value=mock_openai_response)
-        
+
         requirements = "Test the login functionality"
         test_plan = await agent.create_test_plan(requirements)
 
@@ -130,7 +134,7 @@ class TestTestPlannerAgent:
         assert test_plan.requirements_source == "Test the login functionality"
         assert len(test_plan.test_cases) == 2
         assert len(test_plan.tags) == 3
-        
+
         # Check first test case
         tc1 = test_plan.test_cases[0]
         assert tc1.test_id == "TC001"
@@ -144,7 +148,7 @@ class TestTestPlannerAgent:
     async def test_create_test_plan_with_context(self, agent, mock_openai_response):
         """Test creating a test plan with additional context."""
         agent.call_openai = AsyncMock(return_value=mock_openai_response)
-        
+
         requirements = "Test the login functionality"
         context = {
             "application": "E-commerce platform",
@@ -160,7 +164,7 @@ class TestTestPlannerAgent:
     async def test_test_plan_steps_structure(self, agent, mock_openai_response):
         """Test that test plan steps have correct structure."""
         agent.call_openai = AsyncMock(return_value=mock_openai_response)
-        
+
         requirements = "Test the login functionality"
         test_plan = await agent.create_test_plan(requirements)
 
@@ -178,7 +182,7 @@ class TestTestPlannerAgent:
         assert tc1.steps[1].action == "Enter username 'testuser' in the username field"
         assert tc1.steps[2].action == "Enter password 'password123' in the password field"
         assert tc1.steps[3].action == "Click the login button"
-        
+
         # Check second test case
         tc2 = test_plan.test_cases[1]
         assert tc2.test_id == "TC002"
@@ -188,7 +192,7 @@ class TestTestPlannerAgent:
     def test_parse_test_plan_response_error(self, agent):
         """Test error handling when parsing invalid response."""
         invalid_response = {"content": "not valid json"}
-        
+
         with pytest.raises(ValueError, match="Failed to parse test plan response"):
             agent._parse_test_plan_response(invalid_response)
 
@@ -284,7 +288,7 @@ class TestTestPlannerAgent:
         })
 
         agent.call_openai = AsyncMock(return_value={"content": refined_response})
-        
+
         feedback = "Add error case testing"
         refined_plan = await agent.refine_test_plan(initial_plan, feedback)
 
@@ -321,7 +325,7 @@ class TestTestPlannerAgent:
         )
 
         serialized = agent._serialize_test_plan(test_plan)
-        
+
         # The serialized output should be markdown
         assert "# Test Plan: Test Plan" in serialized
         assert "**Description**: A test plan" in serialized
@@ -359,7 +363,7 @@ class TestTestPlannerAgent:
         })
 
         agent.call_openai = AsyncMock(return_value={"content": scenarios_response})
-        
+
         requirements = "Test complete login functionality including error cases"
         scenarios = await agent.extract_test_scenarios(requirements)
 
@@ -372,17 +376,17 @@ class TestTestPlannerAgent:
     async def test_extract_test_scenarios_error(self, agent):
         """Test error handling when extracting scenarios fails."""
         agent.call_openai = AsyncMock(return_value={"content": "invalid json"})
-        
+
         requirements = "Test requirements"
         scenarios = await agent.extract_test_scenarios(requirements)
-        
+
         assert scenarios == []  # Should return empty list on error
 
     def test_build_requirements_message(self, agent):
         """Test building requirements message."""
         requirements = "Test login"
         message = agent._build_requirements_message(requirements)
-        
+
         assert "Please create a test plan" in message
         assert requirements in message
         assert "JSON format" in message
@@ -392,7 +396,7 @@ class TestTestPlannerAgent:
         requirements = "Test login"
         context = {"app": "E-commerce", "version": "2.0"}
         message = agent._build_requirements_message(requirements, context)
-        
+
         assert requirements in message
         assert "Additional Context:" in message
         assert "app: E-commerce" in message
@@ -408,11 +412,11 @@ class TestTestPlannerAgent:
             "test_cases": [],
             "tags": []
         })
-        
+
         agent.call_openai = AsyncMock(return_value={"content": mock_response})
-        
+
         await agent.create_test_plan("Test requirements")
-        
+
         # Verify call parameters
         agent.call_openai.assert_called_once()
         call_args = agent.call_openai.call_args

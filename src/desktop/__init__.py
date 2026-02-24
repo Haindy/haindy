@@ -1,6 +1,6 @@
 """Desktop automation helpers for OS-level control."""
 
-from src.desktop.cache import CoordinateCache, CachedCoordinate
+from src.desktop.cache import CachedCoordinate, CoordinateCache
 from src.desktop.controller import DesktopController
 from src.desktop.driver import DesktopDriver
 from src.desktop.execution_replay import (

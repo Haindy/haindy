@@ -10,15 +10,15 @@ Refactored to own the complete action execution lifecycle:
 
 import asyncio
 import base64
+import io
 import json
 import os
 import re
-import traceback
-import io
 import time
+import traceback
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, Optional, Tuple, Any, List, Set
+from typing import Any
 
 from PIL import Image, ImageDraw
 
@@ -27,26 +27,38 @@ from src.agents.computer_use import (
     ComputerUseExecutionError,
     ComputerUseSession,
 )
-from src.core.interfaces import AutomationDriver
 from src.config.agent_prompts import ACTION_AGENT_SYSTEM_PROMPT
 from src.config.settings import get_settings
-from src.core.types import (
-    ActionInstruction, ActionType, GridAction, GridCoordinate, TestStep,
-    ScrollDirection, VisibilityStatus, ScrollParameters, 
-    VisibilityResult, ScrollAction, ScrollState, ScrollResult
-)
 from src.core.enhanced_types import (
-    EnhancedActionResult, ValidationResult, CoordinateResult,
-    ExecutionResult, EnvironmentState, AIAnalysis, ComputerToolTurn
+    AIAnalysis,
+    ComputerToolTurn,
+    CoordinateResult,
+    EnhancedActionResult,
+    EnvironmentState,
+    ExecutionResult,
+    ValidationResult,
 )
-
-OBSERVE_ONLY_ALLOWED_ACTIONS: Set[str] = frozenset({"screenshot", "wait", "scroll"})
-from src.grid.overlay import GridOverlay
-from src.grid.refinement import GridRefinement
-from src.monitoring.logger import get_logger
-from src.monitoring.debug_logger import get_debug_logger
+from src.core.interfaces import AutomationDriver
+from src.core.types import (
+    ActionInstruction,
+    ActionType,
+    GridAction,
+    GridCoordinate,
+    ScrollAction,
+    ScrollDirection,
+    ScrollState,
+    TestStep,
+    VisibilityResult,
+    VisibilityStatus,
+)
 from src.desktop.cache import CoordinateCache
 from src.desktop.execution_replay import DriverActionError, normalize_driver_action
+from src.grid.overlay import GridOverlay
+from src.grid.refinement import GridRefinement
+from src.monitoring.debug_logger import get_debug_logger
+from src.monitoring.logger import get_logger
+
+OBSERVE_ONLY_ALLOWED_ACTIONS: set[str] = frozenset({"screenshot", "wait", "scroll"})
 
 logger = get_logger(__name__)
 
@@ -54,26 +66,26 @@ logger = get_logger(__name__)
 class ActionAgent(BaseAgent):
     """
     Refactored AI agent that owns the complete action execution lifecycle.
-    
+
     This agent:
     1. Validates if an action makes sense in the current context
     2. Analyzes screenshots and determines precise grid coordinates
     3. Executes the browser action
     4. Captures comprehensive results for debugging
-    
+
     The refactored architecture gives Action Agent full responsibility for
     action execution, improving error context and debugging capabilities.
     """
-    
+
     def __init__(
         self,
         name: str = "ActionAgent",
-        automation_driver: Optional[AutomationDriver] = None,
+        automation_driver: AutomationDriver | None = None,
         **kwargs
     ):
         """
         Initialize the Action Agent.
-        
+
         Args:
             name: Agent name
             automation_driver: Automation driver for action execution
@@ -82,13 +94,13 @@ class ActionAgent(BaseAgent):
         super().__init__(name=name, **kwargs)
         self.system_prompt = ACTION_AGENT_SYSTEM_PROMPT
         self.automation_driver = automation_driver
-        
+
         # Initialize grid components and configuration
         settings = get_settings()
         self.settings = settings
         self.grid_overlay = GridOverlay(grid_size=settings.grid_size)
         self.grid_refinement = GridRefinement(base_grid=self.grid_overlay)
-        
+
         # Configuration
         self.confidence_threshold = settings.grid_confidence_threshold
         self.refinement_enabled = settings.grid_refinement_enabled
@@ -105,26 +117,26 @@ class ActionAgent(BaseAgent):
                 "on",
             }
         self._computer_use_model = settings.computer_use_model
-        
+
         # Conversation state - one conversation per action
-        self.conversation_history: List[Dict[str, Any]] = []
-    
+        self.conversation_history: list[dict[str, Any]] = []
+
     async def call_openai_with_debug(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         action_type: str,
-        step_number: Optional[int] = None,
-        temperature: Optional[float] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-        screenshot_path: Optional[str] = None,
-        reasoning_level: Optional[str] = None
-    ) -> Dict[str, Any]:
+        step_number: int | None = None,
+        temperature: float | None = None,
+        response_format: dict[str, Any] | None = None,
+        screenshot_path: str | None = None,
+        reasoning_level: str | None = None
+    ) -> dict[str, Any]:
         """
         Conversation-aware OpenAI API call with debug logging.
-        
+
         This method maintains conversation history within a single action,
         using a token-based sliding window to manage context size.
-        
+
         Args:
             messages: List of message dictionaries for this specific call
             action_type: Type of action being performed
@@ -132,22 +144,22 @@ class ActionAgent(BaseAgent):
             temperature: Override default temperature
             response_format: Optional response format specification
             screenshot_path: Path to associated screenshot if any
-            
+
         Returns:
             API response
         """
         debug_logger = get_debug_logger()
-        
+
         # Add current messages to conversation history
         for msg in messages:
             self.conversation_history.append(msg)
-        
+
         # Build full message list with conversation history
         full_messages = self._build_conversation_messages()
-        
+
         # Extract prompt text for logging
         prompt_text = self._extract_prompt_text(messages)
-        
+
         # Make the API call with full conversation context
         response = await self.call_openai(
             messages=full_messages,
@@ -156,14 +168,14 @@ class ActionAgent(BaseAgent):
             reasoning_level=reasoning_level or self.reasoning_level,
             modalities=self.modalities,
         )
-        
+
         # Add assistant response to conversation history
         assistant_message = {
             "role": "assistant",
             "content": response.get("content", "")
         }
         self.conversation_history.append(assistant_message)
-        
+
         # Log the interaction
         if debug_logger:
             debug_logger.log_ai_interaction(
@@ -180,10 +192,10 @@ class ActionAgent(BaseAgent):
                     "conversation_length": len(self.conversation_history)
                 }
             )
-        
+
         return response
-    
-    def _build_conversation_messages(self) -> List[Dict[str, Any]]:
+
+    def _build_conversation_messages(self) -> list[dict[str, Any]]:
         """
         Return a recent slice of conversation history without token counting.
 
@@ -205,14 +217,14 @@ class ActionAgent(BaseAgent):
                 },
             )
         return list(self.conversation_history[-max_messages:])
-    
-    def _extract_prompt_text(self, messages: List[Dict[str, Any]]) -> str:
+
+    def _extract_prompt_text(self, messages: list[dict[str, Any]]) -> str:
         """
         Extract text content from messages for logging.
-        
+
         Args:
             messages: List of message dictionaries
-            
+
         Returns:
             Extracted text content
         """
@@ -229,15 +241,15 @@ class ActionAgent(BaseAgent):
                             prompt_text += item.get("text", "")
                         elif isinstance(item, dict) and item.get("type") == "image_url":
                             prompt_text += " [IMAGE INCLUDED]"
-        
+
         return prompt_text
-    
+
     def reset_conversation(self):
         """Reset conversation history for a new action."""
         self.conversation_history = []
         logger.debug("Conversation history reset for new action")
-    
-    def _should_use_computer_tool(self, action_type: Optional[ActionType]) -> bool:
+
+    def _should_use_computer_tool(self, action_type: ActionType | None) -> bool:
         """Determine whether to execute the action via the Computer Use tool."""
         if not self.automation_driver:
             return False
@@ -259,10 +271,10 @@ class ActionAgent(BaseAgent):
     def _resolve_safety_identifier(
         self,
         test_step: TestStep,
-        test_context: Dict[str, Any],
+        test_context: dict[str, Any],
     ) -> str:
         """Derive a stable safety identifier for Computer Use requests."""
-        components: List[str] = []
+        components: list[str] = []
         debug_logger = get_debug_logger()
         if debug_logger and getattr(debug_logger, "test_run_id", None):
             components.append(self._slugify_identifier(debug_logger.test_run_id, max_length=24))
@@ -290,9 +302,9 @@ class ActionAgent(BaseAgent):
 
     async def _capture_environment_state(
         self,
-        screenshot: Optional[bytes],
+        screenshot: bytes | None,
         debug_logger,
-        step_number: Optional[int],
+        step_number: int | None,
         label: str,
     ) -> EnvironmentState:
         """Capture the current environment state for debugging."""
@@ -347,7 +359,7 @@ class ActionAgent(BaseAgent):
         cache = self._coordinate_cache
         if hasattr(self.automation_driver, "coordinate_cache"):
             try:
-                cache = getattr(self.automation_driver, "coordinate_cache")
+                cache = self.automation_driver.coordinate_cache
             except Exception:
                 cache = self._coordinate_cache
         return ComputerUseSession(
@@ -363,8 +375,8 @@ class ActionAgent(BaseAgent):
     async def _execute_computer_tool_workflow(
         self,
         test_step: TestStep,
-        test_context: Dict[str, Any],
-        screenshot: Optional[bytes] = None,
+        test_context: dict[str, Any],
+        screenshot: bytes | None = None,
         record_driver_actions: bool = False,
     ) -> EnhancedActionResult:
         """Execute an action using the Computer Use tool and return a rich result."""
@@ -434,7 +446,7 @@ class ActionAgent(BaseAgent):
         # Track goal in conversation history for downstream tooling
         self.conversation_history.append({"role": "user", "content": goal})
 
-        cache_label: Optional[str] = None
+        cache_label: str | None = None
         cache_action = "click"
         if instruction.action_type in {ActionType.CLICK, ActionType.TYPE}:
             cache_label = (
@@ -446,7 +458,7 @@ class ActionAgent(BaseAgent):
             cache_label = test_context.get("cache_label") or cache_label
             cache_action = test_context.get("cache_action") or cache_action
 
-        allowed_actions: Optional[Set[str]] = None
+        allowed_actions: set[str] | None = None
         if is_assert_step:
             allowed_actions = OBSERVE_ONLY_ALLOWED_ACTIONS
 
@@ -535,7 +547,7 @@ class ActionAgent(BaseAgent):
             error_message=execution_error,
         )
 
-        concerns: List[str] = []
+        concerns: list[str] = []
         validation_reason = "Computer Use tool executed the requested action."
         if execution_error:
             concerns.append(execution_error)
@@ -553,7 +565,7 @@ class ActionAgent(BaseAgent):
             concerns=concerns,
         )
 
-        ai_analysis: Optional[AIAnalysis] = None
+        ai_analysis: AIAnalysis | None = None
         if session_result.final_output:
             ai_analysis = AIAnalysis(
                 success=success,
@@ -618,17 +630,17 @@ class ActionAgent(BaseAgent):
 
     @staticmethod
     def _extract_cache_metadata(
-        turns: List[ComputerToolTurn],
-        cache_label: Optional[str],
+        turns: list[ComputerToolTurn],
+        cache_label: str | None,
         cache_action: str,
-    ) -> tuple[bool, Optional[tuple[int, int]], Optional[tuple[int, int]]]:
+    ) -> tuple[bool, tuple[int, int] | None, tuple[int, int] | None]:
         """Derive cache usage and coordinates from executed turns."""
         if not cache_label:
             return False, None, None
 
         cache_hit = False
-        coordinates: Optional[tuple[int, int]] = None
-        resolution: Optional[tuple[int, int]] = None
+        coordinates: tuple[int, int] | None = None
+        resolution: tuple[int, int] | None = None
         for turn in turns:
             meta = getattr(turn, "metadata", {}) or {}
             if meta.get("cache_label") and meta.get("cache_label") != cache_label:
@@ -653,8 +665,8 @@ class ActionAgent(BaseAgent):
         return cache_hit, coordinates, resolution
 
     @classmethod
-    def _extract_driver_actions(cls, turns: List[ComputerToolTurn]) -> List[Dict[str, Any]]:
-        recorded: List[Dict[str, Any]] = []
+    def _extract_driver_actions(cls, turns: list[ComputerToolTurn]) -> list[dict[str, Any]]:
+        recorded: list[dict[str, Any]] = []
         for turn in turns:
             if getattr(turn, "status", None) != "executed":
                 continue
@@ -810,7 +822,7 @@ class ActionAgent(BaseAgent):
                 recorded.append({"type": "type_text", "text": "https://www.google.com/"})
                 recorded.append({"type": "press_key", "keys": "enter"})
 
-        normalized: List[Dict[str, Any]] = []
+        normalized: list[dict[str, Any]] = []
         for action in recorded:
             try:
                 normalized.append(normalize_driver_action(action))
@@ -837,7 +849,7 @@ class ActionAgent(BaseAgent):
         raise ValueError(f"Invalid scroll direction: {direction!r}")
 
     @staticmethod
-    def _canonicalize_replay_keys(raw_keys: Any) -> Optional[str]:
+    def _canonicalize_replay_keys(raw_keys: Any) -> str | None:
         """Normalize replay key payloads into a single driver-compatible string."""
         if raw_keys is None:
             return None
@@ -852,7 +864,7 @@ class ActionAgent(BaseAgent):
     async def _execute_skip_navigation_workflow(
         self,
         test_step: TestStep,
-        test_context: Dict[str, Any],
+        test_context: dict[str, Any],
     ) -> EnhancedActionResult:
         """Return a successful result when navigation is already satisfied."""
         instruction = test_step.action_instruction
@@ -907,26 +919,26 @@ class ActionAgent(BaseAgent):
     async def execute_action(
         self,
         test_step: TestStep,
-        test_context: Dict[str, Any],
-        screenshot: Optional[bytes] = None,
+        test_context: dict[str, Any],
+        screenshot: bytes | None = None,
         record_driver_actions: bool = False,
     ) -> EnhancedActionResult:
         """
         Execute a complete action with multi-step workflow support.
-        
+
         Routes to different workflows based on action type.
-        
+
         Args:
             test_step: The test step to execute
             test_context: Context about the test plan and previous steps
             screenshot: Optional pre-captured screenshot
-            
+
         Returns:
             Comprehensive action result with debugging information
         """
         # Reset conversation for new action
         self.reset_conversation()
-        
+
         instruction = test_step.action_instruction
         action_type_enum = instruction.action_type if instruction else None
         action_type = action_type_enum.value if action_type_enum else "unknown"
@@ -959,7 +971,7 @@ class ActionAgent(BaseAgent):
                     exc_info=True,
                 )
                 raise
-        
+
         # Route to appropriate workflow based on action type
         if action_type == "navigate":
             return await self._execute_navigate_workflow(test_step, test_context)
@@ -1007,16 +1019,16 @@ class ActionAgent(BaseAgent):
                 failure_phase="routing",
                 timestamp_end=datetime.now(timezone.utc)
             )
-    
+
     async def _execute_navigate_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any]
+        self, test_step: TestStep, test_context: dict[str, Any]
     ) -> EnhancedActionResult:
         """Execute navigation action workflow."""
         logger.info("Executing navigation workflow", extra={
             "target": test_step.action_instruction.target,
             "value": test_step.action_instruction.value
         })
-        
+
         # Initialize result
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
@@ -1029,11 +1041,11 @@ class ActionAgent(BaseAgent):
             ),
             timestamp_end=datetime.now(timezone.utc)
         )
-        
+
         try:
             # Phase 8b: Enhanced URL extraction from multiple sources
             url = test_step.action_instruction.value
-            
+
             # If URL not in value, try to get from test context
             if not url or "URL" in url:
                 # Check if test_context has scenario info with URL
@@ -1045,12 +1057,12 @@ class ActionAgent(BaseAgent):
                 elif "url" in test_context:
                     url = test_context["url"]
                     logger.info(f"Found URL in test_context: {url}")
-                
+
                 # Still no URL? Try to infer from description
                 if not url or "URL" in url:
                     desc_lower = test_step.description.lower()
                     target_lower = test_step.action_instruction.target.lower()
-                    
+
                     if "wikipedia" in desc_lower or "wikipedia" in target_lower:
                         url = "https://en.wikipedia.org"
                         logger.info("Inferred Wikipedia URL from description")
@@ -1063,7 +1075,7 @@ class ActionAgent(BaseAgent):
                         )
                         result.failure_phase = "url_extraction"
                         return result
-            
+
             # Capture before state
             if self.automation_driver:
                 result.environment_state_before = EnvironmentState(
@@ -1072,13 +1084,13 @@ class ActionAgent(BaseAgent):
                     viewport_size=await self.automation_driver.get_viewport_size(),
                     screenshot=await self.automation_driver.screenshot()
                 )
-            
+
             # Navigate
             execution_start = asyncio.get_event_loop().time()
             if not self.automation_driver:
                 raise RuntimeError("Automation driver not initialized")
             await self.automation_driver.navigate(url)
-            
+
             # Wait briefly for the page to stabilize before capturing the after-state
             stabilization_seconds = max(
                 self.settings.actions_computer_tool_stabilization_wait_ms / 1000.0,
@@ -1086,7 +1098,7 @@ class ActionAgent(BaseAgent):
             )
             if stabilization_seconds:
                 await asyncio.sleep(stabilization_seconds)
-            
+
             # Capture after state
             screenshot_after = await self.automation_driver.screenshot()
             result.environment_state_after = EnvironmentState(
@@ -1095,7 +1107,7 @@ class ActionAgent(BaseAgent):
                 viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot_after
             )
-            
+
             # Phase 8b: Enhanced visual validation
             validation_prompt = f"""
 I navigated to: {url}
@@ -1123,7 +1135,7 @@ MATCHES_EXPECTED: true/false
 ERROR_TYPE: none/404/blank/connection/wrong_site/other
 REASON: <explanation of any issues>
 """
-            
+
             # Save screenshot for debugging
             debug_logger = get_debug_logger()
             screenshot_path = None
@@ -1133,7 +1145,7 @@ REASON: <explanation of any issues>
                     "navigation_validation",
                     step_number=test_step.step_number
                 )
-            
+
             # Use call_openai directly with image
             messages = [
                 {
@@ -1149,7 +1161,7 @@ REASON: <explanation of any issues>
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="navigation_validation",
@@ -1157,25 +1169,25 @@ REASON: <explanation of any issues>
                 screenshot_path=screenshot_path
             )
             validation_response = response.get("content", "")
-            
+
             # Phase 8b: Enhanced parsing of validation response
             success = "SUCCESS: true" in validation_response
             matches = "MATCHES_EXPECTED: true" in validation_response
-            
+
             # Extract detailed information
             page_desc = ""
             error_type = "none"
             reason = ""
-            
+
             if "PAGE_DESCRIPTION:" in validation_response:
                 page_desc = validation_response.split("PAGE_DESCRIPTION:")[1].split("\n")[0].strip()
-            
+
             if "ERROR_TYPE:" in validation_response:
                 error_type = validation_response.split("ERROR_TYPE:")[1].split("\n")[0].strip()
-            
+
             if "REASON:" in validation_response:
                 reason = validation_response.split("REASON:")[1].strip()
-            
+
             # Create detailed validation result
             validation_confidence = 1.0 if success and matches else 0.0
             validation_reasoning = f"{page_desc}"
@@ -1183,7 +1195,7 @@ REASON: <explanation of any issues>
                 validation_reasoning += f" | Error type: {error_type}"
                 if reason:
                     validation_reasoning += f" | {reason}"
-            
+
             # Set validation result
             result.validation = ValidationResult(
                 valid=success and matches,
@@ -1192,33 +1204,33 @@ REASON: <explanation of any issues>
                 concerns=[] if matches else [f"Navigation may have failed: {error_type}"],
                 suggestions=[] if matches else ["Check URL validity", "Verify expected outcome description"]
             )
-            
+
             # Set execution result with detailed error info
             error_msg = None
             if not success:
                 error_msg = f"Navigation failed - {error_type}: {page_desc}"
             elif not matches:
                 error_msg = f"Page loaded but doesn't match expected: {reason}"
-            
+
             result.execution = ExecutionResult(
                 success=success and matches,
                 execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000,
                 error_message=error_msg
             )
-            
+
             # Create comprehensive AI analysis
             ui_changes = []
             anomalies = []
             recommendations = []
-            
+
             if success:
                 ui_changes.append(f"Navigated to {url}")
                 ui_changes.append(f"Page loaded: {page_desc}")
-            
+
             if not matches:
                 anomalies.append(f"Expected: {test_step.action_instruction.expected_outcome}")
                 anomalies.append(f"Actual: {page_desc}")
-                
+
                 if error_type == "404":
                     recommendations.append("Verify the URL is correct")
                     recommendations.append("Check if the page exists")
@@ -1231,7 +1243,7 @@ REASON: <explanation of any issues>
                 elif error_type == "wrong_site":
                     recommendations.append("Verify the URL in test scenario")
                     recommendations.append("Check for redirects")
-            
+
             result.overall_success = success and matches
             result.ai_analysis = AIAnalysis(
                 success=success and matches,
@@ -1242,10 +1254,10 @@ REASON: <explanation of any issues>
                 recommendations=recommendations,
                 anomalies=anomalies
             )
-            
+
             if not result.overall_success:
                 result.failure_phase = "validation"
-            
+
         except Exception as e:
             logger.error(f"Navigation workflow failed: {str(e)}")
             result.overall_success = False
@@ -1256,18 +1268,18 @@ REASON: <explanation of any issues>
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         return result
-    
+
     async def _execute_click_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute click action workflow with validation."""
         logger.info("Executing click workflow", extra={
             "target": test_step.action_instruction.target,
             "description": test_step.description
         })
-        
+
         # Initialize result
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
@@ -1280,27 +1292,27 @@ REASON: <explanation of any issues>
             ),
             timestamp_end=datetime.now(timezone.utc)
         )
-        
+
         try:
             # Step 1: Capture initial state
             if not screenshot and self.automation_driver:
                 screenshot = await self.automation_driver.screenshot()
-            
+
             # Get viewport for grid initialization
             viewport_size = await self.automation_driver.get_viewport_size()
             self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
-            
+
             result.environment_state_before = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
                 title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
-            
+
             # Step 2: Target Identification with AI
             # Check if this is a retry within the conversation
             is_retry = len(self.conversation_history) > 0
-            
+
             if is_retry:
                 click_prompt = f"""
 Based on our previous analysis, I need to retry clicking on the element.
@@ -1325,7 +1337,7 @@ Please analyze the screenshot with the grid overlay and:
 3. Identify the element type if possible (button, link, icon, etc.)
 4. Provide the grid coordinates
 """
-            
+
             click_prompt += """
 Respond in this format:
 TARGET_FOUND: true/false
@@ -1339,10 +1351,10 @@ CONFIDENCE: <0.0-1.0>
 REASONING: <why you selected this location>
 BLOCKED_BY: <if blocked, what's blocking it>
 """
-            
+
             # Create grid overlay screenshot for analysis
             grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
-            
+
             # Save grid screenshot for debugging
             debug_logger = get_debug_logger()
             screenshot_path = None
@@ -1353,7 +1365,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                     step_number=test_step.step_number,
                     with_grid=True
                 )
-            
+
             messages = [
                 {
                     "role": "user",
@@ -1368,7 +1380,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="click_analysis",
@@ -1376,12 +1388,12 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 screenshot_path=screenshot_path
             )
             click_response = response.get("content", "")
-            
+
             # Parse response
             target_found = "TARGET_FOUND: true" in click_response
             visible = "VISIBLE: true" in click_response
             clickable = "CLICKABLE: true" in click_response
-            
+
             if not target_found:
                 result.overall_success = False
                 result.execution = ExecutionResult(
@@ -1391,7 +1403,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 )
                 result.failure_phase = "identification"
                 return result
-            
+
             if not visible or not clickable:
                 blocked_by = ""
                 if "BLOCKED_BY:" in click_response:
@@ -1404,7 +1416,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 )
                 result.failure_phase = "validation"
                 return result
-            
+
             # Extract coordinates and element type
             grid_cell = ""
             offset_x = 0.5
@@ -1412,7 +1424,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
             element_type = "other"
             confidence = 0.0
             reasoning = ""
-            
+
             if "GRID_CELL:" in click_response:
                 grid_cell = click_response.split("GRID_CELL:")[1].split("\n")[0].strip()
             if "OFFSET_X:" in click_response:
@@ -1425,7 +1437,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 confidence = float(click_response.split("CONFIDENCE:")[1].split("\n")[0].strip())
             if "REASONING:" in click_response:
                 reasoning = click_response.split("REASONING:")[1].split("\n")[0].strip()
-            
+
             # Create coordinate result
             # First create a GridCoordinate object
             grid_coord = GridCoordinate(
@@ -1437,7 +1449,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
             )
             # Convert to pixel coordinates
             pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
-            
+
             result.coordinates = CoordinateResult(
                 grid_cell=grid_cell,
                 grid_coordinates=(pixel_x, pixel_y),
@@ -1447,28 +1459,28 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 reasoning=reasoning,
                 refined=False
             )
-            
+
             # Create grid screenshots for debugging
             result.grid_screenshot_before = grid_screenshot
             result.grid_screenshot_highlighted = self._create_highlighted_screenshot(
                 screenshot, grid_cell
             )
-            
+
             # Step 3: Click Execution
             execution_start = asyncio.get_event_loop().time()
-            
+
             logger.info("Executing click", extra={
                 "coordinates": (pixel_x, pixel_y),
                 "element_type": element_type,
                 "confidence": confidence
             })
-            
+
             await self.automation_driver.click(pixel_x, pixel_y)
-            
+
             # Wait based on element type (or use generic 1s as discussed)
             wait_time = 1000  # Default 1 second
             await self.automation_driver.wait(wait_time)
-            
+
             # Step 4: Capture post-click state
             screenshot_after = await self.automation_driver.screenshot()
             result.environment_state_after = EnvironmentState(
@@ -1477,16 +1489,16 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 viewport_size=viewport_size,
                 screenshot=screenshot_after
             )
-            
+
             execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
-            
+
             # Step 5: Click Validation with AI
             # Special handling for input fields - skip strict focus validation
             target_lower = test_step.action_instruction.target.lower()
             is_input_field = any(term in target_lower for term in ["input", "search", "text", "field", "box"])
             expected_lower = test_step.action_instruction.expected_outcome.lower()
             expects_focus = any(term in expected_lower for term in ["focus", "cursor", "caret"])
-            
+
             if is_input_field and expects_focus:
                 # For input fields expecting focus, we trust the click worked
                 # Cursor blink makes visual validation unreliable
@@ -1530,7 +1542,7 @@ UI_CHANGES: <list what changed>
 UNEXPECTED_CHANGES: <any unexpected behaviors>
 CONFIDENCE: <0.0-1.0>
 """
-            
+
             messages = [
                 {
                     "role": "user",
@@ -1553,7 +1565,7 @@ CONFIDENCE: <0.0-1.0>
                     ]
                 }
             ]
-            
+
             validation_response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="click_validation",
@@ -1561,54 +1573,54 @@ CONFIDENCE: <0.0-1.0>
                 temperature=0.3
             )
             validation_content = validation_response.get("content", "")
-            
+
             # Parse validation
             changes_detected = "CHANGES_DETECTED: true" in validation_content
             expected_met = "EXPECTED_OUTCOME_MET: true" in validation_content
             url_changed = "URL_CHANGED: true" in validation_content
-            
+
             ui_changes = []
             unexpected_changes = []
             validation_confidence = 0.0
-            
+
             if "UI_CHANGES:" in validation_content:
                 ui_changes_text = validation_content.split("UI_CHANGES:")[1].split("\n")[0].strip()
                 ui_changes = [change.strip() for change in ui_changes_text.split(",") if change.strip()]
-            
+
             if "UNEXPECTED_CHANGES:" in validation_content:
                 unexpected_text = validation_content.split("UNEXPECTED_CHANGES:")[1].split("\n")[0].strip()
                 if unexpected_text and unexpected_text.lower() not in ["none", "n/a"]:
                     unexpected_changes = [unexpected_text]
-            
+
             if "CONFIDENCE:" in validation_content:
                 validation_confidence = float(validation_content.split("CONFIDENCE:")[1].split("\n")[0].strip())
-            
+
             # Determine success
             success = changes_detected and expected_met
-            
+
             # Build error message if needed
             error_message = None
             if not changes_detected:
                 error_message = "Click had no effect - no changes detected"
             elif not expected_met:
                 error_message = f"Click executed but unexpected result: {', '.join(ui_changes)}"
-            
+
             # Set results
             result.validation = ValidationResult(
                 valid=True,  # Click was valid to attempt
                 confidence=confidence,
                 reasoning=f"Clicked {element_type} at {grid_cell}: {reasoning}"
             )
-            
+
             result.execution = ExecutionResult(
                 success=success,
                 execution_time_ms=execution_time,
                 error_message=error_message
             )
-            
+
             # Enhance outcome description based on what actually happened
             actual_outcome = f"Clicked {element_type}"
-            
+
             # If URL changed (navigation occurred), describe where we navigated
             if url_changed and result.environment_state_after:
                 new_title = result.environment_state_after.title
@@ -1625,7 +1637,7 @@ CONFIDENCE: <0.0-1.0>
                     actual_outcome = f"Clicked {element_type} - {ui_changes[0]} and {len(ui_changes)-1} other changes"
             else:
                 actual_outcome = f"Clicked {element_type} with no visible changes"
-            
+
             result.ai_analysis = AIAnalysis(
                 success=success,
                 confidence=validation_confidence,
@@ -1635,11 +1647,11 @@ CONFIDENCE: <0.0-1.0>
                 recommendations=[] if success else ["Verify the correct element was clicked", "Check if page needs more time to load"],
                 anomalies=unexpected_changes
             )
-            
+
             result.overall_success = success
             if not success:
                 result.failure_phase = "validation" if changes_detected else "execution"
-            
+
         except Exception as e:
             logger.error(f"Click workflow failed: {str(e)}")
             result.overall_success = False
@@ -1650,11 +1662,11 @@ CONFIDENCE: <0.0-1.0>
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         return result
-    
+
     async def _execute_type_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute type action workflow with focus handling."""
         logger.info("Executing type workflow", extra={
@@ -1662,7 +1674,7 @@ CONFIDENCE: <0.0-1.0>
             "value": test_step.action_instruction.value,
             "description": test_step.description
         })
-        
+
         # Initialize result
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
@@ -1675,23 +1687,23 @@ CONFIDENCE: <0.0-1.0>
             ),
             timestamp_end=datetime.now(timezone.utc)
         )
-        
+
         try:
             # Step 1: Capture initial state
             if not screenshot and self.automation_driver:
                 screenshot = await self.automation_driver.screenshot()
-            
+
             # Get viewport for grid initialization
             viewport_size = await self.automation_driver.get_viewport_size()
             self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
-            
+
             result.environment_state_before = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
                 title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
-            
+
             # Step 2: Input Field Identification
             type_prompt = f"""
 I need to type text into an input field in this screenshot.
@@ -1719,10 +1731,10 @@ REASONING: <why you selected this location>
 CURRENT_VALUE: <any text already in the field>
 BLOCKED_BY: <if blocked, what's blocking it>
 """
-            
+
             # Create grid overlay screenshot for analysis
             grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
-            
+
             # Save grid screenshot for debugging
             debug_logger = get_debug_logger()
             screenshot_path = None
@@ -1733,7 +1745,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                     step_number=test_step.step_number,
                     with_grid=True
                 )
-            
+
             messages = [
                 {
                     "role": "user",
@@ -1748,7 +1760,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="type_analysis",
@@ -1756,12 +1768,12 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 screenshot_path=screenshot_path
             )
             type_response = response.get("content", "")
-            
+
             # Parse response
             input_found = "INPUT_FOUND: true" in type_response
             editable = "EDITABLE: true" in type_response
             has_focus = "HAS_FOCUS: true" in type_response
-            
+
             if not input_found:
                 result.overall_success = False
                 result.execution = ExecutionResult(
@@ -1771,7 +1783,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 )
                 result.failure_phase = "identification"
                 return result
-            
+
             if not editable:
                 blocked_by = ""
                 if "BLOCKED_BY:" in type_response:
@@ -1784,7 +1796,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 )
                 result.failure_phase = "validation"
                 return result
-            
+
             # Extract coordinates and field info
             grid_cell = ""
             offset_x = 0.5
@@ -1793,7 +1805,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
             confidence = 0.0
             reasoning = ""
             current_value = ""
-            
+
             if "GRID_CELL:" in type_response:
                 grid_cell = type_response.split("GRID_CELL:")[1].split("\n")[0].strip()
             if "OFFSET_X:" in type_response:
@@ -1808,7 +1820,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 reasoning = type_response.split("REASONING:")[1].split("\n")[0].strip()
             if "CURRENT_VALUE:" in type_response:
                 current_value = type_response.split("CURRENT_VALUE:")[1].split("\n")[0].strip()
-            
+
             # Create coordinate result
             grid_coord = GridCoordinate(
                 cell=grid_cell,
@@ -1818,7 +1830,7 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 refined=False
             )
             pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
-            
+
             result.coordinates = CoordinateResult(
                 grid_cell=grid_cell,
                 grid_coordinates=(pixel_x, pixel_y),
@@ -1828,32 +1840,32 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 reasoning=reasoning,
                 refined=False
             )
-            
+
             # Create grid screenshots for debugging
             result.grid_screenshot_before = grid_screenshot
             result.grid_screenshot_highlighted = self._create_highlighted_screenshot(
                 screenshot, grid_cell
             )
-            
+
             # Step 3: Robust Focus Detection with Visual Comparison
             execution_start = asyncio.get_event_loop().time()
-            
+
             if not has_focus:
                 logger.info("Input field doesn't have focus, using robust focus detection", extra={
                     "coordinates": (pixel_x, pixel_y),
                     "field_type": field_type
                 })
-                
+
                 # Strategy 1: Click outside first, then click inside to compare
                 viewport_width, viewport_height = await self.automation_driver.get_viewport_size()
-                
+
                 # Click outside the search box (top-left corner)
                 await self.automation_driver.click(50, 50)
                 await self.automation_driver.wait(200)
-                
+
                 # Take screenshot without focus
                 unfocused_screenshot = await self.automation_driver.screenshot()
-                
+
                 # Save unfocused screenshot for debugging
                 debug_logger = get_debug_logger()
                 unfocused_screenshot_path = None
@@ -1863,14 +1875,14 @@ BLOCKED_BY: <if blocked, what's blocking it>
                         "unfocused_field",
                         step_number=test_step.step_number
                     )
-                
+
                 # Click on the input field
                 await self.automation_driver.click(pixel_x, pixel_y)
                 await self.automation_driver.wait(200)
-                
+
                 # Take screenshot with focus
                 focused_screenshot = await self.automation_driver.screenshot()
-                
+
                 # Save focused screenshot for debugging
                 focused_screenshot_path = None
                 if debug_logger:
@@ -1879,14 +1891,14 @@ BLOCKED_BY: <if blocked, what's blocking it>
                         "focused_field",
                         step_number=test_step.step_number
                     )
-                
+
                 # First, show the unfocused screenshot
                 unfocused_prompt = f"""
 Here is a screenshot of the page BEFORE clicking on the input field at grid cell {grid_cell}.
 Please observe the current state of the input field - its border, background, and whether there's a cursor visible.
 I'll show you another screenshot after clicking to compare.
 """
-                
+
                 unfocused_messages = [
                     {
                         "role": "user",
@@ -1901,7 +1913,7 @@ I'll show you another screenshot after clicking to compare.
                         ]
                     }
                 ]
-                
+
                 # Send unfocused screenshot
                 await self.call_openai_with_debug(
                     messages=unfocused_messages,
@@ -1909,7 +1921,7 @@ I'll show you another screenshot after clicking to compare.
                     step_number=test_step.step_number,
                         screenshot_path=unfocused_screenshot_path
                 )
-                
+
                 # Now show the focused screenshot and ask for comparison
                 focus_comparison_prompt = f"""
 Now here is the screenshot AFTER clicking on the input field at grid cell {grid_cell}.
@@ -1926,7 +1938,7 @@ FOCUS_ACHIEVED: true/false
 DIFFERENCES_DESCRIPTION: <describe what changed>
 CONFIDENCE: <0.0-1.0>
 """
-                
+
                 messages = [
                     {
                         "role": "user",
@@ -1941,7 +1953,7 @@ CONFIDENCE: <0.0-1.0>
                         ]
                     }
                 ]
-                
+
                 focus_response = await self.call_openai_with_debug(
                     messages=messages,
                     action_type="focus_comparison",
@@ -1949,15 +1961,15 @@ CONFIDENCE: <0.0-1.0>
                         screenshot_path=f"{unfocused_screenshot_path}, {focused_screenshot_path}"
                 )
                 focus_content = focus_response.get("content", "")
-                
+
                 # Parse focus comparison response
                 visual_differences = "VISUAL_DIFFERENCES: true" in focus_content
                 focus_achieved = "FOCUS_ACHIEVED: true" in focus_content
-                
+
                 if not visual_differences or not focus_achieved:
                     logger.info("No clear visual focus indicators, will validate by typing")
                     focus_achieved = True  # Assume focus and validate with typing later
-            
+
             # Step 4: Clear existing text if needed
             if current_value and current_value.lower() not in ["empty", "none", ""]:
                 logger.info("Clearing existing text", extra={"current_value": current_value})
@@ -1972,16 +1984,16 @@ CONFIDENCE: <0.0-1.0>
                 await self.automation_driver.wait(100)
                 # Type over the selection
                 logger.info("Triple-clicked to select all text")
-            
+
             # Step 5: Type the text with validation
             logger.info("Typing text with validation", extra={
                 "text": test_step.action_instruction.value,
                 "field_type": field_type
             })
-            
+
             # Take screenshot BEFORE typing
             before_typing_screenshot = await self.automation_driver.screenshot()
-            
+
             # Save before typing screenshot for debugging
             before_typing_screenshot_path = None
             if debug_logger:
@@ -1990,14 +2002,14 @@ CONFIDENCE: <0.0-1.0>
                     "before_typing",
                     step_number=test_step.step_number
                 )
-            
+
             # Type the text
             await self.automation_driver.type_text(test_step.action_instruction.value)
             await self.automation_driver.wait(500)  # Wait for text to appear
-            
+
             # Take screenshot AFTER typing
             after_typing_screenshot = await self.automation_driver.screenshot()
-            
+
             # Save after typing screenshot for debugging
             after_typing_screenshot_path = None
             if debug_logger:
@@ -2006,7 +2018,7 @@ CONFIDENCE: <0.0-1.0>
                     "after_typing",
                     step_number=test_step.step_number
                 )
-            
+
             # Step 6: Capture after state and validate
             result.environment_state_after = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
@@ -2014,20 +2026,20 @@ CONFIDENCE: <0.0-1.0>
                 viewport_size=viewport_size,
                 screenshot=after_typing_screenshot
             )
-            
+
             execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
-            
+
             # Step 7: Typing Result Validation with Visual Comparison
             # First, show the before typing screenshot
             before_typing_prompt = f"""
-Here is the screenshot BEFORE typing. Please observe the input field at grid cell {grid_cell} - 
+Here is the screenshot BEFORE typing. Please observe the input field at grid cell {grid_cell} -
 note what text (if any) is currently in the field.
 I'm about to type: "{test_step.action_instruction.value}"
 """
-            
+
             before_messages = [
                 {
-                    "role": "user", 
+                    "role": "user",
                     "content": [
                         {"type": "text", "text": before_typing_prompt},
                         {
@@ -2039,7 +2051,7 @@ I'm about to type: "{test_step.action_instruction.value}"
                     ]
                 }
             ]
-            
+
             # Send before screenshot
             await self.call_openai_with_debug(
                 messages=before_messages,
@@ -2047,7 +2059,7 @@ I'm about to type: "{test_step.action_instruction.value}"
                 step_number=test_step.step_number,
                 screenshot_path=before_typing_screenshot_path
             )
-            
+
             # Now show after typing and ask for validation
             typing_validation_prompt = f"""
 Now here is the screenshot AFTER typing "{test_step.action_instruction.value}".
@@ -2070,7 +2082,7 @@ TYPING_SUCCESSFUL: true/false
 CONFIDENCE: <0.0-1.0>
 REASONING: <explain what you observed>
 """
-            
+
             messages = [
                 {
                     "role": "user",
@@ -2085,7 +2097,7 @@ REASONING: <explain what you observed>
                     ]
                 }
             ]
-            
+
             validation_response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="typing_validation",
@@ -2093,19 +2105,19 @@ REASONING: <explain what you observed>
                 screenshot_path=f"{before_typing_screenshot_path}, {after_typing_screenshot_path}"
             )
             validation_content = validation_response.get("content", "")
-            
+
             # Parse validation
             text_visible = "TEXT_VISIBLE: true" in validation_content
             text_matches = "TEXT_MATCHES: true" in validation_content
             typing_successful = "TYPING_SUCCESSFUL: true" in validation_content
             validation_errors = "VALIDATION_ERRORS: true" in validation_content
-            
+
             actual_text = ""
             error_message = ""
             field_state = "normal"
             validation_confidence = 0.0
             reasoning = ""
-            
+
             if "ACTUAL_TEXT:" in validation_content:
                 actual_text = validation_content.split("ACTUAL_TEXT:")[1].split("\n")[0].strip()
             if "ERROR_MESSAGE:" in validation_content:
@@ -2116,7 +2128,7 @@ REASONING: <explain what you observed>
                 validation_confidence = float(validation_content.split("CONFIDENCE:")[1].split("\n")[0].strip())
             if "REASONING:" in validation_content:
                 reasoning = validation_content.split("REASONING:")[1].strip()
-            
+
             logger.info("Typing validation results", extra={
                 "text_visible": text_visible,
                 "text_matches": text_matches,
@@ -2126,10 +2138,10 @@ REASONING: <explain what you observed>
                 "error_message": error_message,
                 "reasoning": reasoning
             })
-            
+
             # Use the comprehensive typing_successful flag
             success = typing_successful
-            
+
             # Build error message if needed
             error_msg = None
             if not success and not text_visible and field_type != "search":
@@ -2138,20 +2150,20 @@ REASONING: <explain what you observed>
                 error_msg = f"Text mismatch: expected '{test_step.action_instruction.value}', got '{actual_text}'"
             elif validation_errors:
                 error_msg = f"Field validation error: {error_message}"
-            
+
             # Set results
             result.validation = ValidationResult(
                 valid=True,  # Type action was valid to attempt
                 confidence=confidence,
                 reasoning=f"Typed into {field_type} at {grid_cell}: {reasoning}"
             )
-            
+
             result.execution = ExecutionResult(
                 success=success,
                 execution_time_ms=execution_time,
                 error_message=error_msg
             )
-            
+
             result.ai_analysis = AIAnalysis(
                 success=success,
                 confidence=validation_confidence,
@@ -2165,11 +2177,11 @@ REASONING: <explain what you observed>
                 ],
                 anomalies=[f"Field state: {field_state}"] if field_state != "normal" else []
             )
-            
+
             result.overall_success = success
             if not success:
                 result.failure_phase = "validation" if text_visible else "execution"
-            
+
         except Exception as e:
             logger.error(f"Type workflow failed: {str(e)}")
             result.overall_success = False
@@ -2180,17 +2192,17 @@ REASONING: <explain what you observed>
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         return result
-    
+
     async def _execute_assert_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute assert action workflow."""
         logger.info("Executing assert workflow", extra={
             "target": test_step.action_instruction.target
         })
-        
+
         # Initialize result
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
@@ -2203,19 +2215,19 @@ REASONING: <explain what you observed>
             ),
             timestamp_end=datetime.now(timezone.utc)
         )
-        
+
         try:
             # Capture current state
             if not screenshot and self.automation_driver:
                 screenshot = await self.automation_driver.screenshot()
-            
+
             result.environment_state_before = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
                 title=await self.automation_driver.get_page_title(),
                 viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot
             )
-            
+
             # Ask AI to validate assertion
             assert_prompt = f"""
 Please analyze this screenshot and verify:
@@ -2234,7 +2246,7 @@ MATCHES_EXPECTED: true/false
 WHAT_I_SEE: <description>
 REASON: <explanation if it doesn't match>
 """
-            
+
             # Use call_openai directly with image
             messages = [
                 {
@@ -2250,7 +2262,7 @@ REASON: <explanation if it doesn't match>
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="action_execution",
@@ -2258,28 +2270,28 @@ REASON: <explanation if it doesn't match>
                 temperature=0.3
             )
             validation_response = response.get("content", "")
-            
+
             # Parse validation
             visible = "VISIBLE: true" in validation_response
             matches = "MATCHES_EXPECTED: true" in validation_response
-            
+
             # Extract what AI sees
             what_seen = ""
             if "WHAT_I_SEE:" in validation_response:
                 what_seen = validation_response.split("WHAT_I_SEE:")[1].split("\n")[0].strip()
-            
+
             # Set results
             result.validation = ValidationResult(
                 valid=visible and matches,
                 confidence=1.0 if visible and matches else 0.0,
                 reasoning=what_seen
             )
-            
+
             result.execution = ExecutionResult(
                 success=visible and matches,
                 execution_time_ms=0.0  # No action executed, just validation
             )
-            
+
             result.overall_success = visible and matches
             result.ai_analysis = AIAnalysis(
                 success=visible and matches,
@@ -2290,10 +2302,10 @@ REASON: <explanation if it doesn't match>
                 recommendations=[],
                 anomalies=[] if visible and matches else [f"Expected outcome not visible: {what_seen}"]
             )
-            
+
             if not result.overall_success:
                 result.failure_phase = "assertion"
-            
+
         except Exception as e:
             logger.error(f"Assert workflow failed: {str(e)}")
             result.overall_success = False
@@ -2304,17 +2316,17 @@ REASON: <explanation if it doesn't match>
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         return result
-    
+
     async def _execute_key_press_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute keyboard key press action workflow."""
         logger.info("Executing key press workflow", extra={
             "key": test_step.action_instruction.value or "unknown"
         })
-        
+
         # Initialize result
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
@@ -2327,12 +2339,12 @@ REASON: <explanation if it doesn't match>
             ),
             timestamp_end=datetime.now(timezone.utc)
         )
-        
+
         try:
             # Capture before state
             if not screenshot and self.automation_driver:
                 screenshot = await self.automation_driver.screenshot()
-            
+
             viewport_size = await self.automation_driver.get_viewport_size()
             result.environment_state_before = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
@@ -2340,7 +2352,7 @@ REASON: <explanation if it doesn't match>
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
-            
+
             # Save screenshot for debugging
             debug_logger = get_debug_logger()
             if debug_logger:
@@ -2349,7 +2361,7 @@ REASON: <explanation if it doesn't match>
                     "before_key_press",
                     step_number=test_step.step_number
                 )
-            
+
             # Get the key to press
             key = test_step.action_instruction.value
             if not key:
@@ -2370,23 +2382,23 @@ REASON: <explanation if it doesn't match>
                     )
                     result.failure_phase = "validation"
                     return result
-            
+
             logger.info(f"Pressing key: {key}")
-            
+
             # For search box interactions on Wikipedia, we need a small delay
             # Wikipedia's search box sometimes needs a moment to register Enter
             if "search" in test_step.action_instruction.target.lower() and key.lower() == "enter":
                 logger.info("Adding small delay before pressing Enter for search box")
                 await self.automation_driver.wait(200)
-            
+
             # Press the key
             execution_start = asyncio.get_event_loop().time()
             await self.automation_driver.press_key(key)
-            
+
             # Wait for effect (longer for Enter which might submit forms)
             wait_time = 3000 if key.lower() == "enter" else 500
             await self.automation_driver.wait(wait_time)
-            
+
             # Capture after state
             screenshot_after = await self.automation_driver.screenshot()
             result.environment_state_after = EnvironmentState(
@@ -2395,9 +2407,9 @@ REASON: <explanation if it doesn't match>
                 viewport_size=viewport_size,
                 screenshot=screenshot_after
             )
-            
+
             execution_time = (asyncio.get_event_loop().time() - execution_start) * 1000
-            
+
             # Validate the key press effect
             validation_prompt = f"""
 Compare these before and after screenshots to determine if pressing {key} had the expected effect.
@@ -2423,7 +2435,7 @@ MATCHES_EXPECTED: true/false
 CONFIDENCE: <0.0-1.0>
 REASONING: Describe what actually happened in terms that can be compared to the expected outcome
 """
-            
+
             messages = [
                 {
                     "role": "user",
@@ -2446,7 +2458,7 @@ REASONING: Describe what actually happened in terms that can be compared to the 
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="action_execution",
@@ -2454,39 +2466,39 @@ REASONING: Describe what actually happened in terms that can be compared to the 
                 temperature=0.3
             )
             validation_content = response.get("content", "")
-            
+
             # Parse validation
             success = "SUCCESS: true" in validation_content
             matches_expected = "MATCHES_EXPECTED: true" in validation_content
             changes = "none"
             confidence = 0.0
             reasoning = ""
-            
+
             if "CHANGES_DETECTED:" in validation_content:
                 changes = validation_content.split("CHANGES_DETECTED:")[1].split("\n")[0].strip()
             if "CONFIDENCE:" in validation_content:
                 try:
                     confidence = float(validation_content.split("CONFIDENCE:")[1].split("\n")[0].strip())
-                except:
+                except (TypeError, ValueError):
                     confidence = 0.0
             if "REASONING:" in validation_content:
                 reasoning = validation_content.split("REASONING:", 1)[1].strip()
-            
+
             result.validation = ValidationResult(
                 valid=success and matches_expected,
                 confidence=confidence,
                 reasoning=reasoning
             )
-            
+
             result.execution = ExecutionResult(
                 success=success and matches_expected,
                 execution_time_ms=execution_time,
                 error_message=None if success else f"Key press did not have expected effect: {reasoning}"
             )
-            
+
             # Enhance outcome description based on what actually happened
             actual_outcome = f"Pressed {key}"
-            
+
             # If navigation occurred, describe where we navigated to
             if changes in ["navigation", "form_submit"]:
                 if result.environment_state_after:
@@ -2511,7 +2523,7 @@ REASONING: Describe what actually happened in terms that can be compared to the 
                     actual_outcome = f"Pressed {key} with visual changes"
             else:
                 actual_outcome = f"Pressed {key} with no visible changes"
-            
+
             result.ai_analysis = AIAnalysis(
                 success=success and matches_expected,
                 confidence=confidence,
@@ -2521,11 +2533,11 @@ REASONING: Describe what actually happened in terms that can be compared to the 
                 recommendations=[] if success else ["Verify the correct key was pressed", "Check if more time is needed for the action"],
                 anomalies=[] if matches_expected else [f"Unexpected result: {reasoning}"]
             )
-            
+
             result.overall_success = success and matches_expected
             if not result.overall_success:
                 result.failure_phase = "validation"
-            
+
         except Exception as e:
             logger.error(f"Key press workflow failed: {str(e)}")
             result.overall_success = False
@@ -2536,18 +2548,18 @@ REASONING: Describe what actually happened in terms that can be compared to the 
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         return result
-    
+
     async def _execute_dropdown_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute dropdown/select action workflow with multi-step interaction."""
         logger.info("Executing dropdown workflow", extra={
             "target": test_step.action_instruction.target,
             "value": test_step.action_instruction.value
         })
-        
+
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
             test_step=test_step,
@@ -2558,11 +2570,11 @@ REASONING: Describe what actually happened in terms that can be compared to the 
                 reasoning="Not yet validated"
             )
         )
-        
+
         try:
             if not screenshot:
                 screenshot = await self.automation_driver.screenshot()
-            
+
             # Step 1: Identify dropdown element
             dropdown_prompt = f"""
 I need to interact with a dropdown/select element.
@@ -2587,7 +2599,7 @@ BLOCKED: true/false
 BLOCKER_REASON: <if blocked, explain why>
 CONFIDENCE: <0.0-1.0>
 """
-            
+
             # Get dropdown location
             messages = [
                 {
@@ -2603,7 +2615,7 @@ CONFIDENCE: <0.0-1.0>
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="action_execution",
@@ -2611,12 +2623,12 @@ CONFIDENCE: <0.0-1.0>
                 temperature=0.3
             )
             dropdown_response = response.get("content", "")
-            
+
             # Parse response
             dropdown_found = "DROPDOWN_FOUND: true" in dropdown_response
             is_open = "DROPDOWN_STATE: open" in dropdown_response
             blocked = "BLOCKED: true" in dropdown_response
-            
+
             if not dropdown_found:
                 result.overall_success = False
                 result.execution = ExecutionResult(
@@ -2626,7 +2638,7 @@ CONFIDENCE: <0.0-1.0>
                 )
                 result.failure_phase = "identification"
                 return result
-            
+
             if blocked:
                 blocker_reason = ""
                 if "BLOCKER_REASON:" in dropdown_response:
@@ -2639,23 +2651,23 @@ CONFIDENCE: <0.0-1.0>
                 )
                 result.failure_phase = "validation"
                 return result
-            
+
             # Extract coordinates
             grid_cell = ""
             offset_x = 0.5
             offset_y = 0.5
-            
+
             if "GRID_CELL:" in dropdown_response:
                 grid_cell = dropdown_response.split("GRID_CELL:")[1].split("\n")[0].strip()
             if "OFFSET_X:" in dropdown_response:
                 offset_x = float(dropdown_response.split("OFFSET_X:")[1].split("\n")[0].strip())
             if "OFFSET_Y:" in dropdown_response:
                 offset_y = float(dropdown_response.split("OFFSET_Y:")[1].split("\n")[0].strip())
-            
+
             # Step 2: Open dropdown if needed
             if not is_open:
                 logger.info("Opening dropdown", extra={"grid_cell": grid_cell})
-                
+
                 # Click to open dropdown
                 grid_coord = GridCoordinate(
                     cell=grid_cell,
@@ -2667,10 +2679,10 @@ CONFIDENCE: <0.0-1.0>
                 pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
                 await self.automation_driver.click(pixel_x, pixel_y)
                 await asyncio.sleep(0.5)  # Wait for dropdown to open
-                
+
                 # Take new screenshot
                 screenshot_after_open = await self.automation_driver.screenshot()
-                
+
                 # Verify dropdown opened
                 verify_prompt = "Is the dropdown now open? Respond with DROPDOWN_OPEN: true/false"
                 messages = [
@@ -2687,7 +2699,7 @@ CONFIDENCE: <0.0-1.0>
                         ]
                     }
                 ]
-                
+
                 verify_response = await self.call_openai_with_debug(
                     messages=messages,
                     action_type="verify_selection",
@@ -2702,7 +2714,7 @@ CONFIDENCE: <0.0-1.0>
                     screenshot_after_open = await self.automation_driver.screenshot()
             else:
                 screenshot_after_open = screenshot
-            
+
             # Step 3: Find and select target option
             target_value = test_step.action_instruction.value
             option_prompt = f"""
@@ -2724,7 +2736,7 @@ OFFSET_Y: <0.0-1.0>
 CONFIDENCE: <0.0-1.0>
 MATCH_TYPE: exact/partial/none
 """
-            
+
             # Search for option
             messages = [
                 {
@@ -2740,7 +2752,7 @@ MATCH_TYPE: exact/partial/none
                     ]
                 }
             ]
-            
+
             option_response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="find_option",
@@ -2748,35 +2760,35 @@ MATCH_TYPE: exact/partial/none
                 temperature=0.3
             )
             option_content = option_response.get("content", "")
-            
+
             option_found = "OPTION_FOUND: true" in option_content
             option_visible = "OPTION_VISIBLE: true" in option_content
             needs_scroll = "NEEDS_SCROLL: true" in option_content
-            
+
             # Handle scrolling if needed
             if needs_scroll and not option_visible:
                 # For MVP, we'll try basic scrolling
                 scroll_direction = "down"
                 if "SCROLL_DIRECTION: up" in option_content:
                     scroll_direction = "up"
-                
+
                 # Find scroll area (simplified - click and drag in center of dropdown)
                 if scroll_direction == "down":
                     # Drag from middle to top of dropdown area
                     start_y = pixel_y + 50
-                    end_y = pixel_y - 50
+                    pixel_y - 50
                 else:
                     # Drag from middle to bottom
                     start_y = pixel_y - 50
-                    end_y = pixel_y + 50
-                
+                    pixel_y + 50
+
                 # Simple drag to scroll
                 await self.automation_driver.click(pixel_x, start_y)
                 await asyncio.sleep(0.1)
                 # Note: We need drag support in the automation driver for this
                 # For now, we'll just try to find the option in the visible area
                 logger.warning("Dropdown scrolling not fully implemented - drag support needed")
-            
+
             if not option_found:
                 result.overall_success = False
                 result.execution = ExecutionResult(
@@ -2786,12 +2798,12 @@ MATCH_TYPE: exact/partial/none
                 )
                 result.failure_phase = "option_search"
                 return result
-            
+
             # Extract option coordinates
             option_cell = ""
             option_x = 0.5
             option_y = 0.5
-            
+
             if "GRID_CELL:" in option_content:
                 parts = option_content.split("GRID_CELL:")
                 if len(parts) > 1:
@@ -2804,7 +2816,7 @@ MATCH_TYPE: exact/partial/none
                 parts = option_content.split("OFFSET_Y:")
                 if len(parts) > 1:
                     option_y = float(parts[1].split("\n")[0].strip())
-            
+
             # Step 4: Click on the option
             option_grid_coord = GridCoordinate(
                 cell=option_cell,
@@ -2814,14 +2826,14 @@ MATCH_TYPE: exact/partial/none
                 refined=False
             )
             option_coords = self.grid_overlay.coordinate_to_pixels(option_grid_coord)
-            
+
             execution_start = asyncio.get_event_loop().time()
             await self.automation_driver.click(option_coords[0], option_coords[1])
             await asyncio.sleep(0.5)  # Wait for selection
-            
+
             # Step 5: Validate selection
             screenshot_after = await self.automation_driver.screenshot()
-            
+
             validate_prompt = f"""
 I just selected "{target_value}" from a dropdown.
 
@@ -2837,7 +2849,7 @@ MATCHES_TARGET: true/false
 MATCHES_EXPECTED: true/false
 CONFIDENCE: <0.0-1.0>
 """
-            
+
             messages = [
                 {
                     "role": "user",
@@ -2852,7 +2864,7 @@ CONFIDENCE: <0.0-1.0>
                     ]
                 }
             ]
-            
+
             validate_response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="validate_selection",
@@ -2860,19 +2872,18 @@ CONFIDENCE: <0.0-1.0>
                 temperature=0.3
             )
             validate_content = validate_response.get("content", "")
-            
+
             # Parse validation
-            dropdown_closed = "DROPDOWN_CLOSED: true" in validate_content
             matches_target = "MATCHES_TARGET: true" in validate_content
             matches_expected = "MATCHES_EXPECTED: true" in validate_content
-            
+
             selected_value = ""
             if "SELECTED_VALUE:" in validate_content:
                 selected_value = validate_content.split("SELECTED_VALUE:")[1].split("\n")[0].strip()
-            
+
             # Set results
             success = matches_target and matches_expected
-            
+
             result.coordinates = CoordinateResult(
                 grid_cell=option_cell,
                 grid_coordinates=(option_coords[0], option_coords[1]),
@@ -2881,34 +2892,34 @@ CONFIDENCE: <0.0-1.0>
                 confidence=0.9 if success else 0.5,
                 reasoning=f"Selected '{selected_value}' from dropdown"
             )
-            
+
             result.validation = ValidationResult(
                 valid=success,
                 confidence=0.9 if success else 0.5,
                 reasoning=f"Dropdown selection: {selected_value}",
                 concerns=[] if success else [f"Selected value '{selected_value}' may not match target '{target_value}'"]
             )
-            
+
             result.execution = ExecutionResult(
                 success=success,
                 execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000,
                 error_message=None if success else f"Selection mismatch: expected '{target_value}', got '{selected_value}'"
             )
-            
+
             result.environment_state_before = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
                 title=await self.automation_driver.get_page_title(),
                 viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot
             )
-            
+
             result.environment_state_after = EnvironmentState(
                 url=await self.automation_driver.get_page_url(),
                 title=await self.automation_driver.get_page_title(),
                 viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot_after
             )
-            
+
             result.ai_analysis = AIAnalysis(
                 success=success,
                 confidence=0.9 if success else 0.5,
@@ -2918,11 +2929,11 @@ CONFIDENCE: <0.0-1.0>
                 recommendations=[] if success else ["Verify the target value matches available options", "Check for case sensitivity"],
                 anomalies=[] if success else [f"Selection mismatch: '{selected_value}' vs '{target_value}'"]
             )
-            
+
             result.overall_success = success
             if not success:
                 result.failure_phase = "validation"
-            
+
         except Exception as e:
             logger.error(f"Dropdown workflow failed: {str(e)}")
             result.overall_success = False
@@ -2933,11 +2944,11 @@ CONFIDENCE: <0.0-1.0>
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         return result
-    
+
     async def _execute_legacy_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute the legacy workflow for click/type actions."""
         # This is the existing execute_action logic that was replaced
@@ -2952,7 +2963,7 @@ CONFIDENCE: <0.0-1.0>
                 reasoning="Not yet validated"
             )
         )
-        
+
         try:
             # Capture initial browser state
             if self.automation_driver:
@@ -2963,11 +2974,11 @@ CONFIDENCE: <0.0-1.0>
                     viewport_size=viewport_size,
                     screenshot=screenshot or await self.automation_driver.screenshot()
                 )
-                
+
                 # Use provided screenshot or capture new one
                 if not screenshot:
                     screenshot = result.environment_state_before.screenshot
-            
+
             # Phase 1: Validation
             validation_result = await self._validate_action(
                 test_step.action_instruction,
@@ -2975,7 +2986,7 @@ CONFIDENCE: <0.0-1.0>
                 test_context
             )
             result.validation = validation_result
-            
+
             if not result.validation.valid:
                 logger.warning("Action validation failed", extra={
                     "reasoning": result.validation.reasoning,
@@ -2984,10 +2995,10 @@ CONFIDENCE: <0.0-1.0>
                 result.failure_phase = "validation"
                 result.timestamp_end = datetime.now(timezone.utc)
                 return result
-            
+
             # Phase 2: Coordinate Determination
             grid_action = await self.determine_action(screenshot, test_step.action_instruction)
-            
+
             # Convert GridAction to CoordinateResult
             self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
             x, y = self.grid_overlay.coordinate_to_pixels(grid_action.coordinate)
@@ -3000,18 +3011,18 @@ CONFIDENCE: <0.0-1.0>
                 reasoning=getattr(grid_action.coordinate, 'reasoning', ''),
                 refined=grid_action.coordinate.refined
             )
-            
+
             # Create grid overlay screenshots
             result.grid_screenshot_before = self.grid_overlay.create_overlay_image(screenshot)
             result.grid_screenshot_highlighted = self._create_highlighted_screenshot(
                 screenshot,
                 result.coordinates.grid_cell
             )
-            
+
             # Phase 3: Action Execution
             if self.automation_driver and result.coordinates.confidence >= 0.7:
                 execution_start = asyncio.get_event_loop().time()
-                
+
                 try:
                     # Execute the action
                     if test_step.action_instruction.action_type.value == "click":
@@ -3020,16 +3031,16 @@ CONFIDENCE: <0.0-1.0>
                         # Enhanced typing with focus validation
                         if test_step.action_instruction.value:
                             success = await self._execute_type_with_focus(
-                                x, y, 
+                                x, y,
                                 test_step.action_instruction.value,
                                 test_step.action_instruction.target
                             )
                             if not success:
                                 raise Exception("Failed to type text - element not focusable")
-                    
+
                     # Wait for UI update
                     await self.automation_driver.wait(1000)
-                    
+
                     # Capture post-action state
                     result.environment_state_after = EnvironmentState(
                         url=await self.automation_driver.get_page_url(),
@@ -3037,12 +3048,12 @@ CONFIDENCE: <0.0-1.0>
                         viewport_size=viewport_size,
                         screenshot=await self.automation_driver.screenshot()
                     )
-                    
+
                     result.execution = ExecutionResult(
                         success=True,
                         execution_time_ms=(asyncio.get_event_loop().time() - execution_start) * 1000
                     )
-                    
+
                 except Exception as e:
                     result.execution = ExecutionResult(
                         success=False,
@@ -3063,7 +3074,7 @@ CONFIDENCE: <0.0-1.0>
                     error_message=f"Coordinate confidence too low: {result.coordinates.confidence}"
                 )
                 result.failure_phase = "coordinates"
-            
+
             # Phase 4: Result Analysis
             if result.execution and result.execution.success and result.environment_state_after:
                 analysis = await self._analyze_result(
@@ -3071,7 +3082,7 @@ CONFIDENCE: <0.0-1.0>
                     result
                 )
                 result.ai_analysis = analysis
-            
+
             # Set overall success
             result.overall_success = (
                 result.validation.valid and
@@ -3079,10 +3090,10 @@ CONFIDENCE: <0.0-1.0>
                 result.execution is not None and
                 result.execution.success
             )
-            
+
             result.timestamp_end = datetime.now(timezone.utc)
             return result
-            
+
         except Exception as e:
             logger.error("Unexpected error in action execution", extra={
                 "error": str(e),
@@ -3098,20 +3109,20 @@ CONFIDENCE: <0.0-1.0>
             result.failure_phase = "unknown"
             result.timestamp_end = datetime.now(timezone.utc)
             return result
-    
+
     async def determine_action(
         self, screenshot: bytes, instruction: ActionInstruction
     ) -> GridAction:
         """
         Determine grid coordinates for an action from a screenshot.
-        
+
         This method is maintained for backward compatibility but now focuses
         only on coordinate determination, not execution.
-        
+
         Args:
             screenshot: Screenshot of current state
             instruction: Action instruction to execute
-            
+
         Returns:
             Grid-based action with coordinates
         """
@@ -3120,32 +3131,32 @@ CONFIDENCE: <0.0-1.0>
             "target": instruction.target,
             "description": instruction.description
         })
-        
+
         # Create screenshot with grid overlay for analysis
         overlay_image = self._create_overlay_image(screenshot)
-        
+
         # Analyze the screenshot to find coordinates
         initial_coords = await self._analyze_screenshot(
-            overlay_image, 
+            overlay_image,
             instruction
         )
-        
+
         # Check if refinement is needed
-        if (self.refinement_enabled and 
+        if (self.refinement_enabled and
             initial_coords.confidence < self.confidence_threshold):
             logger.info("Confidence below threshold, applying refinement", extra={
                 "initial_confidence": initial_coords.confidence,
                 "threshold": self.confidence_threshold,
                 "cell": initial_coords.cell
             })
-            
+
             # Apply adaptive refinement
             refined_coords = await self._apply_refinement(
                 screenshot,
                 initial_coords,
                 instruction
             )
-            
+
             # Create action with refined coordinates
             action = GridAction(
                 instruction=instruction,
@@ -3159,7 +3170,7 @@ CONFIDENCE: <0.0-1.0>
                 coordinate=initial_coords,
                 screenshot_before=None
             )
-        
+
         logger.info("Action coordinates determined", extra={
             "cell": action.coordinate.cell,
             "offset_x": action.coordinate.offset_x,
@@ -3167,19 +3178,19 @@ CONFIDENCE: <0.0-1.0>
             "confidence": action.coordinate.confidence,
             "refined": action.coordinate.refined
         })
-        
+
         return action
-    
+
     async def refine_coordinates(
         self, cropped_region: bytes, initial_coords: GridCoordinate
     ) -> GridCoordinate:
         """
         Refine grid coordinates using adaptive refinement.
-        
+
         Args:
             cropped_region: Cropped screenshot region
             initial_coords: Initial grid coordinates
-            
+
         Returns:
             Refined grid coordinates with higher precision
         """
@@ -3187,29 +3198,29 @@ CONFIDENCE: <0.0-1.0>
             cropped_region,
             initial_coords
         )
-    
+
     def _create_overlay_image(self, screenshot: bytes) -> bytes:
         """Create screenshot with grid overlay for AI analysis."""
         # Check if grid needs initialization
         image = Image.open(BytesIO(screenshot))
         width, height = image.size
-        
+
         if self.grid_overlay.viewport_width == 0:
             self.grid_overlay.initialize(width, height)
-        
+
         # Create overlay image (GridOverlay expects bytes)
         return self.grid_overlay.create_overlay_image(screenshot)
-    
+
     async def _analyze_screenshot(
         self, overlay_image: bytes, instruction: ActionInstruction
     ) -> GridCoordinate:
         """Analyze screenshot with AI to find target coordinates."""
         # Prepare the analysis prompt
         prompt = self._build_analysis_prompt(instruction)
-        
+
         # Convert image to base64 for AI
         base64_image = base64.b64encode(overlay_image).decode('utf-8')
-        
+
         # Build messages
         messages = [
             {
@@ -3226,7 +3237,7 @@ CONFIDENCE: <0.0-1.0>
                 ]
             }
         ]
-        
+
         # Call AI for analysis
         response = await self.call_openai_with_debug(
             messages=messages,
@@ -3235,10 +3246,10 @@ CONFIDENCE: <0.0-1.0>
             response_format={"type": "json_object"},
             temperature=0.3  # Lower temperature for precision
         )
-        
+
         # Parse response
         return self._parse_coordinate_response(response)
-    
+
     def _build_analysis_prompt(self, instruction: ActionInstruction) -> str:
         """Build the prompt for screenshot analysis."""
         prompt = f"""Analyze this screenshot with a grid overlay to locate the target element.
@@ -3266,29 +3277,29 @@ Guidelines:
 - For buttons, aim for the center of the clickable area
 - If the element spans multiple cells, choose the most central one
 - If you cannot find the element with high confidence, still provide your best guess"""
-        
+
         return prompt
-    
-    def _parse_coordinate_response(self, response: Dict) -> GridCoordinate:
+
+    def _parse_coordinate_response(self, response: dict) -> GridCoordinate:
         """Parse AI response into GridCoordinate."""
         try:
             # Check if response is actually a coroutine (testing issue)
             if asyncio.iscoroutine(response):
                 logger.error("Response is a coroutine, not a dict - likely test mock issue")
                 raise ValueError("Response is a coroutine")
-                
+
             content = response.get("content", {})
-            
+
             # Handle string content (JSON)
             if isinstance(content, str):
                 content = json.loads(content)
-            
+
             # Extract coordinate data
             cell = content.get("cell", "A1")
             offset_x = float(content.get("offset_x", 0.5))
             offset_y = float(content.get("offset_y", 0.5))
             confidence = float(content.get("confidence", 0.5))
-            
+
             # Log reasoning if provided
             reasoning = content.get("reasoning", "")
             if reasoning:
@@ -3297,7 +3308,7 @@ Guidelines:
                     "cell": cell,
                     "confidence": confidence
                 })
-            
+
             coord = GridCoordinate(
                 cell=cell,
                 offset_x=max(0.0, min(1.0, offset_x)),  # Clamp to valid range
@@ -3305,12 +3316,12 @@ Guidelines:
                 confidence=max(0.0, min(1.0, confidence)),
                 refined=False
             )
-            
+
             # Store reasoning for later use
-            setattr(coord, 'reasoning', reasoning)
-            
+            coord.reasoning = reasoning
+
             return coord
-            
+
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to parse coordinate response", extra={
                 "error": str(e),
@@ -3325,7 +3336,7 @@ Guidelines:
                 confidence=0.1,
                 refined=False
             )
-    
+
     async def _apply_refinement(
         self, screenshot: bytes, initial_coords: GridCoordinate,
         instruction: ActionInstruction
@@ -3337,28 +3348,28 @@ Guidelines:
             initial_coords,
             instruction.target or instruction.description
         )
-        
+
         # If refinement improved confidence, return the refined coordinates
         # Otherwise perform additional AI-based refinement
         if refined_coords.confidence > initial_coords.confidence:
             return refined_coords
-        
+
         # GridRefinement didn't improve confidence, try our own AI refinement
         # Get the cropped region for detailed analysis
         x, y, width, height = self.grid_overlay.get_refinement_region(initial_coords.cell)
         image = Image.open(BytesIO(screenshot))
         cropped = image.crop((x, y, x + width, y + height))
-        
+
         # Convert cropped region to bytes
         buffer = BytesIO()
         cropped.save(buffer, format='PNG')
         cropped_bytes = buffer.getvalue()
-        
+
         return await self._apply_refinement_to_region(
             cropped_bytes,
             initial_coords
         )
-    
+
     async def _apply_refinement_to_region(
         self, cropped_region: bytes, initial_coords: GridCoordinate
     ) -> GridCoordinate:
@@ -3373,14 +3384,14 @@ The center cell (positions 4-6 horizontally, 4-6 vertically) corresponds to the 
 Provide the refined position in JSON format:
 {{
     "refined_x": 5,  // X position in 9x9 grid (1-9)
-    "refined_y": 5,  // Y position in 9x9 grid (1-9)  
+    "refined_y": 5,  // Y position in 9x9 grid (1-9)
     "confidence": 0.95,  // Updated confidence
     "reasoning": "Explanation of the refined position"
 }}"""
-        
+
         # Convert image to base64
         base64_image = base64.b64encode(cropped_region).decode('utf-8')
-        
+
         messages = [
             {
                 "role": "user",
@@ -3396,7 +3407,7 @@ Provide the refined position in JSON format:
                 ]
             }
         ]
-        
+
         response = await self.call_openai_with_debug(
             messages=messages,
             action_type="refinement_analysis",
@@ -3404,22 +3415,22 @@ Provide the refined position in JSON format:
             response_format={"type": "json_object"},
             temperature=0.2  # Even lower temperature for refinement
         )
-        
+
         # Parse refinement response
         try:
             content = response.get("content", {})
             if isinstance(content, str):
                 content = json.loads(content)
-            
+
             refined_x = int(content.get("refined_x", 5))
             refined_y = int(content.get("refined_y", 5))
             confidence = float(content.get("confidence", 0.8))
-            
+
             # Convert 9x9 position back to offset within original cell
             # Center cell (5,5) = (0.5, 0.5) offset
             offset_x = (refined_x - 1) / 9.0
             offset_y = (refined_y - 1) / 9.0
-            
+
             return GridCoordinate(
                 cell=initial_coords.cell,
                 offset_x=max(0.0, min(1.0, offset_x)),
@@ -3427,7 +3438,7 @@ Provide the refined position in JSON format:
                 confidence=max(0.0, min(1.0, confidence)),
                 refined=True
             )
-            
+
         except Exception as e:
             logger.error("Failed to parse refinement response", extra={
                 "error": str(e)
@@ -3440,21 +3451,21 @@ Provide the refined position in JSON format:
                 confidence=initial_coords.confidence,
                 refined=True
             )
-    
+
     async def _validate_action(
         self,
         instruction: ActionInstruction,
         screenshot: bytes,
-        context: Dict[str, Any]
+        context: dict[str, Any]
     ) -> ValidationResult:
         """
         Validate if the action makes sense in current context.
-        
+
         Args:
             instruction: Action instruction to validate
             screenshot: Current screenshot
             context: Test execution context
-            
+
         Returns:
             Validation result with reasoning
         """
@@ -3486,7 +3497,7 @@ Consider:
 2. Does the action make sense given the current UI state?
 3. Are there any obvious blockers (popups, loading screens, etc.)?
 4. Is this the right time to perform this action in the test flow?"""
-        
+
         # Add special validation for type actions
         if instruction.action_type.value == "type":
             prompt += """
@@ -3497,7 +3508,7 @@ Consider:
 
         # Convert screenshot to base64
         base64_image = base64.b64encode(screenshot).decode('utf-8')
-        
+
         messages = [
             {
                 "role": "user",
@@ -3513,7 +3524,7 @@ Consider:
                 ]
             }
         ]
-        
+
         response = await self.call_openai_with_debug(
             messages=messages,
             action_type="pattern_analysis",
@@ -3521,12 +3532,12 @@ Consider:
             response_format={"type": "json_object"},
             temperature=0.3
         )
-        
+
         try:
             content = response.get("content", {})
             if isinstance(content, str):
                 content = json.loads(content)
-            
+
             return ValidationResult(
                 valid=content.get("valid", False),
                 confidence=float(content.get("confidence", 0.0)),
@@ -3543,7 +3554,7 @@ Consider:
                 concerns=["Validation parsing failed"],
                 suggestions=[]
             )
-    
+
     def _create_highlighted_screenshot(
         self,
         screenshot: bytes,
@@ -3551,31 +3562,31 @@ Consider:
     ) -> bytes:
         """
         Create a screenshot with the selected grid cell highlighted.
-        
+
         Args:
             screenshot: Original screenshot
             grid_cell: Grid cell to highlight
-            
+
         Returns:
             Screenshot with highlighted cell
         """
         # Load image
         img = Image.open(BytesIO(screenshot))
         width, height = img.size
-        
+
         # Initialize grid if needed
         if self.grid_overlay.viewport_width != width:
             self.grid_overlay.initialize(width, height)
-        
+
         # Get cell bounds
         x, y, cell_width, cell_height = self.grid_overlay.get_cell_bounds(grid_cell)
-        
+
         # Create overlay with grid
         overlay_img = Image.open(BytesIO(self.grid_overlay.create_overlay_image(screenshot)))
-        
+
         # Draw highlight on the selected cell
         draw = ImageDraw.Draw(overlay_img, "RGBA")
-        
+
         # Draw a semi-transparent red rectangle
         draw.rectangle(
             [x, y, x + cell_width, y + cell_height],
@@ -3583,19 +3594,19 @@ Consider:
             outline=(255, 0, 0, 255),
             width=3
         )
-        
+
         # Add label
         draw.text(
             (x + 5, y + 5),
             f"SELECTED: {grid_cell}",
             fill=(255, 255, 255, 255)
         )
-        
+
         # Convert back to bytes
         output = BytesIO()
         overlay_img.save(output, format="PNG")
         return output.getvalue()
-    
+
     async def _analyze_result(
         self,
         instruction: ActionInstruction,
@@ -3603,11 +3614,11 @@ Consider:
     ) -> AIAnalysis:
         """
         Analyze the result of the action execution.
-        
+
         Args:
             instruction: Original action instruction
             result: Execution result with before/after states
-            
+
         Returns:
             AI analysis of the action result
         """
@@ -3658,7 +3669,7 @@ Compare the before and after screenshots and provide analysis in JSON format:
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="result_analysis",
@@ -3666,12 +3677,12 @@ Compare the before and after screenshots and provide analysis in JSON format:
                 response_format={"type": "json_object"},
                 temperature=0.3
             )
-            
+
             try:
                 content = response.get("content", {})
                 if isinstance(content, str):
                     content = json.loads(content)
-                
+
                 return AIAnalysis(
                     success=content.get("success", False),
                     confidence=float(content.get("confidence", 0.0)),
@@ -3683,7 +3694,7 @@ Compare the before and after screenshots and provide analysis in JSON format:
                 )
             except Exception as e:
                 logger.error("Failed to parse analysis response", extra={"error": str(e)})
-        
+
         return AIAnalysis(
             success=result.execution.success,
             confidence=0.5,
@@ -3693,39 +3704,39 @@ Compare the before and after screenshots and provide analysis in JSON format:
             recommendations=[],
             anomalies=[]
         )
-    
+
     async def _execute_click_with_focus(self, x: int, y: int) -> None:
         """
         Execute a click with enhanced focus handling.
-        
+
         This method implements multiple click strategies to ensure proper focus.
         """
         logger.debug("Executing enhanced click with focus", extra={"x": x, "y": y})
-        
+
         # Strategy 1: Single click
         await self.automation_driver.click(x, y)
         await self.automation_driver.wait(100)
-        
+
         # Strategy 2: Double-click for stubborn elements
         # Some elements require double-click to properly focus
         # We'll use this selectively based on validation
-    
+
     async def _execute_type_with_focus(
-        self, 
-        x: int, 
-        y: int, 
+        self,
+        x: int,
+        y: int,
         text: str,
-        target_description: Optional[str] = None
+        target_description: str | None = None
     ) -> bool:
         """
         Execute typing with enhanced focus validation and retry strategies.
-        
+
         Args:
             x: X coordinate to click
             y: Y coordinate to click
             text: Text to type
             target_description: Description of the target element
-            
+
         Returns:
             True if typing was successful, False otherwise
         """
@@ -3735,66 +3746,66 @@ Compare the before and after screenshots and provide analysis in JSON format:
             "text_length": len(text),
             "target": target_description
         })
-        
+
         # Strategy 1: Single click and type
         await self.automation_driver.click(x, y)
         await self.automation_driver.wait(200)
-        
+
         # Validate focus by checking if we can type
         focus_validated = await self._validate_focus_for_typing(x, y, target_description)
-        
+
         if focus_validated:
             await self.automation_driver.type_text(text)
             await self.automation_driver.wait(500)
             return True
-        
+
         # Strategy 2: Double-click to focus
         logger.warning("Single click didn't achieve focus, trying double-click")
         await self.automation_driver.click(x, y)
         await self.automation_driver.wait(50)
         await self.automation_driver.click(x, y)
         await self.automation_driver.wait(200)
-        
+
         focus_validated = await self._validate_focus_for_typing(x, y, target_description)
-        
+
         if focus_validated:
             await self.automation_driver.type_text(text)
             await self.automation_driver.wait(500)
             return True
-        
+
         # Strategy 3: Click and wait longer
         logger.warning("Double-click didn't achieve focus, trying click with longer wait")
         await self.automation_driver.click(x, y)
         await self.automation_driver.wait(1000)  # Wait longer for JavaScript to load
-        
+
         focus_validated = await self._validate_focus_for_typing(x, y, target_description)
-        
+
         if focus_validated:
             await self.automation_driver.type_text(text)
             await self.automation_driver.wait(500)
             return True
-        
+
         logger.error("Failed to achieve focus after multiple strategies")
         return False
-    
+
     async def _validate_focus_for_typing(
-        self, 
-        x: int, 
+        self,
+        x: int,
         y: int,
-        target_description: Optional[str] = None
+        target_description: str | None = None
     ) -> bool:
         """
         Validate that an element is focused and ready for typing.
-        
+
         This method uses AI to analyze the current state and determine if
         the target element is properly focused.
         """
         # Take a screenshot to analyze current state
         screenshot = await self.automation_driver.screenshot()
-        
+
         # Create a highlighted screenshot showing where we clicked
         highlighted_screenshot = self._create_click_highlight_screenshot(screenshot, x, y)
-        
+
         prompt = f"""Analyze this screenshot to determine if a text input element is currently focused and ready for typing.
 
 I just clicked at the marked location (red circle). {f'The target is: {target_description}' if target_description else ''}
@@ -3817,7 +3828,7 @@ Respond in JSON format:
         try:
             # Convert screenshot to base64
             base64_image = base64.b64encode(highlighted_screenshot).decode('utf-8')
-            
+
             messages = [
                 {
                     "role": "user",
@@ -3833,7 +3844,7 @@ Respond in JSON format:
                     ]
                 }
             ]
-            
+
             response = await self.call_openai_with_debug(
                 messages=messages,
                 action_type="focus_analysis",
@@ -3841,39 +3852,38 @@ Respond in JSON format:
                 response_format={"type": "json_object"},
                 temperature=0.1
             )
-            
+
             content = response.get("content", {})
             if isinstance(content, str):
                 content = json.loads(content)
-            
+
             is_focused = content.get("is_focused", False)
             confidence = float(content.get("confidence", 0.0))
             reasoning = content.get("reasoning", "")
-            
+
             logger.debug("Focus validation result", extra={
                 "is_focused": is_focused,
                 "confidence": confidence,
                 "reasoning": reasoning,
                 "element_type": content.get("element_type", "unknown")
             })
-            
+
             # Consider it focused if confidence is high enough
             return is_focused and confidence >= 0.7
-            
+
         except Exception as e:
             logger.error("Failed to validate focus", extra={"error": str(e)})
             # Assume focused to allow typing to proceed
             return True
-    
+
     def _create_click_highlight_screenshot(self, screenshot: bytes, x: int, y: int) -> bytes:
         """Create a screenshot with a highlight showing where we clicked."""
         from PIL import Image, ImageDraw
-        import io
-        
+
         # Open the screenshot
         image = Image.open(io.BytesIO(screenshot))
         draw = ImageDraw.Draw(image)
-        
+
         # Draw a red circle at the click location
         radius = 15
         draw.ellipse(
@@ -3881,24 +3891,24 @@ Respond in JSON format:
             outline="red",
             width=3
         )
-        
+
         # Draw a crosshair
         draw.line([x - radius, y, x + radius, y], fill="red", width=2)
         draw.line([x, y - radius, x, y + radius], fill="red", width=2)
-        
+
         # Convert back to bytes
         buffer = io.BytesIO()
         image.save(buffer, format='PNG')
         return buffer.getvalue()
-    
+
     # Scroll action workflows
-    
+
     async def _execute_scroll_to_element_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """
         Execute iterative scroll-to-element workflow.
-        
+
         This implements the intelligent scrolling algorithm that:
         1. Checks element visibility (fully/partially/not visible)
         2. Determines scroll direction with confidence
@@ -3910,7 +3920,7 @@ Respond in JSON format:
             "target": test_step.action_instruction.target,
             "step_number": test_step.step_number
         })
-        
+
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
             test_step=test_step,
@@ -3922,39 +3932,39 @@ Respond in JSON format:
                 reasoning="Scroll action validated"
             )
         )
-        
+
         try:
             # Initialize scroll state
             state = ScrollState(
                 target_element=test_step.action_instruction.target or test_step.description
             )
-            
+
             # Capture initial screenshot if not provided
             if not screenshot:
                 screenshot = await self.automation_driver.screenshot()
-            
+
             while state.attempts < state.max_attempts:
                 state.attempts += 1
-                
+
                 logger.info(f"Scroll attempt {state.attempts}/{state.max_attempts}")
-                
+
                 # Check element visibility
                 visibility = await self._check_element_visibility(
-                    screenshot, 
-                    state.target_element, 
+                    screenshot,
+                    state.target_element,
                     state,
                     test_step.step_number
                 )
-                
+
                 logger.info(
-                    f"Visibility check result",
+                    "Visibility check result",
                     extra={
                         "status": visibility.status.value,
                         "confidence": visibility.direction_confidence,
                         "coordinates": visibility.coordinates.dict() if visibility.coordinates else None
                     }
                 )
-                
+
                 # Success case - element fully visible
                 if visibility.status == VisibilityStatus.FULLY_VISIBLE and visibility.coordinates:
                     result.overall_success = True
@@ -3978,10 +3988,10 @@ Respond in JSON format:
                         ui_changes=[f"Element now visible after {state.attempts} scroll attempts"]
                     )
                     break
-                
+
                 # Plan next scroll action
                 scroll_action = await self._plan_scroll_action(state, visibility)
-                
+
                 if not scroll_action:
                     # AI couldn't determine scroll direction
                     result.overall_success = False
@@ -3992,23 +4002,23 @@ Respond in JSON format:
                     )
                     result.failure_phase = "scroll_planning"
                     break
-                
+
                 # Execute scroll
                 await self._execute_scroll(scroll_action)
                 state.scroll_history.append(scroll_action)
                 state.last_direction = scroll_action.direction
-                
+
                 # Wait for scroll animation and any dynamic content
                 await asyncio.sleep(0.8)
-                
+
                 # Capture new screenshot
                 screenshot = await self.automation_driver.screenshot()
-                
+
                 # Check if we're making progress
                 if not await self._is_making_progress(state, screenshot):
                     logger.warning("No progress detected, may have reached page boundary")
                     # Could implement alternative strategies here
-            
+
             # Max attempts reached
             if state.attempts >= state.max_attempts:
                 result.overall_success = False
@@ -4026,7 +4036,7 @@ Respond in JSON format:
                     ui_changes=[],
                     anomalies=[f"Element not found after {state.max_attempts} attempts"]
                 )
-            
+
         except Exception as e:
             logger.error(f"Scroll-to-element workflow failed: {str(e)}")
             result.overall_success = False
@@ -4037,14 +4047,14 @@ Respond in JSON format:
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         result.timestamp_end = datetime.now(timezone.utc)
         return result
-    
+
     async def _check_element_visibility(
-        self, 
-        screenshot: bytes, 
-        target: str, 
+        self,
+        screenshot: bytes,
+        target: str,
         state: ScrollState,
         step_number: int
     ) -> VisibilityResult:
@@ -4054,37 +4064,37 @@ Respond in JSON format:
         """
         # Add grid overlay
         grid_screenshot = self.grid_overlay.create_overlay_image(screenshot)
-        
+
         # Craft context-aware prompt
         context = self._build_visibility_context(state)
-        
+
         prompt = f"""
         Analyze this screenshot with a {self.grid_overlay.grid_size}x{self.grid_overlay.grid_size} grid overlay.
-        
+
         Target element: "{target}"
-        
+
         Determine the visibility of the target element:
-        
+
         1. If FULLY VISIBLE (entire element is visible and clickable):
            - Provide exact grid coordinates (e.g., "M23")
            - Confidence score (0-100)
-           
+
         2. If PARTIALLY VISIBLE (only part is visible):
            - Indicate visible portion (top/bottom/left/right edge)
            - Estimate percentage visible
            - Suggest scroll direction to reveal fully
-           
+
         3. If NOT VISIBLE:
            - Based on current page content, suggest scroll direction
            - Consider these patterns:
              * Headers/navigation → scroll UP
-             * Footers/submit buttons → scroll DOWN  
+             * Footers/submit buttons → scroll DOWN
              * Next/continue buttons → usually DOWN
              * Previous/back → usually UP
            - Provide confidence in direction (0-100)
-        
+
         {context}
-        
+
         Respond in this format:
         STATUS: [FULLY_VISIBLE|PARTIALLY_VISIBLE|NOT_VISIBLE]
         COORDINATES: [grid coords if visible, e.g. M23]
@@ -4094,7 +4104,7 @@ Respond in JSON format:
         DIRECTION_CONFIDENCE: [0-100]
         NOTES: [any relevant observations]
         """
-        
+
         messages = [
             {"role": "system", "content": self.system_prompt},
             {
@@ -4110,43 +4120,43 @@ Respond in JSON format:
                 ]
             }
         ]
-        
+
         response = await self.call_openai_with_debug(
             messages=messages,
             action_type="scroll_visibility_check",
             step_number=step_number,
             temperature=0.3
         )
-        
+
         return self._parse_visibility_response(response['content'])
-    
+
     def _build_visibility_context(self, state: ScrollState) -> str:
         """Build context from scroll history for better AI decisions."""
         if not state.scroll_history:
             return ""
-        
+
         context_parts = ["Previous scroll attempts:"]
-        
+
         # Summarize recent history
         recent_scrolls = state.scroll_history[-3:]  # Last 3 scrolls
-        for i, scroll in enumerate(recent_scrolls):
+        for _i, scroll in enumerate(recent_scrolls):
             context_parts.append(
                 f"- Scrolled {scroll.direction.value} {scroll.distance}px"
             )
-        
+
         # Add warnings about patterns
         if self._is_oscillating(state.scroll_history):
             context_parts.append(
                 "WARNING: Oscillating pattern detected - element might be in the middle"
             )
-        
+
         return "\n".join(context_parts)
-    
+
     async def _plan_scroll_action(
-        self, 
-        state: ScrollState, 
+        self,
+        state: ScrollState,
         visibility: VisibilityResult
-    ) -> Optional[ScrollAction]:
+    ) -> ScrollAction | None:
         """
         Plan the next scroll action based on current visibility and history.
         Implements intelligent scroll distance calculation.
@@ -4155,29 +4165,29 @@ Respond in JSON format:
         if self._detect_overshoot(state, visibility):
             logger.info("Overshoot detected, planning correction")
             return self._create_correction_scroll(state)
-        
-        # Handle partial visibility - fine-tune positioning  
+
+        # Handle partial visibility - fine-tune positioning
         if visibility.status == VisibilityStatus.PARTIALLY_VISIBLE:
             return self._create_fine_tune_scroll(visibility)
-        
+
         # Handle not visible - calculate smart scroll distance
         if visibility.status == VisibilityStatus.NOT_VISIBLE:
             if not visibility.suggested_direction:
                 return None
-                
+
             distance = self._calculate_scroll_distance(state, visibility)
-            
+
             return ScrollAction(
                 direction=visibility.suggested_direction,
                 distance=distance,
                 is_correction=False
             )
-        
+
         return None
-    
+
     def _calculate_scroll_distance(
-        self, 
-        state: ScrollState, 
+        self,
+        state: ScrollState,
         visibility: VisibilityResult
     ) -> int:
         """
@@ -4191,20 +4201,20 @@ Respond in JSON format:
             base_distance = 400  # Confident - medium jumps
         else:
             base_distance = 200  # Less confident - smaller jumps
-        
+
         # Reduce distance as attempts increase (convergence)
         attempt_factor = max(0.3, 1.0 - (state.attempts * 0.1))
-        
+
         # Further reduce if we've been oscillating
         if self._is_oscillating(state.scroll_history):
             attempt_factor *= 0.5
             logger.debug("Oscillation detected, reducing scroll distance")
-        
+
         final_distance = int(base_distance * attempt_factor)
-        
+
         # Ensure minimum scroll distance
         return max(100, final_distance)
-    
+
     def _create_fine_tune_scroll(self, visibility: VisibilityResult) -> ScrollAction:
         """Create small scroll action for fine-tuning when element is partially visible."""
         # Small distances for fine-tuning
@@ -4214,61 +4224,61 @@ Respond in JSON format:
             distance = 100  # Small adjustment
         else:
             distance = 200  # Medium adjustment
-        
+
         return ScrollAction(
             direction=visibility.suggested_direction,
             distance=distance,
             is_correction=False
         )
-    
+
     def _detect_overshoot(self, state: ScrollState, visibility: VisibilityResult) -> bool:
         """Detect if we've scrolled past the target element."""
         if state.attempts < 2:
             return False
-        
+
         # Was partially visible, now not visible = likely overshot
         if state.element_partially_visible and visibility.status == VisibilityStatus.NOT_VISIBLE:
             return True
-        
+
         # Direction reversal with high confidence = likely overshot
-        if (state.last_direction and 
+        if (state.last_direction and
             visibility.suggested_direction and
             self._is_opposite_direction(state.last_direction, visibility.suggested_direction) and
             visibility.direction_confidence > 0.80):
             return True
-        
+
         return False
-    
+
     def _create_correction_scroll(self, state: ScrollState) -> ScrollAction:
         """Create a corrective scroll action after overshoot."""
         last_scroll = state.scroll_history[-1]
         opposite_dir = self._get_opposite_direction(last_scroll.direction)
-        
+
         # Scroll back partial distance of last scroll
         correction_distance = last_scroll.distance // 3
-        
+
         return ScrollAction(
             direction=opposite_dir,
             distance=max(50, correction_distance),  # Minimum 50px
             is_correction=True
         )
-    
-    def _is_oscillating(self, history: List[ScrollAction], window: int = 4) -> bool:
+
+    def _is_oscillating(self, history: list[ScrollAction], window: int = 4) -> bool:
         """Check if scroll history shows oscillating pattern."""
         if len(history) < window:
             return False
-        
+
         recent = history[-window:]
         directions = [s.direction for s in recent]
-        
+
         # Check for alternating directions
         changes = 0
         for i in range(1, len(directions)):
             if directions[i] != directions[i-1]:
                 changes += 1
-        
+
         return changes >= window - 1
-    
+
     def _is_opposite_direction(self, dir1: ScrollDirection, dir2: ScrollDirection) -> bool:
         """Check if two directions are opposite."""
         opposites = {
@@ -4278,7 +4288,7 @@ Respond in JSON format:
             ScrollDirection.RIGHT: ScrollDirection.LEFT
         }
         return opposites.get(dir1) == dir2
-    
+
     def _get_opposite_direction(self, direction: ScrollDirection) -> ScrollDirection:
         """Get the opposite scroll direction."""
         opposites = {
@@ -4288,11 +4298,11 @@ Respond in JSON format:
             ScrollDirection.RIGHT: ScrollDirection.LEFT
         }
         return opposites[direction]
-    
+
     async def _execute_scroll(self, action: ScrollAction):
         """Execute the actual scroll action in the browser."""
         x, y = 0, 0
-        
+
         if action.direction == ScrollDirection.DOWN:
             y = action.distance
         elif action.direction == ScrollDirection.UP:
@@ -4301,37 +4311,37 @@ Respond in JSON format:
             x = action.distance
         elif action.direction == ScrollDirection.LEFT:
             x = -action.distance
-        
+
         logger.debug(
             f"Executing scroll: {action.direction.value} by {action.distance}px",
             extra={"x": x, "y": y, "is_correction": action.is_correction}
         )
-        
+
         # Use smooth scrolling for better UX
         await self.automation_driver.scroll_by_pixels(x, y, smooth=True)
-        
+
         # Record execution time
         action.executed_at = datetime.now(timezone.utc)
-    
+
     async def _is_making_progress(self, state: ScrollState, screenshot: bytes) -> bool:
         """Check if scrolling is having an effect (not stuck)."""
         # Simple hash comparison to detect identical screenshots
         import hashlib
         current_hash = hashlib.md5(screenshot).hexdigest()
-        
+
         if state.last_screenshot_hash == current_hash:
             # Screenshot hasn't changed - might be at page boundary
             return False
-        
+
         state.last_screenshot_hash = current_hash
         return True
-    
+
     def _parse_visibility_response(self, ai_response: str) -> VisibilityResult:
         """Parse AI response into VisibilityResult object."""
         # Parse the structured response
         lines = ai_response.strip().split('\n')
         result = VisibilityResult(status=VisibilityStatus.NOT_VISIBLE)
-        
+
         for line in lines:
             if line.startswith('STATUS:'):
                 status_str = line.split(':', 1)[1].strip()
@@ -4385,17 +4395,17 @@ Respond in JSON format:
                     pass
             elif line.startswith('NOTES:'):
                 result.notes = line.split(':', 1)[1].strip()
-        
+
         return result
-    
+
     async def _execute_scroll_by_pixels_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute precise pixel-based scrolling."""
         logger.info("Executing scroll-by-pixels workflow", extra={
             "step_number": test_step.step_number
         })
-        
+
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
             test_step=test_step,
@@ -4407,23 +4417,23 @@ Respond in JSON format:
                 reasoning="Scroll action validated"
             )
         )
-        
+
         try:
             # Extract scroll parameters from instruction
             # Expected format: "scroll_by_pixels: x=0, y=300" or similar
             value_str = test_step.action_instruction.value or ""
             x, y = 0, 0
-            
+
             # Parse x and y values
             import re
             x_match = re.search(r'x=(-?\d+)', value_str)
             y_match = re.search(r'y=(-?\d+)', value_str)
-            
+
             if x_match:
                 x = int(x_match.group(1))
             if y_match:
                 y = int(y_match.group(1))
-            
+
             # If no explicit values, use defaults based on direction hints
             if x == 0 and y == 0:
                 if "down" in test_step.description.lower():
@@ -4436,16 +4446,16 @@ Respond in JSON format:
                     x = -300
                 else:
                     y = 300  # Default to scrolling down
-            
+
             # Execute scroll
             await self.automation_driver.scroll_by_pixels(x, y)
-            
+
             # Wait for scroll to complete
             await asyncio.sleep(0.5)
-            
+
             # Capture result
-            screenshot_after = await self.automation_driver.screenshot()
-            
+            await self.automation_driver.screenshot()
+
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
@@ -4464,7 +4474,7 @@ Respond in JSON format:
                 matches_expected=True,
                 ui_changes=["Page scrolled to new position"]
             )
-            
+
         except Exception as e:
             logger.error(f"Scroll-by-pixels workflow failed: {str(e)}")
             result.overall_success = False
@@ -4475,18 +4485,18 @@ Respond in JSON format:
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         result.timestamp_end = datetime.now(timezone.utc)
         return result
-    
+
     async def _execute_scroll_to_top_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute scroll to top of page."""
         logger.info("Executing scroll-to-top workflow", extra={
             "step_number": test_step.step_number
         })
-        
+
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
             test_step=test_step,
@@ -4498,17 +4508,17 @@ Respond in JSON format:
                 reasoning="Scroll action validated"
             )
         )
-        
+
         try:
             # Execute scroll to top
             await self.automation_driver.scroll_to_top()
-            
+
             # Wait for scroll to complete
             await asyncio.sleep(0.5)
-            
+
             # Capture result
-            screenshot_after = await self.automation_driver.screenshot()
-            
+            await self.automation_driver.screenshot()
+
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
@@ -4520,11 +4530,11 @@ Respond in JSON format:
                     scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
-            
+
             # Verify we're at the top
             scroll_x, scroll_y = await self.automation_driver.get_scroll_position()
             at_top = scroll_y == 0
-            
+
             result.ai_analysis = AIAnalysis(
                 success=at_top,
                 confidence=1.0,
@@ -4533,7 +4543,7 @@ Respond in JSON format:
                 ui_changes=["Page scrolled to top"],
                 anomalies=[] if at_top else ["Not at absolute top of page"]
             )
-            
+
         except Exception as e:
             logger.error(f"Scroll-to-top workflow failed: {str(e)}")
             result.overall_success = False
@@ -4544,18 +4554,18 @@ Respond in JSON format:
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         result.timestamp_end = datetime.now(timezone.utc)
         return result
-    
+
     async def _execute_scroll_to_bottom_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute scroll to bottom of page."""
         logger.info("Executing scroll-to-bottom workflow", extra={
             "step_number": test_step.step_number
         })
-        
+
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
             test_step=test_step,
@@ -4567,17 +4577,17 @@ Respond in JSON format:
                 reasoning="Scroll action validated"
             )
         )
-        
+
         try:
             # Execute scroll to bottom
             await self.automation_driver.scroll_to_bottom()
-            
+
             # Wait for scroll to complete and any lazy-loaded content
             await asyncio.sleep(1.0)
-            
+
             # Capture result
-            screenshot_after = await self.automation_driver.screenshot()
-            
+            await self.automation_driver.screenshot()
+
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
@@ -4589,12 +4599,12 @@ Respond in JSON format:
                     scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
-            
+
             # Verify we're at the bottom
             vw, vh, pw, ph = await self.automation_driver.get_page_dimensions()
             scroll_x, scroll_y = await self.automation_driver.get_scroll_position()
             at_bottom = scroll_y >= (ph - vh - 10)  # Allow 10px tolerance
-            
+
             result.ai_analysis = AIAnalysis(
                 success=at_bottom,
                 confidence=1.0,
@@ -4603,7 +4613,7 @@ Respond in JSON format:
                 ui_changes=["Page scrolled to bottom"],
                 anomalies=[] if at_bottom else ["Not at absolute bottom of page"]
             )
-            
+
         except Exception as e:
             logger.error(f"Scroll-to-bottom workflow failed: {str(e)}")
             result.overall_success = False
@@ -4614,19 +4624,19 @@ Respond in JSON format:
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         result.timestamp_end = datetime.now(timezone.utc)
         return result
-    
+
     async def _execute_scroll_horizontal_workflow(
-        self, test_step: TestStep, test_context: Dict[str, Any], screenshot: Optional[bytes]
+        self, test_step: TestStep, test_context: dict[str, Any], screenshot: bytes | None
     ) -> EnhancedActionResult:
         """Execute horizontal scrolling."""
         logger.info("Executing horizontal scroll workflow", extra={
             "step_number": test_step.step_number,
             "description": test_step.description
         })
-        
+
         result = EnhancedActionResult(
             test_step_id=test_step.step_id,
             test_step=test_step,
@@ -4638,21 +4648,21 @@ Respond in JSON format:
                 reasoning="Scroll action validated"
             )
         )
-        
+
         try:
             # Determine scroll direction and amount
             description_lower = test_step.description.lower()
             value = test_step.action_instruction.value or ""
-            
+
             # Default scroll amount
             scroll_amount = 300
-            
+
             # Try to extract amount from value
             import re
             amount_match = re.search(r'(\d+)', value)
             if amount_match:
                 scroll_amount = int(amount_match.group(1))
-            
+
             # Determine direction
             if "right" in description_lower:
                 x = scroll_amount
@@ -4661,16 +4671,16 @@ Respond in JSON format:
             else:
                 # Default to right
                 x = scroll_amount
-            
+
             # Execute horizontal scroll
             await self.automation_driver.scroll_by_pixels(x, 0)
-            
+
             # Wait for scroll to complete
             await asyncio.sleep(0.5)
-            
+
             # Capture result
-            screenshot_after = await self.automation_driver.screenshot()
-            
+            await self.automation_driver.screenshot()
+
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
@@ -4682,7 +4692,7 @@ Respond in JSON format:
                     scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
-            
+
             result.ai_analysis = AIAnalysis(
                 success=True,
                 confidence=1.0,
@@ -4690,7 +4700,7 @@ Respond in JSON format:
                 matches_expected=True,
                 ui_changes=["Page scrolled horizontally"]
             )
-            
+
         except Exception as e:
             logger.error(f"Horizontal scroll workflow failed: {str(e)}")
             result.overall_success = False
@@ -4701,6 +4711,6 @@ Respond in JSON format:
                 error_traceback=traceback.format_exc()
             )
             result.failure_phase = "execution"
-        
+
         result.timestamp_end = datetime.now(timezone.utc)
         return result

@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from dotenv import load_dotenv
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
@@ -11,8 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.interfaces import ConfigProvider
 
-
-AGENT_ENV_PREFIX: Dict[str, str] = {
+AGENT_ENV_PREFIX: dict[str, str] = {
     "scope_triage": "HAINDY_SCOPE_TRIAGE",
     "test_planner": "HAINDY_TEST_PLANNER",
     "test_runner": "HAINDY_TEST_RUNNER",
@@ -20,7 +19,7 @@ AGENT_ENV_PREFIX: Dict[str, str] = {
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
 
-ALLOWED_REASONING_LEVELS: Set[str] = {
+ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
     "minimal",
     "low",
@@ -36,7 +35,7 @@ class AgentModelConfig(BaseModel):
     model: str
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     reasoning_level: str = Field(default="medium")
-    modalities: Set[str] = Field(default_factory=lambda: {"text"})
+    modalities: set[str] = Field(default_factory=lambda: {"text"})
 
     @field_validator("reasoning_level")
     @classmethod
@@ -50,13 +49,13 @@ class AgentModelConfig(BaseModel):
 
     @field_validator("modalities")
     @classmethod
-    def validate_modalities(cls, value: Set[str]) -> Set[str]:
+    def validate_modalities(cls, value: set[str]) -> set[str]:
         if not value:
             raise ValueError("Agent modalities cannot be empty")
         return value
 
 
-DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
+DEFAULT_AGENT_MODELS: dict[str, AgentModelConfig] = {
     "scope_triage": AgentModelConfig(
         model="gpt-5.2",
         temperature=0.15,
@@ -112,7 +111,7 @@ class Settings(BaseSettings):
         ge=60,
         description="Request timeout for OpenAI API calls in seconds",
     )
-    agent_models: Dict[str, AgentModelConfig] = Field(
+    agent_models: dict[str, AgentModelConfig] = Field(
         default_factory=dict,
         description="Per-agent OpenAI model configuration",
     )
@@ -129,7 +128,7 @@ class Settings(BaseSettings):
     )
 
     # Desktop Configuration
-    desktop_prefer_resolution: Tuple[int, int] = Field(
+    desktop_prefer_resolution: tuple[int, int] = Field(
         default=(1920, 1080),
         description="Preferred resolution for desktop sessions",
         env="HAINDY_DESKTOP_RESOLUTION",
@@ -180,7 +179,7 @@ class Settings(BaseSettings):
         description="Execution replay cache path",
         env="HAINDY_EXECUTION_REPLAY_CACHE_PATH",
     )
-    desktop_display: Optional[str] = Field(
+    desktop_display: str | None = Field(
         default=None,
         description="X11 display override for desktop capture",
         env="HAINDY_DESKTOP_DISPLAY",
@@ -311,12 +310,12 @@ class Settings(BaseSettings):
         ),
         env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
     )
-    actions_computer_tool_allowed_domains: List[str] = Field(
+    actions_computer_tool_allowed_domains: list[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool is permitted to interact with",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS",
     )
-    actions_computer_tool_blocked_domains: List[str] = Field(
+    actions_computer_tool_blocked_domains: list[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool must never interact with",
         env="HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS",
@@ -349,7 +348,7 @@ class Settings(BaseSettings):
         default="json",
         description="Log format (json or text)",
     )
-    log_file: Optional[str] = Field(
+    log_file: str | None = Field(
         default=None, description="Log file path"
     )
     model_log_path: Path = Field(
@@ -417,7 +416,7 @@ class Settings(BaseSettings):
 
     @field_validator("desktop_prefer_resolution", mode="before")
     @classmethod
-    def parse_desktop_resolution(cls, value: Any) -> Tuple[int, int]:
+    def parse_desktop_resolution(cls, value: Any) -> tuple[int, int]:
         if isinstance(value, tuple) and len(value) == 2:
             return int(value[0]), int(value[1])
         if isinstance(value, list) and len(value) == 2:
@@ -472,7 +471,7 @@ class Settings(BaseSettings):
         return self
 
     @staticmethod
-    def _coerce_domain_list(raw: Any) -> List[str]:
+    def _coerce_domain_list(raw: Any) -> list[str]:
         """Normalize various list inputs (list, tuple, comma-separated string)."""
         if raw is None:
             return []
@@ -481,7 +480,7 @@ class Settings(BaseSettings):
                 return []
             return [item.strip() for item in raw.split(",") if item.strip()]
         if isinstance(raw, (list, tuple, set)):
-            coerced: List[str] = []
+            coerced: list[str] = []
             for item in raw:
                 if item is None:
                     continue
@@ -512,7 +511,7 @@ class Settings(BaseSettings):
         """Populate agent model configurations from defaults and environment."""
         env = os.environ
 
-        configured_models: Dict[str, AgentModelConfig] = {}
+        configured_models: dict[str, AgentModelConfig] = {}
         openai_model_env_set = "OPENAI_MODEL" in env
         openai_temperature_env_set = "OPENAI_TEMPERATURE" in env
 
@@ -577,7 +576,7 @@ class Settings(BaseSettings):
 class ConfigManager(ConfigProvider):
     """Configuration manager implementation."""
 
-    def __init__(self, settings: Optional[Settings] = None) -> None:
+    def __init__(self, settings: Settings | None = None) -> None:
         """
         Initialize config manager.
 
@@ -598,14 +597,14 @@ class ConfigManager(ConfigProvider):
         try:
             return getattr(self.settings, key)
         except AttributeError:
-            raise KeyError(f"Required configuration key not found: {key}")
+            raise KeyError(f"Required configuration key not found: {key}") from None
 
-    def get_all(self) -> Dict[str, Any]:
+    def get_all(self) -> dict[str, Any]:
         """Get all configuration values."""
         return self.settings.model_dump()
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     # Load .env file if it exists
