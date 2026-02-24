@@ -322,7 +322,7 @@ ENHANCED_HTML_TEMPLATE = """
         }
         
         /* Browser calls */
-        .browser-calls {
+        .automation-calls {
             background: #f5f5f5;
             border-radius: 4px;
             padding: 12px;
@@ -695,11 +695,11 @@ ENHANCED_HTML_TEMPLATE = """
                                                     {% endif %}
                                                     
                                                     <!-- Browser Calls -->
-                                                    {% if action.browser_calls %}
+                                                    {% if action.automation_calls %}
                                                     <div class="mt-16">
                                                         <strong>Browser Calls:</strong>
-                                                        <div class="browser-calls">
-                                                            {% for call in action.browser_calls %}
+                                                        <div class="automation-calls">
+                                                            {% for call in action.automation_calls %}
                                                             {{ call.timestamp }}: {{ call.method }}({{ call.args|join(', ') }}){% if call.result %} → {{ call.result }}{% endif %}
                                                             {% endfor %}
                                                         </div>
@@ -911,7 +911,7 @@ class EnhancedReporter:
                             "duration": action_duration,
                             "result": action.get("result"),
                             "ai_conversation": ai_conversation,
-                            "browser_calls": action.get("browser_calls", []),
+                            "automation_calls": action.get("automation_calls", []),
                             "screenshots": action.get("screenshots", {})
                         })
                 

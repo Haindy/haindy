@@ -145,8 +145,8 @@ class ActionAgent(Agent):
 
 
 
-class BrowserDriver(ABC):
-    """Abstract interface for browser automation."""
+class AutomationDriver(ABC):
+    """Abstract interface for environment automation."""
 
     @abstractmethod
     async def start(self) -> None:

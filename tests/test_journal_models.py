@@ -70,14 +70,14 @@ class TestJournalEntry:
             test_scenario="Test",
             step_reference="Step 1",
             action_taken="Clicked button",
-            scripted_command="await page.click('#submit-btn')",
+            scripted_command="click selector='#submit-btn'",
             selectors={"primary": "#submit-btn", "fallback": "button[type=submit]"},
             expected_result="Success",
             actual_result="Success",
             execution_mode=ExecutionMode.SCRIPTED
         )
         
-        assert entry.scripted_command == "await page.click('#submit-btn')"
+        assert entry.scripted_command == "click selector='#submit-btn'"
         assert entry.selectors["primary"] == "#submit-btn"
         assert entry.grid_coordinates is None
 
@@ -90,7 +90,7 @@ class TestActionRecord:
         record = ActionRecord(
             pattern_type=PatternType.CLICK,
             visual_signature={"action_type": "click", "description": "Click login"},
-            playwright_command="await page.click('#login-btn')",
+            automation_command="click selector='#login-btn'",
             selectors={"primary": "#login-btn"},
             success_count=5,
             failure_count=1,
@@ -108,16 +108,16 @@ class TestActionRecord:
         record = ActionRecord(
             pattern_type=PatternType.TYPE,
             visual_signature={},
-            playwright_command="await page.fill('#username', 'test')",
+            automation_command="type selector='#username' text='test'",
             selectors={"primary": "#username"},
             fallback_commands=[
-                "await page.fill('input[name=username]', 'test')",
-                "await page.fill('input[type=text]:first', 'test')"
+                "type selector='input[name=username]' text='test'",
+                "type selector='input[type=text]:first' text='test'"
             ]
         )
         
         assert len(record.fallback_commands) == 2
-        assert record.fallback_commands[0] == "await page.fill('input[name=username]', 'test')"
+        assert record.fallback_commands[0] == "type selector='input[name=username]' text='test'"
 
 
 class TestPatternMatch:
@@ -164,14 +164,14 @@ class TestScriptedCommand:
         """Test creating a scripted command."""
         cmd = ScriptedCommand(
             command_type="click",
-            command="await page.click('#submit')",
+            command="click selector='#submit'",
             selectors=["#submit", "button[type=submit]", "button:has-text('Submit')"],
             parameters={"timeout": 30000},
             retry_count=3
         )
         
         assert cmd.command_type == "click"
-        assert cmd.command == "await page.click('#submit')"
+        assert cmd.command == "click selector='#submit'"
         assert len(cmd.selectors) == 3
         assert cmd.timeout_ms == 30000
         assert cmd.retry_count == 3
@@ -181,7 +181,7 @@ class TestScriptedCommand:
         """Test scripted command fallback settings."""
         cmd = ScriptedCommand(
             command_type="type",
-            command="await page.fill('#input', 'text')",
+            command="type selector='#input' text='text'",
             fallback_threshold=0.9,
             allow_visual_fallback=False
         )
@@ -291,8 +291,8 @@ class TestExecutionJournal:
         
         # Add discovered patterns
         journal.discovered_patterns = [
-            ActionRecord(pattern_type=PatternType.CLICK, visual_signature={}, playwright_command="cmd1"),
-            ActionRecord(pattern_type=PatternType.TYPE, visual_signature={}, playwright_command="cmd2")
+            ActionRecord(pattern_type=PatternType.CLICK, visual_signature={}, automation_command="cmd1"),
+            ActionRecord(pattern_type=PatternType.TYPE, visual_signature={}, automation_command="cmd2")
         ]
         journal.reused_patterns = [uuid4(), uuid4(), uuid4()]
         
@@ -321,7 +321,7 @@ class TestExecutionJournal:
         pattern = ActionRecord(
             pattern_type=PatternType.CLICK,
             visual_signature={"action": "click"},
-            playwright_command="await page.click('#btn')"
+            automation_command="click selector='#btn'"
         )
         journal.discovered_patterns.append(pattern)
         

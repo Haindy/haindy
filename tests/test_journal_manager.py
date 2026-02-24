@@ -78,7 +78,7 @@ def sample_action_result():
             "refined_coordinates": "M23+offset(0.7,0.4)",
             "final_confidence": 0.95
         },
-        playwright_command="await page.click('#login-btn')",
+        automation_command="click selector='#login-btn'",
         selectors={"primary": "#login-btn", "fallback": "button[type=submit]"},
         element_text="Login",
         actual_outcome="Login form displayed"
@@ -143,7 +143,7 @@ class TestJournalManager:
         )
         
         assert entry.execution_mode == ExecutionMode.SCRIPTED
-        assert entry.scripted_command == "await page.click('#login-btn')"
+        assert entry.scripted_command == "click selector='#login-btn'"
         assert entry.selectors is not None
         assert entry.screenshot_before == "before.png"
         assert entry.screenshot_after == "after.png"
@@ -168,7 +168,7 @@ class TestJournalManager:
         assert len(journal_manager._pattern_library) == 1
         pattern = list(journal_manager._pattern_library.values())[0]
         assert pattern.pattern_type.value == "click"
-        assert pattern.playwright_command == sample_action_result.playwright_command
+        assert pattern.automation_command == sample_action_result.automation_command
         assert pattern.success_count == 1
     
     @pytest.mark.asyncio
@@ -181,7 +181,7 @@ class TestJournalManager:
             success=True,
             action=ActionType.CLICK,
             confidence=0.6,  # Below threshold
-            playwright_command="await page.click('#btn')"
+            automation_command="click selector='#btn'"
         )
         
         await journal_manager.record_action(
@@ -281,7 +281,7 @@ class TestJournalManager:
                 success=True,
                 action=ActionType.CLICK if i < 3 else ActionType.TYPE,
                 confidence=0.9,
-                playwright_command=f"await page.click('#btn{i}')",
+                automation_command=f"click selector='#btn{i}'",
                 actual_outcome="Success"
             )
             
@@ -322,7 +322,7 @@ class TestJournalManager:
             success=True,
             action=ActionType.CLICK,
             confidence=0.9,
-            playwright_command="await page.click('#btn')"
+            automation_command="click selector='#btn'"
         )
         await journal_manager.record_action(
             journal_id=journal1.journal_id,

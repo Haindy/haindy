@@ -4,11 +4,11 @@ AI-driven autonomous testing agent — Transform requirements into comprehensive
 
 ## Overview
 
-HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs three specialized AI agents coordinating together to plan, execute, and evaluate tests.
+HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and execute desktop-first testing workflows. The system uses a dedicated situational setup stage plus specialized agents that plan, execute, and evaluate tests.
 
 ## Key Features
 
-- **Multi-Agent Architecture**: Three specialized AI agents (Test Planner, Test Runner, Action Agent)
+- **Multi-Agent Architecture**: Scope Triage, Situational, Test Planner, Test Runner, and Action Agent
 - **DOM-Free Visual Interaction**: Adaptive grid-based interaction with automatic refinement
 - **Desktop + Gemini Computer Use**: Optional OS-level driver with Gemini provider support
 - **Just-In-Time Scripted Automation**: Records successful actions for faster replay
@@ -41,12 +41,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-4. Install Playwright browsers:
-```bash
-playwright install chromium
-```
-
-5. Set up pre-commit hooks:
+4. Set up pre-commit hooks:
 ```bash
 pre-commit install
 ```
@@ -95,8 +90,6 @@ VERTEX_PROJECT=your-vertex-project
 VERTEX_LOCATION=us-central1
 CU_SAFETY_POLICY=auto_approve
 
-# Driver backend: playwright or desktop
-HAINDY_DRIVER_BACKEND=desktop
 ```
 
 Desktop automation has OS-level dependencies (`ffmpeg`, `xrandr`, `/dev/uinput`, `xclip`).
@@ -106,30 +99,28 @@ See `docs/RUNBOOK.md` for setup details.
 
 ### Running Tests
 
-#### Document-based Testing
+#### Desktop-First Execution
 ```bash
-# Extract test requirements from a document (PRD, design doc, etc.)
-python -m src.main --plan requirements.md
+# Both files are required:
+# --plan: test requirements
+# --context: runtime setup/context details (target type, URL/app launch, constraints)
+python -m src.main --plan requirements.md --context execution_context.txt
 
 # Short form
-python -m src.main -p requirements.md
+python -m src.main -p requirements.md --context execution_context.txt
 
 # With debug output for detailed logging
-python -m src.main --plan requirements.md --debug
+python -m src.main --plan requirements.md --context execution_context.txt --debug
 
 # Emit structured JSON logs (suitable for automation)
-python -m src.main --plan requirements.md --verbose
-
-# With URL specified in command (overrides URL in file)
-python -m src.main --plan requirements.md --url https://example.com
+python -m src.main --plan requirements.md --context execution_context.txt --verbose
 ```
 
 #### Desktop + Gemini Quickstart
 ```bash
 export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=google
-export HAINDY_DRIVER_BACKEND=desktop
-python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt --context test_scenarios/wikipedia_search_simple.txt
 ```
 
 ### Execution Options
@@ -137,26 +128,7 @@ python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 #### Berserk Mode
 ```bash
 # Fully autonomous mode - no confirmations
-python -m src.main --berserk --plan requirements.pdf
-```
-
-#### Plan-Only Mode
-```bash
-# Generate test plan without executing
-python -m src.main --plan-only --plan test_scenarios/wikipedia_search_simple.txt
-```
-
-#### Browser Options
-```bash
-# Browser runs in headless mode by default
-python -m src.main --plan requirements.md
-
-# Force headless mode explicitly
-python -m src.main --plan requirements.md --headless
-
-# Note: To show browser window, you need to modify the .env file or settings:
-# Add to .env: BROWSER_HEADLESS=false
-# Or modify src/config/settings.py temporarily
+python -m src.main --berserk --plan requirements.pdf --context execution_context.txt
 ```
 
 ### Output Options
@@ -164,16 +136,16 @@ python -m src.main --plan requirements.md --headless
 #### Report Formats
 ```bash
 # HTML report (default)
-python -m src.main --plan requirements.md --format html
+python -m src.main --plan requirements.md --context execution_context.txt --format html
 
 # JSON report
-python -m src.main --plan requirements.md --format json
+python -m src.main --plan requirements.md --context execution_context.txt --format json
 
 # Markdown report
-python -m src.main --plan requirements.md --format markdown
+python -m src.main --plan requirements.md --context execution_context.txt --format markdown
 
 # Custom output directory
-python -m src.main --plan requirements.md --output custom_reports/
+python -m src.main --plan requirements.md --context execution_context.txt --output custom_reports/
 ```
 
 ### Advanced Options
@@ -181,10 +153,10 @@ python -m src.main --plan requirements.md --output custom_reports/
 #### Timeouts and Limits
 ```bash
 # Set execution timeout (default: 7200 seconds)
-python -m src.main --plan requirements.md --timeout 3600
+python -m src.main --plan requirements.md --context execution_context.txt --timeout 3600
 
 # Set maximum steps (default: 50)
-python -m src.main --plan requirements.md --max-steps 100
+python -m src.main --plan requirements.md --context execution_context.txt --max-steps 100
 ```
 
 ### Utility Commands

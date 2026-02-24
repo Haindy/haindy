@@ -9,11 +9,12 @@ from uuid import UUID, uuid4
 
 from src.agents import (
     ScopeTriageAgent,
+    SituationalAgent,
     TestPlannerAgent,
     TestRunner,
     ActionAgent,
 )
-from src.browser.driver import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.core.types import (
     AgentMessage,
     ScopeTriageResult,
@@ -53,7 +54,7 @@ class WorkflowCoordinator:
         self,
         message_bus: Optional[MessageBus] = None,
         state_manager: Optional[StateManager] = None,
-        browser_driver: Optional[BrowserDriver] = None,
+        automation_driver: Optional[AutomationDriver] = None,
         max_steps: int = 50
     ):
         """
@@ -62,11 +63,11 @@ class WorkflowCoordinator:
         Args:
             message_bus: Message bus for agent communication
             state_manager: State manager for test execution
-            browser_driver: Browser driver for web automation
+            automation_driver: Browser driver for web automation
         """
         self.message_bus = message_bus or MessageBus()
         self.state_manager = state_manager or StateManager()
-        self.browser_driver = browser_driver
+        self.automation_driver = automation_driver
         
         # Register the coordinator itself for message bus diagnostics
         self.message_bus.register_agent("coordinator")
@@ -95,6 +96,7 @@ class WorkflowCoordinator:
         planner_cfg = settings.get_agent_model_config("test_planner")
         runner_cfg = settings.get_agent_model_config("test_runner")
         action_cfg = settings.get_agent_model_config("action_agent")
+        situational_cfg = settings.get_agent_model_config("situational_agent")
 
         # Create agents
         self._agents = {
@@ -114,7 +116,7 @@ class WorkflowCoordinator:
             ),
             "test_runner": TestRunner(
                 name="TestRunner",
-                browser_driver=self.browser_driver,
+                automation_driver=self.automation_driver,
                 model=runner_cfg.model,
                 temperature=runner_cfg.temperature,
                 reasoning_level=runner_cfg.reasoning_level,
@@ -122,12 +124,19 @@ class WorkflowCoordinator:
             ),
             "action_agent": ActionAgent(
                 name="ActionAgent",
-                browser_driver=self.browser_driver,
+                automation_driver=self.automation_driver,
                 model=action_cfg.model,
                 temperature=action_cfg.temperature,
                 reasoning_level=action_cfg.reasoning_level,
                 modalities=action_cfg.modalities,
-            )
+            ),
+            "situational_agent": SituationalAgent(
+                name="SituationalAgent",
+                model=situational_cfg.model,
+                temperature=situational_cfg.temperature,
+                reasoning_level=situational_cfg.reasoning_level,
+                modalities=situational_cfg.modalities,
+            ),
         }
         
         # Set up test runner dependencies

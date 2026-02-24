@@ -1,6 +1,7 @@
 """Desktop automation helpers for OS-level control."""
 
 from src.desktop.cache import CoordinateCache, CachedCoordinate
+from src.desktop.controller import DesktopController
 from src.desktop.driver import DesktopDriver
 from src.desktop.execution_replay import (
     DriverActionError,
@@ -16,6 +17,7 @@ from src.desktop.virtual_input import VirtualInput
 __all__ = [
     "CachedCoordinate",
     "CoordinateCache",
+    "DesktopController",
     "DesktopDriver",
     "DisplayMode",
     "DriverActionError",

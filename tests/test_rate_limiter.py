@@ -148,12 +148,12 @@ class TestRateLimiter:
         """Test rate limiter initialization."""
         config = RateLimitConfig(
             api_calls_per_minute=30,
-            browser_actions_per_minute=60
+            automation_actions_per_minute=60
         )
         limiter = RateLimiter(config)
         
         assert limiter.config.api_calls_per_minute == 30
-        assert limiter.config.browser_actions_per_minute == 60
+        assert limiter.config.automation_actions_per_minute == 60
     
     @pytest.mark.asyncio
     async def test_api_rate_limiting(self):
@@ -180,18 +180,18 @@ class TestRateLimiter:
     async def test_browser_action_limiting(self):
         """Test browser action rate limiting."""
         config = RateLimitConfig(
-            browser_actions_per_minute=120,
-            browser_actions_burst=3
+            automation_actions_per_minute=120,
+            automation_actions_burst=3
         )
         limiter = RateLimiter(config)
         
         # Should allow up to burst
         for _ in range(3):
-            assert await limiter.check_browser_action() is True
+            assert await limiter.check_automation_action() is True
         
         # Next should fail
         with pytest.raises(RateLimitExceeded):
-            await limiter.check_browser_action()
+            await limiter.check_automation_action()
     
     @pytest.mark.asyncio
     async def test_wait_for_limit(self):

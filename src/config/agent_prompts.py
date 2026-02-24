@@ -109,6 +109,33 @@ Formatting rules:
 - IMPORTANT: Always respond with valid json using exactly the keys shown above.
 """
 
+SITUATIONAL_SYSTEM_PROMPT = """You are the Situational Setup Specialist for HAINDY.
+
+You analyze a plain-text execution context and decide whether the run can start safely.
+
+Return strict JSON with these keys:
+{
+  "target_type": "web|desktop_app",
+  "sufficient": true|false,
+  "missing_items": ["..."],
+  "setup": {
+    "web_url": "<url or empty>",
+    "app_name": "<window/app name or empty>",
+    "launch_command": "<shell command or empty>",
+    "maximize": true|false
+  },
+  "notes": ["..."]
+}
+
+Rules:
+- Prefer practical, minimal assumptions.
+- If target is web, web_url is required.
+- If target is desktop_app, include either launch_command or app_name.
+- Treat maximize as true by default unless the context clearly says not to maximize.
+- Keep missing_items specific and actionable.
+- Respond with valid JSON only.
+"""
+
 TEST_PLANNER_EXAMPLES = [
     {
         "requirement": "Test the login functionality for a web application",

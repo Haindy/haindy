@@ -2,9 +2,6 @@
 Tests for the script recorder.
 """
 
-from unittest.mock import Mock
-from uuid import uuid4
-
 import pytest
 
 from src.core.types import ActionType
@@ -26,7 +23,7 @@ def click_action_result():
         action=ActionType.CLICK,
         confidence=0.95,
         coordinates=(500, 300),
-        playwright_command="await page.click('#submit-btn')",
+        automation_command="click selector='#submit-btn'",
         actual_outcome="Button clicked"
     )
 
@@ -39,7 +36,7 @@ def type_action_result():
         action=ActionType.TYPE,
         confidence=0.9,
         input_text="test@example.com",
-        playwright_command="await page.fill('#email', 'test@example.com')",
+        automation_command="type selector='#email' text='test@example.com'",
         actual_outcome="Text entered"
     )
 
@@ -66,7 +63,7 @@ class TestScriptRecorder:
         
         assert command is not None
         assert command.command_type == "click"
-        assert command.command == click_action_result.playwright_command
+        assert command.command == click_action_result.automation_command
         assert len(command.selectors) > 0
         assert '[data-testid="submit-button"]' in command.selectors
         assert '#submit-btn' in command.selectors
@@ -167,7 +164,7 @@ class TestScriptRecorder:
         pattern = ActionRecord(
             pattern_type=PatternType.CLICK,
             visual_signature={},
-            playwright_command="await page.click('#btn')",
+            automation_command="click selector='#btn'",
             selectors={
                 "primary": "#btn",
                 "secondary": "button.submit",
@@ -179,9 +176,9 @@ class TestScriptRecorder:
         
         assert len(fallbacks) > 0
         # Should include wait strategy
-        assert any("wait_for_load_state" in fb for fb in fallbacks)
+        assert any("wait ms=500" in fb for fb in fallbacks)
         # Should include force click
-        assert any("force=True" in fb for fb in fallbacks)
+        assert any("force=true" in fb for fb in fallbacks)
     
     def test_record_scroll_action(self, script_recorder):
         """Test recording a scroll action."""
@@ -204,7 +201,7 @@ class TestScriptRecorder:
         
         assert command is not None
         assert command.command_type == "scroll"
-        assert "mouse.wheel" in command.command
+        assert "scroll direction='down'" in command.command
         assert "500" in command.command
     
     def test_record_wait_action(self, script_recorder):
@@ -225,7 +222,7 @@ class TestScriptRecorder:
         
         assert command is not None
         assert command.command_type == "wait"
-        assert "wait_for_timeout(2000)" in command.command
+        assert "wait ms=2000" in command.command
     
     def test_text_selector_escaping(self, script_recorder):
         """Test that text in selectors is properly escaped."""
@@ -256,12 +253,12 @@ class TestScriptRecorder:
     
     def test_replace_selector(self, script_recorder):
         """Test selector replacement in commands."""
-        original = "await page.click('#old-selector')"
+        original = "click selector='#old-selector'"
         new_selector = "button.new-class"
         
         replaced = script_recorder._replace_selector(original, new_selector)
         
-        assert replaced == "await page.click('button.new-class')"
+        assert replaced == "click selector='button.new-class'"
         assert "#old-selector" not in replaced
     
     def test_unknown_action_type(self, script_recorder):

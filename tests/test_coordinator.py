@@ -42,7 +42,7 @@ def mock_browser_driver():
 def coordinator(mock_browser_driver):
     """Create a WorkflowCoordinator instance for testing."""
     return WorkflowCoordinator(
-        browser_driver=mock_browser_driver,
+        automation_driver=mock_browser_driver,
         max_steps=50
     )
 
@@ -102,11 +102,12 @@ class TestWorkflowCoordinatorBasics:
         await coordinator.initialize()
         
         # Verify agents are created
-        assert len(coordinator._agents) == 4
+        assert len(coordinator._agents) == 5
         assert "test_planner" in coordinator._agents
         assert "test_runner" in coordinator._agents
         assert "action_agent" in coordinator._agents
         assert "scope_triage" in coordinator._agents
+        assert "situational_agent" in coordinator._agents
         
         # Verify coordinator state
         assert coordinator._state == CoordinatorState.IDLE
@@ -124,6 +125,7 @@ class TestWorkflowCoordinatorBasics:
         assert "test_runner" in stats["registered_agents"]
         assert "action_agent" in stats["registered_agents"]
         assert "scope_triage" in stats["registered_agents"]
+        assert "situational_agent" in stats["registered_agents"]
     
     def test_get_active_tests(self, coordinator):
         """Test getting list of active tests."""

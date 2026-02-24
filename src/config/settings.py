@@ -17,6 +17,7 @@ AGENT_ENV_PREFIX: Dict[str, str] = {
     "test_planner": "HAINDY_TEST_PLANNER",
     "test_runner": "HAINDY_TEST_RUNNER",
     "action_agent": "HAINDY_ACTION_AGENT",
+    "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
 
 
@@ -69,6 +70,11 @@ DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
         reasoning_level="low",
         modalities={"text", "vision"},
     ),
+    "situational_agent": AgentModelConfig(
+        model="gpt-5",
+        temperature=0.1,
+        reasoning_level="high",
+    ),
 }
 
 
@@ -112,25 +118,6 @@ class Settings(BaseSettings):
     )
     grid_confidence_threshold: float = Field(
         default=0.8, ge=0.0, le=1.0, description="Confidence threshold for refinement"
-    )
-
-    # Browser Configuration
-    driver_backend: str = Field(
-        default="playwright",
-        description="Automation driver backend (playwright or desktop)",
-        env="HAINDY_DRIVER_BACKEND",
-    )
-    browser_headless: bool = Field(
-        default=True, description="Run browser in headless mode"
-    )
-    browser_timeout: int = Field(
-        default=30000, ge=1000, description="Default browser timeout (ms)"
-    )
-    browser_viewport_width: int = Field(
-        default=1920, ge=800, description="Browser viewport width"
-    )
-    browser_viewport_height: int = Field(
-        default=1080, ge=600, description="Browser viewport height"
     )
 
     # Desktop Configuration
@@ -420,14 +407,6 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid log format: {v}")
         return v
 
-    @field_validator("driver_backend")
-    @classmethod
-    def validate_driver_backend(cls, value: str) -> str:
-        normalized = (value or "").strip().lower()
-        if normalized not in {"playwright", "desktop"}:
-            raise ValueError("driver_backend must be 'playwright' or 'desktop'")
-        return normalized
-
     @field_validator("desktop_prefer_resolution", mode="before")
     @classmethod
     def parse_desktop_resolution(cls, value: Any) -> Tuple[int, int]:
@@ -482,12 +461,6 @@ class Settings(BaseSettings):
         if self.cu_provider == "google":
             if self.desktop_prefer_resolution == (1920, 1080):
                 self.desktop_prefer_resolution = (1440, 900)
-            if (
-                self.browser_viewport_width == 1920
-                and self.browser_viewport_height == 1080
-            ):
-                self.browser_viewport_width = 1440
-                self.browser_viewport_height = 900
         return self
 
     @staticmethod

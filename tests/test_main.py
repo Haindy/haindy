@@ -1,338 +1,105 @@
-"""Tests for main.py CLI interface."""
+"""Tests for desktop-first CLI interface."""
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.main import (
-    async_main,
-    create_parser,
-    read_plan_file,
-    run_test,
-    show_version,
-    test_api_connection,
-)
-from src.core.types import ScopeTriageResult, TestCase, TestCasePriority, TestPlan, TestStep
-from src.error_handling import ScopeTriageBlockedError
+from src.main import async_main, create_parser, read_context_file, read_plan_file, run_test
 
 
 class TestCLIParser:
-    """Test command line parser."""
-
-    def test_parser_creation(self):
-        """Test parser is created with all expected arguments."""
+    def test_parser_creation(self) -> None:
         parser = create_parser()
-
-        # Check description
-        assert "HAINDY - Autonomous AI Testing Agent v0.1.0" in parser.description
-
-        # Get all actions
         actions = {action.dest: action for action in parser._actions}
-
-        # Check all expected arguments exist
         assert "plan" in actions
+        assert "context" in actions
         assert "test_api" in actions
         assert "version" in actions
-        assert "berserk" in actions
-        assert "record" in actions
 
-    def test_mutually_exclusive_inputs(self):
-        """Test that input options are mutually exclusive."""
+    def test_mutually_exclusive_inputs(self) -> None:
         parser = create_parser()
-
-        # These should work
-        parser.parse_args(["--plan", "test.md"])
+        parser.parse_args(["--plan", "test.md", "--context", "ctx.txt"])
         parser.parse_args(["--test-api"])
         parser.parse_args(["--version"])
-        parser.parse_args(["--record"])
-        parser.parse_args(["--no-record"])
 
-        # These should fail
         with pytest.raises(SystemExit):
             parser.parse_args(["--plan", "test.md", "--test-api"])
 
+
+class TestFileLoading:
+    @pytest.mark.asyncio
+    async def test_read_plan_file_not_found(self) -> None:
         with pytest.raises(SystemExit):
-            parser.parse_args(["--plan", "test.md", "--version"])
+            await read_plan_file(Path("missing.md"))
 
-    def test_removed_input_flags_rejected(self):
-        """Removed input flags should be rejected by parser."""
-        parser = create_parser()
+    @pytest.mark.asyncio
+    async def test_read_context_file_not_found(self) -> None:
         with pytest.raises(SystemExit):
-            parser.parse_args(["--requirements"])
+            await read_context_file(Path("missing.txt"))
+
+    @pytest.mark.asyncio
+    async def test_read_context_file_empty(self, tmp_path: Path) -> None:
+        context_file = tmp_path / "context.txt"
+        context_file.write_text("\n")
         with pytest.raises(SystemExit):
-            parser.parse_args(["--json-test-plan", "test.json"])
-
-
-class TestUtilityCommands:
-    """Test utility command functions."""
-
-    def test_show_version(self, capsys):
-        """Test version display."""
-        result = show_version()
-        captured = capsys.readouterr()
-
-        assert result == 0
-        assert "HAINDY - Autonomous AI Testing Agent" in captured.out
-        assert "Version: 0.1.0" in captured.out
-        assert "Python: 3.10+" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_api_connection_success(self, capsys):
-        """Test successful API connection test."""
-        mock_response = {
-            "content": "API test successful",
-            "model": "gpt-5",
-            "usage": {"total_tokens": 10},
-        }
-
-        with patch("src.models.openai_client.OpenAIClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.call = AsyncMock(return_value=mock_response)
-            mock_client_class.return_value = mock_client
-
-            result = await test_api_connection()
-            captured = capsys.readouterr()
-
-            assert result == 0
-            assert "OpenAI API connection successful" in captured.out
-            assert "Model: gpt-5" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_api_connection_failure(self, capsys):
-        """Test failed API connection test."""
-        with patch("src.models.openai_client.OpenAIClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.call = AsyncMock(side_effect=Exception("API Error"))
-            mock_client_class.return_value = mock_client
-
-            result = await test_api_connection()
-            captured = capsys.readouterr()
-
-            assert result == 1
-            assert "API test failed" in captured.out
-            assert "OPENAI_API_KEY" in captured.out
-
-
-class TestPlanFileReading:
-    """Test plan file reading."""
-    
-    @pytest.mark.asyncio
-    async def test_read_plan_file_not_found(self, capsys):
-        """Test reading non-existent file."""
-        with pytest.raises(SystemExit):
-            await read_plan_file(Path("nonexistent.md"))
-        captured = capsys.readouterr()
-        assert "File not found" in captured.out
-    
-    @pytest.mark.asyncio
-    async def test_read_plan_file_with_url(self, tmp_path):
-        """Test reading plan file with URL on first line."""
-        # Create test file with URL
-        test_file = tmp_path / "test_requirements.md"
-        test_file.write_text("https://example.com\nTest the login flow\nVerify user can log in")
-        requirements = await read_plan_file(test_file)
-        assert "Test the login flow" in requirements
-        assert "Verify user can log in" in requirements
-        assert "https://example.com" in requirements
-    
-    @pytest.mark.asyncio
-    async def test_read_plan_file_without_url(self, tmp_path):
-        """Test reading plan file without URL."""
-        test_file = tmp_path / "test.md"
-        test_file.write_text("Test the shopping cart functionality")
-        requirements = await read_plan_file(test_file)
-        assert requirements == "Test the shopping cart functionality"
+            await read_context_file(context_file)
 
 
 class TestMainFlow:
-    """Test main execution flow."""
-    
     @pytest.mark.asyncio
-    async def test_version_command(self):
-        """Test --version command."""
-        with patch("src.main.show_version", return_value=0) as mock_version:
-            result = await async_main(["--version"])
-            assert result == 0
-            mock_version.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_test_api_command(self):
-        """Test --test-api command."""
-        with patch("src.main.test_api_connection", new_callable=AsyncMock) as mock_test:
-            mock_test.return_value = 0
-            result = await async_main(["--test-api"])
-            assert result == 0
-            mock_test.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_plan_mode(self):
-        """Test --plan mode."""
-        with patch("src.main.read_plan_file", new_callable=AsyncMock) as mock_read:
-            mock_read.return_value = "Test requirements"
-            with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
-                mock_run.return_value = 0
-                result = await async_main(["--plan", "test.md"])
-                assert result == 0
-                mock_read.assert_called_once()
-                mock_run.assert_called_once()
-                call_kwargs = mock_run.call_args.kwargs
-                assert call_kwargs["override_url"] is None
+    async def test_requires_context_when_plan_supplied(self, capsys):
+        result = await async_main(["--plan", "requirements.md"])
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "--context is required" in captured.out
 
     @pytest.mark.asyncio
-    async def test_berserk_mode_flag(self):
-        """Test --berserk flag is passed through."""
-        with patch("src.main.read_plan_file", new_callable=AsyncMock) as mock_read:
-            mock_read.return_value = "Test requirements"
-            with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
-                mock_run.return_value = 0
-                result = await async_main(["--plan", "test.md", "--berserk"])
-                assert result == 0
-                # Verify berserk flag was passed to run_test
-                call_kwargs = mock_run.call_args.kwargs
-                assert call_kwargs["berserk"] is True
+    async def test_invokes_run_test_with_plan_and_context(self, tmp_path: Path) -> None:
+        plan_file = tmp_path / "plan.txt"
+        context_file = tmp_path / "context.txt"
+        plan_file.write_text("Test requirement")
+        context_file.write_text("target: web\nurl: https://example.com")
 
-    @pytest.mark.asyncio
-    async def test_plan_only_skips_browser_and_reports_storage(
-        self, monkeypatch, tmp_path, capsys
-    ):
-        """Plan-only mode should avoid browser startup and report saved files."""
-        monkeypatch.chdir(tmp_path)
-
-        step = TestStep(
-            step_number=1,
-            description="Navigate to home page",
-            action="navigate",
-            expected_result="Home page is displayed",
-        )
-        case = TestCase(
-            test_id="TC001",
-            name="Sample Case",
-            description="Test description",
-            priority=TestCasePriority.MEDIUM,
-            prerequisites=[],
-            steps=[step],
-            postconditions=[],
-            tags=[],
-        )
-
-        plan_id = uuid4()
-        test_plan = TestPlan(
-            plan_id=plan_id,
-            name="Sample Plan",
-            description="Plan description",
-            requirements_source="Test requirements",
-            test_cases=[case],
-        )
-
-        plan_dir = Path("generated_test_plans") / str(plan_id)
-        plan_dir.mkdir(parents=True, exist_ok=True)
-        (plan_dir / f"test_plan_{plan_id}.json").write_text("{}")
-        (plan_dir / f"test_plan_{plan_id}.md").write_text("# Plan")
-
-        planner_instance = MagicMock()
-        triage_result = ScopeTriageResult(
-            in_scope="Admin scope only",
-            explicit_exclusions=["Exclude FMC flows"],
-            ambiguous_points=["Clarify translation requirements"],
-            blocking_questions=[],
-        )
-        pipeline_mock = AsyncMock(return_value=(test_plan, triage_result))
-
-        class DummyProgress:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def add_task(self, *args, **kwargs):
-                return "task"
-
-            def update(self, *args, **kwargs):
-                return None
-
-        with patch("src.main.ScopeTriageAgent", return_value=MagicMock()) as mock_triage, \
-             patch("src.main.TestPlannerAgent", return_value=planner_instance) as mock_planner, \
-             patch("src.main.run_scope_triage_and_plan", pipeline_mock), \
-             patch("src.main.BrowserController") as mock_browser, \
-             patch("src.main.Progress", DummyProgress):
-            result = await run_test(
-                requirements="Look up Wikipedia",
-                override_url="https://example.com",
-                plan_only=True,
-                headless=True,
-                output_dir=None,
-                report_format="html",
-                timeout=1200,
-                max_steps=50,
-                berserk=False,
+        with patch("src.main.run_test", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = 0
+            result = await async_main(
+                ["--plan", str(plan_file), "--context", str(context_file)]
             )
 
         assert result == 0
-        mock_browser.assert_not_called()
-        mock_planner.assert_called_once()
-        mock_triage.assert_called_once()
-        pipeline_mock.assert_awaited_once()
+        mock_run.assert_awaited_once()
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["requirements"] == "Test requirement"
+        assert "https://example.com" in kwargs["context_text"]
 
-        captured = capsys.readouterr()
-        assert "generated_test_plans" in captured.out
-        assert str(plan_id) in captured.out
-        assert f"test_plan_{plan_id}.json" in captured.out
-        assert f"test_plan_{plan_id}.md" in captured.out
-        assert "Explicit Exclusions" in captured.out
-        assert "Scope Ambiguities" in captured.out
-        assert "Clarify translation requirements" in captured.out
 
-    @pytest.mark.asyncio
-    async def test_plan_only_reports_scope_blockers(self, capsys):
-        """Plan-only mode should stop when scope blockers are detected."""
-        blocking_result = ScopeTriageResult(
-            in_scope="Admin scope only",
-            explicit_exclusions=[],
-            ambiguous_points=["Confirm translation coverage."],
-            blocking_questions=["Need staging URL before planning."],
+@pytest.mark.asyncio
+async def test_run_test_blocks_on_insufficient_context() -> None:
+    with patch("src.main.initialize_debug_logger") as mock_debug_logger, patch(
+        "src.main._create_planning_agents"
+    ) as mock_create_agents:
+        debug_instance = type("Debug", (), {"reports_dir": Path("reports")})()
+        mock_debug_logger.return_value = debug_instance
+
+        triage = AsyncMock()
+        planner = AsyncMock()
+        situational = AsyncMock()
+        situational.assess_context.return_value = type(
+            "Assessment",
+            (),
+            {
+                "sufficient": False,
+                "notes": ["Need a URL"],
+                "as_blocking_questions": lambda self: ["Missing required context: web_url"],
+            },
+        )()
+        mock_create_agents.return_value = (triage, planner, situational)
+
+        result = await run_test(
+            requirements="Test requirement",
+            context_text="no target",
+            timeout=1,
         )
-        pipeline_error = ScopeTriageBlockedError(triage_result=blocking_result)
-        pipeline_mock = AsyncMock(side_effect=pipeline_error)
 
-        with patch("src.main.ScopeTriageAgent", return_value=MagicMock()) as mock_triage, \
-             patch("src.main.TestPlannerAgent", return_value=MagicMock()) as mock_planner, \
-             patch("src.main.run_scope_triage_and_plan", pipeline_mock), \
-             patch("src.main.BrowserController") as mock_browser:
-            result = await run_test(
-                requirements="List requirements here",
-                override_url="https://example.com",
-                plan_only=True,
-                headless=True,
-                output_dir=None,
-                report_format="html",
-                timeout=1200,
-                max_steps=50,
-                berserk=False,
-            )
-
-        assert result == 1
-        mock_browser.assert_not_called()
-        mock_triage.assert_called_once()
-        mock_planner.assert_called_once()
-        pipeline_mock.assert_awaited_once()
-
-        captured = capsys.readouterr()
-        assert "Scope triage blocked test planning" in captured.out
-        assert "Need staging URL before planning." in captured.out
-
-    @pytest.mark.asyncio
-    async def test_no_input_shows_help(self, capsys):
-        """Test that no input shows help."""
-        result = await async_main([])
-        assert result == 1
-        
-        captured = capsys.readouterr()
-        assert "usage:" in captured.out
-        assert "HAINDY - Autonomous AI Testing Agent" in captured.out
+    assert result == 1

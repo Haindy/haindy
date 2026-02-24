@@ -16,14 +16,14 @@ from PIL import Image
 from io import BytesIO
 
 from src.agents.action_agent import ActionAgent
-from src.browser.driver import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.core.types import (
     ActionInstruction, ActionType, TestStep,
     ScrollDirection, VisibilityStatus
 )
 from src.core.enhanced_types import (
     EnhancedActionResult, ValidationResult, CoordinateResult,
-    ExecutionResult, BrowserState, AIAnalysis
+    ExecutionResult, EnvironmentState, AIAnalysis
 )
 
 
@@ -54,7 +54,6 @@ def mock_settings():
     settings.vertex_project = ""
     settings.vertex_location = "us-central1"
     settings.cu_safety_policy = "auto_approve"
-    settings.driver_backend = "playwright"
     settings.desktop_coordinate_cache_path = Path("data/desktop_cache/coordinates.json")
     settings.model_log_path = Path("data/model_logs/model_calls.jsonl")
     return settings
@@ -83,7 +82,7 @@ def mock_browser_driver():
 def action_agent(mock_settings, mock_browser_driver):
     """Create an ActionAgent instance for testing."""
     with patch("src.agents.action_agent.get_settings", return_value=mock_settings):
-        agent = ActionAgent(browser_driver=mock_browser_driver)
+        agent = ActionAgent(automation_driver=mock_browser_driver)
         # Mock the OpenAI client
         agent._client = AsyncMock()
         agent.call_openai = AsyncMock()
@@ -135,7 +134,7 @@ class TestActionAgentBasics:
     def test_initialization(self, action_agent):
         """Test that action agent initializes correctly."""
         assert action_agent.name == "ActionAgent"
-        assert action_agent.browser_driver is not None
+        assert action_agent.automation_driver is not None
         assert action_agent.grid_overlay is not None
         assert action_agent.grid_refinement is not None
         assert action_agent.confidence_threshold == 0.8
@@ -349,7 +348,7 @@ class TestActionAgentIntegration:
     ):
         """Test that exceptions are captured in the result."""
         # Make the browser driver raise an exception
-        action_agent.browser_driver.screenshot.side_effect = Exception("Test error")
+        action_agent.automation_driver.screenshot.side_effect = Exception("Test error")
         
         # Execute - should not raise, but capture error
         result = await action_agent.execute_action(

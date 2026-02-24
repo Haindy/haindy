@@ -89,8 +89,8 @@ class AgentError(HAINDYError):
         })
 
 
-class BrowserError(RetryableError):
-    """Error related to browser automation."""
+class AutomationError(RetryableError):
+    """Error related to environment automation."""
     
     def __init__(
         self,

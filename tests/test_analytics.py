@@ -79,7 +79,7 @@ class TestTestMetrics:
             steps_passed=4,
             steps_failed=1,
             api_calls=10,
-            browser_actions=20
+            automation_actions=20
         )
         
         data = metrics.to_dict()
@@ -172,16 +172,16 @@ class TestMetricsCollector:
         assert len(collector.metrics["timer.api.duration"]) == 1
     
     @pytest.mark.asyncio
-    async def test_record_browser_action(self):
-        """Test recording browser actions."""
+    async def test_record_automation_action(self):
+        """Test recording automation actions."""
         collector = MetricsCollector()
         test_id = uuid4()
         
         await collector.start_test(test_id, "test_example")
-        await collector.record_browser_action(test_id, "click", 50)
+        await collector.record_automation_action(test_id, "click", 50)
         
-        assert collector.test_metrics[test_id].browser_actions == 1
-        assert len(collector.metrics["counter.browser.actions"]) == 1
+        assert collector.test_metrics[test_id].automation_actions == 1
+        assert len(collector.metrics["counter.automation.actions"]) == 1
     
     @pytest.mark.asyncio
     async def test_metric_summary(self):
@@ -248,13 +248,13 @@ class TestMetricsCollector:
         
         # Record various metrics
         await collector.record_api_call(test_id, "api1", 100)
-        await collector.record_browser_action(test_id, "click", 50)
+        await collector.record_automation_action(test_id, "click", 50)
         await collector.record_step_outcome(test_id, "step1", True, 200)
         
         perf_summary = collector.get_performance_summary()
         
         assert "api_calls" in perf_summary
-        assert "browser_actions" in perf_summary
+        assert "automation_actions" in perf_summary
         assert "steps" in perf_summary
         assert perf_summary["steps"]["success_rate"] == 1.0
     

@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 from src.agents.action_agent import ActionAgent
 from src.agents.base_agent import BaseAgent
 from src.agents.formatters import TestPlanFormatter
-from src.browser.driver import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.types import (
@@ -38,7 +38,6 @@ from src.core.types import (
     TestSummary,
 )
 from src.monitoring.logger import get_logger, get_run_id
-from src.browser.instrumented_driver import InstrumentedBrowserDriver
 from src.desktop.cache import CoordinateCache
 from src.desktop.execution_replay import replay_driver_actions
 from src.runtime.execution_replay_cache import (
@@ -88,7 +87,7 @@ class TestRunner(BaseAgent):
     def __init__(
         self,
         name: str = "TestRunner",
-        browser_driver: Optional[BrowserDriver] = None,
+        automation_driver: Optional[AutomationDriver] = None,
         action_agent: Optional[ActionAgent] = None,
         **kwargs
     ):
@@ -97,13 +96,13 @@ class TestRunner(BaseAgent):
         
         Args:
             name: Agent name
-            browser_driver: Browser driver instance
+            automation_driver: Browser driver instance
             action_agent: Action agent for executing browser actions
             **kwargs: Additional arguments for BaseAgent
         """
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_RUNNER_SYSTEM_PROMPT
-        self.browser_driver = browser_driver
+        self.automation_driver = automation_driver
         self.action_agent = action_agent
         
         # Current execution state
@@ -121,9 +120,7 @@ class TestRunner(BaseAgent):
         self._execution_replay_cache = ExecutionReplayCache(
             self._settings.execution_replay_cache_path
         )
-        self._environment = (
-            "desktop" if self._settings.driver_backend == "desktop" else "browser"
-        )
+        self._environment = "desktop"
         self._model_logger = get_model_logger(
             self._settings.model_log_path,
             max_screenshots=getattr(self._settings, "max_screenshots", None),
@@ -133,8 +130,8 @@ class TestRunner(BaseAgent):
             run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid4().hex[:8]
         self._trace = RunTraceWriter(run_id)
         self._evidence: Optional[EvidenceManager] = None
-        if self.browser_driver and hasattr(self.browser_driver, "coordinate_cache"):
-            self._coordinate_cache = getattr(self.browser_driver, "coordinate_cache")
+        if self.automation_driver and hasattr(self.automation_driver, "coordinate_cache"):
+            self._coordinate_cache = getattr(self.automation_driver, "coordinate_cache")
         else:
             self._coordinate_cache = CoordinateCache(
                 self._settings.desktop_coordinate_cache_path
@@ -166,10 +163,10 @@ class TestRunner(BaseAgent):
         return severity_order.get(severity, 99)
     
     async def _ensure_initial_screenshot(self) -> None:
-        """Capture and cache the initial browser screenshot."""
+        """Capture and cache the initial environment screenshot."""
         if self._initial_screenshot_bytes is not None:
             return
-        if not self.browser_driver:
+        if not self.automation_driver:
             return
         
         wait_seconds = max(
@@ -180,7 +177,7 @@ class TestRunner(BaseAgent):
             await asyncio.sleep(wait_seconds)
         
         try:
-            screenshot = await self.browser_driver.screenshot()
+            screenshot = await self.automation_driver.screenshot()
         except Exception as exc:  # pragma: no cover - defensive path
             logger.warning(
                 "Failed to capture initial screenshot",
@@ -196,7 +193,7 @@ class TestRunner(BaseAgent):
         self._latest_screenshot_origin = "initial_state"
         
         logger.info(
-            "Captured initial browser screenshot",
+            "Captured initial environment screenshot",
             extra={"screenshot_path": self._initial_screenshot_path},
         )
 
@@ -225,11 +222,11 @@ class TestRunner(BaseAgent):
                 source,
             )
 
-        if not self.browser_driver:
+        if not self.automation_driver:
             return None, None, None
 
         try:
-            screenshot = await self.browser_driver.screenshot()
+            screenshot = await self.automation_driver.screenshot()
         except Exception as exc:  # pragma: no cover - defensive path
             logger.warning(
                 "Failed to capture screenshot for interpretation",
@@ -298,7 +295,7 @@ class TestRunner(BaseAgent):
             status=TestStatus.IN_PROGRESS,
             environment={
                 "initial_url": initial_url,
-                "browser": "Chromium",
+                "runtime": "desktop",
                 "execution_mode": "enhanced"
             }
         )
@@ -309,7 +306,7 @@ class TestRunner(BaseAgent):
                     "test_plan_id": str(test_plan.plan_id),
                     "test_plan_name": test_plan.name,
                     "initial_url": initial_url,
-                    "driver_backend": self._settings.driver_backend,
+                    "automation_backend": "desktop",
                     "model_log_path": str(self._settings.model_log_path),
                     "task_plan_cache_path": str(self._settings.task_plan_cache_path),
                     "execution_replay_cache_path": str(
@@ -356,9 +353,9 @@ class TestRunner(BaseAgent):
         
         try:
             # Navigate to initial URL if provided
-            if initial_url and self.browser_driver:
+            if initial_url and self.automation_driver:
                 logger.info("Navigating to initial URL", extra={"url": initial_url})
-                await self.browser_driver.navigate(initial_url)
+                await self.automation_driver.navigate(initial_url)
             
             await self._ensure_initial_screenshot()
             
@@ -608,8 +605,8 @@ class TestRunner(BaseAgent):
                 return step_result
             
             # Capture before screenshot
-            if self.browser_driver:
-                screenshot_before = await self.browser_driver.screenshot()
+            if self.automation_driver:
+                screenshot_before = await self.automation_driver.screenshot()
                 screenshot_path = self._save_screenshot(
                     screenshot_before,
                     f"tc{test_case.test_id}_step{step.step_number}_before"
@@ -727,9 +724,9 @@ class TestRunner(BaseAgent):
                 self._current_step_data["plan_cache_hit"] = plan_cache_hit
 
                 # Capture after screenshot
-                if self.browser_driver:
+                if self.automation_driver:
                     await asyncio.sleep(1)  # Brief wait for UI to stabilize
-                    screenshot_after = await self.browser_driver.screenshot()
+                    screenshot_after = await self.automation_driver.screenshot()
                     screenshot_path = self._save_screenshot(
                         screenshot_after,
                         f"tc{test_case.test_id}_step{step.step_number}_after",
@@ -1316,25 +1313,25 @@ Respond with a JSON object containing an "actions" array where every item follow
                 "test_runner_interpretation": action.copy() if isinstance(action, dict) else None,
                 "action_agent_execution": None
             },
-            "browser_calls": [],
+            "automation_calls": [],
             "result": None,
             "screenshots": {}
         }
         
         try:
-            if not self.action_agent or not self.browser_driver:
+            if not self.action_agent or not self.automation_driver:
                 error_result = {
                     "success": False,
-                    "error": "Action agent or browser driver not available"
+                    "error": "Action agent or automation driver not available"
                 }
                 action_data["result"] = error_result
                 action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
                 self._current_step_actions.append(action_data)
                 return error_result
             
-            # If browser driver is instrumented, start capturing calls
-            if isinstance(self.browser_driver, InstrumentedBrowserDriver):
-                self.browser_driver.start_capture()
+            # If driver supports capture, start capturing calls
+            if hasattr(self.automation_driver, "start_capture"):
+                self.automation_driver.start_capture()
             
             # Create ActionInstruction for the action
             instruction = ActionInstruction(
@@ -1372,7 +1369,7 @@ Respond with a JSON object containing an "actions" array where every item follow
             test_context["cache_action"] = step.cache_action or "click"
             
             # Get screenshot before action
-            screenshot = await self.browser_driver.screenshot()
+            screenshot = await self.automation_driver.screenshot()
             
             # Execute via Action Agent
             result = await self.action_agent.execute_action(
@@ -1382,9 +1379,9 @@ Respond with a JSON object containing an "actions" array where every item follow
                 record_driver_actions=record_driver_actions,
             )
             
-            # Stop capturing browser calls
-            if isinstance(self.browser_driver, InstrumentedBrowserDriver):
-                action_data["browser_calls"] = self.browser_driver.stop_capture()
+            # Stop capturing automation calls
+            if hasattr(self.automation_driver, "stop_capture"):
+                action_data["automation_calls"] = self.automation_driver.stop_capture()
             
             # Extract AI conversation from Action Agent
             # The action agent stores conversation history
@@ -1423,10 +1420,10 @@ Respond with a JSON object containing an "actions" array where every item follow
             }
             
             # Store screenshot paths
-            if result.browser_state_before and result.browser_state_before.screenshot_path:
-                action_data["screenshots"]["before"] = result.browser_state_before.screenshot_path
-            if result.browser_state_after and result.browser_state_after.screenshot_path:
-                action_data["screenshots"]["after"] = result.browser_state_after.screenshot_path
+            if result.environment_state_before and result.environment_state_before.screenshot_path:
+                action_data["screenshots"]["before"] = result.environment_state_before.screenshot_path
+            if result.environment_state_after and result.environment_state_after.screenshot_path:
+                action_data["screenshots"]["after"] = result.environment_state_after.screenshot_path
             if result.grid_screenshot_highlighted:
                 # Get path from debug logger if available
                 from src.monitoring.debug_logger import get_debug_logger
@@ -1473,8 +1470,8 @@ Respond with a JSON object containing an "actions" array where every item follow
             })
             
             # Stop capturing if needed
-            if isinstance(self.browser_driver, InstrumentedBrowserDriver):
-                action_data["browser_calls"] = self.browser_driver.stop_capture()
+            if hasattr(self.automation_driver, "stop_capture"):
+                action_data["automation_calls"] = self.automation_driver.stop_capture()
             
             error_result = {
                 "success": False,
@@ -2027,8 +2024,8 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
             return True
         
         # Take screenshot for verification
-        if self.browser_driver:
-            screenshot = await self.browser_driver.screenshot()
+        if self.automation_driver:
+            screenshot = await self.automation_driver.screenshot()
             
             # Use AI to verify postconditions
             prompt = f"""Verify these postconditions are met based on the current state:
@@ -2175,24 +2172,24 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         can_replay = getattr(step, "can_be_replayed", None)
         if can_replay is False:
             return False
-        return self.browser_driver is not None
+        return self.automation_driver is not None
 
     async def _execution_replay_key(
         self, step: TestStep, test_case: TestCase
     ) -> Optional[ExecutionReplayCacheKey]:
-        if not self.browser_driver:
+        if not self.automation_driver:
             return None
         try:
-            viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+            viewport_width, viewport_height = await self.automation_driver.get_viewport_size()
         except Exception:
             logger.debug(
                 "TestRunner: failed to read viewport for execution replay cache",
                 exc_info=True,
             )
             return None
-        environment = (step.environment or self._environment or "browser").strip()
+        environment = (step.environment or self._environment or "desktop").strip()
         keyboard_layout = (
-            getattr(self.browser_driver, "keyboard_layout", None)
+            getattr(self.automation_driver, "keyboard_layout", None)
             or self._settings.desktop_keyboard_layout
         )
         return ExecutionReplayCacheKey(
@@ -2235,7 +2232,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             )
         try:
             await replay_driver_actions(
-                self.browser_driver,
+                self.automation_driver,
                 entry.actions,
                 stabilization_wait_ms=int(
                     self._settings.actions_computer_tool_stabilization_wait_ms
@@ -2317,15 +2314,15 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                     "test_runner_interpretation": None,
                     "action_agent_execution": None,
                 },
-                "browser_calls": [],
+                "automation_calls": [],
                 "result": replay_action["result"],
                 "screenshots": {},
             }
         )
 
         screenshot_after = None
-        if self.browser_driver:
-            screenshot_after = await self.browser_driver.screenshot()
+        if self.automation_driver:
+            screenshot_after = await self.automation_driver.screenshot()
             screenshot_path = self._save_screenshot(
                 screenshot_after,
                 f"tc{test_case.test_id}_step{step.step_number}_after",
@@ -2461,10 +2458,10 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                 continue
             resolution = result.get("cache_resolution")
             if not resolution:
-                if not self.browser_driver:
+                if not self.automation_driver:
                     continue
                 try:
-                    resolution = await self.browser_driver.get_viewport_size()
+                    resolution = await self.automation_driver.get_viewport_size()
                 except Exception:
                     logger.debug(
                         "Failed to read viewport for cache persistence",
@@ -2511,10 +2508,10 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             action = result.get("cache_action") or "click"
             resolution = result.get("cache_resolution")
             if not resolution:
-                if not self.browser_driver:
+                if not self.automation_driver:
                     continue
                 try:
-                    resolution = await self.browser_driver.get_viewport_size()
+                    resolution = await self.automation_driver.get_viewport_size()
                 except Exception:
                     logger.debug(
                         "Failed to read viewport for cache invalidation",

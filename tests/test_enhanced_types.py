@@ -8,7 +8,7 @@ from uuid import UUID
 
 from src.core.enhanced_types import (
     ValidationResult, CoordinateResult, ExecutionResult,
-    AIAnalysis, BrowserState, EnhancedActionResult,
+    AIAnalysis, EnvironmentState, EnhancedActionResult,
     ActionPattern
 )
 from src.core.types import TestStep, ActionType
@@ -161,12 +161,12 @@ class TestAIAnalysis:
         assert len(analysis.ui_changes) == 2
 
 
-class TestBrowserState:
-    """Tests for BrowserState model."""
+class TestEnvironmentState:
+    """Tests for EnvironmentState model."""
     
-    def test_browser_state_creation(self):
+    def test_environment_state_creation(self):
         """Test creating browser state."""
-        state = BrowserState(
+        state = EnvironmentState(
             url="https://example.com/login",
             title="Login Page",
             viewport_size=(1920, 1080),
@@ -220,12 +220,12 @@ class TestEnhancedActionResult:
                 confidence=0.9,
                 reasoning="Found button"
             ),
-            browser_state_before=BrowserState(
+            environment_state_before=EnvironmentState(
                 url="https://example.com",
                 title="Example",
                 viewport_size=(1920, 1080)
             ),
-            browser_state_after=BrowserState(
+            environment_state_after=EnvironmentState(
                 url="https://example.com/dashboard",
                 title="Dashboard",
                 viewport_size=(1920, 1080)
@@ -289,7 +289,7 @@ class TestActionPattern:
                 confidence=0.95,
                 reasoning="Button center"
             ),
-            playwright_command="page.click('button#login')",
+            automation_command="click selector='button#login'",
             confidence=0.9,
             success_count=5,
             failure_count=1

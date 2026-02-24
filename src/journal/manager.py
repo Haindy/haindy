@@ -144,7 +144,7 @@ class JournalManager:
                 step_reference=f"Step {step.step_number}: {step.description}",
                 action_taken=self._describe_action(step, journal_result),
                 grid_coordinates=journal_result.grid_coordinates if execution_mode == ExecutionMode.VISUAL else None,
-                scripted_command=journal_result.playwright_command,
+                scripted_command=journal_result.automation_command,
                 selectors=journal_result.selectors,
                 execution_mode=execution_mode,
                 execution_time_ms=execution_time_ms,
@@ -360,7 +360,7 @@ class JournalManager:
         entry: JournalEntry
     ) -> Optional[ActionRecord]:
         """Create an action pattern from successful execution."""
-        if not result.playwright_command:
+        if not result.automation_command:
             return None
         
         pattern = ActionRecord(
@@ -370,7 +370,7 @@ class JournalManager:
                 "description": step.action,
                 "grid_coordinates": result.grid_coordinates
             },
-            playwright_command=result.playwright_command,
+            automation_command=result.automation_command,
             selectors=result.selectors or {},
             element_text=result.element_text,
             success_count=1,

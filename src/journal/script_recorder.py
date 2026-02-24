@@ -1,5 +1,5 @@
 """
-Script recorder for converting AI actions to Playwright commands.
+Script recorder for converting AI actions to Automation commands.
 """
 
 import re
@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 
 class ScriptRecorder:
     """
-    Records and converts AI-driven actions into scripted Playwright commands.
+    Records and converts AI-driven actions into scripted Automation commands.
     
     Enables dual-mode execution by creating replayable scripts from
     successful visual interactions.
@@ -118,12 +118,10 @@ class ScriptRecorder:
         fallbacks = []
         
         # Add variations with different wait strategies
-        base_command = pattern.playwright_command
+        base_command = pattern.automation_command
         
         # Add explicit wait before action
-        fallbacks.append(
-            f"await page.wait_for_load_state('networkidle'); {base_command}"
-        )
+        fallbacks.append(f"wait ms=500; {base_command}")
         
         # Add retry with different selector
         if pattern.selectors:
@@ -133,8 +131,8 @@ class ScriptRecorder:
                     fallbacks.append(alt_command)
         
         # Add force click option for clicks
-        if "click(" in base_command:
-            force_click = base_command.replace("click(", "click(force=True, ")
+        if base_command.startswith("click"):
+            force_click = base_command + " force=true"
             fallbacks.append(force_click)
         
         return fallbacks
@@ -153,11 +151,11 @@ class ScriptRecorder:
             return None
         
         primary_selector = selectors[0]
-        command = f"await page.click('{primary_selector}')"
+        command = f"click selector='{primary_selector}'"
         
         # Store the actual command that was generated
-        if action_result.playwright_command:
-            command = action_result.playwright_command
+        if action_result.automation_command:
+            command = action_result.automation_command
         
         return ScriptedCommand(
             command_type="click",
@@ -184,10 +182,10 @@ class ScriptRecorder:
         
         primary_selector = selectors[0]
         text = action_result.input_text.replace("'", "\\'")
-        command = f"await page.fill('{primary_selector}', '{text}')"
+        command = f"type selector='{primary_selector}' text='{text}'"
         
-        if action_result.playwright_command:
-            command = action_result.playwright_command
+        if action_result.automation_command:
+            command = action_result.automation_command
         
         return ScriptedCommand(
             command_type="type",
@@ -209,10 +207,10 @@ class ScriptRecorder:
         if not url:
             return None
         
-        command = f"await page.goto('{url}')"
+        command = f"navigate url='{url}'"
         
-        if action_result.playwright_command:
-            command = action_result.playwright_command
+        if action_result.automation_command:
+            command = action_result.automation_command
         
         return ScriptedCommand(
             command_type="navigate",
@@ -235,12 +233,12 @@ class ScriptRecorder:
         scroll_amount = element_info.get("amount", 300) if element_info else 300
         
         if scroll_direction == "down":
-            command = f"await page.mouse.wheel(0, {scroll_amount})"
+            command = f"scroll direction='down' amount={scroll_amount}"
         else:
-            command = f"await page.mouse.wheel(0, -{scroll_amount})"
+            command = f"scroll direction='up' amount={scroll_amount}"
         
-        if action_result.playwright_command:
-            command = action_result.playwright_command
+        if action_result.automation_command:
+            command = action_result.automation_command
         
         return ScriptedCommand(
             command_type="scroll",
@@ -259,10 +257,10 @@ class ScriptRecorder:
     ) -> Optional[ScriptedCommand]:
         """Record a wait action."""
         wait_time = element_info.get("duration", 1000) if element_info else 1000
-        command = f"await page.wait_for_timeout({wait_time})"
+        command = f"wait ms={wait_time}"
         
-        if action_result.playwright_command:
-            command = action_result.playwright_command
+        if action_result.automation_command:
+            command = action_result.automation_command
         
         return ScriptedCommand(
             command_type="wait",
@@ -280,10 +278,10 @@ class ScriptRecorder:
     ) -> Optional[ScriptedCommand]:
         """Record a screenshot action."""
         path = element_info.get("path", "screenshot.png") if element_info else "screenshot.png"
-        command = f"await page.screenshot({{path: '{path}', full_page: true}})"
+        command = f"screenshot path='{path}'"
         
-        if action_result.playwright_command:
-            command = action_result.playwright_command
+        if action_result.automation_command:
+            command = action_result.automation_command
         
         return ScriptedCommand(
             command_type="screenshot",
@@ -357,13 +355,11 @@ class ScriptRecorder:
     
     def _replace_selector(self, command: str, new_selector: str) -> str:
         """Replace selector in a command."""
-        # Find the selector in the command (between quotes)
-        # Handle both 'selector' and "selector" formats
-        # Also handle await prefix
-        pattern = r"(.*page\.\w+\()['\"]([^'\"]+)['\"](.*)$"
-        match = re.match(pattern, command)
-        
+        # Replace only automation-command selector args, e.g. selector='...'
+        pattern = r"(selector=)(['\"])(.*?)(\2)"
+        match = re.search(pattern, command)
         if match:
-            return f"{match.group(1)}'{new_selector}'{match.group(3)}"
-        
+            start = match.start(3)
+            end = match.end(3)
+            return f"{command[:start]}{new_selector}{command[end:]}"
         return command

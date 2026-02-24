@@ -27,7 +27,7 @@ from src.agents.computer_use import (
     ComputerUseExecutionError,
     ComputerUseSession,
 )
-from src.browser.driver import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.config.agent_prompts import ACTION_AGENT_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.types import (
@@ -37,7 +37,7 @@ from src.core.types import (
 )
 from src.core.enhanced_types import (
     EnhancedActionResult, ValidationResult, CoordinateResult,
-    ExecutionResult, BrowserState, AIAnalysis, ComputerToolTurn
+    ExecutionResult, EnvironmentState, AIAnalysis, ComputerToolTurn
 )
 
 OBSERVE_ONLY_ALLOWED_ACTIONS: Set[str] = frozenset({"screenshot", "wait", "scroll"})
@@ -68,7 +68,7 @@ class ActionAgent(BaseAgent):
     def __init__(
         self,
         name: str = "ActionAgent",
-        browser_driver: Optional[BrowserDriver] = None,
+        automation_driver: Optional[AutomationDriver] = None,
         **kwargs
     ):
         """
@@ -76,12 +76,12 @@ class ActionAgent(BaseAgent):
         
         Args:
             name: Agent name
-            browser_driver: Browser driver for action execution
+            automation_driver: Automation driver for action execution
             **kwargs: Additional arguments for BaseAgent
         """
         super().__init__(name=name, **kwargs)
         self.system_prompt = ACTION_AGENT_SYSTEM_PROMPT
-        self.browser_driver = browser_driver
+        self.automation_driver = automation_driver
         
         # Initialize grid components and configuration
         settings = get_settings()
@@ -239,7 +239,7 @@ class ActionAgent(BaseAgent):
     
     def _should_use_computer_tool(self, action_type: Optional[ActionType]) -> bool:
         """Determine whether to execute the action via the Computer Use tool."""
-        if not self.browser_driver:
+        if not self.automation_driver:
             return False
         if not self.use_computer_tool:
             return False
@@ -288,34 +288,34 @@ class ActionAgent(BaseAgent):
         identifier = "-".join(filter(None, components)) or f"haindy-step-{test_step.step_number}"
         return identifier[:64]
 
-    async def _capture_browser_state(
+    async def _capture_environment_state(
         self,
         screenshot: Optional[bytes],
         debug_logger,
         step_number: Optional[int],
         label: str,
-    ) -> BrowserState:
-        """Capture the current browser state for debugging."""
-        if not self.browser_driver:
-            raise ComputerUseExecutionError("Browser driver is not available.")
+    ) -> EnvironmentState:
+        """Capture the current environment state for debugging."""
+        if not self.automation_driver:
+            raise ComputerUseExecutionError("Automation driver is not available.")
 
         url = ""
         title = ""
-        get_url = getattr(self.browser_driver, "get_page_url", None)
-        get_title = getattr(self.browser_driver, "get_page_title", None)
+        get_url = getattr(self.automation_driver, "get_page_url", None)
+        get_title = getattr(self.automation_driver, "get_page_title", None)
 
         if callable(get_url):
             try:
                 url = await get_url()
             except Exception:  # pragma: no cover - defensive
-                logger.debug("Unable to retrieve page URL during browser state capture", exc_info=True)
+                logger.debug("Unable to retrieve page URL during environment state capture", exc_info=True)
         if callable(get_title):
             try:
                 title = await get_title()
             except Exception:  # pragma: no cover - defensive
-                logger.debug("Unable to retrieve page title during browser state capture", exc_info=True)
+                logger.debug("Unable to retrieve page title during environment state capture", exc_info=True)
 
-        viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+        viewport_width, viewport_height = await self.automation_driver.get_viewport_size()
 
         screenshot_path = None
         if screenshot and debug_logger:
@@ -325,7 +325,7 @@ class ActionAgent(BaseAgent):
                 step_number=step_number,
             )
 
-        return BrowserState(
+        return EnvironmentState(
             url=url or "",
             title=title or "",
             viewport_size=(viewport_width, viewport_height),
@@ -333,24 +333,26 @@ class ActionAgent(BaseAgent):
             screenshot_path=screenshot_path,
         )
 
-    def _new_computer_use_session(self, debug_logger) -> ComputerUseSession:
+    def _new_computer_use_session(
+        self,
+        debug_logger,
+        environment: str,
+    ) -> ComputerUseSession:
         """Create a Computer Use session bound to the current driver and client."""
-        if not self.browser_driver:
-            raise ComputerUseExecutionError("Browser driver is not available.")
-
-        environment = "desktop" if self.settings.driver_backend == "desktop" else "browser"
+        if not self.automation_driver:
+            raise ComputerUseExecutionError("Automation driver is not available.")
         model_override = (
             self._computer_use_model if self.settings.cu_provider == "openai" else None
         )
         cache = self._coordinate_cache
-        if hasattr(self.browser_driver, "coordinate_cache"):
+        if hasattr(self.automation_driver, "coordinate_cache"):
             try:
-                cache = getattr(self.browser_driver, "coordinate_cache")
+                cache = getattr(self.automation_driver, "coordinate_cache")
             except Exception:
                 cache = self._coordinate_cache
         return ComputerUseSession(
             client=self.client.client,
-            browser=self.browser_driver,
+            automation_driver=self.automation_driver,
             settings=self.settings,
             debug_logger=debug_logger,
             model=model_override,
@@ -371,10 +373,10 @@ class ActionAgent(BaseAgent):
 
         debug_logger = get_debug_logger()
         initial_screenshot = screenshot
-        if initial_screenshot is None and self.browser_driver:
-            initial_screenshot = await self.browser_driver.screenshot()
+        if initial_screenshot is None and self.automation_driver:
+            initial_screenshot = await self.automation_driver.screenshot()
 
-        browser_state_before = await self._capture_browser_state(
+        environment_state_before = await self._capture_environment_state(
             initial_screenshot,
             debug_logger,
             test_step.step_number,
@@ -409,20 +411,25 @@ class ActionAgent(BaseAgent):
         }
         session_metadata["interaction_mode"] = interaction_mode
         session_metadata["step_goal"] = test_step.description
-        session_metadata["environment"] = (
-            "desktop" if self.settings.driver_backend == "desktop" else "browser"
-        )
+        session_metadata["environment"] = str(
+            context_lookup.get("environment")
+            or getattr(test_step, "environment", None)
+            or "desktop"
+        ).strip().lower()
 
         safety_identifier = self._resolve_safety_identifier(test_step, context_lookup)
         session_metadata["safety_identifier"] = safety_identifier
-        if browser_state_before.url:
-            session_metadata["current_url"] = browser_state_before.url
+        if environment_state_before.url:
+            session_metadata["current_url"] = environment_state_before.url
 
         if isinstance(context_for_result, dict):
             context_for_result["safety_identifier"] = safety_identifier
             context_for_result["interaction_mode"] = interaction_mode
 
-        session = self._new_computer_use_session(debug_logger)
+        session = self._new_computer_use_session(
+            debug_logger,
+            environment=session_metadata["environment"],
+        )
 
         # Track goal in conversation history for downstream tooling
         self.conversation_history.append({"role": "user", "content": goal})
@@ -492,8 +499,8 @@ class ActionAgent(BaseAgent):
 
         duration_ms = (time.perf_counter() - start_ts) * 1000
 
-        after_screenshot = await self.browser_driver.screenshot()
-        browser_state_after = await self._capture_browser_state(
+        after_screenshot = await self.automation_driver.screenshot()
+        environment_state_after = await self._capture_environment_state(
             after_screenshot,
             debug_logger,
             test_step.step_number,
@@ -566,7 +573,7 @@ class ActionAgent(BaseAgent):
                 action_type="computer_use",
                 prompt=goal,
                 response=session_result.final_output or "",
-                screenshot_path=browser_state_after.screenshot_path,
+                screenshot_path=environment_state_after.screenshot_path,
                 additional_context={
                     "step_number": test_step.step_number,
                     "response_ids": session_result.response_ids,
@@ -590,8 +597,8 @@ class ActionAgent(BaseAgent):
             test_context=context_for_result,
             validation=validation,
             execution=execution_result,
-            browser_state_before=browser_state_before,
-            browser_state_after=browser_state_after,
+            environment_state_before=environment_state_before,
+            environment_state_after=environment_state_after,
             ai_analysis=ai_analysis,
             overall_success=success,
             failure_phase=None if success else "execution",
@@ -1058,19 +1065,19 @@ class ActionAgent(BaseAgent):
                         return result
             
             # Capture before state
-            if self.browser_driver:
-                result.browser_state_before = BrowserState(
-                    url=await self.browser_driver.get_page_url(),
-                    title=await self.browser_driver.get_page_title(),
-                    viewport_size=await self.browser_driver.get_viewport_size(),
-                    screenshot=await self.browser_driver.screenshot()
+            if self.automation_driver:
+                result.environment_state_before = EnvironmentState(
+                    url=await self.automation_driver.get_page_url(),
+                    title=await self.automation_driver.get_page_title(),
+                    viewport_size=await self.automation_driver.get_viewport_size(),
+                    screenshot=await self.automation_driver.screenshot()
                 )
             
             # Navigate
             execution_start = asyncio.get_event_loop().time()
-            if not self.browser_driver:
-                raise RuntimeError("Browser driver not initialized")
-            await self.browser_driver.navigate(url)
+            if not self.automation_driver:
+                raise RuntimeError("Automation driver not initialized")
+            await self.automation_driver.navigate(url)
             
             # Wait briefly for the page to stabilize before capturing the after-state
             stabilization_seconds = max(
@@ -1081,11 +1088,11 @@ class ActionAgent(BaseAgent):
                 await asyncio.sleep(stabilization_seconds)
             
             # Capture after state
-            screenshot_after = await self.browser_driver.screenshot()
-            result.browser_state_after = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
-                viewport_size=await self.browser_driver.get_viewport_size(),
+            screenshot_after = await self.automation_driver.screenshot()
+            result.environment_state_after = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
+                viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot_after
             )
             
@@ -1276,16 +1283,16 @@ REASON: <explanation of any issues>
         
         try:
             # Step 1: Capture initial state
-            if not screenshot and self.browser_driver:
-                screenshot = await self.browser_driver.screenshot()
+            if not screenshot and self.automation_driver:
+                screenshot = await self.automation_driver.screenshot()
             
             # Get viewport for grid initialization
-            viewport_size = await self.browser_driver.get_viewport_size()
+            viewport_size = await self.automation_driver.get_viewport_size()
             self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
             
-            result.browser_state_before = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
+            result.environment_state_before = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
@@ -1456,17 +1463,17 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 "confidence": confidence
             })
             
-            await self.browser_driver.click(pixel_x, pixel_y)
+            await self.automation_driver.click(pixel_x, pixel_y)
             
             # Wait based on element type (or use generic 1s as discussed)
             wait_time = 1000  # Default 1 second
-            await self.browser_driver.wait(wait_time)
+            await self.automation_driver.wait(wait_time)
             
             # Step 4: Capture post-click state
-            screenshot_after = await self.browser_driver.screenshot()
-            result.browser_state_after = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
+            screenshot_after = await self.automation_driver.screenshot()
+            result.environment_state_after = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot_after
             )
@@ -1603,9 +1610,9 @@ CONFIDENCE: <0.0-1.0>
             actual_outcome = f"Clicked {element_type}"
             
             # If URL changed (navigation occurred), describe where we navigated
-            if url_changed and result.browser_state_after:
-                new_title = result.browser_state_after.title
-                new_url = result.browser_state_after.url
+            if url_changed and result.environment_state_after:
+                new_title = result.environment_state_after.title
+                new_url = result.environment_state_after.url
                 if new_title:
                     actual_outcome = f"Clicked {element_type} and navigated to: {new_title}"
                 else:
@@ -1671,16 +1678,16 @@ CONFIDENCE: <0.0-1.0>
         
         try:
             # Step 1: Capture initial state
-            if not screenshot and self.browser_driver:
-                screenshot = await self.browser_driver.screenshot()
+            if not screenshot and self.automation_driver:
+                screenshot = await self.automation_driver.screenshot()
             
             # Get viewport for grid initialization
-            viewport_size = await self.browser_driver.get_viewport_size()
+            viewport_size = await self.automation_driver.get_viewport_size()
             self.grid_overlay.initialize(viewport_size[0], viewport_size[1])
             
-            result.browser_state_before = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
+            result.environment_state_before = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
@@ -1838,14 +1845,14 @@ BLOCKED_BY: <if blocked, what's blocking it>
                 })
                 
                 # Strategy 1: Click outside first, then click inside to compare
-                viewport_width, viewport_height = await self.browser_driver.get_viewport_size()
+                viewport_width, viewport_height = await self.automation_driver.get_viewport_size()
                 
                 # Click outside the search box (top-left corner)
-                await self.browser_driver.click(50, 50)
-                await self.browser_driver.wait(200)
+                await self.automation_driver.click(50, 50)
+                await self.automation_driver.wait(200)
                 
                 # Take screenshot without focus
-                unfocused_screenshot = await self.browser_driver.screenshot()
+                unfocused_screenshot = await self.automation_driver.screenshot()
                 
                 # Save unfocused screenshot for debugging
                 debug_logger = get_debug_logger()
@@ -1858,11 +1865,11 @@ BLOCKED_BY: <if blocked, what's blocking it>
                     )
                 
                 # Click on the input field
-                await self.browser_driver.click(pixel_x, pixel_y)
-                await self.browser_driver.wait(200)
+                await self.automation_driver.click(pixel_x, pixel_y)
+                await self.automation_driver.wait(200)
                 
                 # Take screenshot with focus
-                focused_screenshot = await self.browser_driver.screenshot()
+                focused_screenshot = await self.automation_driver.screenshot()
                 
                 # Save focused screenshot for debugging
                 focused_screenshot_path = None
@@ -1955,14 +1962,14 @@ CONFIDENCE: <0.0-1.0>
             if current_value and current_value.lower() not in ["empty", "none", ""]:
                 logger.info("Clearing existing text", extra={"current_value": current_value})
                 # Select all and delete
-                # Use Playwright's keyboard API through the page object
+                # Use Automation's keyboard API through the page object
                 # For now, we'll use a simpler approach - triple-click to select all
-                await self.browser_driver.click(pixel_x, pixel_y)
-                await self.browser_driver.wait(50)
-                await self.browser_driver.click(pixel_x, pixel_y)
-                await self.browser_driver.wait(50)
-                await self.browser_driver.click(pixel_x, pixel_y)
-                await self.browser_driver.wait(100)
+                await self.automation_driver.click(pixel_x, pixel_y)
+                await self.automation_driver.wait(50)
+                await self.automation_driver.click(pixel_x, pixel_y)
+                await self.automation_driver.wait(50)
+                await self.automation_driver.click(pixel_x, pixel_y)
+                await self.automation_driver.wait(100)
                 # Type over the selection
                 logger.info("Triple-clicked to select all text")
             
@@ -1973,7 +1980,7 @@ CONFIDENCE: <0.0-1.0>
             })
             
             # Take screenshot BEFORE typing
-            before_typing_screenshot = await self.browser_driver.screenshot()
+            before_typing_screenshot = await self.automation_driver.screenshot()
             
             # Save before typing screenshot for debugging
             before_typing_screenshot_path = None
@@ -1985,11 +1992,11 @@ CONFIDENCE: <0.0-1.0>
                 )
             
             # Type the text
-            await self.browser_driver.type_text(test_step.action_instruction.value)
-            await self.browser_driver.wait(500)  # Wait for text to appear
+            await self.automation_driver.type_text(test_step.action_instruction.value)
+            await self.automation_driver.wait(500)  # Wait for text to appear
             
             # Take screenshot AFTER typing
-            after_typing_screenshot = await self.browser_driver.screenshot()
+            after_typing_screenshot = await self.automation_driver.screenshot()
             
             # Save after typing screenshot for debugging
             after_typing_screenshot_path = None
@@ -2001,9 +2008,9 @@ CONFIDENCE: <0.0-1.0>
                 )
             
             # Step 6: Capture after state and validate
-            result.browser_state_after = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
+            result.environment_state_after = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=after_typing_screenshot
             )
@@ -2199,13 +2206,13 @@ REASONING: <explain what you observed>
         
         try:
             # Capture current state
-            if not screenshot and self.browser_driver:
-                screenshot = await self.browser_driver.screenshot()
+            if not screenshot and self.automation_driver:
+                screenshot = await self.automation_driver.screenshot()
             
-            result.browser_state_before = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
-                viewport_size=await self.browser_driver.get_viewport_size(),
+            result.environment_state_before = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
+                viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot
             )
             
@@ -2323,13 +2330,13 @@ REASON: <explanation if it doesn't match>
         
         try:
             # Capture before state
-            if not screenshot and self.browser_driver:
-                screenshot = await self.browser_driver.screenshot()
+            if not screenshot and self.automation_driver:
+                screenshot = await self.automation_driver.screenshot()
             
-            viewport_size = await self.browser_driver.get_viewport_size()
-            result.browser_state_before = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
+            viewport_size = await self.automation_driver.get_viewport_size()
+            result.environment_state_before = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot
             )
@@ -2370,21 +2377,21 @@ REASON: <explanation if it doesn't match>
             # Wikipedia's search box sometimes needs a moment to register Enter
             if "search" in test_step.action_instruction.target.lower() and key.lower() == "enter":
                 logger.info("Adding small delay before pressing Enter for search box")
-                await self.browser_driver.wait(200)
+                await self.automation_driver.wait(200)
             
             # Press the key
             execution_start = asyncio.get_event_loop().time()
-            await self.browser_driver.press_key(key)
+            await self.automation_driver.press_key(key)
             
             # Wait for effect (longer for Enter which might submit forms)
             wait_time = 3000 if key.lower() == "enter" else 500
-            await self.browser_driver.wait(wait_time)
+            await self.automation_driver.wait(wait_time)
             
             # Capture after state
-            screenshot_after = await self.browser_driver.screenshot()
-            result.browser_state_after = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
+            screenshot_after = await self.automation_driver.screenshot()
+            result.environment_state_after = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
                 viewport_size=viewport_size,
                 screenshot=screenshot_after
             )
@@ -2482,9 +2489,9 @@ REASONING: Describe what actually happened in terms that can be compared to the 
             
             # If navigation occurred, describe where we navigated to
             if changes in ["navigation", "form_submit"]:
-                if result.browser_state_after:
-                    new_title = result.browser_state_after.title
-                    new_url = result.browser_state_after.url
+                if result.environment_state_after:
+                    new_title = result.environment_state_after.title
+                    new_url = result.environment_state_after.url
                     # Extract meaningful part of the reasoning that describes what we see
                     if reasoning and "navigated to" in reasoning.lower():
                         actual_outcome = reasoning
@@ -2554,7 +2561,7 @@ REASONING: Describe what actually happened in terms that can be compared to the 
         
         try:
             if not screenshot:
-                screenshot = await self.browser_driver.screenshot()
+                screenshot = await self.automation_driver.screenshot()
             
             # Step 1: Identify dropdown element
             dropdown_prompt = f"""
@@ -2658,11 +2665,11 @@ CONFIDENCE: <0.0-1.0>
                     refined=False
                 )
                 pixel_x, pixel_y = self.grid_overlay.coordinate_to_pixels(grid_coord)
-                await self.browser_driver.click(pixel_x, pixel_y)
+                await self.automation_driver.click(pixel_x, pixel_y)
                 await asyncio.sleep(0.5)  # Wait for dropdown to open
                 
                 # Take new screenshot
-                screenshot_after_open = await self.browser_driver.screenshot()
+                screenshot_after_open = await self.automation_driver.screenshot()
                 
                 # Verify dropdown opened
                 verify_prompt = "Is the dropdown now open? Respond with DROPDOWN_OPEN: true/false"
@@ -2690,9 +2697,9 @@ CONFIDENCE: <0.0-1.0>
                 if "DROPDOWN_OPEN: false" in verify_response.get("content", ""):
                     # Try one more time with a slight delay
                     await asyncio.sleep(0.5)
-                    await self.browser_driver.click(pixel_x, pixel_y)
+                    await self.automation_driver.click(pixel_x, pixel_y)
                     await asyncio.sleep(0.5)
-                    screenshot_after_open = await self.browser_driver.screenshot()
+                    screenshot_after_open = await self.automation_driver.screenshot()
             else:
                 screenshot_after_open = screenshot
             
@@ -2764,9 +2771,9 @@ MATCH_TYPE: exact/partial/none
                     end_y = pixel_y + 50
                 
                 # Simple drag to scroll
-                await self.browser_driver.click(pixel_x, start_y)
+                await self.automation_driver.click(pixel_x, start_y)
                 await asyncio.sleep(0.1)
-                # Note: We need drag support in browser driver for this
+                # Note: We need drag support in the automation driver for this
                 # For now, we'll just try to find the option in the visible area
                 logger.warning("Dropdown scrolling not fully implemented - drag support needed")
             
@@ -2809,11 +2816,11 @@ MATCH_TYPE: exact/partial/none
             option_coords = self.grid_overlay.coordinate_to_pixels(option_grid_coord)
             
             execution_start = asyncio.get_event_loop().time()
-            await self.browser_driver.click(option_coords[0], option_coords[1])
+            await self.automation_driver.click(option_coords[0], option_coords[1])
             await asyncio.sleep(0.5)  # Wait for selection
             
             # Step 5: Validate selection
-            screenshot_after = await self.browser_driver.screenshot()
+            screenshot_after = await self.automation_driver.screenshot()
             
             validate_prompt = f"""
 I just selected "{target_value}" from a dropdown.
@@ -2888,17 +2895,17 @@ CONFIDENCE: <0.0-1.0>
                 error_message=None if success else f"Selection mismatch: expected '{target_value}', got '{selected_value}'"
             )
             
-            result.browser_state_before = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
-                viewport_size=await self.browser_driver.get_viewport_size(),
+            result.environment_state_before = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
+                viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot
             )
             
-            result.browser_state_after = BrowserState(
-                url=await self.browser_driver.get_page_url(),
-                title=await self.browser_driver.get_page_title(),
-                viewport_size=await self.browser_driver.get_viewport_size(),
+            result.environment_state_after = EnvironmentState(
+                url=await self.automation_driver.get_page_url(),
+                title=await self.automation_driver.get_page_title(),
+                viewport_size=await self.automation_driver.get_viewport_size(),
                 screenshot=screenshot_after
             )
             
@@ -2948,18 +2955,18 @@ CONFIDENCE: <0.0-1.0>
         
         try:
             # Capture initial browser state
-            if self.browser_driver:
-                viewport_size = await self.browser_driver.get_viewport_size()
-                result.browser_state_before = BrowserState(
-                    url=await self.browser_driver.get_page_url(),
-                    title=await self.browser_driver.get_page_title(),
+            if self.automation_driver:
+                viewport_size = await self.automation_driver.get_viewport_size()
+                result.environment_state_before = EnvironmentState(
+                    url=await self.automation_driver.get_page_url(),
+                    title=await self.automation_driver.get_page_title(),
                     viewport_size=viewport_size,
-                    screenshot=screenshot or await self.browser_driver.screenshot()
+                    screenshot=screenshot or await self.automation_driver.screenshot()
                 )
                 
                 # Use provided screenshot or capture new one
                 if not screenshot:
-                    screenshot = result.browser_state_before.screenshot
+                    screenshot = result.environment_state_before.screenshot
             
             # Phase 1: Validation
             validation_result = await self._validate_action(
@@ -3002,7 +3009,7 @@ CONFIDENCE: <0.0-1.0>
             )
             
             # Phase 3: Action Execution
-            if self.browser_driver and result.coordinates.confidence >= 0.7:
+            if self.automation_driver and result.coordinates.confidence >= 0.7:
                 execution_start = asyncio.get_event_loop().time()
                 
                 try:
@@ -3021,14 +3028,14 @@ CONFIDENCE: <0.0-1.0>
                                 raise Exception("Failed to type text - element not focusable")
                     
                     # Wait for UI update
-                    await self.browser_driver.wait(1000)
+                    await self.automation_driver.wait(1000)
                     
                     # Capture post-action state
-                    result.browser_state_after = BrowserState(
-                        url=await self.browser_driver.get_page_url(),
-                        title=await self.browser_driver.get_page_title(),
+                    result.environment_state_after = EnvironmentState(
+                        url=await self.automation_driver.get_page_url(),
+                        title=await self.automation_driver.get_page_title(),
                         viewport_size=viewport_size,
-                        screenshot=await self.browser_driver.screenshot()
+                        screenshot=await self.automation_driver.screenshot()
                     )
                     
                     result.execution = ExecutionResult(
@@ -3058,7 +3065,7 @@ CONFIDENCE: <0.0-1.0>
                 result.failure_phase = "coordinates"
             
             # Phase 4: Result Analysis
-            if result.execution and result.execution.success and result.browser_state_after:
+            if result.execution and result.execution.success and result.environment_state_after:
                 analysis = await self._analyze_result(
                     test_step.action_instruction,
                     result
@@ -3143,7 +3150,7 @@ CONFIDENCE: <0.0-1.0>
             action = GridAction(
                 instruction=instruction,
                 coordinate=refined_coords,
-                screenshot_before=None  # Will be set by browser driver
+                screenshot_before=None  # Will be set by automation driver
             )
         else:
             # Use initial coordinates
@@ -3614,7 +3621,7 @@ Action Performed:
 Execution Details:
 - Grid Cell: {result.coordinates.grid_cell}
 - Execution Time: {result.execution.execution_time_ms}ms
-- URL Change: {result.browser_state_before.url} → {result.browser_state_after.url}
+- URL Change: {result.environment_state_before.url} → {result.environment_state_after.url}
 
 Compare the before and after screenshots and provide analysis in JSON format:
 {{
@@ -3628,7 +3635,7 @@ Compare the before and after screenshots and provide analysis in JSON format:
 }}"""
 
         # Create comparison with before and after screenshots
-        if result.browser_state_before.screenshot and result.browser_state_after.screenshot:
+        if result.environment_state_before.screenshot and result.environment_state_after.screenshot:
             messages = [
                 {
                     "role": "user",
@@ -3637,14 +3644,14 @@ Compare the before and after screenshots and provide analysis in JSON format:
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(result.browser_state_before.screenshot).decode('utf-8')}",
+                                "url": f"data:image/png;base64,{base64.b64encode(result.environment_state_before.screenshot).decode('utf-8')}",
                                 "detail": "high"
                             }
                         },
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64.b64encode(result.browser_state_after.screenshot).decode('utf-8')}",
+                                "url": f"data:image/png;base64,{base64.b64encode(result.environment_state_after.screenshot).decode('utf-8')}",
                                 "detail": "high"
                             }
                         }
@@ -3696,8 +3703,8 @@ Compare the before and after screenshots and provide analysis in JSON format:
         logger.debug("Executing enhanced click with focus", extra={"x": x, "y": y})
         
         # Strategy 1: Single click
-        await self.browser_driver.click(x, y)
-        await self.browser_driver.wait(100)
+        await self.automation_driver.click(x, y)
+        await self.automation_driver.wait(100)
         
         # Strategy 2: Double-click for stubborn elements
         # Some elements require double-click to properly focus
@@ -3730,41 +3737,41 @@ Compare the before and after screenshots and provide analysis in JSON format:
         })
         
         # Strategy 1: Single click and type
-        await self.browser_driver.click(x, y)
-        await self.browser_driver.wait(200)
+        await self.automation_driver.click(x, y)
+        await self.automation_driver.wait(200)
         
         # Validate focus by checking if we can type
         focus_validated = await self._validate_focus_for_typing(x, y, target_description)
         
         if focus_validated:
-            await self.browser_driver.type_text(text)
-            await self.browser_driver.wait(500)
+            await self.automation_driver.type_text(text)
+            await self.automation_driver.wait(500)
             return True
         
         # Strategy 2: Double-click to focus
         logger.warning("Single click didn't achieve focus, trying double-click")
-        await self.browser_driver.click(x, y)
-        await self.browser_driver.wait(50)
-        await self.browser_driver.click(x, y)
-        await self.browser_driver.wait(200)
+        await self.automation_driver.click(x, y)
+        await self.automation_driver.wait(50)
+        await self.automation_driver.click(x, y)
+        await self.automation_driver.wait(200)
         
         focus_validated = await self._validate_focus_for_typing(x, y, target_description)
         
         if focus_validated:
-            await self.browser_driver.type_text(text)
-            await self.browser_driver.wait(500)
+            await self.automation_driver.type_text(text)
+            await self.automation_driver.wait(500)
             return True
         
         # Strategy 3: Click and wait longer
         logger.warning("Double-click didn't achieve focus, trying click with longer wait")
-        await self.browser_driver.click(x, y)
-        await self.browser_driver.wait(1000)  # Wait longer for JavaScript to load
+        await self.automation_driver.click(x, y)
+        await self.automation_driver.wait(1000)  # Wait longer for JavaScript to load
         
         focus_validated = await self._validate_focus_for_typing(x, y, target_description)
         
         if focus_validated:
-            await self.browser_driver.type_text(text)
-            await self.browser_driver.wait(500)
+            await self.automation_driver.type_text(text)
+            await self.automation_driver.wait(500)
             return True
         
         logger.error("Failed to achieve focus after multiple strategies")
@@ -3783,7 +3790,7 @@ Compare the before and after screenshots and provide analysis in JSON format:
         the target element is properly focused.
         """
         # Take a screenshot to analyze current state
-        screenshot = await self.browser_driver.screenshot()
+        screenshot = await self.automation_driver.screenshot()
         
         # Create a highlighted screenshot showing where we clicked
         highlighted_screenshot = self._create_click_highlight_screenshot(screenshot, x, y)
@@ -3924,7 +3931,7 @@ Respond in JSON format:
             
             # Capture initial screenshot if not provided
             if not screenshot:
-                screenshot = await self.browser_driver.screenshot()
+                screenshot = await self.automation_driver.screenshot()
             
             while state.attempts < state.max_attempts:
                 state.attempts += 1
@@ -3956,11 +3963,11 @@ Respond in JSON format:
                     result.execution = ExecutionResult(
                         success=True,
                         execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
-                        browser_state_after=BrowserState(
-                            url=await self.browser_driver.get_page_url(),
-                            title=await self.browser_driver.get_page_title(),
-                            viewport_size=await self.browser_driver.get_viewport_size(),
-                            scroll_position=await self.browser_driver.get_scroll_position()
+                        environment_state_after=EnvironmentState(
+                            url=await self.automation_driver.get_page_url(),
+                            title=await self.automation_driver.get_page_title(),
+                            viewport_size=await self.automation_driver.get_viewport_size(),
+                            scroll_position=await self.automation_driver.get_scroll_position()
                         )
                     )
                     result.ai_analysis = AIAnalysis(
@@ -3995,7 +4002,7 @@ Respond in JSON format:
                 await asyncio.sleep(0.8)
                 
                 # Capture new screenshot
-                screenshot = await self.browser_driver.screenshot()
+                screenshot = await self.automation_driver.screenshot()
                 
                 # Check if we're making progress
                 if not await self._is_making_progress(state, screenshot):
@@ -4301,7 +4308,7 @@ Respond in JSON format:
         )
         
         # Use smooth scrolling for better UX
-        await self.browser_driver.scroll_by_pixels(x, y, smooth=True)
+        await self.automation_driver.scroll_by_pixels(x, y, smooth=True)
         
         # Record execution time
         action.executed_at = datetime.now(timezone.utc)
@@ -4431,23 +4438,23 @@ Respond in JSON format:
                     y = 300  # Default to scrolling down
             
             # Execute scroll
-            await self.browser_driver.scroll_by_pixels(x, y)
+            await self.automation_driver.scroll_by_pixels(x, y)
             
             # Wait for scroll to complete
             await asyncio.sleep(0.5)
             
             # Capture result
-            screenshot_after = await self.browser_driver.screenshot()
+            screenshot_after = await self.automation_driver.screenshot()
             
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
                 execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
-                browser_state_after=BrowserState(
-                    url=await self.browser_driver.get_page_url(),
-                    title=await self.browser_driver.get_page_title(),
-                    viewport_size=await self.browser_driver.get_viewport_size(),
-                    scroll_position=await self.browser_driver.get_scroll_position()
+                environment_state_after=EnvironmentState(
+                    url=await self.automation_driver.get_page_url(),
+                    title=await self.automation_driver.get_page_title(),
+                    viewport_size=await self.automation_driver.get_viewport_size(),
+                    scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
             result.ai_analysis = AIAnalysis(
@@ -4494,28 +4501,28 @@ Respond in JSON format:
         
         try:
             # Execute scroll to top
-            await self.browser_driver.scroll_to_top()
+            await self.automation_driver.scroll_to_top()
             
             # Wait for scroll to complete
             await asyncio.sleep(0.5)
             
             # Capture result
-            screenshot_after = await self.browser_driver.screenshot()
+            screenshot_after = await self.automation_driver.screenshot()
             
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
                 execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
-                browser_state_after=BrowserState(
-                    url=await self.browser_driver.get_page_url(),
-                    title=await self.browser_driver.get_page_title(),
-                    viewport_size=await self.browser_driver.get_viewport_size(),
-                    scroll_position=await self.browser_driver.get_scroll_position()
+                environment_state_after=EnvironmentState(
+                    url=await self.automation_driver.get_page_url(),
+                    title=await self.automation_driver.get_page_title(),
+                    viewport_size=await self.automation_driver.get_viewport_size(),
+                    scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
             
             # Verify we're at the top
-            scroll_x, scroll_y = await self.browser_driver.get_scroll_position()
+            scroll_x, scroll_y = await self.automation_driver.get_scroll_position()
             at_top = scroll_y == 0
             
             result.ai_analysis = AIAnalysis(
@@ -4563,29 +4570,29 @@ Respond in JSON format:
         
         try:
             # Execute scroll to bottom
-            await self.browser_driver.scroll_to_bottom()
+            await self.automation_driver.scroll_to_bottom()
             
             # Wait for scroll to complete and any lazy-loaded content
             await asyncio.sleep(1.0)
             
             # Capture result
-            screenshot_after = await self.browser_driver.screenshot()
+            screenshot_after = await self.automation_driver.screenshot()
             
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
                 execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
-                browser_state_after=BrowserState(
-                    url=await self.browser_driver.get_page_url(),
-                    title=await self.browser_driver.get_page_title(),
-                    viewport_size=await self.browser_driver.get_viewport_size(),
-                    scroll_position=await self.browser_driver.get_scroll_position()
+                environment_state_after=EnvironmentState(
+                    url=await self.automation_driver.get_page_url(),
+                    title=await self.automation_driver.get_page_title(),
+                    viewport_size=await self.automation_driver.get_viewport_size(),
+                    scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
             
             # Verify we're at the bottom
-            vw, vh, pw, ph = await self.browser_driver.get_page_dimensions()
-            scroll_x, scroll_y = await self.browser_driver.get_scroll_position()
+            vw, vh, pw, ph = await self.automation_driver.get_page_dimensions()
+            scroll_x, scroll_y = await self.automation_driver.get_scroll_position()
             at_bottom = scroll_y >= (ph - vh - 10)  # Allow 10px tolerance
             
             result.ai_analysis = AIAnalysis(
@@ -4656,23 +4663,23 @@ Respond in JSON format:
                 x = scroll_amount
             
             # Execute horizontal scroll
-            await self.browser_driver.scroll_by_pixels(x, 0)
+            await self.automation_driver.scroll_by_pixels(x, 0)
             
             # Wait for scroll to complete
             await asyncio.sleep(0.5)
             
             # Capture result
-            screenshot_after = await self.browser_driver.screenshot()
+            screenshot_after = await self.automation_driver.screenshot()
             
             result.overall_success = True
             result.execution = ExecutionResult(
                 success=True,
                 execution_time_ms=(datetime.now(timezone.utc) - result.timestamp_start).total_seconds() * 1000,
-                browser_state_after=BrowserState(
-                    url=await self.browser_driver.get_page_url(),
-                    title=await self.browser_driver.get_page_title(),
-                    viewport_size=await self.browser_driver.get_viewport_size(),
-                    scroll_position=await self.browser_driver.get_scroll_position()
+                environment_state_after=EnvironmentState(
+                    url=await self.automation_driver.get_page_url(),
+                    title=await self.automation_driver.get_page_title(),
+                    viewport_size=await self.automation_driver.get_viewport_size(),
+                    scroll_position=await self.automation_driver.get_scroll_position()
                 )
             )
             

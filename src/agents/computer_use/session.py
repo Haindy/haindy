@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover - optional dependency
 from src.config.settings import Settings
 from src.desktop.cache import CoordinateCache
 from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
-from src.core.interfaces import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.monitoring.debug_logger import DebugLogger
 from src.utils.model_logging import ModelCallLogger, get_model_logger
 
@@ -145,7 +145,7 @@ class ComputerUseSession:
     def __init__(
         self,
         client: AsyncOpenAI,
-        browser: BrowserDriver,
+        automation_driver: AutomationDriver,
         settings: Settings,
         debug_logger: Optional[DebugLogger] = None,
         model: Optional[str] = None,
@@ -156,7 +156,7 @@ class ComputerUseSession:
         model_logger: Optional[ModelCallLogger] = None,
     ) -> None:
         self._client = client
-        self._browser = browser
+        self._automation_driver = automation_driver
         self._settings = settings
         self._debug_logger = debug_logger
         self._provider = (provider or settings.cu_provider or "openai").lower()
@@ -300,10 +300,10 @@ class ComputerUseSession:
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
-        await self._ensure_browser_ready()
+        await self._ensure_automation_driver_ready()
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
-        screenshot = initial_screenshot or await self._browser.screenshot()
+        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        screenshot = initial_screenshot or await self._automation_driver.screenshot()
         screenshot_b64 = encode_png_base64(screenshot)
         tool_environment = self._map_openai_environment(environment)
 
@@ -527,9 +527,9 @@ class ComputerUseSession:
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
-        await self._ensure_browser_ready()
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
-        initial_screenshot = await self._browser.screenshot()
+        await self._ensure_automation_driver_ready()
+        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
+        initial_screenshot = await self._automation_driver.screenshot()
         wrapped_goal = self._wrap_goal_for_google(goal, environment)
         contents, config = self._build_google_initial_request(
             goal=wrapped_goal,
@@ -782,7 +782,7 @@ class ComputerUseSession:
         cache_action: str = "click",
         use_cache: bool = True,
     ) -> None:
-        """Execute a single Computer Use tool action via the browser driver."""
+        """Execute a single Computer Use tool action via the automation driver."""
         action = turn.parameters or {}
         raw_action_type = action.get("type") or turn.action_type
         action_type = self._canonicalize_action_type(raw_action_type)
@@ -791,7 +791,7 @@ class ComputerUseSession:
             turn.action_type = action_type
         start = time.perf_counter()
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
         turn.metadata["resolution"] = (viewport_width, viewport_height)
         turn.metadata["normalized_coords"] = bool(normalized_coords)
         allow_action, deny_reason = self._is_action_allowed(action_type)
@@ -855,7 +855,7 @@ class ComputerUseSession:
                     button = (action.get("button", "left") or "left").lower()
                     click_count = int(action.get("click_count", 1))
                     await asyncio.wait_for(
-                        self._browser.click(x, y, button=button, click_count=click_count),
+                        self._automation_driver.click(x, y, button=button, click_count=click_count),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -880,7 +880,7 @@ class ComputerUseSession:
                     button = "right" if action_type == "right_click" else "left"
                     click_count = 2 if action_type == "double_click" else 1
                     await asyncio.wait_for(
-                        self._browser.click(x, y, button=button, click_count=click_count),
+                        self._automation_driver.click(x, y, button=button, click_count=click_count),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -907,7 +907,7 @@ class ComputerUseSession:
                     if steps <= 0:
                         steps = 1
                     await asyncio.wait_for(
-                        self._browser.move_mouse(x, y, steps=steps),
+                        self._automation_driver.move_mouse(x, y, steps=steps),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -983,7 +983,7 @@ class ComputerUseSession:
                         steps = 1
 
                     await asyncio.wait_for(
-                        self._browser.drag_mouse(start_x, start_y, end_x, end_y, steps=steps),
+                        self._automation_driver.drag_mouse(start_x, start_y, end_x, end_y, steps=steps),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update(
@@ -1005,7 +1005,7 @@ class ComputerUseSession:
                         normalized=normalized_coords,
                     )
                     await asyncio.wait_for(
-                        self._browser.drag_mouse(start_x, start_y, end_x, end_y, steps=1),
+                        self._automation_driver.drag_mouse(start_x, start_y, end_x, end_y, steps=1),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update(
@@ -1029,7 +1029,7 @@ class ComputerUseSession:
                     turn.metadata["scroll_x"] = scroll_x
                     turn.metadata["scroll_y"] = scroll_y
                     await asyncio.wait_for(
-                        self._browser.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+                        self._automation_driver.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.status = "executed"
@@ -1046,7 +1046,7 @@ class ComputerUseSession:
                     magnitude = min(magnitude, int(self._settings.scroll_max_magnitude))
                     turn.metadata["scroll_direction"] = direction
                     turn.metadata["scroll_magnitude"] = magnitude
-                    await self._browser.scroll(direction, magnitude)
+                    await self._automation_driver.scroll(direction, magnitude)
                     turn.status = "executed"
                 elif action_type == "scroll_at":
                     direction = (action.get("direction") or "").lower()
@@ -1070,8 +1070,8 @@ class ComputerUseSession:
                         )
                     turn.metadata["scroll_direction"] = direction
                     turn.metadata["scroll_magnitude"] = magnitude
-                    await self._browser.move_mouse(x, y, steps=1)
-                    await self._browser.scroll(direction, magnitude)
+                    await self._automation_driver.move_mouse(x, y, steps=1)
+                    await self._automation_driver.scroll(direction, magnitude)
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "type":
@@ -1086,7 +1086,7 @@ class ComputerUseSession:
                             turn.metadata["synthetic_text_payload"] = text_payload
                     if not text_payload:
                         raise ComputerUseExecutionError("Type action missing text payload.")
-                    await self._browser.type_text(text_payload)
+                    await self._automation_driver.type_text(text_payload)
                     turn.status = "executed"
                 elif action_type == "type_text_at":
                     text_payload = action.get("text")
@@ -1104,13 +1104,13 @@ class ComputerUseSession:
                             viewport_height,
                             normalized=normalized_coords,
                         )
-                    await self._browser.click(x, y, button="left", click_count=1)
+                    await self._automation_driver.click(x, y, button="left", click_count=1)
                     if clear_before:
-                        await self._browser.press_key("ctrl+a")
-                        await self._browser.press_key("backspace")
-                    await self._browser.type_text(str(text_payload))
+                        await self._automation_driver.press_key("ctrl+a")
+                        await self._automation_driver.press_key("backspace")
+                    await self._automation_driver.type_text(str(text_payload))
                     if press_enter:
-                        await self._browser.press_key("enter")
+                        await self._automation_driver.press_key("enter")
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type in {"keypress", "key_combination"}:
@@ -1124,7 +1124,7 @@ class ComputerUseSession:
                             turn.metadata["synthetic_key_sequence"] = key_sequence
                         for key in key_sequence:
                             normalized = normalize_key_sequence(key)
-                            await self._browser.press_key(normalized)
+                            await self._automation_driver.press_key(normalized)
                             if self._should_capture_clipboard_after_key_combo(normalized):
                                 capture_clipboard_after_action = True
                     else:
@@ -1136,14 +1136,14 @@ class ComputerUseSession:
                         if isinstance(keys, (list, tuple)):
                             for key in keys:
                                 normalized = normalize_key_sequence(str(key))
-                                await self._browser.press_key(normalized)
+                                await self._automation_driver.press_key(normalized)
                                 if self._should_capture_clipboard_after_key_combo(
                                     normalized
                                 ):
                                     capture_clipboard_after_action = True
                         else:
                             normalized = normalize_key_sequence(str(keys))
-                            await self._browser.press_key(normalized)
+                            await self._automation_driver.press_key(normalized)
                             if self._should_capture_clipboard_after_key_combo(
                                 normalized
                             ):
@@ -1159,18 +1159,18 @@ class ComputerUseSession:
                         action.get("duration_ms")
                         or self._settings.actions_computer_tool_stabilization_wait_ms
                     )
-                    await self._browser.wait(duration)
+                    await self._automation_driver.wait(duration)
                     turn.metadata["duration_ms"] = duration
                     turn.status = "executed"
                 elif action_type == "wait_5_seconds":
-                    await self._browser.wait(5000)
+                    await self._automation_driver.wait(5000)
                     turn.metadata["duration_ms"] = 5000
                     turn.status = "executed"
                 elif action_type == "go_back":
-                    await self._browser.press_key("alt+left")
+                    await self._automation_driver.press_key("alt+left")
                     turn.status = "executed"
                 elif action_type == "go_forward":
-                    await self._browser.press_key("alt+right")
+                    await self._automation_driver.press_key("alt+right")
                     turn.status = "executed"
                 elif action_type == "search":
                     await self._navigate_via_address_bar("https://www.google.com/")
@@ -1183,7 +1183,7 @@ class ComputerUseSession:
                     turn.status = "executed"
                 elif action_type == "screenshot":
                     logger.debug(
-                        "Computer Use requested screenshot action; no browser operation executed."
+                        "Computer Use requested screenshot action; no automation_driver operation executed."
                     )
                     turn.status = "executed"
                 else:
@@ -1241,7 +1241,7 @@ class ComputerUseSession:
         turn_index: int,
     ) -> None:
         """Capture screenshot and update metadata after action execution."""
-        screenshot_bytes = await self._browser.screenshot()
+        screenshot_bytes = await self._automation_driver.screenshot()
         turn.screenshot_path = self._save_turn_screenshot(
             screenshot_bytes,
             suffix=f"{turn.action_type}_{turn_index}",
@@ -1265,7 +1265,7 @@ class ComputerUseSession:
         button = action.get("button", "left")
         click_count = int(action.get("click_count", 1))
         await asyncio.wait_for(
-            self._browser.click(x, y, button=button, click_count=click_count),
+            self._automation_driver.click(x, y, button=button, click_count=click_count),
             timeout=self._action_timeout_seconds,
         )
 
@@ -1279,12 +1279,12 @@ class ComputerUseSession:
         action_type = action.get("type")
         if action_type == "double_click":
             await asyncio.wait_for(
-                self._browser.click(x, y, button="left", click_count=2),
+                self._automation_driver.click(x, y, button="left", click_count=2),
                 timeout=self._action_timeout_seconds,
             )
         elif action_type == "right_click":
             await asyncio.wait_for(
-                self._browser.click(x, y, button="right", click_count=1),
+                self._automation_driver.click(x, y, button="right", click_count=1),
                 timeout=self._action_timeout_seconds,
             )
 
@@ -1293,7 +1293,7 @@ class ComputerUseSession:
         scroll_x = int(action.get("scroll_x", 0))
         scroll_y = int(action.get("scroll_y", 0))
         await asyncio.wait_for(
-            self._browser.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+            self._automation_driver.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
             timeout=self._action_timeout_seconds,
         )
 
@@ -1308,10 +1308,10 @@ class ComputerUseSession:
         """Build the payload for a follow-up request after executing an action."""
         screenshot_b64 = call.metadata.get("screenshot_base64")
         if not screenshot_b64:
-            screenshot_bytes = await self._browser.screenshot()
+            screenshot_bytes = await self._automation_driver.screenshot()
             screenshot_b64 = encode_png_base64(screenshot_bytes)
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
 
         payload: Dict[str, Any] = {
             "model": model or self._openai_model,
@@ -1598,10 +1598,10 @@ class ComputerUseSession:
     ) -> Tuple[Dict[str, Any], Any, bytes]:
         from google.genai import types  # type: ignore
 
-        screenshot_bytes = await self._browser.screenshot()
+        screenshot_bytes = await self._automation_driver.screenshot()
         page_url = ""
         try:
-            page_url = await self._browser.get_page_url()
+            page_url = await self._automation_driver.get_page_url()
         except Exception:
             page_url = ""
         if not page_url:
@@ -1737,15 +1737,15 @@ class ComputerUseSession:
         logger.info("Initialized Google CU client in API key mode")
         return self._google_client
 
-    async def _ensure_browser_ready(self) -> None:
-        """Ensure the browser session is started before execution."""
-        await self._browser.start()
+    async def _ensure_automation_driver_ready(self) -> None:
+        """Ensure the automation_driver session is started before execution."""
+        await self._automation_driver.start()
 
     async def invalidate_cache(self, cache_label: str, cache_action: str) -> None:
         """Invalidate a cached coordinate for the current resolution."""
         logger.info("ComputerUseSession: invalidating coordinate cache after failure")
         try:
-            resolution = await self._browser.get_viewport_size()
+            resolution = await self._automation_driver.get_viewport_size()
             self._coordinate_cache.invalidate(cache_label, cache_action, resolution)
         except Exception:
             logger.debug(
@@ -1758,21 +1758,21 @@ class ComputerUseSession:
         """Wait for the configured stabilization interval."""
         wait_ms = self._settings.actions_computer_tool_stabilization_wait_ms
         if wait_ms > 0:
-            await self._browser.wait(wait_ms)
+            await self._automation_driver.wait(wait_ms)
 
     async def _maybe_get_current_url(self) -> Optional[str]:
-        """Attempt to retrieve the current page URL from the browser driver."""
-        get_url = getattr(self._browser, "get_page_url", None)
+        """Attempt to retrieve the current page URL from the automation driver."""
+        get_url = getattr(self._automation_driver, "get_page_url", None)
         if callable(get_url):
             try:
                 return await get_url()
             except Exception:
-                logger.debug("Failed to retrieve current URL from browser driver", exc_info=True)
+                logger.debug("Failed to retrieve current URL from automation driver", exc_info=True)
         return None
 
     @staticmethod
     def _canonicalize_action_type(action_type: Optional[str]) -> Optional[str]:
-        """Normalize OpenAI action types to the browser driver's expectations."""
+        """Normalize OpenAI action types to the automation driver's expectations."""
         if not action_type:
             return action_type
 
@@ -1863,7 +1863,7 @@ class ComputerUseSession:
         if target_text:
             confirmation_text += f" Focus on: {target_text}."
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        viewport_width, viewport_height = await self._automation_driver.get_viewport_size()
 
         payload: Dict[str, Any] = {
             "model": model or self._openai_model,
@@ -2145,7 +2145,7 @@ class ComputerUseSession:
         return False
 
     async def _maybe_read_clipboard(self, turn: ComputerToolTurn) -> Optional[str]:
-        reader = getattr(self._browser, "read_clipboard", None)
+        reader = getattr(self._automation_driver, "read_clipboard", None)
         if not callable(reader):
             return None
         try:
@@ -2162,9 +2162,9 @@ class ComputerUseSession:
         return clipboard_text[:max_chars]
 
     async def _navigate_via_address_bar(self, url: str) -> None:
-        await self._browser.press_key("ctrl+l")
-        await self._browser.type_text(url)
-        await self._browser.press_key("enter")
+        await self._automation_driver.press_key("ctrl+l")
+        await self._automation_driver.type_text(url)
+        await self._automation_driver.press_key("enter")
 
     def _save_turn_screenshot(
         self, screenshot_bytes: bytes, suffix: str, step_number: Optional[int]
@@ -2324,10 +2324,10 @@ def normalize_response(response: Any) -> Dict[str, Any]:
 
 def normalize_key_sequence(key: str) -> str:
     """
-    Convert Computer Use key strings to Playwright-compatible sequences.
+    Convert Computer Use key strings to Automation-compatible sequences.
 
     The model commonly emits uppercase tokens (e.g., "ENTER") or modifier
-    combinations like "CTRL+ENTER". Playwright expects specific casing, so we
+    combinations like "CTRL+ENTER". Automation expects specific casing, so we
     normalize each segment before execution.
     """
     if not key:
@@ -2373,7 +2373,7 @@ def normalize_key_sequence(key: str) -> str:
             return mapping[token_upper]
 
         if token_upper.startswith("F") and token_upper[1:].isdigit():
-            return token_upper  # Playwright expects F-keys uppercase.
+            return token_upper  # Automation expects F-keys uppercase.
 
         if len(token) == 1:
             return token

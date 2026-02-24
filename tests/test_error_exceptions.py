@@ -7,7 +7,7 @@ from datetime import datetime
 
 from src.error_handling.exceptions import (
     HAINDYError, RetryableError, NonRetryableError, AgentError,
-    BrowserError, ValidationError, RecoveryError, HallucinationError,
+    AutomationError, ValidationError, RecoveryError, HallucinationError,
     TimeoutError, CoordinationError
 )
 
@@ -117,7 +117,7 @@ class TestBrowserError:
     
     def test_browser_error_creation(self):
         """Test browser error with optional fields."""
-        error = BrowserError(
+        error = AutomationError(
             "Click failed",
             url="https://example.com",
             selector="#submit-button",
@@ -132,7 +132,7 @@ class TestBrowserError:
     
     def test_browser_error_minimal(self):
         """Test browser error with minimal info."""
-        error = BrowserError("Page not found")
+        error = AutomationError("Page not found")
         assert error.url is None
         assert error.selector is None
         assert error.action is None

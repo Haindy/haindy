@@ -48,7 +48,7 @@ class TestPlanFormatter:
         if pretty:
             return json.dumps(plan_dict, indent=2, ensure_ascii=False)
         else:
-            return json.dumps(plan_dict, ensure_ascii=False)
+            return json.dumps(plan_dict, ensure_ascii=False, separators=(",", ":"))
     
     @staticmethod
     def to_markdown(test_plan: TestPlan) -> str:

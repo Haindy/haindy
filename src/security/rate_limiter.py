@@ -49,8 +49,8 @@ class RateLimitConfig:
     api_burst_size: int = 10
     
     # Browser action limits
-    browser_actions_per_minute: int = 120
-    browser_actions_burst: int = 20
+    automation_actions_per_minute: int = 120
+    automation_actions_burst: int = 20
     
     # Agent message limits
     agent_messages_per_minute: int = 300
@@ -240,9 +240,9 @@ class RateLimiter:
             )
             
             # Browser actions limiter
-            self._limiters["browser"] = TokenBucket(
-                capacity=self.config.browser_actions_burst,
-                refill_rate=self.config.browser_actions_per_minute / 60
+            self._limiters["automation"] = TokenBucket(
+                capacity=self.config.automation_actions_burst,
+                refill_rate=self.config.automation_actions_per_minute / 60
             )
             
             # Agent messages limiter
@@ -265,9 +265,9 @@ class RateLimiter:
             )
             
             # Browser actions limiter
-            self._limiters["browser"] = SlidingWindowCounter(
+            self._limiters["automation"] = SlidingWindowCounter(
                 window_seconds=60,
-                limit=self.config.browser_actions_per_minute
+                limit=self.config.automation_actions_per_minute
             )
             
             # Agent messages limiter
@@ -297,9 +297,9 @@ class RateLimiter:
         """
         return await self._check_limit("api", wait)
     
-    async def check_browser_action(self, wait: bool = False) -> bool:
+    async def check_automation_action(self, wait: bool = False) -> bool:
         """Check if browser action is allowed."""
-        return await self._check_limit("browser", wait)
+        return await self._check_limit("automation", wait)
     
     async def check_agent_message(self, wait: bool = False) -> bool:
         """Check if agent message is allowed."""
@@ -373,7 +373,7 @@ class RateLimiter:
         """Get configured limit for a type."""
         limits = {
             "api": self.config.api_calls_per_minute,
-            "browser": self.config.browser_actions_per_minute,
+            "automation": self.config.automation_actions_per_minute,
             "agent": self.config.agent_messages_per_minute,
             "screenshot": self.config.screenshots_per_minute
         }

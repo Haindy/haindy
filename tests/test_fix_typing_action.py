@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from src.agents.action_agent import ActionAgent
-from src.browser.driver import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.core.types import (
     ActionType,
     ActionInstruction,
@@ -24,7 +24,7 @@ from src.core.enhanced_types import (
     ValidationResult,
     CoordinateResult,
     ExecutionResult,
-    BrowserState,
+    EnvironmentState,
     AIAnalysis
 )
 
@@ -83,7 +83,7 @@ def action_agent(mock_browser_driver, mock_grid_overlay):
     """Create an action agent with mocked dependencies."""
     agent = ActionAgent(
         name="TestActionAgent",
-        browser_driver=mock_browser_driver
+        automation_driver=mock_browser_driver
     )
     agent.use_computer_tool = False
     agent.settings.actions_use_computer_tool = False
@@ -141,7 +141,7 @@ class TestEnhancedTypingAction:
             ValidationResult,
             CoordinateResult,
             ExecutionResult,
-            BrowserState,
+            EnvironmentState,
             AIAnalysis
         )
         
@@ -166,7 +166,7 @@ class TestEnhancedTypingAction:
                 reasoning="Found search box at center",
                 refined=False
             ),
-            browser_state_before=BrowserState(
+            environment_state_before=EnvironmentState(
                 url="https://wikipedia.org",
                 title="Wikipedia",
                 viewport_size=(1920, 1080)
@@ -176,7 +176,7 @@ class TestEnhancedTypingAction:
                 execution_time_ms=523.4,
                 error_message=None,
                 error_traceback=None,
-                browser_logs=[],
+                environment_logs=[],
                 network_activity=[]
             ),
             ai_analysis=AIAnalysis(
@@ -229,7 +229,7 @@ class TestEnhancedTypingAction:
             ValidationResult,
             CoordinateResult,
             ExecutionResult,
-            BrowserState,
+            EnvironmentState,
             AIAnalysis
         )
         
@@ -266,7 +266,7 @@ class TestEnhancedTypingAction:
                     reasoning="Found search box",
                     refined=False
                 ),
-                browser_state_before=BrowserState(
+                environment_state_before=EnvironmentState(
                     url="https://wikipedia.org",
                     title="Wikipedia",
                     viewport_size=(1920, 1080)
@@ -276,7 +276,7 @@ class TestEnhancedTypingAction:
                     execution_time_ms=600.0,
                     error_message=None,
                     error_traceback=None,
-                    browser_logs=[],
+                    environment_logs=[],
                     network_activity=[]
                 ),
                 ai_analysis=AIAnalysis(
@@ -318,7 +318,7 @@ class TestEnhancedTypingAction:
             ValidationResult,
             CoordinateResult,
             ExecutionResult,
-            BrowserState,
+            EnvironmentState,
             AIAnalysis
         )
         
@@ -354,7 +354,7 @@ class TestEnhancedTypingAction:
                     reasoning="Found search box",
                     refined=False
                 ),
-                browser_state_before=BrowserState(
+                environment_state_before=EnvironmentState(
                     url="https://wikipedia.org",
                     title="Wikipedia",
                     viewport_size=(1920, 1080)
@@ -364,7 +364,7 @@ class TestEnhancedTypingAction:
                     execution_time_ms=1200.0,
                     error_message=None,
                     error_traceback=None,
-                    browser_logs=[],
+                    environment_logs=[],
                     network_activity=[]
                 ),
                 ai_analysis=AIAnalysis(
@@ -410,7 +410,7 @@ class TestEnhancedTypingAction:
             ValidationResult,
             CoordinateResult,
             ExecutionResult,
-            BrowserState,
+            EnvironmentState,
             AIAnalysis
         )
         
@@ -445,7 +445,7 @@ class TestEnhancedTypingAction:
                     reasoning="Found element",
                     refined=False
                 ),
-                browser_state_before=BrowserState(
+                environment_state_before=EnvironmentState(
                     url="https://wikipedia.org",
                     title="Wikipedia",
                     viewport_size=(1920, 1080)
@@ -455,7 +455,7 @@ class TestEnhancedTypingAction:
                     execution_time_ms=1500.0,
                     error_message="Failed to type text - element not focusable after 4 attempts",
                     error_traceback=None,
-                    browser_logs=[],
+                    environment_logs=[],
                     network_activity=[]
                 ),
                 ai_analysis=AIAnalysis(
@@ -497,7 +497,7 @@ class TestEnhancedTypingAction:
             ValidationResult,
             CoordinateResult,
             ExecutionResult,
-            BrowserState,
+            EnvironmentState,
             AIAnalysis
         )
         
@@ -516,7 +516,7 @@ class TestEnhancedTypingAction:
                     suggestions=["Find the actual search input element"]
                 ),
                 coordinates=None,
-                browser_state_before=BrowserState(
+                environment_state_before=EnvironmentState(
                     url="https://wikipedia.org",
                     title="Wikipedia",
                     viewport_size=(1920, 1080)
@@ -575,7 +575,7 @@ class TestClickWithFocus:
             ValidationResult,
             CoordinateResult,
             ExecutionResult,
-            BrowserState,
+            EnvironmentState,
             AIAnalysis
         )
         
@@ -605,7 +605,7 @@ class TestClickWithFocus:
                     reasoning="Found search button",
                     refined=False
                 ),
-                browser_state_before=BrowserState(
+                environment_state_before=EnvironmentState(
                     url="https://wikipedia.org",
                     title="Wikipedia",
                     viewport_size=(1920, 1080)
@@ -615,7 +615,7 @@ class TestClickWithFocus:
                     execution_time_ms=200.0,
                     error_message=None,
                     error_traceback=None,
-                    browser_logs=[],
+                    environment_logs=[],
                     network_activity=[]
                 ),
                 ai_analysis=AIAnalysis(

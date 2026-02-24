@@ -38,7 +38,7 @@ class JournalActionResult(BaseModel):
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     coordinates: Optional[Tuple[int, int]] = None
     grid_coordinates: Optional[Dict[str, Any]] = None
-    playwright_command: Optional[str] = None
+    automation_command: Optional[str] = None
     selectors: Optional[Dict[str, str]] = None
     input_text: Optional[str] = None
     element_text: Optional[str] = None
@@ -64,7 +64,7 @@ class JournalEntry(BaseModel):
     # Scripted command for replay mode
     scripted_command: Optional[str] = Field(
         default=None,
-        description="Playwright command for direct execution"
+        description="Automation command for direct execution"
     )
     
     # Selectors discovered during execution
@@ -118,7 +118,7 @@ class ActionRecord(BaseModel):
     )
     
     # Scripted replay data
-    playwright_command: str
+    automation_command: str
     selectors: Dict[str, str] = Field(default_factory=dict)
     fallback_commands: List[str] = Field(
         default_factory=list,
@@ -163,7 +163,7 @@ class ScriptedCommand(BaseModel):
     """A scripted command ready for execution."""
     
     command_type: str  # click, type, navigate, etc.
-    command: str       # The actual Playwright command
+    command: str       # The actual Automation command
     selectors: List[str] = Field(
         default_factory=list,
         description="Ordered list of selectors to try"

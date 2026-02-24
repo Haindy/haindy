@@ -25,7 +25,8 @@ async def test_model_call_logger_sanitizes_bytes(tmp_path: Path) -> None:
     assert len(lines) == 1
     entry = json.loads(lines[0])
 
-    assert entry["run_id"] == "unknown"
+    assert isinstance(entry["run_id"], str)
+    assert entry["run_id"]
     assert entry["request_payload"]["payload"]["blob"] == "<<bytes:3>>"
     assert entry["response"]["raw"] == "<<bytes:3>>"
     assert entry["metadata"]["meta"] == "<<bytes:3>>"

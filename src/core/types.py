@@ -147,7 +147,7 @@ class TestStep(BaseModel):
         "click", description="Cache action type for coordinate caching"
     )
     environment: Optional[str] = Field(
-        None, description="Execution environment override (desktop or browser)"
+        None, description="Execution environment override (desktop or web)"
     )
     can_be_replayed: Optional[bool] = Field(
         None, description="Allow execution replay cache for this step"
@@ -356,8 +356,8 @@ class ExecutionJournal(BaseModel):
     screenshot_after: Optional[str] = None
     execution_time_ms: int
     success: bool
-    playwright_command: Optional[str] = Field(
-        None, description="Recorded Playwright command for replay"
+    automation_command: Optional[str] = Field(
+        None, description="Recorded Automation command for replay"
     )
 
 

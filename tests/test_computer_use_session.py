@@ -39,6 +39,7 @@ def session_settings(tmp_path):
         scroll_default_magnitude=450,
         scroll_max_magnitude=600,
         cu_provider="openai",
+        computer_use_model="computer-use-preview",
         google_cu_model="gemini-2.5-computer-use-preview-10-2025",
         vertex_api_key="",
         vertex_project="",
@@ -112,7 +113,7 @@ async def test_computer_use_session_executes_actions_successfully(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -178,7 +179,7 @@ async def test_computer_use_session_blocks_actions_in_observe_mode(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -237,7 +238,7 @@ async def test_computer_use_session_fail_fast_on_safety(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -301,7 +302,7 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -326,7 +327,7 @@ async def test_computer_use_session_per_call_fallback_is_not_sticky(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
         provider="google",
@@ -396,7 +397,7 @@ async def test_computer_use_session_marks_terminal_failure_on_max_turns(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -455,7 +456,7 @@ async def test_computer_use_session_enforces_domain_allowlist(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -513,7 +514,7 @@ async def test_computer_use_session_records_execution_failure(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -547,7 +548,7 @@ def test_computer_use_session_google_client_uses_vertex_project_location(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         provider="google",
         debug_logger=None,
@@ -575,7 +576,7 @@ def test_computer_use_session_google_client_uses_api_key_mode(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         provider="google",
         debug_logger=None,

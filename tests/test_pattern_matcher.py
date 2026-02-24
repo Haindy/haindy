@@ -32,7 +32,7 @@ def sample_pattern():
                 "final_confidence": 0.95
             }
         },
-        playwright_command="await page.click('#login-btn')",
+        automation_command="click selector='#login-btn'",
         selectors={"primary": "#login-btn"},
         element_text="Login",
         element_type="button",
@@ -195,7 +195,7 @@ class TestPatternMatcher:
                     "action_type": ActionType.CLICK, 
                     "description": "click submit"
                 },
-                playwright_command="cmd1",
+                automation_command="cmd1",
                 element_text="Submit"
             ),
             ActionRecord(
@@ -204,7 +204,7 @@ class TestPatternMatcher:
                     "action_type": ActionType.CLICK, 
                     "description": "click the submit button"
                 },
-                playwright_command="cmd2",
+                automation_command="cmd2",
                 element_text="Submit"
             ),
             sample_pattern  # This has "click the login button"

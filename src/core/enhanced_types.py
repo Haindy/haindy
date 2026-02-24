@@ -51,7 +51,7 @@ class ExecutionResult(BaseModel):
     execution_time_ms: float = Field(..., description="Execution duration in milliseconds")
     error_message: Optional[str] = Field(None, description="Error message if execution failed")
     error_traceback: Optional[str] = Field(None, description="Full error traceback if available")
-    browser_logs: List[str] = Field(default_factory=list, description="Browser console logs")
+    environment_logs: List[str] = Field(default_factory=list, description="Environment logs")
     network_activity: List[Dict[str, Any]] = Field(
         default_factory=list, 
         description="Network requests during execution"
@@ -79,8 +79,8 @@ class AIAnalysis(BaseModel):
     )
 
 
-class BrowserState(BaseModel):
-    """Browser state at a point in time."""
+class EnvironmentState(BaseModel):
+    """Environment state at a point in time."""
     
     url: str = Field(..., description="Current page URL")
     title: str = Field(..., description="Page title")
@@ -180,14 +180,14 @@ class EnhancedActionResult(BaseModel):
         description="Coordinate determination results"
     )
     
-    # Browser states
-    browser_state_before: Optional[BrowserState] = Field(
+    # Environment states
+    environment_state_before: Optional[EnvironmentState] = Field(
         None, 
-        description="Browser state before action"
+        description="Environment state before action"
     )
-    browser_state_after: Optional[BrowserState] = Field(
+    environment_state_after: Optional[EnvironmentState] = Field(
         None, 
-        description="Browser state after action"
+        description="Environment state after action"
     )
     
     # Grid screenshots
@@ -279,12 +279,12 @@ class EnhancedActionResult(BaseModel):
             "execution_success": self.execution.success if self.execution else False,
             "execution_time_ms": self.execution.execution_time_ms if self.execution else 0.0,
             "execution_error": self.execution.error_message if self.execution else None,
-            "url_before": self.browser_state_before.url if self.browser_state_before else "",
-            "url_after": self.browser_state_after.url if self.browser_state_after else "",
-            "page_title_before": self.browser_state_before.title if self.browser_state_before else "",
-            "page_title_after": self.browser_state_after.title if self.browser_state_after else "",
-            "screenshot_before": self.browser_state_before.screenshot if self.browser_state_before else None,
-            "screenshot_after": self.browser_state_after.screenshot if self.browser_state_after else None,
+            "url_before": self.environment_state_before.url if self.environment_state_before else "",
+            "url_after": self.environment_state_after.url if self.environment_state_after else "",
+            "page_title_before": self.environment_state_before.title if self.environment_state_before else "",
+            "page_title_after": self.environment_state_after.title if self.environment_state_after else "",
+            "screenshot_before": self.environment_state_before.screenshot if self.environment_state_before else None,
+            "screenshot_after": self.environment_state_after.screenshot if self.environment_state_after else None,
             "grid_screenshot_before": self.grid_screenshot_before,
             "grid_screenshot_highlighted": self.grid_screenshot_highlighted,
             "test_context": self.test_context,
@@ -309,9 +309,9 @@ class ActionPattern(BaseModel):
     action_type: str = Field(..., description="Type of action")
     target_description: str = Field(..., description="Description of target element")
     grid_coordinates: CoordinateResult = Field(..., description="Successful coordinates")
-    playwright_command: Optional[str] = Field(
+    automation_command: Optional[str] = Field(
         None, 
-        description="Recorded Playwright command for direct replay"
+        description="Recorded Automation command for direct replay"
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Pattern confidence")
     success_count: int = Field(0, description="Number of successful uses")
@@ -365,7 +365,7 @@ class BugReport(BaseModel):
     grid_cell_targeted: Optional[str] = Field(None, description="Grid cell that was targeted")
     coordinates_used: Optional[GridCoordinate] = Field(None, description="Exact coordinates used")
     
-    # Browser state
+    # Environment state
     url_before: Optional[str] = Field(None, description="URL before action")
     url_after: Optional[str] = Field(None, description="URL after action")
     page_title_before: Optional[str] = Field(None, description="Page title before action")

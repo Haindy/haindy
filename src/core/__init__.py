@@ -5,7 +5,7 @@ Core module exports.
 from src.core.interfaces import (
     ActionAgent,
     Agent,
-    BrowserDriver,
+    AutomationDriver,
     ConfigProvider,
     GridSystem,
     TestExecutor,
@@ -34,7 +34,7 @@ __all__ = [
     "TestPlannerAgent",
     "TestRunnerAgent",
     "ActionAgent",
-    "BrowserDriver",
+    "AutomationDriver",
     "GridSystem",
     "TestExecutor",
     "ConfigProvider",

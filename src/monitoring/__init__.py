@@ -19,7 +19,7 @@ from src.monitoring.analytics import (
     end_test,
     record_step,
     record_api_call,
-    record_browser_action,
+    record_automation_action,
     get_analytics,
 )
 
@@ -46,7 +46,7 @@ __all__ = [
     "end_test",
     "record_step",
     "record_api_call",
-    "record_browser_action",
+    "record_automation_action",
     "get_analytics",
     
     # Reporter

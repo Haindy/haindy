@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ErrorCategory(Enum):
     """Categories for error classification."""
     AGENT = auto()
-    BROWSER = auto()
+    AUTOMATION = auto()
     VALIDATION = auto()
     COORDINATION = auto()
     TIMEOUT = auto()
@@ -172,7 +172,7 @@ class ErrorAggregator:
         
         category_mapping = {
             "AgentError": ErrorCategory.AGENT,
-            "BrowserError": ErrorCategory.BROWSER,
+            "AutomationError": ErrorCategory.AUTOMATION,
             "ValidationError": ErrorCategory.VALIDATION,
             "CoordinationError": ErrorCategory.COORDINATION,
             "TimeoutError": ErrorCategory.TIMEOUT,
@@ -252,9 +252,9 @@ class ErrorAggregator:
                     )
         
         # Check category-specific issues
-        if self.category_counts[ErrorCategory.BROWSER] > 10:
+        if self.category_counts[ErrorCategory.AUTOMATION] > 10:
             recommendations.append(
-                "High number of browser errors. Check browser stability and page load times."
+                "High number of automation errors. Check target app stability and readiness."
             )
         
         if self.category_counts[ErrorCategory.VALIDATION] > 5:

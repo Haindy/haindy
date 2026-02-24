@@ -68,7 +68,7 @@ class TestMetrics:
     steps_failed: int = 0
     steps_skipped: int = 0
     api_calls: int = 0
-    browser_actions: int = 0
+    automation_actions: int = 0
     screenshots_taken: int = 0
     errors: List[str] = field(default_factory=list)
     performance_metrics: Dict[str, float] = field(default_factory=dict)
@@ -105,7 +105,7 @@ class TestMetrics:
             },
             "resources": {
                 "api_calls": self.api_calls,
-                "browser_actions": self.browser_actions,
+                "automation_actions": self.automation_actions,
                 "screenshots": self.screenshots_taken
             },
             "errors": self.errors,
@@ -240,25 +240,25 @@ class MetricsCollector:
                 tags={"api": api_name}
             )
     
-    async def record_browser_action(
+    async def record_automation_action(
         self,
         test_id: UUID,
         action_type: str,
         duration_ms: int,
         success: bool = True
     ) -> None:
-        """Record browser action metrics."""
+        """Record automation action metrics."""
         async with self._lock:
             if test_id in self.test_metrics:
-                self.test_metrics[test_id].browser_actions += 1
+                self.test_metrics[test_id].automation_actions += 1
             
             await self.record_counter(
-                "browser.actions",
+                "automation.actions",
                 tags={"action": action_type, "success": str(success)}
             )
             
             await self.record_timer(
-                "browser.action_duration",
+                "automation.action_duration",
                 duration_ms / 1000,
                 tags={"action": action_type}
             )
@@ -385,9 +385,9 @@ class MetricsCollector:
                 "rate_per_minute": self.get_rate("api.calls"),
                 "duration": self.get_metric_summary("timer.api.duration")
             },
-            "browser_actions": {
-                "rate_per_minute": self.get_rate("browser.actions"),
-                "duration": self.get_metric_summary("timer.browser.action_duration")
+            "automation_actions": {
+                "rate_per_minute": self.get_rate("automation.actions"),
+                "duration": self.get_metric_summary("timer.automation.action_duration")
             },
             "steps": {
                 "success_rate": self._calculate_step_success_rate(),
@@ -456,9 +456,9 @@ async def record_api_call(test_id: UUID, api_name: str, duration_ms: int, succes
     await _metrics_collector.record_api_call(test_id, api_name, duration_ms, success)
 
 
-async def record_browser_action(test_id: UUID, action: str, duration_ms: int, success: bool = True) -> None:
-    """Record browser action."""
-    await _metrics_collector.record_browser_action(test_id, action, duration_ms, success)
+async def record_automation_action(test_id: UUID, action: str, duration_ms: int, success: bool = True) -> None:
+    """Record automation action."""
+    await _metrics_collector.record_automation_action(test_id, action, duration_ms, success)
 
 
 def get_analytics() -> MetricsCollector:

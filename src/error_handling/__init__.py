@@ -8,7 +8,7 @@ for the multi-agent testing system.
 from .exceptions import (
     HAINDYError,
     AgentError,
-    BrowserError,
+    AutomationError,
     ValidationError,
     RecoveryError,
     HallucinationError,
@@ -48,7 +48,7 @@ __all__ = [
     # Exceptions
     "HAINDYError",
     "AgentError",
-    "BrowserError",
+    "AutomationError",
     "ValidationError",
     "RecoveryError",
     "HallucinationError",

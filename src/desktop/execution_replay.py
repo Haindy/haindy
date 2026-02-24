@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from src.core.interfaces import BrowserDriver
+from src.core.interfaces import AutomationDriver
 
 
 class DriverActionError(ValueError):
@@ -121,7 +121,7 @@ def normalize_driver_actions(actions: Iterable[Dict[str, Any]]) -> List[Dict[str
 
 
 async def replay_driver_actions(
-    driver: BrowserDriver,
+    driver: AutomationDriver,
     actions: List[Dict[str, Any]],
     *,
     stabilization_wait_ms: int,

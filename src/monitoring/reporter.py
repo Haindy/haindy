@@ -79,7 +79,7 @@ class TestExecutionReport:
             },
             "resources": {
                 "api_calls": self.test_metrics.api_calls,
-                "browser_actions": self.test_metrics.browser_actions,
+                "automation_actions": self.test_metrics.automation_actions,
                 "screenshots": self.test_metrics.screenshots_taken
             }
         }
@@ -161,7 +161,7 @@ class TestExecutionReport:
         md += "## Resource Usage\n\n"
         resources = data['resources']
         md += f"- API Calls: {resources['api_calls']}\n"
-        md += f"- Browser Actions: {resources['browser_actions']}\n"
+        md += f"- Automation Actions: {resources['automation_actions']}\n"
         md += f"- Screenshots: {resources['screenshots']}\n\n"
         
         # Errors
@@ -310,7 +310,7 @@ class ReportGenerator:
         # Add trends
         perf_data["trends"] = {
             "api_call_rate_trend": self._calculate_trend("api.calls"),
-            "browser_action_trend": self._calculate_trend("browser.actions"),
+            "automation_action_trend": self._calculate_trend("automation.actions"),
             "error_rate_trend": self._calculate_trend("tests.failed")
         }
         
@@ -765,7 +765,7 @@ class TestReporter:
             steps_failed=failed_steps,
             steps_skipped=skipped_steps,
             api_calls=0,  # TODO: Track API calls
-            browser_actions=0,  # TODO: Track browser actions
+            automation_actions=0,  # TODO: Track automation actions
             screenshots_taken=0,  # TODO: Track screenshots
             errors=[],  # TODO: Track errors
             performance_metrics={}

@@ -12,7 +12,7 @@ from src.error_handling.aggregator import (
     ErrorCategory, ErrorMetrics, ErrorReport, ErrorAggregator
 )
 from src.error_handling.exceptions import (
-    AgentError, BrowserError, ValidationError, TimeoutError,
+    AgentError, AutomationError, ValidationError, TimeoutError,
     CoordinationError, RecoveryError
 )
 
@@ -98,7 +98,7 @@ class TestErrorReport:
             start_time=datetime.now(timezone.utc),
             end_time=datetime.now(timezone.utc) + timedelta(minutes=5),
             total_errors=10,
-            errors_by_category={ErrorCategory.AGENT: 5, ErrorCategory.BROWSER: 5},
+            errors_by_category={ErrorCategory.AGENT: 5, ErrorCategory.AUTOMATION: 5},
             errors_by_type=metrics,
             critical_errors=[],
             recovery_summary={"total_recovery_attempts": 3},
@@ -190,12 +190,12 @@ class TestErrorAggregator:
         assert aggregator.category_counts[ErrorCategory.AGENT] == 1
         
         # Add browser error
-        error2 = BrowserError("Click failed")
+        error2 = AutomationError("Click failed")
         aggregator.add_error(error2, operation="click", recovered=True)
         
         assert len(aggregator.errors) == 2
-        assert "BrowserError" in aggregator.error_metrics
-        assert aggregator.category_counts[ErrorCategory.BROWSER] == 1
+        assert "AutomationError" in aggregator.error_metrics
+        assert aggregator.category_counts[ErrorCategory.AUTOMATION] == 1
     
     def test_error_categorization(self):
         """Test error category mapping."""
@@ -203,7 +203,7 @@ class TestErrorAggregator:
         
         # Test known categories
         assert aggregator._categorize_error(AgentError("", "", "")) == ErrorCategory.AGENT
-        assert aggregator._categorize_error(BrowserError("")) == ErrorCategory.BROWSER
+        assert aggregator._categorize_error(AutomationError("")) == ErrorCategory.AUTOMATION
         assert aggregator._categorize_error(ValidationError("", "")) == ErrorCategory.VALIDATION
         assert aggregator._categorize_error(TimeoutError("", "", 0)) == ErrorCategory.TIMEOUT
         assert aggregator._categorize_error(CoordinationError("", [], "")) == ErrorCategory.COORDINATION
@@ -239,7 +239,7 @@ class TestErrorAggregator:
         # Add errors with recovery attempts
         for i in range(3):
             aggregator.add_error(
-                BrowserError("Fail"),
+                AutomationError("Fail"),
                 recovered=True
             )
         
@@ -254,7 +254,7 @@ class TestErrorAggregator:
         assert summary["total_recovery_successes"] == 3
         assert summary["overall_recovery_rate"] == 0.6
         assert summary["recoverable_error_types"] == 2
-        assert summary["best_recovery"] == "BrowserError"  # 100% success
+        assert summary["best_recovery"] == "AutomationError"  # 100% success
         assert summary["worst_recovery"] == "TimeoutError"  # 0% success
     
     def test_generate_recommendations(self):
@@ -272,12 +272,12 @@ class TestErrorAggregator:
         recommendations = aggregator.generate_recommendations()
         assert any("High error rate" in r for r in recommendations)
         
-        # Add browser errors
+        # Add automation errors
         for i in range(12):
-            aggregator.add_error(BrowserError("Browser fail"))
-        
+            aggregator.add_error(AutomationError("Browser fail"))
+
         recommendations = aggregator.generate_recommendations()
-        assert any("browser errors" in r for r in recommendations)
+        assert any("automation errors" in r for r in recommendations)
         
         # Add timeout errors
         for i in range(4):
@@ -292,7 +292,7 @@ class TestErrorAggregator:
         
         # Add errors with timestamps
         error1 = AgentError("First", "agent1", "type")
-        error2 = BrowserError("Second")
+        error2 = AutomationError("Second")
         
         aggregator.add_error(error1)
         aggregator.add_error(error2)
@@ -300,7 +300,7 @@ class TestErrorAggregator:
         timeline = aggregator.get_error_timeline()
         assert len(timeline) == 2
         assert timeline[0]["error_type"] == "AgentError"
-        assert timeline[1]["error_type"] == "BrowserError"
+        assert timeline[1]["error_type"] == "AutomationError"
         assert all("timestamp" in event for event in timeline)
         assert all("category" in event for event in timeline)
     
@@ -318,7 +318,7 @@ class TestErrorAggregator:
             agent_name="agent1"
         )
         aggregator.add_error(
-            BrowserError("Browser fail"),
+            AutomationError("Browser fail"),
             agent_name="agent2"
         )
         
@@ -326,7 +326,7 @@ class TestErrorAggregator:
         assert "agent1" in summary
         assert "agent2" in summary
         assert summary["agent1"]["AgentError"] == 2
-        assert summary["agent2"]["BrowserError"] == 1
+        assert summary["agent2"]["AutomationError"] == 1
     
     def test_generate_full_report(self):
         """Test full report generation."""
@@ -341,7 +341,7 @@ class TestErrorAggregator:
         
         for i in range(2):
             aggregator.add_error(
-                BrowserError(f"Browser fail {i}"),
+                AutomationError(f"Browser fail {i}"),
                 recovered=True
             )
         
