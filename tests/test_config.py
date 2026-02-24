@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config.settings import ConfigManager, Settings
+from src.config.settings import AgentModelConfig, ConfigManager, Settings
 
 
 class TestSettings:
@@ -21,6 +21,22 @@ class TestSettings:
     def test_invalid_log_level_raises(self):
         with pytest.raises(ValueError):
             Settings(log_level="invalid")
+
+    def test_default_openai_model(self):
+        settings = Settings()
+        assert settings.openai_model == "gpt-5.2"
+
+    @pytest.mark.parametrize(
+        "level",
+        ["none", "minimal", "low", "medium", "high", "xhigh"],
+    )
+    def test_reasoning_level_accepts_supported_values(self, level):
+        config = AgentModelConfig(model="gpt-5.2", reasoning_level=level)
+        assert config.reasoning_level == level
+
+    def test_reasoning_level_rejects_unsupported_value(self):
+        with pytest.raises(ValueError):
+            AgentModelConfig(model="gpt-5.2", reasoning_level="ultra")
 
 
 class TestConfigManager:

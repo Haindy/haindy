@@ -190,7 +190,7 @@ class ActionAgent(BaseAgent):
         The Responses API supports very large contexts, so for now we retain a
         modest window of the latest exchanges to keep behavior predictable
         without relying on tokenizer lookups that may not exist for preview
-        models like GPT-5.
+        models like GPT-5.2.
         """
         if not self.conversation_history:
             return []

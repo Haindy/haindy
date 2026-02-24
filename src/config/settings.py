@@ -20,6 +20,15 @@ AGENT_ENV_PREFIX: Dict[str, str] = {
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
 
+ALLOWED_REASONING_LEVELS: Set[str] = {
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+}
+
 
 class AgentModelConfig(BaseModel):
     """Per-agent model configuration."""
@@ -33,10 +42,9 @@ class AgentModelConfig(BaseModel):
     @classmethod
     def validate_reasoning_level(cls, value: str) -> str:
         """Ensure reasoning level is valid."""
-        allowed = {"low", "medium", "high"}
-        if value not in allowed:
+        if value not in ALLOWED_REASONING_LEVELS:
             raise ValueError(
-                f"Invalid reasoning level: {value}. Allowed values: {sorted(allowed)}"
+                f"Invalid reasoning level: {value}. Allowed values: {sorted(ALLOWED_REASONING_LEVELS)}"
             )
         return value
 
@@ -50,28 +58,28 @@ class AgentModelConfig(BaseModel):
 
 DEFAULT_AGENT_MODELS: Dict[str, AgentModelConfig] = {
     "scope_triage": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.2",
         temperature=0.15,
         reasoning_level="high",
     ),
     "test_planner": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.2",
         temperature=0.35,
         reasoning_level="high",
     ),
     "test_runner": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.2",
         temperature=0.55,
         reasoning_level="medium",
     ),
     "action_agent": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.2",
         temperature=0.25,
         reasoning_level="low",
         modalities={"text", "vision"},
     ),
     "situational_agent": AgentModelConfig(
-        model="gpt-5",
+        model="gpt-5.2",
         temperature=0.1,
         reasoning_level="high",
     ),
@@ -91,7 +99,7 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(
-        default="gpt-5", description="Default OpenAI model"
+        default="gpt-5.2", description="Default OpenAI model"
     )
     openai_temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Default temperature"

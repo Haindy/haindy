@@ -38,6 +38,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 3. Install the package in development mode:
 ```bash
+pip install -r requirements.lock
 pip install -e ".[dev]"
 ```
 
@@ -53,20 +54,20 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=your_api_key_here
 
 # Optional: override defaults globally
-OPENAI_MODEL=gpt-5
+OPENAI_MODEL=gpt-5.2
 OPENAI_TEMPERATURE=0.7
 OPENAI_REQUEST_TIMEOUT_SECONDS=900
 
 # Agent-specific overrides (recommended)
-HAINDY_TEST_PLANNER_MODEL=gpt-5
+HAINDY_TEST_PLANNER_MODEL=gpt-5.2
 HAINDY_TEST_PLANNER_REASONING_LEVEL=high
 HAINDY_TEST_PLANNER_TEMPERATURE=0.35
 
-HAINDY_TEST_RUNNER_MODEL=gpt-5
+HAINDY_TEST_RUNNER_MODEL=gpt-5.2
 HAINDY_TEST_RUNNER_REASONING_LEVEL=medium
 HAINDY_TEST_RUNNER_TEMPERATURE=0.55
 
-HAINDY_ACTION_AGENT_MODEL=gpt-5
+HAINDY_ACTION_AGENT_MODEL=gpt-5.2
 HAINDY_ACTION_AGENT_REASONING_LEVEL=low
 HAINDY_ACTION_AGENT_TEMPERATURE=0.25
 HAINDY_ACTION_AGENT_MODALITIES=text,vision
@@ -75,7 +76,10 @@ HAINDY_ACTION_AGENT_MODALITIES=text,vision
 If the agent-specific variables are omitted, the system falls back to the global
 `OPENAI_MODEL`, `OPENAI_TEMPERATURE`, and `OPENAI_REQUEST_TIMEOUT_SECONDS`
 values. Override per agent to fine-tune cost vs. accuracy or adjust request timeouts
-for long-running GPT-5 reasoning calls.
+for long-running GPT-5.2 reasoning calls.
+
+Supported `*_REASONING_LEVEL` values: `none`, `minimal`, `low`, `medium`,
+`high`, and `xhigh`.
 
 #### Computer Use (Gemini + Desktop) Configuration
 ```env

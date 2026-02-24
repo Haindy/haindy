@@ -17,6 +17,7 @@ python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
+pip install -r requirements.lock
 pip install -e .[dev]
 
 # Install Playwright browsers

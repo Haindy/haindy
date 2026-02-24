@@ -103,7 +103,7 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         output_text="hello world",
         usage=usage,
         status="completed",
-        model="gpt-5",
+        model="gpt-5.2",
     )
     delta_event = SimpleNamespace(type="response.output_text.delta", delta="hello")
     events = [delta_event, SimpleNamespace(type="response.completed", response=final_response)]
@@ -127,7 +127,7 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         lambda self, text, encoder: len(text),
     )
 
-    client = OpenAIClient(model="gpt-5", api_key="test-key")
+    client = OpenAIClient(model="gpt-5.2", api_key="test-key")
 
     observer = RecordingObserver()
     result = await client._call_responses_api_streaming(

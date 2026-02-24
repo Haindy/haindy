@@ -21,7 +21,7 @@ from src.core.types import (
 class Agent(ABC):
     """Abstract base class for all AI agents."""
 
-    def __init__(self, name: str, model: str = "gpt-5") -> None:
+    def __init__(self, name: str, model: str = "gpt-5.2") -> None:
         """
         Initialize the agent.
 

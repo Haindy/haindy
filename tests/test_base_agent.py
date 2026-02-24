@@ -33,7 +33,7 @@ class TestBaseAgent:
         agent = BaseAgent(name="TestAgent")
         
         assert agent.name == "TestAgent"
-        assert agent.model == "gpt-5"
+        assert agent.model == "gpt-5.2"
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
@@ -53,7 +53,7 @@ class TestBaseAgent:
         
         # Now client should be created
         mock_client_class.assert_called_once_with(
-            model="gpt-5",
+            model="gpt-5.2",
             reasoning_level="medium",
             modalities={"text"},
         )

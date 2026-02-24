@@ -42,7 +42,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "gpt-5",
+        model: str = "gpt-5.2",
         api_key: Optional[str] = None,
         max_retries: int = 3,
         reasoning_level: str = "medium",
@@ -254,6 +254,10 @@ class OpenAIClient:
         # Pricing as of GPT-4o mini (adjust as needed)
         # These are example prices - update with actual pricing
         pricing = {
+            "gpt-5.2": {
+                "prompt": 1.25 / 1_000_000,
+                "completion": 5.0 / 1_000_000,
+            },
             "gpt-5": {
                 "prompt": 1.25 / 1_000_000,
                 "completion": 5.0 / 1_000_000,

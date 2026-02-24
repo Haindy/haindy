@@ -54,7 +54,7 @@ MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 LOOP_ERROR_PREFIX = "Computer Use loop detected"
 
 COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
-- Executor: OpenAI Computer Use tool powered by GPT-5 with medium reasoning effort.
+- Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
 - Environment: Chromium browser with full mouse, keyboard, scrolling, and screenshot control.
 - Inputs: Each prompt is delivered with the latest screenshot and scenario metadata; do not capture screenshots yourself.
 
