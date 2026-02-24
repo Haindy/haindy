@@ -124,13 +124,26 @@ Return strict JSON with these keys:
     "launch_command": "<shell command or empty>",
     "maximize": true|false
   },
+  "entry_actions": [
+    {
+      "action_type": "navigate|click|type|key_press|assert|skip_navigation",
+      "description": "<human-readable action>",
+      "target": "<target or empty>",
+      "value": "<value or empty>",
+      "expected_outcome": "<observable outcome>",
+      "computer_use_prompt": "<final directive for computer-use model>"
+    }
+  ],
   "notes": ["..."]
 }
 
 Rules:
 - Prefer practical, minimal assumptions.
 - If target is web, web_url is required.
-- If target is desktop_app, include either launch_command or app_name.
+- For desktop_app, do NOT require deterministic identifiers such as exact window title, task-switcher label, WM_CLASS, or process name.
+- Do NOT require or suggest programmatic OS/window controls (wmctrl, xdotool, direct maximize/focus APIs).
+- Entrypoint must be represented as visual `entry_actions` that the Action Agent can execute on the visible desktop.
+- Keep `entry_actions` short and goal-oriented (usually 1-3 actions).
 - Treat maximize as true by default unless the context clearly says not to maximize.
 - Keep missing_items specific and actionable.
 - Respond with valid JSON only.

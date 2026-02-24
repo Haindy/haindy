@@ -237,6 +237,7 @@ async def run_test(
 
         console.print("[cyan]Initializing desktop runtime...[/cyan]")
         desktop_controller, coordinator = await _create_coordinator_stack(max_steps=max_steps)
+        action_agent = coordinator.get_action_agent()
 
         should_record = bool(settings.enable_screen_recording)
         if record_override is not None:
@@ -256,7 +257,11 @@ async def run_test(
                 screen_recorder = None
 
         console.print("[cyan]Preparing entrypoint state with Situational Agent...[/cyan]")
-        await situational_agent.prepare_entrypoint(desktop_controller.driver, assessment)
+        await situational_agent.prepare_entrypoint(
+            desktop_controller.driver,
+            assessment,
+            action_agent=action_agent,
+        )
 
         test_context = {
             "execution_context": context_text,

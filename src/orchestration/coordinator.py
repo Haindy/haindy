@@ -460,6 +460,13 @@ class WorkflowCoordinator:
         """Get list of active test IDs."""
         return list(self._active_tests.keys())
 
+    def get_action_agent(self) -> ActionAgent | None:
+        """Get the initialized ActionAgent instance, if available."""
+        agent = self._agents.get("action_agent")
+        if isinstance(agent, ActionAgent):
+            return agent
+        return None
+
     def get_scope_triage_result(self, plan_id: UUID) -> ScopeTriageResult | None:
         """Retrieve the stored scope triage result for a generated plan."""
         return self._plan_triage_results.get(plan_id)
