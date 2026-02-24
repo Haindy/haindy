@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field, model_validator
 class TestStatus(str, Enum):
     """Status of a test execution."""
 
+    __test__ = False
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     PASSED = "passed"
@@ -124,6 +126,8 @@ class StepIntent(str, Enum):
 class TestStep(BaseModel):
     """A single step in a test case."""
 
+    __test__ = False
+
     step_id: UUID = Field(default_factory=uuid4)
     step_number: int
     description: str = Field(..., description="Human-readable description of the step")
@@ -167,6 +171,8 @@ class TestStep(BaseModel):
 class TestCasePriority(str, Enum):
     """Priority levels for test cases."""
 
+    __test__ = False
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -175,6 +181,8 @@ class TestCasePriority(str, Enum):
 
 class TestCase(BaseModel):
     """A test case containing multiple test steps."""
+
+    __test__ = False
 
     case_id: UUID = Field(default_factory=uuid4)
     test_id: str = Field(..., description="Human-readable test case ID (e.g., TC001)")
@@ -189,6 +197,8 @@ class TestCase(BaseModel):
 
 class TestPlan(BaseModel):
     """A complete test plan containing multiple test cases."""
+
+    __test__ = False
 
     plan_id: UUID = Field(default_factory=uuid4)
     name: str = Field(..., description="Test plan name")
@@ -305,6 +315,8 @@ class ScopeTriageResult(BaseModel):
 
 class TestState(BaseModel):
     """Current state of test execution."""
+
+    __test__ = False
 
     test_plan: TestPlan
     current_step: TestStep | None = None

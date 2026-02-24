@@ -31,6 +31,8 @@ class MetricType(Enum):
 
 class TestOutcome(Enum):
     """Possible test outcomes."""
+
+    __test__ = False
     PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -57,6 +59,8 @@ class MetricValue:
 @dataclass
 class TestMetrics:
     """Metrics for a single test execution."""
+
+    __test__ = False
     test_id: UUID
     test_name: str
     start_time: datetime

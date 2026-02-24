@@ -131,96 +131,96 @@ class Settings(BaseSettings):
     desktop_prefer_resolution: tuple[int, int] = Field(
         default=(1920, 1080),
         description="Preferred resolution for desktop sessions",
-        env="HAINDY_DESKTOP_RESOLUTION",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_RESOLUTION"),
     )
     desktop_keyboard_layout: str = Field(
         default="us",
         description="Keyboard layout for desktop automation (us, es)",
-        env="HAINDY_DESKTOP_KEYBOARD_LAYOUT",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_KEYBOARD_LAYOUT"),
     )
     desktop_enable_keyboard_scancodes: bool = Field(
         default=True,
         description="Emit MSC_SCAN scancodes for key events",
-        env="HAINDY_DESKTOP_KEYBOARD_SCANCODES",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_KEYBOARD_SCANCODES"),
     )
     desktop_keyboard_key_delay_ms: int = Field(
         default=12,
         ge=0,
         description="Delay between key events when sending combos",
-        env="HAINDY_DESKTOP_KEY_DELAY_MS",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_KEY_DELAY_MS"),
     )
     desktop_enable_resolution_switch: bool = Field(
         default=True,
         description="Allow resolution downshift for desktop runs",
-        env="HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH"),
     )
     desktop_screenshot_dir: Path = Field(
         default=Path("data/screenshots/desktop"),
         description="Directory for desktop screenshots",
-        env="HAINDY_DESKTOP_SCREENSHOT_DIR",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_SCREENSHOT_DIR"),
     )
     desktop_coordinate_cache_path: Path = Field(
         default=Path("data/desktop_cache/coordinates.json"),
         description="Coordinate cache path for desktop actions",
-        env="HAINDY_DESKTOP_COORDINATE_CACHE_PATH",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_COORDINATE_CACHE_PATH"),
     )
     task_plan_cache_path: Path = Field(
         default=Path("data/task_plan_cache.json"),
         description="Task planning cache path",
-        env="HAINDY_TASK_PLAN_CACHE_PATH",
+        validation_alias=AliasChoices("HAINDY_TASK_PLAN_CACHE_PATH"),
     )
     enable_execution_replay_cache: bool = Field(
         default=True,
         description="Enable execution replay cache (record/replay driver actions per step)",
-        env="HAINDY_ENABLE_EXECUTION_REPLAY_CACHE",
+        validation_alias=AliasChoices("HAINDY_ENABLE_EXECUTION_REPLAY_CACHE"),
     )
     execution_replay_cache_path: Path = Field(
         default=Path("data/execution_replay_cache.json"),
         description="Execution replay cache path",
-        env="HAINDY_EXECUTION_REPLAY_CACHE_PATH",
+        validation_alias=AliasChoices("HAINDY_EXECUTION_REPLAY_CACHE_PATH"),
     )
     desktop_display: str | None = Field(
         default=None,
         description="X11 display override for desktop capture",
-        env="HAINDY_DESKTOP_DISPLAY",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_DISPLAY"),
     )
     desktop_clipboard_timeout_seconds: float = Field(
         default=3.0,
         ge=0.5,
         description="Timeout for desktop clipboard reads",
-        env="HAINDY_DESKTOP_CLIPBOARD_TIMEOUT_SECONDS",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_CLIPBOARD_TIMEOUT_SECONDS"),
     )
     desktop_clipboard_hold_seconds: float = Field(
         default=15.0,
         ge=0.5,
         description="Max time to hold clipboard owner process",
-        env="HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS",
+        validation_alias=AliasChoices("HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS"),
     )
     enable_screen_recording: bool = Field(
         default=False,
         description="Enable GNOME desktop screen recording during test execution",
-        env="HAINDY_ENABLE_SCREEN_RECORDING",
+        validation_alias=AliasChoices("HAINDY_ENABLE_SCREEN_RECORDING"),
     )
     screen_recording_output_dir: Path = Field(
         default=Path("reports/recordings"),
         description="Directory for optional desktop screen recordings",
-        env="HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
+        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_OUTPUT_DIR"),
     )
     screen_recording_framerate: int = Field(
         default=30,
         ge=1,
         description="Framerate for GNOME desktop screen recordings",
-        env="HAINDY_SCREEN_RECORDING_FRAMERATE",
+        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_FRAMERATE"),
     )
     screen_recording_draw_cursor: bool = Field(
         default=True,
         description="Draw cursor in GNOME desktop screen recordings",
-        env="HAINDY_SCREEN_RECORDING_DRAW_CURSOR",
+        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_DRAW_CURSOR"),
     )
     screen_recording_prefix: str = Field(
         default="haindy-agent",
         description="Filename prefix for desktop screen recordings",
-        env="HAINDY_SCREEN_RECORDING_PREFIX",
+        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_PREFIX"),
     )
 
     # Execution Configuration
@@ -241,7 +241,7 @@ class Settings(BaseSettings):
     actions_use_computer_tool: bool = Field(
         default=False,
         description="Enable OpenAI Computer Use tool for action execution",
-        env="HAINDY_ACTIONS_USE_COMPUTER_TOOL",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_USE_COMPUTER_TOOL"),
     )
     computer_use_model: str = Field(
         default="computer-use-preview",
@@ -282,61 +282,61 @@ class Settings(BaseSettings):
         default=12,
         ge=1,
         description="Maximum tool turns per action when using Computer Use",
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS"),
     )
     actions_computer_tool_loop_detection_window: int = Field(
         default=3,
         ge=2,
         description="Repeated identical turns (with identical screenshots) before flagging a loop",
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW"),
     )
     actions_computer_tool_action_timeout_ms: int = Field(
         default=7000,
         ge=500,
         description="Timeout in milliseconds for executing a single computer action",
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS"),
     )
     actions_computer_tool_stabilization_wait_ms: int = Field(
         default=1000,
         ge=0,
         le=1000,
         description="Delay after executing an action before capturing the next screenshot",
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS"),
     )
     actions_computer_tool_fail_fast_on_safety: bool = Field(
         default=True,
         description=(
             "Abort immediately on pending safety checks before cu_safety_policy is applied"
         ),
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST"),
     )
     actions_computer_tool_allowed_domains: list[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool is permitted to interact with",
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS"),
     )
     actions_computer_tool_blocked_domains: list[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool must never interact with",
-        env="HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS",
+        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS"),
     )
     scroll_turn_multiplier: float = Field(
         default=3.0,
         ge=1.0,
         description="Multiplier for extra scroll turns before max-turn enforcement",
-        env="HAINDY_SCROLL_TURN_MULTIPLIER",
+        validation_alias=AliasChoices("HAINDY_SCROLL_TURN_MULTIPLIER"),
     )
     scroll_default_magnitude: int = Field(
         default=450,
         ge=1,
         description="Default scroll magnitude (pixels) when not specified",
-        env="HAINDY_SCROLL_DEFAULT_MAGNITUDE",
+        validation_alias=AliasChoices("HAINDY_SCROLL_DEFAULT_MAGNITUDE"),
     )
     scroll_max_magnitude: int = Field(
         default=600,
         ge=1,
         description="Maximum per-scroll magnitude/pixel delta",
-        env="HAINDY_SCROLL_MAX_MAGNITUDE",
+        validation_alias=AliasChoices("HAINDY_SCROLL_MAX_MAGNITUDE"),
     )
 
     # Logging Configuration
@@ -360,7 +360,7 @@ class Settings(BaseSettings):
         default=12,
         ge=1,
         description="Cap on retained screenshots per run",
-        env="HAINDY_MAX_SCREENSHOTS",
+        validation_alias=AliasChoices("HAINDY_MAX_SCREENSHOTS"),
     )
 
     # Storage Configuration

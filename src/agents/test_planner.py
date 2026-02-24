@@ -30,6 +30,8 @@ class TestPlannerAgent(BaseAgent):
     into detailed, executable test plans with clear steps and expected outcomes.
     """
 
+    __test__ = False
+
     def __init__(self, name: str = "TestPlanner", **kwargs):
         """Initialize the Test Planner Agent."""
         super().__init__(name=name, **kwargs)
