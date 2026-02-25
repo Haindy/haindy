@@ -65,14 +65,23 @@ class DesktopDriver(AutomationDriver):
         if self._started and self.virtual_input is not None:
             return
         self.resolution_manager.maybe_downshift()
-        if self.virtual_input is None:
-            viewport = self.resolution_manager.viewport_size()
-            self.virtual_input = VirtualInput(
-                viewport=viewport,
-                keyboard_layout=self.keyboard_layout,
-                emit_scancodes=self.keyboard_emit_scancodes,
-                key_delay_ms=self.keyboard_key_delay_ms,
-            )
+        try:
+            if self.virtual_input is None:
+                viewport = self.resolution_manager.viewport_size()
+                self.virtual_input = VirtualInput(
+                    viewport=viewport,
+                    keyboard_layout=self.keyboard_layout,
+                    emit_scancodes=self.keyboard_emit_scancodes,
+                    key_delay_ms=self.keyboard_key_delay_ms,
+                )
+        except Exception:
+            # If startup fails after a resolution switch, restore immediately so the
+            # host display is not left in the downshifted mode.
+            with contextlib.suppress(Exception):
+                self.resolution_manager.restore()
+            self.virtual_input = None
+            self._started = False
+            raise
         self._started = True
 
     async def stop(self) -> None:
@@ -98,10 +107,14 @@ class DesktopDriver(AutomationDriver):
         await self.type_text(url)
         await self.press_key("enter")
 
-    async def click(self, x: int, y: int, button: str = "left", click_count: int = 1) -> None:
+    async def click(
+        self, x: int, y: int, button: str = "left", click_count: int = 1
+    ) -> None:
         await self._ensure_ready()
         await self.virtual_input.click(x, y, button=button, click_count=click_count)
-        self._capture_call("click", {"x": x, "y": y, "button": button, "click_count": click_count})
+        self._capture_call(
+            "click", {"x": x, "y": y, "button": button, "click_count": click_count}
+        )
 
     async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
         await self._ensure_ready()
@@ -137,7 +150,10 @@ class DesktopDriver(AutomationDriver):
     async def press_key(self, key: str | Iterable[str]) -> None:
         await self._ensure_ready()
         await self.virtual_input.press_key(key)
-        self._capture_call("press_key", {"key": list(key) if isinstance(key, (list, tuple, set)) else key})
+        self._capture_call(
+            "press_key",
+            {"key": list(key) if isinstance(key, (list, tuple, set)) else key},
+        )
 
     async def scroll(self, direction: str, amount: int) -> None:
         normalized_direction = str(direction or "").strip().lower()
@@ -150,7 +166,9 @@ class DesktopDriver(AutomationDriver):
             x=delta if normalized_direction in {"left", "right"} else 0,
         )
 
-    async def scroll_by_pixels(self, x: int = 0, y: int = 0, smooth: bool = True) -> None:
+    async def scroll_by_pixels(
+        self, x: int = 0, y: int = 0, smooth: bool = True
+    ) -> None:
         await self._ensure_ready()
         await self.virtual_input.scroll(x=x, y=y)
         self._capture_call("scroll_by_pixels", {"x": x, "y": y, "smooth": smooth})

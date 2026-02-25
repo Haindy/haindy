@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -236,7 +237,9 @@ async def run_test(
         )
 
         console.print("[cyan]Initializing desktop runtime...[/cyan]")
-        desktop_controller, coordinator = await _create_coordinator_stack(max_steps=max_steps)
+        desktop_controller, coordinator = await _create_coordinator_stack(
+            max_steps=max_steps
+        )
         action_agent = coordinator.get_action_agent()
 
         should_record = bool(settings.enable_screen_recording)
@@ -251,12 +254,20 @@ async def run_test(
             )
             try:
                 recording_artifact_path = screen_recorder.start()
-                console.print(f"[dim]Screen recording started:[/dim] {recording_artifact_path}")
+                console.print(
+                    f"[dim]Screen recording started:[/dim] {recording_artifact_path}"
+                )
             except ScreenRecorderError as exc:
-                logger.warning("Unable to start screen recording", exc_info=True, extra={"error": str(exc)})
+                logger.warning(
+                    "Unable to start screen recording",
+                    exc_info=True,
+                    extra={"error": str(exc)},
+                )
                 screen_recorder = None
 
-        console.print("[cyan]Preparing entrypoint state with Situational Agent...[/cyan]")
+        console.print(
+            "[cyan]Preparing entrypoint state with Situational Agent...[/cyan]"
+        )
         await situational_agent.prepare_entrypoint(
             desktop_controller.driver,
             assessment,
@@ -296,7 +307,9 @@ async def run_test(
             finally:
                 screen_recorder = None
 
-        raw_status = getattr(test_state, "status", getattr(test_state, "test_status", "unknown"))
+        raw_status = getattr(
+            test_state, "status", getattr(test_state, "test_status", "unknown")
+        )
         status_value = raw_status.value if hasattr(raw_status, "value") else raw_status
         success_statuses = {"passed", "completed"}
         status_color = "green" if status_value in success_statuses else "red"
@@ -310,7 +323,9 @@ async def run_test(
 
         final_triage = triage_result
         if coordinator:
-            stored_triage = coordinator.get_scope_triage_result(test_state.test_plan.plan_id)
+            stored_triage = coordinator.get_scope_triage_result(
+                test_state.test_plan.plan_id
+            )
             if stored_triage:
                 final_triage = stored_triage
         _print_scope_triage_followups(final_triage)
@@ -320,7 +335,11 @@ async def run_test(
         output_dir.mkdir(exist_ok=True)
 
         action_storage = None
-        if coordinator and hasattr(coordinator, "_agents") and "test_runner" in coordinator._agents:
+        if (
+            coordinator
+            and hasattr(coordinator, "_agents")
+            and "test_runner" in coordinator._agents
+        ):
             runner = coordinator._agents["test_runner"]
             if hasattr(runner, "get_action_storage"):
                 action_storage = runner.get_action_storage()
@@ -343,7 +362,9 @@ async def run_test(
         _print_scope_blockers(scope_error)
         return 1
     except asyncio.TimeoutError:
-        console.print(f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]")
+        console.print(
+            f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]"
+        )
         return 2
     except KeyboardInterrupt:
         console.print("\n[yellow]Test execution interrupted by user[/yellow]")
@@ -357,11 +378,19 @@ async def run_test(
             try:
                 screen_recorder.stop()
             except ScreenRecorderError:
-                logger.warning("Screen recording stop failed during cleanup", exc_info=True)
+                logger.warning(
+                    "Screen recording stop failed during cleanup", exc_info=True
+                )
         if coordinator:
-            await coordinator.cleanup()
+            try:
+                await coordinator.cleanup()
+            except Exception:
+                logger.warning("Coordinator cleanup failed", exc_info=True)
         if desktop_controller:
-            await desktop_controller.stop()
+            try:
+                await desktop_controller.stop()
+            except Exception:
+                logger.warning("Desktop controller stop failed", exc_info=True)
 
 
 async def _create_coordinator_stack(
@@ -369,16 +398,30 @@ async def _create_coordinator_stack(
 ) -> tuple[DesktopController, WorkflowCoordinator]:
     """Build and initialize the desktop/coordinator stack."""
     desktop_controller = DesktopController()
-    await desktop_controller.start()
+    try:
+        await desktop_controller.start()
+    except Exception:
+        with contextlib.suppress(Exception):
+            await desktop_controller.stop()
+        raise
 
-    coordinator = WorkflowCoordinator(
-        message_bus=MessageBus(),
-        state_manager=StateManager(),
-        automation_driver=desktop_controller.driver,
-        max_steps=max_steps,
-    )
-    await coordinator.initialize()
-    return desktop_controller, coordinator
+    coordinator: WorkflowCoordinator | None = None
+    try:
+        coordinator = WorkflowCoordinator(
+            message_bus=MessageBus(),
+            state_manager=StateManager(),
+            automation_driver=desktop_controller.driver,
+            max_steps=max_steps,
+        )
+        await coordinator.initialize()
+        return desktop_controller, coordinator
+    except Exception:
+        if coordinator is not None:
+            with contextlib.suppress(Exception):
+                await coordinator.cleanup()
+        with contextlib.suppress(Exception):
+            await desktop_controller.stop()
+        raise
 
 
 async def _run_with_timeout(
@@ -408,8 +451,12 @@ def _print_scope_triage_followups(triage_result: ScopeTriageResult | None) -> No
     if triage_result is None:
         return
 
-    exclusions = [item.strip() for item in triage_result.explicit_exclusions if item.strip()]
-    ambiguities = [item.strip() for item in triage_result.ambiguous_points if item.strip()]
+    exclusions = [
+        item.strip() for item in triage_result.explicit_exclusions if item.strip()
+    ]
+    ambiguities = [
+        item.strip() for item in triage_result.ambiguous_points if item.strip()
+    ]
 
     if exclusions:
         console.print("\n[bold cyan]Explicit Exclusions[/bold cyan]")
@@ -487,7 +534,12 @@ async def test_api_connection() -> int:
 
         client = OpenAIClient()
         response = await client.call(
-            messages=[{"role": "user", "content": "Say 'API test successful' and nothing else."}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Say 'API test successful' and nothing else.",
+                }
+            ],
         )
         if "API test successful" in response["content"]:
             console.print("[green]✓ OpenAI API connection successful![/green]")
@@ -558,7 +610,9 @@ async def async_main(args: list[str] | None = None) -> int:
         parser.print_help()
         return 1
     if not parsed_args.context:
-        console.print("[red]Error: --context is required when running with --plan[/red]")
+        console.print(
+            "[red]Error: --context is required when running with --plan[/red]"
+        )
         return 1
 
     requirements = await read_plan_file(parsed_args.plan)

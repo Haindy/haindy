@@ -12,7 +12,9 @@ class DummyVirtualInput:
         self.keys: list[str] = []
         self.scrolls: list[tuple[int, int]] = []
 
-    async def click(self, x: int, y: int, button: str = "left", click_count: int = 1) -> None:
+    async def click(
+        self, x: int, y: int, button: str = "left", click_count: int = 1
+    ) -> None:
         self.clicks.append((x, y, button, click_count))
 
     async def type_text(self, text: str) -> None:
@@ -116,3 +118,39 @@ async def test_desktop_driver_scroll_rejects_invalid_direction(
     with pytest.raises(ValueError):
         await driver.scroll("diagonal", 100)
     await driver.stop()
+
+
+@pytest.mark.asyncio
+async def test_desktop_driver_restores_resolution_when_start_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    driver = DesktopDriver(
+        screenshot_dir=tmp_path / "shots",
+        cache_path=tmp_path / "coords.json",
+        prefer_resolution=(800, 600),
+        enable_resolution_switch=True,
+    )
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        driver.resolution_manager,
+        "maybe_downshift",
+        lambda: calls.append("downshift"),
+    )
+    monkeypatch.setattr(
+        driver.resolution_manager,
+        "restore",
+        lambda: calls.append("restore"),
+    )
+    monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
+
+    def _raise_virtual_input(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("virtual input failed")
+
+    monkeypatch.setattr("src.desktop.driver.VirtualInput", _raise_virtual_input)
+
+    with pytest.raises(RuntimeError, match="virtual input failed"):
+        await driver.start()
+
+    assert calls == ["downshift", "restore"]
+    assert driver.virtual_input is None
