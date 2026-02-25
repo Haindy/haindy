@@ -26,6 +26,23 @@ class TestSettings:
         settings = Settings()
         assert settings.openai_model == "gpt-5.2"
 
+    def test_cu_provider_accepts_anthropic(self, monkeypatch):
+        monkeypatch.setenv("CU_PROVIDER", "anthropic")
+        settings = Settings(cu_provider="anthropic")
+        assert settings.cu_provider == "anthropic"
+
+    def test_default_anthropic_computer_use_model(self):
+        settings = Settings(_env_file=None)
+        assert settings.anthropic_cu_model == "claude-sonnet-4-6"
+
+    def test_default_anthropic_computer_use_max_tokens(self):
+        settings = Settings(_env_file=None)
+        assert settings.anthropic_cu_max_tokens == 16384
+
+    def test_default_computer_action_timeout(self):
+        settings = Settings(_env_file=None)
+        assert settings.actions_computer_tool_action_timeout_ms == 600000
+
     @pytest.mark.parametrize(
         "level",
         ["none", "minimal", "low", "medium", "high", "xhigh"],

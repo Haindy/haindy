@@ -108,9 +108,7 @@ class Settings(BaseSettings):
 
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
-    openai_model: str = Field(
-        default="gpt-5.2", description="Default OpenAI model"
-    )
+    openai_model: str = Field(default="gpt-5.2", description="Default OpenAI model")
     openai_max_retries: int = Field(
         default=3, ge=1, description="Maximum API retry attempts"
     )
@@ -221,9 +219,7 @@ class Settings(BaseSettings):
     )
 
     # Execution Configuration
-    max_test_steps: int = Field(
-        default=100, ge=1, description="Maximum steps per test"
-    )
+    max_test_steps: int = Field(default=100, ge=1, description="Maximum steps per test")
     step_timeout: int = Field(
         default=30000, ge=1000, description="Timeout per step (ms)"
     )
@@ -248,17 +244,44 @@ class Settings(BaseSettings):
     computer_use_model: str = Field(
         default="computer-use-preview",
         description="OpenAI model for computer-use execution",
-        validation_alias=AliasChoices("HAINDY_COMPUTER_USE_MODEL", "COMPUTER_USE_MODEL"),
+        validation_alias=AliasChoices(
+            "HAINDY_COMPUTER_USE_MODEL", "COMPUTER_USE_MODEL"
+        ),
     )
     cu_provider: str = Field(
         default="google",
-        description="Computer-use provider to run actions (openai or google)",
+        description="Computer-use provider to run actions (openai, google, or anthropic)",
         validation_alias=AliasChoices("CU_PROVIDER", "HAINDY_CU_PROVIDER"),
     )
     google_cu_model: str = Field(
         default="gemini-2.5-computer-use-preview-10-2025",
         description="Google Gemini computer-use model name",
         validation_alias=AliasChoices("GOOGLE_CU_MODEL", "HAINDY_GOOGLE_CU_MODEL"),
+    )
+    anthropic_api_key: str = Field(
+        default="",
+        description="Anthropic API key for Claude computer-use",
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "HAINDY_ANTHROPIC_API_KEY"),
+    )
+    anthropic_cu_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Anthropic Claude computer-use model name",
+        validation_alias=AliasChoices(
+            "ANTHROPIC_CU_MODEL", "HAINDY_ANTHROPIC_CU_MODEL"
+        ),
+    )
+    anthropic_cu_beta: str = Field(
+        default="computer-use-2025-11-24",
+        description="Anthropic beta flag for computer-use tool availability",
+        validation_alias=AliasChoices("ANTHROPIC_CU_BETA", "HAINDY_ANTHROPIC_CU_BETA"),
+    )
+    anthropic_cu_max_tokens: int = Field(
+        default=16384,
+        ge=256,
+        description="Max output tokens for Anthropic computer-use requests",
+        validation_alias=AliasChoices(
+            "ANTHROPIC_CU_MAX_TOKENS", "HAINDY_ANTHROPIC_CU_MAX_TOKENS"
+        ),
     )
     vertex_api_key: str = Field(
         default="",
@@ -293,7 +316,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW"),
     )
     actions_computer_tool_action_timeout_ms: int = Field(
-        default=7000,
+        default=600000,
         ge=500,
         description="Timeout in milliseconds for executing a single computer action",
         validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS"),
@@ -303,7 +326,9 @@ class Settings(BaseSettings):
         ge=0,
         le=1000,
         description="Delay after executing an action before capturing the next screenshot",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS"),
+        validation_alias=AliasChoices(
+            "HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS"
+        ),
     )
     actions_computer_tool_fail_fast_on_safety: bool = Field(
         default=True,
@@ -350,9 +375,7 @@ class Settings(BaseSettings):
         default="json",
         description="Log format (json or text)",
     )
-    log_file: str | None = Field(
-        default=None, description="Log file path"
-    )
+    log_file: str | None = Field(default=None, description="Log file path")
     model_log_path: Path = Field(
         default=Path("data/model_logs/model_calls.jsonl"),
         description="Log file for raw model prompts/responses",
@@ -366,23 +389,17 @@ class Settings(BaseSettings):
     )
 
     # Storage Configuration
-    data_dir: Path = Field(
-        default=Path("data"), description="Data storage directory"
-    )
+    data_dir: Path = Field(default=Path("data"), description="Data storage directory")
     reports_dir: Path = Field(
         default=Path("reports"), description="Reports output directory"
     )
     screenshots_dir: Path = Field(
         default=Path("data/screenshots"), description="Screenshots directory"
     )
-    cache_dir: Path = Field(
-        default=Path(".cache"), description="Cache directory"
-    )
+    cache_dir: Path = Field(default=Path(".cache"), description="Cache directory")
 
     # Security Configuration
-    rate_limit_enabled: bool = Field(
-        default=True, description="Enable rate limiting"
-    )
+    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
     rate_limit_requests_per_minute: int = Field(
         default=60, ge=1, description="API requests per minute"
     )
@@ -391,9 +408,7 @@ class Settings(BaseSettings):
     )
 
     # Development Configuration
-    debug_mode: bool = Field(
-        default=False, description="Enable debug mode"
-    )
+    debug_mode: bool = Field(default=False, description="Enable debug mode")
     save_agent_conversations: bool = Field(
         default=True, description="Save agent conversation logs"
     )
@@ -438,9 +453,11 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_cu_provider(cls, value: str) -> str:
         normalized = (value or "").strip().lower()
-        if normalized not in {"openai", "google"}:
+        if normalized not in {"openai", "google", "anthropic"}:
             raise ValueError(
-                f"Unsupported cu_provider '{value}'. Supported providers are 'openai' and 'google'."
+                "Unsupported cu_provider "
+                f"'{value}'. Supported providers are 'openai', 'google', and "
+                "'anthropic'."
             )
         return normalized
 
@@ -519,7 +536,9 @@ class Settings(BaseSettings):
         existing_models = self.agent_models.copy()
 
         for agent_name, prefix in AGENT_ENV_PREFIX.items():
-            base_config = existing_models.get(agent_name, DEFAULT_AGENT_MODELS[agent_name])
+            base_config = existing_models.get(
+                agent_name, DEFAULT_AGENT_MODELS[agent_name]
+            )
             config_payload = base_config.model_dump()
 
             model_override = env.get(f"{prefix}_MODEL")

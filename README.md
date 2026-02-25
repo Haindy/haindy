@@ -39,11 +39,12 @@ cp .env.example .env
 
 Minimum required settings:
 - `OPENAI_API_KEY` (used by orchestration)
-- `CU_PROVIDER=openai` or `CU_PROVIDER=google`
+- `CU_PROVIDER=openai`, `CU_PROVIDER=google`, or `CU_PROVIDER=anthropic`
 
 Provider-specific:
 - OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (typically `computer-use-preview`)
 - Google computer-use: `GOOGLE_CU_MODEL` and Vertex credentials/settings (see `.env.example`)
+- Anthropic computer-use: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_CU_MODEL` (default `claude-sonnet-4-6`), optional `ANTHROPIC_CU_MAX_TOKENS` (default `16384`)
 
 ## Run
 
