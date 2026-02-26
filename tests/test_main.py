@@ -171,6 +171,7 @@ async def test_run_test_stops_desktop_even_if_coordinator_cleanup_fails(
     coordinator = type("CoordinatorStub", (), {})()
     coordinator.cleanup = AsyncMock(side_effect=RuntimeError("cleanup failed"))
     coordinator.get_action_agent = lambda: None
+    mock_scope_pipeline = AsyncMock(return_value=(object(), object()))
 
     with (
         patch("src.main.initialize_debug_logger", return_value=debug_instance),
@@ -180,7 +181,7 @@ async def test_run_test_stops_desktop_even_if_coordinator_cleanup_fails(
         ),
         patch(
             "src.main.run_scope_triage_and_plan",
-            new=AsyncMock(return_value=(object(), object())),
+            new=mock_scope_pipeline,
         ),
         patch(
             "src.main._create_coordinator_stack",
@@ -198,5 +199,8 @@ async def test_run_test_stops_desktop_even_if_coordinator_cleanup_fails(
         )
 
     assert result == 1
+    assert mock_scope_pipeline.await_count == 1
+    kwargs = mock_scope_pipeline.await_args.kwargs
+    assert kwargs["cache_key_context"] == {"execution_context": "desktop context"}
     coordinator.cleanup.assert_awaited_once()
     desktop_controller.stop.assert_awaited_once()

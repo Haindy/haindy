@@ -43,6 +43,21 @@ class TestSettings:
         settings = Settings(_env_file=None)
         assert settings.actions_computer_tool_action_timeout_ms == 600000
 
+    def test_planning_cache_defaults(self):
+        settings = Settings(_env_file=None)
+        assert settings.enable_planning_cache is True
+        assert settings.planning_cache_path == Path("data/planning_cache.json")
+
+    def test_planning_cache_env_alias(self, monkeypatch):
+        monkeypatch.setenv("HAINDY_ENABLE_PLANNING_CACHE", "false")
+        monkeypatch.setenv(
+            "HAINDY_PLANNING_CACHE_PATH",
+            "tmp/planning_cache_override.json",
+        )
+        settings = Settings(_env_file=None)
+        assert settings.enable_planning_cache is False
+        assert settings.planning_cache_path == Path("tmp/planning_cache_override.json")
+
     @pytest.mark.parametrize(
         "level",
         ["none", "minimal", "low", "medium", "high", "xhigh"],

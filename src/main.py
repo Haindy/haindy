@@ -234,6 +234,7 @@ async def run_test(
             planner=planner,
             triage_agent=triage_agent,
             context=planning_context,
+            cache_key_context={"execution_context": context_text},
         )
 
         console.print("[cyan]Initializing desktop runtime...[/cyan]")
