@@ -96,6 +96,75 @@ async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_google_observe_only_policy_violation_fails_immediately(
+    tmp_path: Path,
+) -> None:
+    settings = SimpleNamespace(
+        openai_request_timeout_seconds=900,
+        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_stabilization_wait_ms=0,
+        actions_computer_tool_max_turns=5,
+        actions_computer_tool_loop_detection_window=3,
+        actions_computer_tool_fail_fast_on_safety=True,
+        actions_computer_tool_allowed_domains=[],
+        actions_computer_tool_blocked_domains=[],
+        scroll_turn_multiplier=3.0,
+        scroll_default_magnitude=450,
+        scroll_max_magnitude=600,
+        cu_provider="google",
+        computer_use_model="computer-use-preview",
+        google_cu_model="gemini-2.5-computer-use-preview-10-2025",
+        vertex_api_key="",
+        vertex_project="",
+        vertex_location="us-central1",
+        cu_safety_policy="auto_approve",
+        model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
+        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        max_screenshots=12,
+    )
+    browser = AsyncMock()
+    browser.get_viewport_size.return_value = (800, 600)
+    browser.screenshot.return_value = b"fake_png_bytes"
+    browser.wait.return_value = None
+    browser.start.return_value = None
+    browser.get_page_url.return_value = "https://example.com"
+    browser.get_page_title.return_value = "Example Page"
+
+    function_call = DummyFunctionCall("click_at", {"x": 300, "y": 220})
+    response = DummyGoogleResponse(
+        {"id": "resp_obs_google_1", "candidates": []},
+        candidates=[DummyCandidate(DummyContent([DummyPart(function_call)]))],
+    )
+
+    session = ComputerUseSession(
+        client=None,  # type: ignore[arg-type]
+        automation_driver=browser,
+        settings=settings,
+        google_client=object(),
+        provider="google",
+    )
+    session._build_google_initial_request = (  # type: ignore[assignment]
+        lambda *args, **kwargs: ([{"role": "user"}], "config")
+    )
+    session._create_google_response = AsyncMock(return_value=response)  # type: ignore[assignment]
+
+    result = await session.run(
+        goal="Verify current state without interacting.",
+        initial_screenshot=b"initial_bytes",
+        metadata={"step_number": 2, "interaction_mode": "observe_only"},
+        allowed_actions={"screenshot"},
+    )
+
+    assert result.terminal_status == "failed"
+    assert result.terminal_failure_code == "observe_only_policy_violation"
+    assert len(result.actions) == 1
+    assert result.actions[0].status == "failed"
+    assert result.actions[0].metadata.get("policy") == "observe_only"
+    assert session._create_google_response.await_count == 1  # type: ignore[attr-defined]
+    browser.click.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,

@@ -507,6 +507,25 @@ class ComputerUseSession:
             result.actions.append(turn)
             metadata["_auto_confirmation_attempts"] = 0
 
+            if self._is_observe_only_policy_violation(turn):
+                reason = turn.error_message or (
+                    "Observe-only policy violation blocked action execution."
+                )
+                self._mark_terminal_failure(
+                    result=result,
+                    reason=reason,
+                    code="observe_only_policy_violation",
+                )
+                logger.warning(
+                    "Observe-only policy violation detected (openai); aborting action",
+                    extra={
+                        "step_number": metadata.get("step_number"),
+                        "action_type": turn.action_type,
+                        "call_id": turn.call_id,
+                    },
+                )
+                return result
+
             loop_detection = self._update_loop_history(
                 turn=turn,
                 history=loop_history,
@@ -601,6 +620,7 @@ class ComputerUseSession:
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
         initial_screenshot = await self._automation_driver.screenshot()
+        goal = self._apply_interaction_mode_guidance(goal, metadata)
         wrapped_goal = self._wrap_goal_for_google(goal, environment)
         contents, config = self._build_google_initial_request(
             goal=wrapped_goal,
@@ -697,6 +717,25 @@ class ComputerUseSession:
                 result.actions.append(turn)
                 executed_turns.append(turn)
 
+                if self._is_observe_only_policy_violation(turn):
+                    reason = turn.error_message or (
+                        "Observe-only policy violation blocked action execution."
+                    )
+                    self._mark_terminal_failure(
+                        result=result,
+                        reason=reason,
+                        code="observe_only_policy_violation",
+                    )
+                    logger.warning(
+                        "Observe-only policy violation detected (google); aborting action",
+                        extra={
+                            "step_number": metadata.get("step_number"),
+                            "action_type": turn.action_type,
+                            "call_id": turn.call_id,
+                        },
+                    )
+                    return result
+
                 loop_detection = self._update_loop_history(
                     turn=turn,
                     history=loop_history,
@@ -786,6 +825,7 @@ class ComputerUseSession:
                 goal=goal,
                 history=history,
                 turns=executed_turns,
+                metadata=metadata,
                 environment=environment,
                 model=model,
             )
@@ -951,6 +991,25 @@ class ComputerUseSession:
                 self._update_last_pointer_position(turn)
                 result.actions.append(turn)
                 executed_turns.append(turn)
+
+                if self._is_observe_only_policy_violation(turn):
+                    reason = turn.error_message or (
+                        "Observe-only policy violation blocked action execution."
+                    )
+                    self._mark_terminal_failure(
+                        result=result,
+                        reason=reason,
+                        code="observe_only_policy_violation",
+                    )
+                    logger.warning(
+                        "Observe-only policy violation detected (anthropic); aborting action",
+                        extra={
+                            "step_number": metadata.get("step_number"),
+                            "action_type": turn.action_type,
+                            "call_id": turn.call_id,
+                        },
+                    )
+                    return result
 
                 loop_detection = self._update_loop_history(
                     turn=turn,
@@ -2018,6 +2077,7 @@ class ComputerUseSession:
         goal: str,
         history: list[Any],
         turns: list[ComputerToolTurn],
+        metadata: dict[str, Any],
         environment: str = "desktop",
         model: str | None = None,
     ) -> tuple[dict[str, Any], Any, bytes]:
@@ -2063,6 +2123,21 @@ class ComputerUseSession:
 
         function_response_content = types.Content(role="user", parts=parts)
         contents = list(history) + [function_response_content]
+        interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
+        if interaction_mode:
+            reminder = (
+                "Reminder: Observe-only mode is active. Do not interact with the UI. "
+                "Do not call click_at, type_text_at, key_combination, or drag actions. "
+                "Only inspect and report findings."
+                if interaction_mode == "observe_only"
+                else "Reminder: Execute mode is active. Complete the requested interaction directly without asking for confirmation."
+            )
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=reminder)],
+                )
+            )
         tools = [
             types.Tool(
                 computer_use=types.ComputerUse(
@@ -2613,6 +2688,24 @@ class ComputerUseSession:
         ]
         return any(marker in text for marker in confirmation_markers)
 
+    @staticmethod
+    def _apply_interaction_mode_guidance(goal: str, metadata: dict[str, Any]) -> str:
+        """Inject explicit interaction-mode instructions into provider prompts."""
+        interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
+        if interaction_mode != "observe_only":
+            return goal
+
+        guidance = (
+            "CRITICAL OBSERVE-ONLY MODE:\n"
+            "- Do NOT interact with the UI.\n"
+            "- Do NOT call click_at, type_text_at, key_combination, drag_and_drop, or any mutating action.\n"
+            "- Use only observation actions (screenshot/wait/scroll) if needed.\n"
+            "- When verification is complete, respond with findings and stop."
+        )
+        if guidance in goal:
+            return goal
+        return f"{goal}\n\n{guidance}"
+
     async def _build_confirmation_request(
         self,
         previous_response_id: str | None,
@@ -2766,6 +2859,27 @@ class ComputerUseSession:
         result.terminal_failure_reason = reason
         result.terminal_failure_code = code
         return failure_turn
+
+    @staticmethod
+    def _mark_terminal_failure(
+        *,
+        result: ComputerUseSessionResult,
+        reason: str,
+        code: str,
+    ) -> None:
+        """Mark a session result as terminally failed without appending a synthetic turn."""
+        result.final_output = reason
+        result.terminal_status = "failed"
+        result.terminal_failure_reason = reason
+        result.terminal_failure_code = code
+
+    @staticmethod
+    def _is_observe_only_policy_violation(turn: ComputerToolTurn) -> bool:
+        """Return True when a failed turn is caused by observe-only enforcement."""
+        if turn.status != "failed":
+            return False
+        metadata = turn.metadata if isinstance(turn.metadata, dict) else {}
+        return str(metadata.get("policy") or "").strip().lower() == "observe_only"
 
     async def _enforce_domain_policy(self, action_type: str | None) -> None:
         """Prevent interactions with domains outside defined allow/block lists."""
