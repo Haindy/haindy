@@ -49,7 +49,6 @@ __all__ = [
     "TimeoutError",
     "CoordinationError",
     "ScopeTriageBlockedError",
-
     # Recovery
     "RetryStrategy",
     "ExponentialBackoffStrategy",
@@ -57,7 +56,6 @@ __all__ = [
     "RecoveryManager",
     "RecoveryContext",
     "RecoveryAction",
-
     # Validation
     "ActionValidator",
     "ConfidenceScorer",
@@ -65,10 +63,9 @@ __all__ = [
     "ValidationResult",
     "ValidationRule",
     "ValidationSeverity",
-
     # Aggregation
     "ErrorAggregator",
     "ErrorCategory",
     "ErrorMetrics",
-    "ErrorReport"
+    "ErrorReport",
 ]

@@ -48,6 +48,7 @@ async def demonstrate_retry_strategies():
 
     # Simulate a flaky operation
     attempt_count = 0
+
     async def flaky_browser_operation():
         nonlocal attempt_count
         attempt_count += 1
@@ -58,7 +59,7 @@ async def demonstrate_retry_strategies():
                 "Element not found",
                 url="https://example.com",
                 selector="#submit-button",
-                action="click"
+                action="click",
             )
         else:
             print(f"  Attempt {attempt_count}: Operation succeeded!")
@@ -67,16 +68,12 @@ async def demonstrate_retry_strategies():
     # Test exponential backoff
     print("\n  Exponential Backoff Strategy:")
     strategy = ExponentialBackoffStrategy(
-        base_delay_ms=100,
-        max_attempts=5,
-        jitter=True
+        base_delay_ms=100, max_attempts=5, jitter=True
     )
 
     try:
         result = await recovery_manager.execute_with_recovery(
-            flaky_browser_operation,
-            "flaky_browser_op",
-            retry_strategy=strategy
+            flaky_browser_operation, "flaky_browser_op", retry_strategy=strategy
         )
         print(f"  Result: {result}")
     except Exception as e:
@@ -85,16 +82,11 @@ async def demonstrate_retry_strategies():
     # Test linear backoff
     print("\n  Linear Backoff Strategy:")
     attempt_count = 0  # Reset
-    strategy = LinearBackoffStrategy(
-        delay_increment_ms=200,
-        max_attempts=4
-    )
+    strategy = LinearBackoffStrategy(delay_increment_ms=200, max_attempts=4)
 
     try:
         result = await recovery_manager.execute_with_recovery(
-            flaky_browser_operation,
-            "flaky_browser_op_linear",
-            retry_strategy=strategy
+            flaky_browser_operation, "flaky_browser_op_linear", retry_strategy=strategy
         )
         print(f"  Result: {result}")
     except Exception as e:
@@ -122,34 +114,34 @@ async def demonstrate_hallucination_detection():
         {
             "agent_output": "I can see the 'Purchase Now' button at the top of the page",
             "screenshot_elements": {"Add to Cart", "View Details", "Back to Home"},
-            "description": "Agent claims to see non-existent button"
+            "description": "Agent claims to see non-existent button",
         },
         {
             "agent_output": "Clicking on the Add to Cart button",
             "screenshot_elements": {"Add to Cart", "Remove", "Quantity"},
-            "description": "Agent correctly identifies existing element"
+            "description": "Agent correctly identifies existing element",
         },
         {
             "agent_output": "The element is located at coordinates: (-50, 200)",
             "viewport_size": (1920, 1080),
-            "description": "Agent provides negative coordinates"
+            "description": "Agent provides negative coordinates",
         },
         {
             "agent_output": "Found the button at coordinates: (1800, 1000)",
             "viewport_size": (1920, 1080),
-            "description": "Agent provides valid coordinates"
-        }
+            "description": "Agent provides valid coordinates",
+        },
     ]
 
     for i, test_case in enumerate(test_cases, 1):
         print(f"\n  Test {i}: {test_case['description']}")
-        print(f"  Agent output: \"{test_case['agent_output']}\"")
+        print(f'  Agent output: "{test_case["agent_output"]}"')
 
         error = detector.detect_hallucinations(
             test_case["agent_output"],
             "test_agent",
             screenshot_elements=test_case.get("screenshot_elements"),
-            viewport_size=test_case.get("viewport_size")
+            viewport_size=test_case.get("viewport_size"),
         )
 
         if error:
@@ -177,41 +169,38 @@ async def demonstrate_action_validation():
                     action_type=ActionType.CLICK,
                     description="Click submit button",
                     target="#valid-button",
-                    expected_outcome="Button clicked"
+                    expected_outcome="Button clicked",
                 ),
                 coordinate=GridCoordinate(
                     cell="H15",
                     offset_x=0.7,
                     offset_y=0.4,
                     confidence=0.92,
-                    refined=True
-                )
+                    refined=True,
+                ),
             ),
             "context": {
                 "viewport_size": (1920, 1080),
                 "page_loaded": True,
-                "element_exists": True
+                "element_exists": True,
             },
-            "description": "Valid action with good confidence"
+            "description": "Valid action with good confidence",
         },
         {
             "action": GridAction(
                 instruction=ActionInstruction(
                     action_type=ActionType.CLICK,
                     description="Click phantom button",
-                    expected_outcome="Button clicked"
+                    expected_outcome="Button clicked",
                 ),
                 coordinate=GridCoordinate(
                     cell="ZZ99",  # Invalid grid position
                     confidence=0.15,  # Low confidence
-                    refined=False
-                )
+                    refined=False,
+                ),
             ),
-            "context": {
-                "viewport_size": (1920, 1080),
-                "page_loaded": True
-            },
-            "description": "Low confidence coordinates"
+            "context": {"viewport_size": (1920, 1080), "page_loaded": True},
+            "description": "Low confidence coordinates",
         },
         {
             "action": GridAction(
@@ -219,19 +208,13 @@ async def demonstrate_action_validation():
                     action_type=ActionType.TYPE,
                     description="Type in field",
                     target="   ",  # Empty target
-                    expected_outcome="Text entered"
+                    expected_outcome="Text entered",
                 ),
-                coordinate=GridCoordinate(
-                    cell="M20",
-                    confidence=0.5
-                )
+                coordinate=GridCoordinate(cell="M20", confidence=0.5),
             ),
-            "context": {
-                "page_loaded": True,
-                "element_exists": False
-            },
-            "description": "Missing selector and element"
-        }
+            "context": {"page_loaded": True, "element_exists": False},
+            "description": "Missing selector and element",
+        },
     ]
 
     for i, test in enumerate(actions, 1):
@@ -239,8 +222,7 @@ async def demonstrate_action_validation():
 
         # Calculate confidence
         confidence = scorer.calculate_action_confidence(
-            test["action"],
-            screenshot_analysis={"confidence": 0.8}
+            test["action"], screenshot_analysis={"confidence": 0.8}
         )
         confidence_level = scorer.get_confidence_level(confidence)
 
@@ -248,8 +230,7 @@ async def demonstrate_action_validation():
 
         # Validate action
         is_valid, results = await validator.validate_action(
-            test["action"],
-            test["context"]
+            test["action"], test["context"]
         )
 
         print(f"  Validation: {'✓ PASSED' if is_valid else '❌ FAILED'}")
@@ -273,41 +254,39 @@ async def demonstrate_error_aggregation():
     # Agent errors
     for i in range(4):
         error = AgentError(
-            f"Agent processing failed #{i+1}",
+            f"Agent processing failed #{i + 1}",
             agent_name=f"agent_{i % 2}",
-            agent_type="TestRunnerAgent"
+            agent_type="TestRunnerAgent",
         )
         aggregator.add_error(
             error,
             agent_name=f"agent_{i % 2}",
             operation="process_instruction",
-            recovered=(i < 2)  # First 2 recovered
+            recovered=(i < 2),  # First 2 recovered
         )
 
     # Browser errors
     for i in range(3):
         error = BrowserError(
-            f"Browser automation failed #{i+1}",
+            f"Browser automation failed #{i + 1}",
             url="https://test.com",
-            action="click"
+            action="click",
         )
         aggregator.add_error(
             error,
             operation="click_element",
-            recovered=True  # All recovered
+            recovered=True,  # All recovered
         )
 
     # Timeout errors
     for _i in range(2):
         error = TimeoutError(
-            "Operation timed out",
-            operation="page_load",
-            timeout_ms=5000
+            "Operation timed out", operation="page_load", timeout_ms=5000
         )
         aggregator.add_error(
             error,
             operation="load_page",
-            recovered=False  # None recovered
+            recovered=False,  # None recovered
         )
 
     # Validation error
@@ -315,9 +294,9 @@ async def demonstrate_error_aggregation():
         ValidationError(
             "Invalid action parameters",
             validation_type="action_validation",
-            failed_rules=["coordinate_bounds", "element_selector"]
+            failed_rules=["coordinate_bounds", "element_selector"],
         ),
-        operation="validate_action"
+        operation="validate_action",
     )
 
     # Generate report
@@ -325,7 +304,9 @@ async def demonstrate_error_aggregation():
 
     print("\n  Test Summary:")
     print(f"    - Test ID: {report.test_id}")
-    print(f"    - Duration: {(report.end_time - report.start_time).total_seconds():.2f}s")
+    print(
+        f"    - Duration: {(report.end_time - report.start_time).total_seconds():.2f}s"
+    )
     print(f"    - Total errors: {report.total_errors}")
 
     print("\n  Errors by Category:")
@@ -345,9 +326,9 @@ async def demonstrate_error_aggregation():
     print(f"    - Total attempts: {summary['total_recovery_attempts']}")
     print(f"    - Successful recoveries: {summary['total_recovery_successes']}")
     print(f"    - Overall recovery rate: {summary['overall_recovery_rate']:.1%}")
-    if summary['best_recovery']:
+    if summary["best_recovery"]:
         print(f"    - Best recovery: {summary['best_recovery']}")
-    if summary['worst_recovery']:
+    if summary["worst_recovery"]:
         print(f"    - Worst recovery: {summary['worst_recovery']}")
 
     print("\n  Recommendations:")
@@ -360,7 +341,9 @@ async def demonstrate_error_aggregation():
     # Save report
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    report_file = reports_dir / f"error_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    report_file = (
+        reports_dir / f"error_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
     report.save_to_file(report_file)
     print(f"\n  Report saved to: {report_file}")
 
@@ -378,7 +361,7 @@ async def demonstrate_fallback_mechanisms():
         raise BrowserError(
             "Element not clickable",
             selector="#dynamic-button",
-            max_retries=1  # Only retry once
+            max_retries=1,  # Only retry once
         )
 
     # Fallback using grid coordinates
@@ -389,17 +372,14 @@ async def demonstrate_fallback_mechanisms():
     # Execute with fallback
     print("\n  Executing operation with fallback strategy:")
 
-    strategy = LinearBackoffStrategy(
-        delay_increment_ms=100,
-        max_attempts=2
-    )
+    strategy = LinearBackoffStrategy(delay_increment_ms=100, max_attempts=2)
 
     try:
         result = await recovery_manager.execute_with_recovery(
             primary_operation,
             "click_with_fallback",
             retry_strategy=strategy,
-            fallback=fallback_operation
+            fallback=fallback_operation,
         )
         print(f"  Success: {result}")
     except Exception as e:
@@ -436,6 +416,7 @@ async def main():
     except Exception as e:
         print(f"\nError during demo: {e}")
         import traceback
+
         traceback.print_exc()
 
 

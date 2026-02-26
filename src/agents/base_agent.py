@@ -91,9 +91,7 @@ class BaseAgent(Agent):
 
         return None
 
-    async def _generate_response(
-        self, message: AgentMessage
-    ) -> dict[str, Any] | None:
+    async def _generate_response(self, message: AgentMessage) -> dict[str, Any] | None:
         """
         Generate response content for a message.
 

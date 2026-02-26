@@ -55,19 +55,23 @@ async def demonstrate_message_bus():
     print("\nPublishing messages...")
 
     # Publish some messages
-    await bus.publish(AgentMessage(
-        from_agent="planner",
-        to_agent="broadcast",
-        message_type=MessageType.PLAN_TEST,
-        content={"requirements": "Test login flow"}
-    ))
+    await bus.publish(
+        AgentMessage(
+            from_agent="planner",
+            to_agent="broadcast",
+            message_type=MessageType.PLAN_TEST,
+            content={"requirements": "Test login flow"},
+        )
+    )
 
-    await bus.publish(AgentMessage(
-        from_agent="runner",
-        to_agent="evaluator",
-        message_type=MessageType.EXECUTE_STEP,
-        content={"step": "Click login button"}
-    ))
+    await bus.publish(
+        AgentMessage(
+            from_agent="runner",
+            to_agent="evaluator",
+            message_type=MessageType.EXECUTE_STEP,
+            content={"step": "Click login button"},
+        )
+    )
 
     # Get messages for specific agent
     print("\nChecking evaluator's message queue...")
@@ -106,8 +110,8 @@ async def demonstrate_state_manager():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.NAVIGATE,
                     description="Go to login page",
-                    expected_outcome="Login page displayed"
-                )
+                    expected_outcome="Login page displayed",
+                ),
             ),
             TestStep(
                 step_id=uuid4(),
@@ -116,8 +120,8 @@ async def demonstrate_state_manager():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.TYPE,
                     description="Enter username and password",
-                    expected_outcome="Credentials entered"
-                )
+                    expected_outcome="Credentials entered",
+                ),
             ),
             TestStep(
                 step_id=uuid4(),
@@ -126,10 +130,10 @@ async def demonstrate_state_manager():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.CLICK,
                     description="Click login button",
-                    expected_outcome="Dashboard displayed"
-                )
-            )
-        ]
+                    expected_outcome="Dashboard displayed",
+                ),
+            ),
+        ],
     )
 
     print("\nCreating test state...")
@@ -140,8 +144,7 @@ async def demonstrate_state_manager():
     # Start test
     print("\nStarting test execution...")
     test_state = await manager.update_test_state(
-        test_plan.plan_id,
-        StateTransition.START
+        test_plan.plan_id, StateTransition.START
     )
     print(f"   Status: {test_state.status}")
     print(f"   Current step: {test_state.current_step.description}")
@@ -151,7 +154,7 @@ async def demonstrate_state_manager():
     test_state = await manager.update_test_state(
         test_plan.plan_id,
         StateTransition.COMPLETE_STEP,
-        {"step_id": test_plan.steps[0].step_id}
+        {"step_id": test_plan.steps[0].step_id},
     )
     print(f"   Completed steps: {len(test_state.completed_steps)}")
     print(f"   Current step: {test_state.current_step.description}")
@@ -165,34 +168,31 @@ async def demonstrate_state_manager():
     # Simulate pause/resume
     print("\nPausing test...")
     test_state = await manager.update_test_state(
-        test_plan.plan_id,
-        StateTransition.PAUSE
+        test_plan.plan_id, StateTransition.PAUSE
     )
     print(f"   Status: {test_state.status}")
 
     print("\nResuming test...")
     test_state = await manager.update_test_state(
-        test_plan.plan_id,
-        StateTransition.RESUME
+        test_plan.plan_id, StateTransition.RESUME
     )
     print(f"   Status: {test_state.status}")
 
     # Complete remaining steps
     for step in test_plan.steps[1:]:
         await manager.update_test_state(
-            test_plan.plan_id,
-            StateTransition.COMPLETE_STEP,
-            {"step_id": step.step_id}
+            test_plan.plan_id, StateTransition.COMPLETE_STEP, {"step_id": step.step_id}
         )
 
     # Complete test
     print("\nCompleting test...")
     test_state = await manager.update_test_state(
-        test_plan.plan_id,
-        StateTransition.COMPLETE
+        test_plan.plan_id, StateTransition.COMPLETE
     )
     print(f"   Final status: {test_state.status}")
-    print(f"   Total time: {(test_state.end_time - test_state.start_time).total_seconds():.2f}s")
+    print(
+        f"   Total time: {(test_state.end_time - test_state.start_time).total_seconds():.2f}s"
+    )
 
     await manager.shutdown()
 
@@ -238,10 +238,10 @@ async def demonstrate_coordinator():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.CLICK,
                     description="Click login",
-                    expected_outcome="Success"
-                )
+                    expected_outcome="Success",
+                ),
             )
-        ]
+        ],
     )
 
     coordinator._agents["test_planner"].create_test_plan = AsyncMock(
@@ -250,10 +250,8 @@ async def demonstrate_coordinator():
 
     # Mock test execution
     from src.core.types import TestState, TestStatus
-    mock_test_state = TestState(
-        test_plan=mock_test_plan,
-        status=TestStatus.COMPLETED
-    )
+
+    mock_test_state = TestState(test_plan=mock_test_plan, status=TestStatus.COMPLETED)
 
     coordinator._agents["test_runner"].execute_test_plan = AsyncMock(
         return_value=mock_test_state
@@ -294,10 +292,7 @@ async def demonstrate_integration():
     # Create all components
     bus = MessageBus()
     state_manager = StateManager()
-    coordinator = WorkflowCoordinator(
-        message_bus=bus,
-        state_manager=state_manager
-    )
+    coordinator = WorkflowCoordinator(message_bus=bus, state_manager=state_manager)
 
     print("\nSetting up integrated system...")
     await coordinator.initialize()
@@ -316,12 +311,14 @@ async def demonstrate_integration():
 
     # Create test plan
     test_id = uuid4()
-    await bus.publish(AgentMessage(
-        from_agent="user",
-        to_agent="coordinator",
-        message_type=MessageType.START_TEST,
-        content={"test_id": str(test_id), "requirements": "Test checkout flow"}
-    ))
+    await bus.publish(
+        AgentMessage(
+            from_agent="user",
+            to_agent="coordinator",
+            message_type=MessageType.START_TEST,
+            content={"test_id": str(test_id), "requirements": "Test checkout flow"},
+        )
+    )
 
     # Simulate workflow steps
     workflow_steps = [
@@ -336,12 +333,14 @@ async def demonstrate_integration():
     ]
 
     for from_agent, to_agent, msg_type in workflow_steps:
-        await bus.publish(AgentMessage(
-            from_agent=from_agent,
-            to_agent=to_agent,
-            message_type=msg_type,
-            content={"test_id": str(test_id)}
-        ))
+        await bus.publish(
+            AgentMessage(
+                from_agent=from_agent,
+                to_agent=to_agent,
+                message_type=msg_type,
+                content={"test_id": str(test_id)},
+            )
+        )
         await asyncio.sleep(0.1)  # Small delay for visualization
 
     print(f"\nMessage Flow ({len(message_log)} messages):")
@@ -387,6 +386,7 @@ async def main():
     except Exception as e:
         print(f"\nError during demo: {e}")
         import traceback
+
         traceback.print_exc()
 
 

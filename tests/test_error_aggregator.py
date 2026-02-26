@@ -72,7 +72,7 @@ class TestErrorMetrics:
         assert metrics.recovery_rate == 0.5  # 1/2
 
         metrics.update(recovered=True)
-        assert metrics.recovery_rate == 2/3  # 2/3
+        assert metrics.recovery_rate == 2 / 3  # 2/3
 
     def test_to_dict(self):
         """Test conversion to dictionary."""
@@ -106,7 +106,7 @@ class TestErrorReport:
             errors_by_type=metrics,
             critical_errors=[],
             recovery_summary={"total_recovery_attempts": 3},
-            recommendations=["Fix agent errors"]
+            recommendations=["Fix agent errors"],
         )
 
         assert report.test_id == "test123"
@@ -130,7 +130,7 @@ class TestErrorReport:
             errors_by_type={},
             critical_errors=[],
             recovery_summary={},
-            recommendations=[]
+            recommendations=[],
         )
 
         data = report.to_dict()
@@ -151,7 +151,7 @@ class TestErrorReport:
             errors_by_type={},
             critical_errors=[],
             recovery_summary={},
-            recommendations=[]
+            recommendations=[],
         )
 
         filepath = tmp_path / "error_report.json"
@@ -183,9 +183,7 @@ class TestErrorAggregator:
 
         # Add agent error
         error1 = AgentError(
-            "Agent failed",
-            agent_name="test_agent",
-            agent_type="TestAgent"
+            "Agent failed", agent_name="test_agent", agent_type="TestAgent"
         )
         aggregator.add_error(error1, agent_name="test_agent", recovered=False)
 
@@ -206,12 +204,29 @@ class TestErrorAggregator:
         aggregator = ErrorAggregator("test", "test")
 
         # Test known categories
-        assert aggregator._categorize_error(AgentError("", "", "")) == ErrorCategory.AGENT
-        assert aggregator._categorize_error(AutomationError("")) == ErrorCategory.AUTOMATION
-        assert aggregator._categorize_error(ValidationError("", "")) == ErrorCategory.VALIDATION
-        assert aggregator._categorize_error(TimeoutError("", "", 0)) == ErrorCategory.TIMEOUT
-        assert aggregator._categorize_error(CoordinationError("", [], "")) == ErrorCategory.COORDINATION
-        assert aggregator._categorize_error(RecoveryError("", "")) == ErrorCategory.RECOVERY
+        assert (
+            aggregator._categorize_error(AgentError("", "", "")) == ErrorCategory.AGENT
+        )
+        assert (
+            aggregator._categorize_error(AutomationError(""))
+            == ErrorCategory.AUTOMATION
+        )
+        assert (
+            aggregator._categorize_error(ValidationError("", ""))
+            == ErrorCategory.VALIDATION
+        )
+        assert (
+            aggregator._categorize_error(TimeoutError("", "", 0))
+            == ErrorCategory.TIMEOUT
+        )
+        assert (
+            aggregator._categorize_error(CoordinationError("", [], ""))
+            == ErrorCategory.COORDINATION
+        )
+        assert (
+            aggregator._categorize_error(RecoveryError("", ""))
+            == ErrorCategory.RECOVERY
+        )
 
         # Test unknown category
         assert aggregator._categorize_error(ValueError("")) == ErrorCategory.UNKNOWN
@@ -242,16 +257,10 @@ class TestErrorAggregator:
 
         # Add errors with recovery attempts
         for _i in range(3):
-            aggregator.add_error(
-                AutomationError("Fail"),
-                recovered=True
-            )
+            aggregator.add_error(AutomationError("Fail"), recovered=True)
 
         for _i in range(2):
-            aggregator.add_error(
-                TimeoutError("Timeout", "op", 5000),
-                recovered=False
-            )
+            aggregator.add_error(TimeoutError("Timeout", "op", 5000), recovered=False)
 
         summary = aggregator.get_recovery_summary()
         assert summary["total_recovery_attempts"] == 5
@@ -313,18 +322,9 @@ class TestErrorAggregator:
         aggregator = ErrorAggregator("test", "test")
 
         # Add errors for different agents
-        aggregator.add_error(
-            AgentError("Fail1", "agent1", "type"),
-            agent_name="agent1"
-        )
-        aggregator.add_error(
-            AgentError("Fail2", "agent1", "type"),
-            agent_name="agent1"
-        )
-        aggregator.add_error(
-            AutomationError("Browser fail"),
-            agent_name="agent2"
-        )
+        aggregator.add_error(AgentError("Fail1", "agent1", "type"), agent_name="agent1")
+        aggregator.add_error(AgentError("Fail2", "agent1", "type"), agent_name="agent1")
+        aggregator.add_error(AutomationError("Browser fail"), agent_name="agent2")
 
         summary = aggregator.get_agent_error_summary()
         assert "agent1" in summary
@@ -339,15 +339,11 @@ class TestErrorAggregator:
         # Add various errors
         for i in range(3):
             aggregator.add_error(
-                AgentError(f"Agent fail {i}", "agent", "type"),
-                recovered=i < 2
+                AgentError(f"Agent fail {i}", "agent", "type"), recovered=i < 2
             )
 
         for i in range(2):
-            aggregator.add_error(
-                AutomationError(f"Browser fail {i}"),
-                recovered=True
-            )
+            aggregator.add_error(AutomationError(f"Browser fail {i}"), recovered=True)
 
         report = aggregator.generate_report()
 

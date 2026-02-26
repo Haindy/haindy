@@ -29,5 +29,5 @@ __all__ = [
     "JournalManager",
     "PatternMatcher",
     "ScriptRecorder",
-    "DualModeExecutor"
+    "DualModeExecutor",
 ]

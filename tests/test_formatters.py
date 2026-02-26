@@ -32,18 +32,18 @@ class TestTestPlanFormatter:
                             step_number=1,
                             action="Navigate to home page",
                             expected_result="Home page is displayed",
-                            description="Go to the home page"
+                            description="Go to the home page",
                         ),
                         TestStep(
                             step_number=2,
                             action="Click on login button",
                             expected_result="Login form is displayed",
                             description="Open login form",
-                            dependencies=[1]
-                        )
+                            dependencies=[1],
+                        ),
                     ],
                     postconditions=["User is logged in"],
-                    tags=["smoke", "critical"]
+                    tags=["smoke", "critical"],
                 ),
                 TestCase(
                     test_id="TC002",
@@ -56,15 +56,15 @@ class TestTestPlanFormatter:
                             step_number=1,
                             action="Enter invalid data",
                             expected_result="Error message is displayed",
-                            description="Test validation"
+                            description="Test validation",
                         )
                     ],
                     postconditions=["Error is handled gracefully"],
-                    tags=["negative", "validation"]
-                )
+                    tags=["negative", "validation"],
+                ),
             ],
             tags=["functional", "ui"],
-            estimated_duration_seconds=300
+            estimated_duration_seconds=300,
         )
 
     def test_to_json_pretty(self, sample_test_plan):
@@ -114,7 +114,10 @@ class TestTestPlanFormatter:
         assert "# Test Plan: Sample Test Plan" in markdown_output
 
         # Check metadata
-        assert "**Description**: A sample test plan for testing formatters" in markdown_output
+        assert (
+            "**Description**: A sample test plan for testing formatters"
+            in markdown_output
+        )
         assert "**Requirements Source**: User Story #123" in markdown_output
         assert "**Tags**: functional, ui" in markdown_output
         assert "**Estimated Duration**: 5 minutes" in markdown_output
@@ -234,14 +237,14 @@ class TestTestPlanFormatter:
                             step_number=1,
                             action="Do something",
                             expected_result="It works",
-                            description="Basic step"
+                            description="Basic step",
                         )
                     ],
                     postconditions=[],
-                    tags=[]
+                    tags=[],
                 )
             ],
-            tags=[]
+            tags=[],
         )
 
         markdown_output = TestPlanFormatter.to_markdown(minimal_plan)

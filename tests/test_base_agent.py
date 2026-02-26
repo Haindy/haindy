@@ -219,18 +219,22 @@ class TestBaseAgent:
         agent = BaseAgent(name="TestAgent")
 
         # Add some history
-        agent.add_to_history(AgentMessage(
-            from_agent="OtherAgent",
-            to_agent="TestAgent",
-            message_type="query",
-            content={"text": "Previous question"},
-        ))
-        agent.add_to_history(AgentMessage(
-            from_agent="TestAgent",
-            to_agent="OtherAgent",
-            message_type="response",
-            content={"text": "Previous answer"},
-        ))
+        agent.add_to_history(
+            AgentMessage(
+                from_agent="OtherAgent",
+                to_agent="TestAgent",
+                message_type="query",
+                content={"text": "Previous question"},
+            )
+        )
+        agent.add_to_history(
+            AgentMessage(
+                from_agent="TestAgent",
+                to_agent="OtherAgent",
+                message_type="response",
+                content={"text": "Previous answer"},
+            )
+        )
 
         messages = agent.build_messages("New question", include_history=True)
 

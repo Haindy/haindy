@@ -106,7 +106,10 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         model="gpt-5.2",
     )
     delta_event = SimpleNamespace(type="response.output_text.delta", delta="hello")
-    events = [delta_event, SimpleNamespace(type="response.completed", response=final_response)]
+    events = [
+        delta_event,
+        SimpleNamespace(type="response.completed", response=final_response),
+    ]
 
     fake_responses = FakeResponses(events=events, final_response=final_response)
 
@@ -146,13 +149,15 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
     assert observer.deltas == [
         {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
     ]
-    assert observer.totals == {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
+    assert observer.totals == {
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "total_tokens": 18,
+    }
     assert observer.started is True
     assert observer.ended is True
     assert not observer.errors
-    assert observer.token_updates == [
-        {"total": 5, "delta_tokens": 5, "delta_chars": 5}
-    ]
+    assert observer.token_updates == [{"total": 5, "delta_tokens": 5, "delta_chars": 5}]
 
     assert result["usage"] == {
         "prompt_tokens": 11,

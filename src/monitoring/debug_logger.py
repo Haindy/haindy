@@ -46,7 +46,7 @@ class DebugLogger:
         prompt: str,
         response: str,
         screenshot_path: str | None = None,
-        additional_context: dict[str, Any] | None = None
+        additional_context: dict[str, Any] | None = None,
     ):
         """
         Log an AI interaction with prompt and response.
@@ -67,12 +67,12 @@ class DebugLogger:
             "prompt": prompt,
             "response": response,
             "screenshot": screenshot_path,
-            "context": additional_context or {}
+            "context": additional_context or {},
         }
 
         # Write to JSONL file
-        with open(self.ai_log_path, 'a') as f:
-            f.write(json.dumps(interaction) + '\n')
+        with open(self.ai_log_path, "a") as f:
+            f.write(json.dumps(interaction) + "\n")
 
         # Also log to console with formatting
         base_extra: dict[str, Any] = {
@@ -84,12 +84,8 @@ class DebugLogger:
 
         response_ids = base_extra.pop("response_ids", None)
 
-        truncated_prompt = (
-            f"{prompt[:200]}..." if len(prompt) > 200 else prompt
-        )
-        truncated_response = (
-            f"{response[:200]}..." if len(response) > 200 else response
-        )
+        truncated_prompt = f"{prompt[:200]}..." if len(prompt) > 200 else prompt
+        truncated_response = f"{response[:200]}..." if len(response) > 200 else response
 
         logger.info("Action: %s", action_type, extra=dict(base_extra))
         logger.info("Prompt: %s", truncated_prompt, extra=dict(base_extra))
@@ -137,7 +133,7 @@ class DebugLogger:
         filepath = self.debug_dir / filename
 
         # Save screenshot
-        with open(filepath, 'wb') as f:
+        with open(filepath, "wb") as f:
             f.write(screenshot_bytes)
 
         logger.debug(
@@ -166,7 +162,7 @@ class DebugLogger:
             "reports_directory": str(self.reports_dir),
             "ai_interactions": ai_interaction_count,
             "screenshots_saved": len(screenshots),
-            "screenshot_files": [s.name for s in screenshots]
+            "screenshot_files": [s.name for s in screenshots],
         }
 
     def get_ai_conversations_html(self) -> str:
@@ -198,7 +194,7 @@ class DebugLogger:
                     html += "</div>\n"
 
                     # Screenshot
-                    if data.get('screenshot'):
+                    if data.get("screenshot"):
                         html += f"<p><strong>📸 SCREENSHOT:</strong> {data['screenshot']}</p>\n"
 
                     html += "</div>\n"

@@ -29,7 +29,6 @@ __all__ = [
     "RateLimitConfig",
     "TokenBucket",
     "SlidingWindowCounter",
-
     # Data sanitization
     "DataSanitizer",
     "SensitiveDataPattern",
@@ -37,5 +36,5 @@ __all__ = [
     "RedactionMethod",
     "sanitize_dict",
     "sanitize_string",
-    "mask_sensitive_data"
+    "mask_sensitive_data",
 ]

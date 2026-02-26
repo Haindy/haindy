@@ -54,7 +54,7 @@ class WorkflowCoordinator:
         message_bus: MessageBus | None = None,
         state_manager: StateManager | None = None,
         automation_driver: AutomationDriver | None = None,
-        max_steps: int = 50
+        max_steps: int = 50,
     ):
         """
         Initialize the workflow coordinator.
@@ -159,23 +159,17 @@ class WorkflowCoordinator:
         """Set up message subscriptions for an agent."""
         if agent_name == "test_planner":
             self.message_bus.subscribe(
-                MessageType.PLAN_TEST,
-                self._handle_plan_request,
-                agent_name
+                MessageType.PLAN_TEST, self._handle_plan_request, agent_name
             )
 
         elif agent_name == "test_runner":
             self.message_bus.subscribe(
-                MessageType.EXECUTE_STEP,
-                self._handle_execute_step,
-                agent_name
+                MessageType.EXECUTE_STEP, self._handle_execute_step, agent_name
             )
 
         elif agent_name == "action_agent":
             self.message_bus.subscribe(
-                MessageType.DETERMINE_ACTION,
-                self._handle_determine_action,
-                agent_name
+                MessageType.DETERMINE_ACTION, self._handle_determine_action, agent_name
             )
 
         # Evaluator agent removed - evaluation now handled by Action Agent
@@ -232,17 +226,11 @@ class WorkflowCoordinator:
                 )
 
             # Phase 2: Initialize test state
-            test_state = await self.state_manager.create_test_state(
-                test_plan,
-                context
-            )
+            test_state = await self.state_manager.create_test_state(test_plan, context)
 
             # Phase 3: Execute test
             self._state = CoordinatorState.EXECUTING
-            final_state = await self._execute_test_plan(
-                test_state,
-                initial_url
-            )
+            final_state = await self._execute_test_plan(test_state, initial_url)
 
             self._state = CoordinatorState.COMPLETED
             return final_state
@@ -272,7 +260,7 @@ class WorkflowCoordinator:
             from_agent="coordinator",
             to_agent="test_planner",
             message_type=MessageType.PLAN_TEST,
-            content={"requirements": requirements}
+            content={"requirements": requirements},
         )
 
         await self.message_bus.publish(message)
@@ -294,16 +282,14 @@ class WorkflowCoordinator:
                 from_agent="test_planner",
                 to_agent="broadcast",
                 message_type=MessageType.PLAN_CREATED,
-                content={"test_plan": test_plan.model_dump()}
+                content={"test_plan": test_plan.model_dump()},
             )
         )
 
         return test_plan, triage_result
 
     async def _execute_test_plan(
-        self,
-        test_state: TestState,
-        initial_url: str | None = None
+        self, test_state: TestState, initial_url: str | None = None
     ) -> TestState:
         """Execute test plan using Test Runner agent."""
         logger.info(f"Executing test plan: {test_state.test_plan.name}")
@@ -334,7 +320,7 @@ class WorkflowCoordinator:
             await self.state_manager.update_test_state(
                 test_state.test_plan.plan_id,
                 StateTransition.ABORT,
-                {"reason": "timeout"}
+                {"reason": "timeout"},
             )
 
             raise
@@ -348,10 +334,7 @@ class WorkflowCoordinator:
         logger.info(f"Pausing test: {test_id}")
 
         # Update state
-        await self.state_manager.update_test_state(
-            test_id,
-            StateTransition.PAUSE
-        )
+        await self.state_manager.update_test_state(test_id, StateTransition.PAUSE)
 
         # Send pause message
         await self.message_bus.publish(
@@ -359,7 +342,7 @@ class WorkflowCoordinator:
                 from_agent="coordinator",
                 to_agent="test_runner",
                 message_type=MessageType.PAUSE_TEST,
-                content={"test_id": str(test_id)}
+                content={"test_id": str(test_id)},
             )
         )
 
@@ -368,10 +351,7 @@ class WorkflowCoordinator:
         logger.info(f"Resuming test: {test_id}")
 
         # Update state
-        await self.state_manager.update_test_state(
-            test_id,
-            StateTransition.RESUME
-        )
+        await self.state_manager.update_test_state(test_id, StateTransition.RESUME)
 
         # Send resume message
         await self.message_bus.publish(
@@ -379,7 +359,7 @@ class WorkflowCoordinator:
                 from_agent="coordinator",
                 to_agent="test_runner",
                 message_type=MessageType.RESUME_TEST,
-                content={"test_id": str(test_id)}
+                content={"test_id": str(test_id)},
             )
         )
 
@@ -397,9 +377,7 @@ class WorkflowCoordinator:
 
         # Update state
         await self.state_manager.update_test_state(
-            test_id,
-            StateTransition.ABORT,
-            {"reason": "user_requested"}
+            test_id, StateTransition.ABORT, {"reason": "user_requested"}
         )
 
         # Send stop message
@@ -408,7 +386,7 @@ class WorkflowCoordinator:
                 from_agent="coordinator",
                 to_agent="broadcast",
                 message_type=MessageType.STOP_TEST,
-                content={"test_id": str(test_id)}
+                content={"test_id": str(test_id)},
             )
         )
 
@@ -431,15 +409,12 @@ class WorkflowCoordinator:
         pass
 
     async def _on_state_change(
-        self,
-        test_id: UUID,
-        test_state: TestState,
-        transition: StateTransition
+        self, test_id: UUID, test_state: TestState, transition: StateTransition
     ) -> None:
         """Handle test state changes."""
         logger.info(
             f"Test state changed: {test_id} - {transition}",
-            extra={"status": test_state.status}
+            extra={"status": test_state.status},
         )
 
         # Broadcast state change
@@ -451,8 +426,8 @@ class WorkflowCoordinator:
                 content={
                     "test_id": str(test_id),
                     "status": test_state.status,
-                    "transition": transition
-                }
+                    "transition": transition,
+                },
             )
         )
 
@@ -481,7 +456,7 @@ class WorkflowCoordinator:
             "state": self._state,
             "active_tests": len(self._active_tests),
             "agents": list(self._agents.keys()),
-            "message_stats": self.message_bus.get_statistics()
+            "message_stats": self.message_bus.get_statistics(),
         }
 
     async def generate_test_plan(self, requirements: str) -> TestPlan:
@@ -523,10 +498,7 @@ class WorkflowCoordinator:
 
         # Wait for tasks to complete
         if self._active_tests:
-            await asyncio.gather(
-                *self._active_tests.values(),
-                return_exceptions=True
-            )
+            await asyncio.gather(*self._active_tests.values(), return_exceptions=True)
 
         # Clear active tests
         self._active_tests.clear()

@@ -32,11 +32,13 @@ async def demo_end_to_end():
     # Setup logging
     setup_logging(log_level="INFO")
 
-    console.print(Panel.fit(
-        "[bold cyan]HAINDY End-to-End Demo[/bold cyan]\n"
-        "Demonstrating complete multi-agent test execution workflow",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]HAINDY End-to-End Demo[/bold cyan]\n"
+            "Demonstrating complete multi-agent test execution workflow",
+            border_style="cyan",
+        )
+    )
 
     # Initialize components
     browser_controller = None
@@ -50,7 +52,9 @@ async def demo_end_to_end():
         console.print("[green]✓[/green] Browser initialized")
 
         # Step 2: Initialize orchestration components
-        console.print("\n[yellow]Step 2:[/yellow] Setting up orchestration framework...")
+        console.print(
+            "\n[yellow]Step 2:[/yellow] Setting up orchestration framework..."
+        )
         message_bus = MessageBus()
         state_manager = StateManager()
 
@@ -65,7 +69,9 @@ async def demo_end_to_end():
         console.print("[green]✓[/green] Orchestration framework ready")
         console.print(f"  - Active agents: {len(coordinator._agents)}")
         console.print(f"  - Message bus ready: {coordinator.message_bus is not None}")
-        console.print(f"  - State manager ready: {coordinator.state_manager is not None}")
+        console.print(
+            f"  - State manager ready: {coordinator.state_manager is not None}"
+        )
 
         # Step 3: Define test requirements
         console.print("\n[yellow]Step 3:[/yellow] Defining test requirements...")
@@ -81,12 +87,14 @@ async def demo_end_to_end():
 
         test_url = f"file://{Path(__file__).parent}/test_page.html"
 
-        console.print(Panel(
-            f"[cyan]Requirements:[/cyan]\n{test_requirements}\n\n"
-            f"[cyan]Target URL:[/cyan] {test_url}",
-            title="Test Scenario",
-            border_style="blue",
-        ))
+        console.print(
+            Panel(
+                f"[cyan]Requirements:[/cyan]\n{test_requirements}\n\n"
+                f"[cyan]Target URL:[/cyan] {test_url}",
+                title="Test Scenario",
+                border_style="blue",
+            )
+        )
 
         # Step 4: Navigate to test page
         console.print("\n[yellow]Step 4:[/yellow] Navigating to test application...")
@@ -94,14 +102,18 @@ async def demo_end_to_end():
         console.print("[green]✓[/green] Navigation complete")
 
         # Step 5: Generate test plan (demo plan-only mode)
-        console.print("\n[yellow]Step 5:[/yellow] Generating test plan from requirements...")
+        console.print(
+            "\n[yellow]Step 5:[/yellow] Generating test plan from requirements..."
+        )
 
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            plan_task = progress.add_task("[cyan]Planning test execution...", total=None)
+            plan_task = progress.add_task(
+                "[cyan]Planning test execution...", total=None
+            )
 
             test_plan = await coordinator.generate_test_plan(test_requirements)
 
@@ -133,7 +145,9 @@ async def demo_end_to_end():
         console.print(table)
 
         # Step 6: Execute test
-        console.print("\n[yellow]Step 6:[/yellow] Executing test with multi-agent system...")
+        console.print(
+            "\n[yellow]Step 6:[/yellow] Executing test with multi-agent system..."
+        )
         console.print("[dim]Note: This demo shows the workflow structure.[/dim]")
         console.print("[dim]Full agent implementation would execute each step.[/dim]")
 
@@ -157,7 +171,9 @@ async def demo_end_to_end():
                 progress.update(exec_task, completed=True)
             except Exception as e:
                 progress.update(exec_task, description=f"[yellow]Note: {e}[/yellow]")
-                console.print("\n[yellow]Note: Full agent execution requires OpenAI API key.[/yellow]")
+                console.print(
+                    "\n[yellow]Note: Full agent execution requires OpenAI API key.[/yellow]"
+                )
                 console.print("[dim]Using mock test state for demo purposes.[/dim]\n")
                 # For demo, create a mock test state
                 from datetime import datetime, timezone
@@ -219,7 +235,9 @@ async def demo_end_to_end():
 
         passed_steps = sum(1 for r in test_state.step_results.values() if r.success)
         console.print(f"Passed Steps: [green]{passed_steps}[/green]")
-        console.print(f"Failed Steps: [red]{len(test_state.step_results) - passed_steps}[/red]")
+        console.print(
+            f"Failed Steps: [red]{len(test_state.step_results) - passed_steps}[/red]"
+        )
 
         # Show workflow components
         console.print("\n[bold]Workflow Components Used:[/bold]")
@@ -243,6 +261,7 @@ async def demo_end_to_end():
     except Exception as e:
         console.print(f"\n[red]Error during demo: {e}[/red]")
         import traceback
+
         traceback.print_exc()
     finally:
         # Cleanup

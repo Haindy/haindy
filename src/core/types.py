@@ -151,7 +151,9 @@ class TestStep(BaseModel):
     action: str = Field(..., description="Action to be performed")
     expected_result: str = Field(..., description="Expected outcome of the action")
     # Keep action_instruction for backward compatibility during transition
-    action_instruction: ActionInstruction | None = Field(None, description="Detailed action instruction (deprecated)")
+    action_instruction: ActionInstruction | None = Field(
+        None, description="Detailed action instruction (deprecated)"
+    )
     dependencies: list[int] = Field(
         default_factory=list, description="Step numbers that must complete first"
     )
@@ -204,11 +206,19 @@ class TestCase(BaseModel):
     case_id: UUID = Field(default_factory=uuid4)
     test_id: str = Field(..., description="Human-readable test case ID (e.g., TC001)")
     name: str = Field(..., description="Test case name")
-    description: str = Field(..., description="Detailed description of what is being tested")
-    priority: TestCasePriority = Field(TestCasePriority.MEDIUM, description="Test case priority")
-    prerequisites: list[str] = Field(default_factory=list, description="Prerequisites for this test case")
+    description: str = Field(
+        ..., description="Detailed description of what is being tested"
+    )
+    priority: TestCasePriority = Field(
+        TestCasePriority.MEDIUM, description="Test case priority"
+    )
+    prerequisites: list[str] = Field(
+        default_factory=list, description="Prerequisites for this test case"
+    )
     steps: list[TestStep] = Field(..., description="Ordered list of test steps")
-    postconditions: list[str] = Field(default_factory=list, description="Expected state after test completion")
+    postconditions: list[str] = Field(
+        default_factory=list, description="Expected state after test completion"
+    )
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
 
 
@@ -220,16 +230,24 @@ class TestPlan(BaseModel):
     plan_id: UUID = Field(default_factory=uuid4)
     name: str = Field(..., description="Test plan name")
     description: str = Field(..., description="Overall test plan description")
-    requirements_source: str = Field(..., description="Source of requirements (e.g., PRD v1.2, URL)")
-    test_cases: list[TestCase] = Field(..., description="List of test cases in this plan")
+    requirements_source: str = Field(
+        ..., description="Source of requirements (e.g., PRD v1.2, URL)"
+    )
+    test_cases: list[TestCase] = Field(
+        ..., description="List of test cases in this plan"
+    )
     steps: list[TestStep] = Field(
         default_factory=list,
         description="Flattened list of all steps for legacy consumers",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    created_by: str = Field("HAINDY Test Planner", description="Who/what created this plan")
+    created_by: str = Field(
+        "HAINDY Test Planner", description="Who/what created this plan"
+    )
     tags: list[str] = Field(default_factory=list, description="Overall plan tags")
-    estimated_duration_seconds: int | None = Field(None, description="Total estimated duration")
+    estimated_duration_seconds: int | None = Field(
+        None, description="Total estimated duration"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -346,7 +364,9 @@ class TestState(BaseModel):
     error_count: int = 0
     warning_count: int = 0
     context: dict[str, Any] = Field(default_factory=dict)
-    test_report: Optional['TestReport'] = Field(None, description="Comprehensive test execution report")  # Will be populated by TestRunner
+    test_report: Optional["TestReport"] = Field(
+        None, description="Comprehensive test execution report"
+    )  # Will be populated by TestRunner
 
 
 class EvaluationResult(BaseModel):
@@ -429,7 +449,9 @@ class ScrollParameters(BaseModel):
 
     direction: ScrollDirection | None = Field(None, description="Scroll direction")
     pixels: int | None = Field(None, description="Number of pixels to scroll")
-    target_element: str | None = Field(None, description="Description of element to scroll to")
+    target_element: str | None = Field(
+        None, description="Description of element to scroll to"
+    )
     max_attempts: int = Field(15, description="Maximum scroll attempts")
 
 
@@ -441,9 +463,15 @@ class VisibilityResult(BaseModel):
         None,
         description="Coordinate metadata if the target is visible",
     )
-    visible_percentage: int | None = Field(None, description="Percentage visible if partial")
-    suggested_direction: ScrollDirection | None = Field(None, description="Suggested scroll direction")
-    direction_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Confidence in direction")
+    visible_percentage: int | None = Field(
+        None, description="Percentage visible if partial"
+    )
+    suggested_direction: ScrollDirection | None = Field(
+        None, description="Suggested scroll direction"
+    )
+    direction_confidence: float = Field(
+        0.0, ge=0.0, le=1.0, description="Confidence in direction"
+    )
     notes: str = Field("", description="Additional AI observations")
 
 
@@ -452,7 +480,9 @@ class ScrollAction(BaseModel):
 
     direction: ScrollDirection
     distance: int = Field(..., description="Distance in pixels")
-    is_correction: bool = Field(False, description="Whether this is a correction scroll")
+    is_correction: bool = Field(
+        False, description="Whether this is a correction scroll"
+    )
     executed_at: datetime | None = None
 
 
@@ -502,11 +532,17 @@ class StepResult(BaseModel):
     action: str
     expected_result: str
     actual_result: str
-    screenshot_before: str | None = Field(None, description="Path to screenshot before action")
-    screenshot_after: str | None = Field(None, description="Path to screenshot after action")
+    screenshot_before: str | None = Field(
+        None, description="Path to screenshot before action"
+    )
+    screenshot_after: str | None = Field(
+        None, description="Path to screenshot after action"
+    )
     error_message: str | None = None
     confidence: float = Field(1.0, ge=0.0, le=1.0)
-    actions_performed: list[dict[str, Any]] = Field(default_factory=list, description="List of sub-actions performed")
+    actions_performed: list[dict[str, Any]] = Field(
+        default_factory=list, description="List of sub-actions performed"
+    )
 
 
 class BugReport(BaseModel):
@@ -519,7 +555,9 @@ class BugReport(BaseModel):
     step_number: int
     description: str
     severity: BugSeverity
-    error_type: str = Field(..., description="Type of error (e.g., 'element_not_found', 'assertion_failed')")
+    error_type: str = Field(
+        ..., description="Type of error (e.g., 'element_not_found', 'assertion_failed')"
+    )
     expected_result: str
     actual_result: str
     screenshot_path: str | None = None
@@ -594,8 +632,12 @@ class TestReport(BaseModel):
     test_cases: list[TestCaseResult] = Field(default_factory=list)
     summary: TestSummary | None = None
     bugs: list[BugReport] = Field(default_factory=list)
-    environment: dict[str, Any] = Field(default_factory=dict, description="Test environment details")
+    environment: dict[str, Any] = Field(
+        default_factory=dict, description="Test environment details"
+    )
     artifacts: dict[str, Any] = Field(
         default_factory=dict, description="Paths to additional run artifacts"
     )
-    created_by: str = Field("HAINDY Test Runner", description="Who/what executed the tests")
+    created_by: str = Field(
+        "HAINDY Test Runner", description="Who/what executed the tests"
+    )

@@ -31,8 +31,8 @@ async def create_sample_test_plan() -> TestPlan:
                 action_type=ActionType.CLICK,
                 description="Click on the Wikipedia search input field",
                 target="Search input box",
-                expected_outcome="Search box is focused and ready for input"
-            )
+                expected_outcome="Search box is focused and ready for input",
+            ),
         ),
         TestStep(
             step_number=2,
@@ -42,8 +42,8 @@ async def create_sample_test_plan() -> TestPlan:
                 description="Type 'Artificial Intelligence' in search box",
                 target="Search input field",
                 value="Artificial Intelligence",
-                expected_outcome="Search query is entered in the search box"
-            )
+                expected_outcome="Search query is entered in the search box",
+            ),
         ),
         TestStep(
             step_number=3,
@@ -52,16 +52,16 @@ async def create_sample_test_plan() -> TestPlan:
                 action_type=ActionType.CLICK,
                 description="Click the search/go button",
                 target="Search button or magnifying glass icon",
-                expected_outcome="Search is initiated and results page loads"
-            )
-        )
+                expected_outcome="Search is initiated and results page loads",
+            ),
+        ),
     ]
 
     return TestPlan(
         name="Wikipedia Search Test",
         description="Test searching for 'Artificial Intelligence' on Wikipedia",
         requirements="User should be able to search Wikipedia for a topic",
-        steps=steps
+        steps=steps,
     )
 
 
@@ -83,8 +83,7 @@ async def run_refactored_demo():
         print("\n2️⃣ Creating refactored agents...")
         action_agent = ActionAgentV2(browser_driver=browser_driver)
         test_runner = TestRunnerV2(
-            browser_driver=browser_driver,
-            action_agent=action_agent
+            browser_driver=browser_driver, action_agent=action_agent
         )
 
         # Create test plan
@@ -98,8 +97,7 @@ async def run_refactored_demo():
         print("   Watch the browser window and see the enhanced logging!")
 
         enhanced_state = await test_runner.execute_test_plan(
-            test_plan=test_plan,
-            initial_url="https://www.wikipedia.org"
+            test_plan=test_plan, initial_url="https://www.wikipedia.org"
         )
 
         # Generate reports
@@ -110,7 +108,10 @@ async def run_refactored_demo():
         reporter.print_terminal_summary(enhanced_state)
 
         # HTML report
-        report_path = Path("reports") / f"refactored_demo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        report_path = (
+            Path("reports")
+            / f"refactored_demo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        )
         reporter.generate_html_report(enhanced_state, report_path)
         print(f"\n📊 HTML report saved to: {report_path}")
 
@@ -134,6 +135,7 @@ async def run_refactored_demo():
     except Exception as e:
         print(f"\n❌ Demo failed: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:
@@ -184,7 +186,7 @@ if __name__ == "__main__":
     asyncio.run(compare_architectures())
 
     # Run the demo
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     input("Press Enter to run the refactored demo...")
 
     asyncio.run(run_refactored_demo())

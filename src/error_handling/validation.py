@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ValidationSeverity(Enum):
     """Severity levels for validation issues."""
+
     INFO = auto()
     WARNING = auto()
     ERROR = auto()
@@ -29,6 +30,7 @@ class ValidationSeverity(Enum):
 
 class HallucinationType(Enum):
     """Types of hallucinations that can be detected."""
+
     PHANTOM_ELEMENT = auto()  # Element doesn't exist
     WRONG_COORDINATES = auto()  # Coordinates outside viewport
     IMPOSSIBLE_ACTION = auto()  # Action not possible in context
@@ -39,6 +41,7 @@ class HallucinationType(Enum):
 @dataclass
 class ValidationResult:
     """Result of a validation check."""
+
     is_valid: bool
     severity: ValidationSeverity
     message: str
@@ -52,13 +55,14 @@ class ValidationResult:
             "severity": self.severity.name,
             "message": self.message,
             "rule_name": self.rule_name,
-            "details": self.details
+            "details": self.details,
         }
 
 
 @dataclass
 class ValidationRule:
     """A single validation rule."""
+
     name: str
     description: str
     check_function: Callable[[Any], ValidationResult]
@@ -74,14 +78,14 @@ class ConfidenceScorer:
             "minimum": 0.3,
             "low": 0.5,
             "medium": 0.7,
-            "high": 0.9
+            "high": 0.9,
         }
 
     def calculate_action_confidence(
         self,
         action: ResolvedAction,
         screenshot_analysis: dict[str, Any] | None = None,
-        historical_success_rate: float | None = None
+        historical_success_rate: float | None = None,
     ) -> float:
         """
         Calculate confidence score for an action.
@@ -113,7 +117,9 @@ class ConfidenceScorer:
             weights.append(1.0)
 
         # Action type confidence (some actions are more reliable)
-        action_confidence = self._get_action_type_confidence(action.instruction.action_type)
+        action_confidence = self._get_action_type_confidence(
+            action.instruction.action_type
+        )
         scores.append(action_confidence)
         weights.append(0.5)
 
@@ -135,7 +141,7 @@ class ConfidenceScorer:
             ActionType.SCROLL: 0.80,
             ActionType.WAIT: 1.0,  # Always succeeds
             ActionType.SCREENSHOT: 1.0,
-            ActionType.ASSERT: 0.75  # Depends on assertion type
+            ActionType.ASSERT: 0.75,  # Depends on assertion type
         }
         return action_confidences.get(action_type, 0.7)
 
@@ -159,7 +165,7 @@ class HallucinationDetector:
             HallucinationType.PHANTOM_ELEMENT: [
                 r"I can see .* button",
                 r"There is a .* element",
-                r"I found .* on the page"
+                r"I found .* on the page",
             ],
             HallucinationType.WRONG_COORDINATES: [
                 r"coordinates?: \(-?\d+, -?\d+\)",  # Negative coordinates
@@ -167,13 +173,13 @@ class HallucinationDetector:
             HallucinationType.FABRICATED_DATA: [
                 r"The (price|total|amount) is \$[\d,]+\.?\d*",
                 r"I see \d+ items? in the cart",
-                r"The form has been submitted successfully"
-            ]
+                r"The form has been submitted successfully",
+            ],
         }
 
         self.valid_viewport_ranges = {
             "x": (0, 1920),  # Common max width
-            "y": (0, 1080)   # Common max height
+            "y": (0, 1080),  # Common max height
         }
 
     def detect_hallucinations(
@@ -181,7 +187,7 @@ class HallucinationDetector:
         agent_output: str,
         agent_name: str,
         screenshot_elements: set[str] | None = None,
-        viewport_size: tuple[int, int] | None = None
+        viewport_size: tuple[int, int] | None = None,
     ) -> HallucinationError | None:
         """
         Detect potential hallucinations in agent output.
@@ -200,14 +206,22 @@ class HallucinationDetector:
             for pattern in patterns:
                 if re.search(pattern, agent_output, re.IGNORECASE):
                     # Verify against screenshot if available
-                    if hall_type == HallucinationType.PHANTOM_ELEMENT and screenshot_elements:
-                        if not self._verify_element_exists(agent_output, screenshot_elements):
+                    if (
+                        hall_type == HallucinationType.PHANTOM_ELEMENT
+                        and screenshot_elements
+                    ):
+                        if not self._verify_element_exists(
+                            agent_output, screenshot_elements
+                        ):
                             return HallucinationError(
                                 "Agent claims to see element that doesn't exist",
                                 agent_name=agent_name,
                                 hallucination_type=hall_type.name,
                                 confidence_score=0.8,
-                                evidence=[f"Pattern matched: {pattern}", "Element not in screenshot"]
+                                evidence=[
+                                    f"Pattern matched: {pattern}",
+                                    "Element not in screenshot",
+                                ],
                             )
 
         # Check coordinate validity
@@ -220,22 +234,20 @@ class HallucinationDetector:
                     agent_name=agent_name,
                     hallucination_type=HallucinationType.WRONG_COORDINATES.name,
                     confidence_score=0.95,
-                    evidence=[f"Coordinates outside viewport: {viewport_size}"]
+                    evidence=[f"Coordinates outside viewport: {viewport_size}"],
                 )
 
         return None
 
     def _verify_element_exists(
-        self,
-        agent_output: str,
-        screenshot_elements: set[str]
+        self, agent_output: str, screenshot_elements: set[str]
     ) -> bool:
         """Verify if claimed element exists in screenshot."""
         # Extract element claims from output
         element_claims = re.findall(
             r"(?:see|found|clicked on|typing in) (?:a |the )?(['\"]?)(.+?)\1 (?:button|link|field|element)",
             agent_output,
-            re.IGNORECASE
+            re.IGNORECASE,
         )
 
         for _, element_text in element_claims:
@@ -247,10 +259,7 @@ class HallucinationDetector:
         return True
 
     def _validate_coordinates(
-        self,
-        x: int,
-        y: int,
-        viewport_size: tuple[int, int]
+        self, x: int, y: int, viewport_size: tuple[int, int]
     ) -> bool:
         """Validate coordinates are within viewport."""
         width, height = viewport_size
@@ -268,42 +277,48 @@ class ActionValidator:
 
     def _setup_default_rules(self) -> None:
         """Set up default validation rules."""
-        self.add_rule(ValidationRule(
-            name="valid_action_type",
-            description="Check if action type is valid",
-            check_function=self._validate_action_type,
-            severity=ValidationSeverity.ERROR
-        ))
+        self.add_rule(
+            ValidationRule(
+                name="valid_action_type",
+                description="Check if action type is valid",
+                check_function=self._validate_action_type,
+                severity=ValidationSeverity.ERROR,
+            )
+        )
 
-        self.add_rule(ValidationRule(
-            name="coordinate_bounds",
-            description="Check if coordinates are within bounds",
-            check_function=self._validate_coordinates,
-            severity=ValidationSeverity.ERROR
-        ))
+        self.add_rule(
+            ValidationRule(
+                name="coordinate_bounds",
+                description="Check if coordinates are within bounds",
+                check_function=self._validate_coordinates,
+                severity=ValidationSeverity.ERROR,
+            )
+        )
 
-        self.add_rule(ValidationRule(
-            name="element_selector",
-            description="Validate element selector format",
-            check_function=self._validate_selector,
-            severity=ValidationSeverity.WARNING
-        ))
+        self.add_rule(
+            ValidationRule(
+                name="element_selector",
+                description="Validate element selector format",
+                check_function=self._validate_selector,
+                severity=ValidationSeverity.WARNING,
+            )
+        )
 
-        self.add_rule(ValidationRule(
-            name="action_prerequisites",
-            description="Check action prerequisites are met",
-            check_function=self._validate_prerequisites,
-            severity=ValidationSeverity.ERROR
-        ))
+        self.add_rule(
+            ValidationRule(
+                name="action_prerequisites",
+                description="Check action prerequisites are met",
+                check_function=self._validate_prerequisites,
+                severity=ValidationSeverity.ERROR,
+            )
+        )
 
     def add_rule(self, rule: ValidationRule) -> None:
         """Add a validation rule."""
         self.rules.append(rule)
 
     async def validate_action(
-        self,
-        action: ResolvedAction,
-        context: dict[str, Any]
+        self, action: ResolvedAction, context: dict[str, Any]
     ) -> tuple[bool, list[ValidationResult]]:
         """
         Validate an action before execution.
@@ -326,16 +341,19 @@ class ActionValidator:
                 results.append(result)
             except Exception as e:
                 logger.error(f"Validation rule {rule.name} failed: {e}")
-                results.append(ValidationResult(
-                    is_valid=False,
-                    severity=ValidationSeverity.ERROR,
-                    message=f"Rule execution failed: {str(e)}",
-                    rule_name=rule.name
-                ))
+                results.append(
+                    ValidationResult(
+                        is_valid=False,
+                        severity=ValidationSeverity.ERROR,
+                        message=f"Rule execution failed: {str(e)}",
+                        rule_name=rule.name,
+                    )
+                )
 
         # Check for any critical or error severity failures
         has_errors = any(
-            not r.is_valid and r.severity in [ValidationSeverity.ERROR, ValidationSeverity.CRITICAL]
+            not r.is_valid
+            and r.severity in [ValidationSeverity.ERROR, ValidationSeverity.CRITICAL]
             for r in results
         )
 
@@ -350,14 +368,14 @@ class ActionValidator:
                 is_valid=False,
                 severity=ValidationSeverity.ERROR,
                 message=f"Invalid action type: {action.instruction.action_type}",
-                rule_name="valid_action_type"
+                rule_name="valid_action_type",
             )
 
         return ValidationResult(
             is_valid=True,
             severity=ValidationSeverity.INFO,
             message="Action type is valid",
-            rule_name="valid_action_type"
+            rule_name="valid_action_type",
         )
 
     def _validate_coordinates(self, data: dict[str, Any]) -> ValidationResult:
@@ -382,7 +400,7 @@ class ActionValidator:
             is_valid=True,
             severity=ValidationSeverity.INFO,
             message="Coordinates valid",
-            rule_name="coordinate_bounds"
+            rule_name="coordinate_bounds",
         )
 
     def _validate_selector(self, data: dict[str, Any]) -> ValidationResult:
@@ -397,14 +415,14 @@ class ActionValidator:
                     is_valid=False,
                     severity=ValidationSeverity.WARNING,
                     message="Empty target description",
-                    rule_name="element_selector"
+                    rule_name="element_selector",
                 )
 
         return ValidationResult(
             is_valid=True,
             severity=ValidationSeverity.INFO,
             message="Selector format valid",
-            rule_name="element_selector"
+            rule_name="element_selector",
         )
 
     def _validate_prerequisites(self, data: dict[str, Any]) -> ValidationResult:
@@ -419,7 +437,7 @@ class ActionValidator:
                     is_valid=False,
                     severity=ValidationSeverity.ERROR,
                     message="Page not loaded for action",
-                    rule_name="action_prerequisites"
+                    rule_name="action_prerequisites",
                 )
 
         # Check element exists for interaction actions
@@ -429,12 +447,12 @@ class ActionValidator:
                     is_valid=False,
                     severity=ValidationSeverity.ERROR,
                     message=f"Element not found for {action.instruction.action_type}",
-                    rule_name="action_prerequisites"
+                    rule_name="action_prerequisites",
                 )
 
         return ValidationResult(
             is_valid=True,
             severity=ValidationSeverity.INFO,
             message="Prerequisites met",
-            rule_name="action_prerequisites"
+            rule_name="action_prerequisites",
         )

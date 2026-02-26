@@ -18,12 +18,17 @@ class ValidationResult(BaseModel):
     """Result of action validation phase."""
 
     valid: bool = Field(..., description="Whether the action is valid to execute")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Validation confidence score")
-    reasoning: str = Field(..., description="Detailed explanation of validation decision")
-    concerns: list[str] = Field(default_factory=list, description="List of validation concerns")
+    confidence: float = Field(
+        ..., ge=0.0, le=1.0, description="Validation confidence score"
+    )
+    reasoning: str = Field(
+        ..., description="Detailed explanation of validation decision"
+    )
+    concerns: list[str] = Field(
+        default_factory=list, description="List of validation concerns"
+    )
     suggestions: list[str] = Field(
-        default_factory=list,
-        description="Alternative approaches if validation failed"
+        default_factory=list, description="Alternative approaches if validation failed"
     )
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -51,12 +56,15 @@ class CoordinateResult(BaseModel):
         le=1.0,
         description="Normalized Y coordinate within selected target bounds",
     )
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Coordinate confidence score")
+    confidence: float = Field(
+        ..., ge=0.0, le=1.0, description="Coordinate confidence score"
+    )
     reasoning: str = Field("", description="Explanation of coordinate selection")
-    adjusted: bool = Field(False, description="Whether post-selection adjustment was applied")
+    adjusted: bool = Field(
+        False, description="Whether post-selection adjustment was applied"
+    )
     adjustment_details: dict[str, Any] | None = Field(
-        None,
-        description="Details about any coordinate adjustment process"
+        None, description="Details about any coordinate adjustment process"
     )
 
 
@@ -64,13 +72,20 @@ class ExecutionResult(BaseModel):
     """Result of action execution phase."""
 
     success: bool = Field(..., description="Whether the action executed successfully")
-    execution_time_ms: float = Field(..., description="Execution duration in milliseconds")
-    error_message: str | None = Field(None, description="Error message if execution failed")
-    error_traceback: str | None = Field(None, description="Full error traceback if available")
-    environment_logs: list[str] = Field(default_factory=list, description="Environment logs")
+    execution_time_ms: float = Field(
+        ..., description="Execution duration in milliseconds"
+    )
+    error_message: str | None = Field(
+        None, description="Error message if execution failed"
+    )
+    error_traceback: str | None = Field(
+        None, description="Full error traceback if available"
+    )
+    environment_logs: list[str] = Field(
+        default_factory=list, description="Environment logs"
+    )
     network_activity: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Network requests during execution"
+        default_factory=list, description="Network requests during execution"
     )
 
 
@@ -78,20 +93,23 @@ class AIAnalysis(BaseModel):
     """AI analysis of action results."""
 
     success: bool = Field(..., description="AI assessment of action success")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Analysis confidence score")
-    actual_outcome: str = Field(..., description="Description of what actually happened")
-    matches_expected: bool = Field(..., description="Whether outcome matches expectations")
+    confidence: float = Field(
+        ..., ge=0.0, le=1.0, description="Analysis confidence score"
+    )
+    actual_outcome: str = Field(
+        ..., description="Description of what actually happened"
+    )
+    matches_expected: bool = Field(
+        ..., description="Whether outcome matches expectations"
+    )
     ui_changes: list[str] = Field(
-        default_factory=list,
-        description="List of observed UI changes"
+        default_factory=list, description="List of observed UI changes"
     )
     recommendations: list[str] = Field(
-        default_factory=list,
-        description="AI recommendations for next steps"
+        default_factory=list, description="AI recommendations for next steps"
     )
     anomalies: list[str] = Field(
-        default_factory=list,
-        description="Unexpected behaviors or UI states detected"
+        default_factory=list, description="Unexpected behaviors or UI states detected"
     )
 
 
@@ -100,7 +118,9 @@ class EnvironmentState(BaseModel):
 
     url: str = Field(..., description="Current page URL")
     title: str = Field(..., description="Page title")
-    viewport_size: tuple[int, int] = Field(..., description="Viewport dimensions (width, height)")
+    viewport_size: tuple[int, int] = Field(
+        ..., description="Viewport dimensions (width, height)"
+    )
     screenshot: bytes | None = Field(None, description="Screenshot data")
     screenshot_path: str | None = Field(None, description="Path to saved screenshot")
     dom_ready_state: str | None = Field(None, description="Document ready state")
@@ -180,7 +200,9 @@ class EnhancedActionResult(BaseModel):
     test_step_id: UUID = Field(..., description="ID of the test step being executed")
 
     # Timestamps
-    timestamp_start: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp_start: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     timestamp_end: datetime | None = Field(None)
 
     # Original request
@@ -192,31 +214,24 @@ class EnhancedActionResult(BaseModel):
 
     # Coordinate determination
     coordinates: CoordinateResult | None = Field(
-        None,
-        description="Coordinate determination results"
+        None, description="Coordinate determination results"
     )
 
     # Environment states
     environment_state_before: EnvironmentState | None = Field(
-        None,
-        description="Environment state before action"
+        None, description="Environment state before action"
     )
     environment_state_after: EnvironmentState | None = Field(
-        None,
-        description="Environment state after action"
+        None, description="Environment state after action"
     )
 
     # Execution
     execution: ExecutionResult | None = Field(
-        None,
-        description="Execution phase results"
+        None, description="Execution phase results"
     )
 
     # AI Analysis
-    ai_analysis: AIAnalysis | None = Field(
-        None,
-        description="AI analysis of results"
-    )
+    ai_analysis: AIAnalysis | None = Field(None, description="AI analysis of results")
     computer_actions: list[ComputerToolTurn] = Field(
         default_factory=list,
         description="Sequence of Computer Use tool actions executed",
@@ -239,9 +254,7 @@ class EnhancedActionResult(BaseModel):
     cache_action: str | None = Field(
         None, description="Cache action type associated with the label"
     )
-    cache_hit: bool = Field(
-        False, description="Whether the coordinate cache was used"
-    )
+    cache_hit: bool = Field(False, description="Whether the coordinate cache was used")
     cache_coordinates: tuple[int, int] | None = Field(
         None, description="Cached pixel coordinates used for the action"
     )
@@ -255,12 +268,11 @@ class EnhancedActionResult(BaseModel):
 
     # Overall status
     overall_success: bool = Field(
-        False,
-        description="Whether the entire action completed successfully"
+        False, description="Whether the entire action completed successfully"
     )
     failure_phase: str | None = Field(
         None,
-        description="Which phase failed: validation|coordinates|execution|analysis"
+        description="Which phase failed: validation|coordinates|execution|analysis",
     )
 
     def dict_for_compatibility(self) -> dict[str, Any]:
@@ -276,21 +288,43 @@ class EnhancedActionResult(BaseModel):
             "validation_passed": self.validation.valid,
             "validation_reasoning": self.validation.reasoning,
             "validation_confidence": self.validation.confidence,
-            "target_reference": self.coordinates.target_reference if self.coordinates else "",
-            "pixel_coordinates": self.coordinates.pixel_coordinates if self.coordinates else (0, 0),
+            "target_reference": self.coordinates.target_reference
+            if self.coordinates
+            else "",
+            "pixel_coordinates": self.coordinates.pixel_coordinates
+            if self.coordinates
+            else (0, 0),
             "relative_x": self.coordinates.relative_x if self.coordinates else 0.5,
             "relative_y": self.coordinates.relative_y if self.coordinates else 0.5,
-            "coordinate_confidence": self.coordinates.confidence if self.coordinates else 0.0,
-            "coordinate_reasoning": self.coordinates.reasoning if self.coordinates else "",
+            "coordinate_confidence": self.coordinates.confidence
+            if self.coordinates
+            else 0.0,
+            "coordinate_reasoning": self.coordinates.reasoning
+            if self.coordinates
+            else "",
             "execution_success": self.execution.success if self.execution else False,
-            "execution_time_ms": self.execution.execution_time_ms if self.execution else 0.0,
+            "execution_time_ms": self.execution.execution_time_ms
+            if self.execution
+            else 0.0,
             "execution_error": self.execution.error_message if self.execution else None,
-            "url_before": self.environment_state_before.url if self.environment_state_before else "",
-            "url_after": self.environment_state_after.url if self.environment_state_after else "",
-            "page_title_before": self.environment_state_before.title if self.environment_state_before else "",
-            "page_title_after": self.environment_state_after.title if self.environment_state_after else "",
-            "screenshot_before": self.environment_state_before.screenshot if self.environment_state_before else None,
-            "screenshot_after": self.environment_state_after.screenshot if self.environment_state_after else None,
+            "url_before": self.environment_state_before.url
+            if self.environment_state_before
+            else "",
+            "url_after": self.environment_state_after.url
+            if self.environment_state_after
+            else "",
+            "page_title_before": self.environment_state_before.title
+            if self.environment_state_before
+            else "",
+            "page_title_after": self.environment_state_after.title
+            if self.environment_state_after
+            else "",
+            "screenshot_before": self.environment_state_before.screenshot
+            if self.environment_state_before
+            else None,
+            "screenshot_after": self.environment_state_after.screenshot
+            if self.environment_state_after
+            else None,
             "test_context": self.test_context,
             "ai_analysis": self.ai_analysis.model_dump() if self.ai_analysis else {},
             "computer_actions": [
@@ -314,16 +348,14 @@ class ActionPattern(BaseModel):
     target_description: str = Field(..., description="Description of target element")
     coordinates: CoordinateResult = Field(..., description="Successful coordinates")
     automation_command: str | None = Field(
-        None,
-        description="Recorded Automation command for direct replay"
+        None, description="Recorded Automation command for direct replay"
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Pattern confidence")
     success_count: int = Field(0, description="Number of successful uses")
     failure_count: int = Field(0, description="Number of failed attempts")
     last_used: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     screenshot_hash: str | None = Field(
-        None,
-        description="Hash of screenshot for visual similarity matching"
+        None, description="Hash of screenshot for visual similarity matching"
     )
 
 
@@ -340,9 +372,13 @@ class BugReport(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Failure details
-    failure_type: str = Field(..., description="Type of failure: validation|execution|evaluation")
+    failure_type: str = Field(
+        ..., description="Type of failure: validation|execution|evaluation"
+    )
     error_message: str = Field(..., description="Primary error message")
-    detailed_error: str | None = Field(None, description="Detailed error with stack trace")
+    detailed_error: str | None = Field(
+        None, description="Detailed error with stack trace"
+    )
 
     # Execution context
     test_plan_name: str = Field(..., description="Name of the test plan")
@@ -350,12 +386,20 @@ class BugReport(BaseModel):
     execution_mode: str = Field("visual", description="How the step was executed")
 
     # Visual evidence
-    screenshot_before: bytes | None = Field(None, description="Screenshot before action")
+    screenshot_before: bytes | None = Field(
+        None, description="Screenshot before action"
+    )
     screenshot_after: bytes | None = Field(None, description="Screenshot after action")
     # AI analysis
-    validation_result: ValidationResult | None = Field(None, description="Validation phase results")
-    coordinate_result: CoordinateResult | None = Field(None, description="Coordinate determination results")
-    execution_result: ExecutionResult | None = Field(None, description="Execution phase results")
+    validation_result: ValidationResult | None = Field(
+        None, description="Validation phase results"
+    )
+    coordinate_result: CoordinateResult | None = Field(
+        None, description="Coordinate determination results"
+    )
+    execution_result: ExecutionResult | None = Field(
+        None, description="Execution phase results"
+    )
     ai_analysis: AIAnalysis | None = Field(None, description="AI evaluation of results")
 
     # Action details
@@ -381,22 +425,25 @@ class BugReport(BaseModel):
 
     # Debugging aids
     confidence_scores: dict[str, float] = Field(
-        default_factory=dict,
-        description="Confidence scores at each phase"
+        default_factory=dict, description="Confidence scores at each phase"
     )
     ui_anomalies: list[str] = Field(
-        default_factory=list,
-        description="Detected UI anomalies or unexpected states"
+        default_factory=list, description="Detected UI anomalies or unexpected states"
     )
     suggested_fixes: list[str] = Field(
-        default_factory=list,
-        description="AI-suggested fixes or workarounds"
+        default_factory=list, description="AI-suggested fixes or workarounds"
     )
 
     # Categorization
-    severity: str = Field("medium", description="Bug severity: low|medium|high|critical")
-    is_blocking: bool = Field(False, description="Whether this blocks test continuation")
-    is_flaky: bool = Field(False, description="Whether this appears to be a flaky failure")
+    severity: str = Field(
+        "medium", description="Bug severity: low|medium|high|critical"
+    )
+    is_blocking: bool = Field(
+        False, description="Whether this blocks test continuation"
+    )
+    is_flaky: bool = Field(
+        False, description="Whether this appears to be a flaky failure"
+    )
 
     def to_summary(self) -> str:
         """Generate a concise summary of the bug report."""
@@ -417,28 +464,27 @@ class BugReport(BaseModel):
             summary += f"  Actual: {self.actual_outcome}\n"
 
         if self.ai_analysis:
-            summary += f"  Confidence: {self.ai_analysis.confidence*100:.0f}%\n"
-        elif self.confidence_scores.get('overall'):
-            summary += f"  Confidence: {self.confidence_scores.get('overall', 0.0):.0%}\n"
+            summary += f"  Confidence: {self.ai_analysis.confidence * 100:.0f}%\n"
+        elif self.confidence_scores.get("overall"):
+            summary += (
+                f"  Confidence: {self.confidence_scores.get('overall', 0.0):.0%}\n"
+            )
 
         return summary
 
 
 class EnhancedTestState(TestState):
     """Extended test state with enhanced tracking capabilities."""
+
     execution_history: list[EnhancedActionResult] = Field(
-        default_factory=list,
-        description="Detailed history of all action executions"
+        default_factory=list, description="Detailed history of all action executions"
     )
     bug_reports: list[BugReport] = Field(
-        default_factory=list,
-        description="Collection of bug reports for failed steps"
+        default_factory=list, description="Collection of bug reports for failed steps"
     )
     performance_metrics: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Performance metrics for the test execution"
+        default_factory=dict, description="Performance metrics for the test execution"
     )
     metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional metadata for test execution"
+        default_factory=dict, description="Additional metadata for test execution"
     )

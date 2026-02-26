@@ -43,7 +43,9 @@ class ExecutionReplayCacheKey:
             except Exception:
                 resolution = (0, 0)
         return cls(
-            scenario=str(payload.get("scenario") or payload.get("scenario_name") or "").strip(),
+            scenario=str(
+                payload.get("scenario") or payload.get("scenario_name") or ""
+            ).strip(),
             step=str(payload.get("step") or payload.get("step_name") or "").strip(),
             environment=str(payload.get("environment") or "desktop").strip(),
             resolution=resolution,
@@ -76,11 +78,15 @@ class ExecutionReplayEntry:
         if not isinstance(actions, list):
             actions = []
         return cls(
-            cache_version=int(payload.get("cache_version", EXECUTION_REPLAY_CACHE_VERSION)),
+            cache_version=int(
+                payload.get("cache_version", EXECUTION_REPLAY_CACHE_VERSION)
+            ),
             key=ExecutionReplayCacheKey.from_dict(
                 key_payload if isinstance(key_payload, dict) else {}
             ),
-            recorded_at_epoch_seconds=int(payload.get("recorded_at_epoch_seconds") or 0),
+            recorded_at_epoch_seconds=int(
+                payload.get("recorded_at_epoch_seconds") or 0
+            ),
             actions=[item for item in actions if isinstance(item, dict)],
         )
 
@@ -107,7 +113,9 @@ class ExecutionReplayCache:
             return None
         return candidates[-1]
 
-    def store(self, key: ExecutionReplayCacheKey, actions: list[dict]) -> ExecutionReplayEntry:
+    def store(
+        self, key: ExecutionReplayCacheKey, actions: list[dict]
+    ) -> ExecutionReplayEntry:
         entries = self._load()
         entry = ExecutionReplayEntry(
             cache_version=EXECUTION_REPLAY_CACHE_VERSION,

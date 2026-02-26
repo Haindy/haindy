@@ -20,11 +20,15 @@ from src.monitoring.logger import setup_logging
 
 def print_test_plan(test_plan):
     """Pretty print a test plan."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Test Plan: {test_plan.name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Description: {test_plan.description}")
-    print(f"Requirements: {test_plan.requirements[:80]}..." if len(test_plan.requirements) > 80 else f"Requirements: {test_plan.requirements}")
+    print(
+        f"Requirements: {test_plan.requirements[:80]}..."
+        if len(test_plan.requirements) > 80
+        else f"Requirements: {test_plan.requirements}"
+    )
 
     if test_plan.tags:
         print(f"Tags: {', '.join(test_plan.tags)}")
@@ -45,7 +49,7 @@ def print_test_plan(test_plan):
         print(f"    Optional: {'Yes' if step.optional else 'No'}")
         print(f"    Max Retries: {step.max_retries}")
 
-    print(f"\n{'='*60}\n")
+    print(f"\n{'=' * 60}\n")
 
 
 def main():
@@ -62,6 +66,7 @@ def main():
 
     # Initialize the OpenAI client for the demo
     from openai import OpenAI
+
     openai_client = OpenAI(api_key=settings.openai_api_key)
     agent._client = openai_client
 
@@ -87,8 +92,8 @@ def main():
             context={
                 "application": "E-commerce Platform",
                 "test_environment": "Staging",
-                "user_types": "Guest and Registered Users"
-            }
+                "user_types": "Guest and Registered Users",
+            },
         )
         print_test_plan(ecommerce_plan)
     except Exception as e:
@@ -139,7 +144,7 @@ def main():
         print(f"   ✗ Error extracting scenarios: {e}")
 
     # Example 4: Refine a test plan
-    if 'ecommerce_plan' in locals():
+    if "ecommerce_plan" in locals():
         print("\n5. Refining test plan based on feedback...")
         feedback = """
         Please add more detail for payment processing steps, including:
@@ -161,7 +166,7 @@ def main():
     print("\nDemo complete!")
 
     # Save example output
-    if 'ecommerce_plan' in locals():
+    if "ecommerce_plan" in locals():
         output_dir = Path("demo_output")
         output_dir.mkdir(exist_ok=True)
 
@@ -182,10 +187,10 @@ def main():
                     "expected_result": step.action_instruction.expected_result,
                     "dependencies": [str(dep_id) for dep_id in step.dependencies],
                     "optional": step.optional,
-                    "max_retries": step.max_retries
+                    "max_retries": step.max_retries,
                 }
                 for step in ecommerce_plan.steps
-            ]
+            ],
         }
 
         with open(output_dir / "sample_test_plan.json", "w") as f:

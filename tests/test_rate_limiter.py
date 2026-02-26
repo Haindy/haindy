@@ -123,7 +123,7 @@ class TestSlidingWindowCounter:
     async def test_window_expiry(self):
         """Test request expiry after window."""
         # Use very short window for testing
-        with patch('time.time') as mock_time:
+        with patch("time.time") as mock_time:
             mock_time.return_value = 1000.0
 
             window = SlidingWindowCounter(window_seconds=10, limit=2)
@@ -148,8 +148,7 @@ class TestRateLimiter:
     async def test_rate_limiter_creation(self):
         """Test rate limiter initialization."""
         config = RateLimitConfig(
-            api_calls_per_minute=30,
-            automation_actions_per_minute=60
+            api_calls_per_minute=30, automation_actions_per_minute=60
         )
         limiter = RateLimiter(config)
 
@@ -162,7 +161,7 @@ class TestRateLimiter:
         config = RateLimitConfig(
             api_calls_per_minute=60,
             api_burst_size=2,
-            strategy=RateLimitStrategy.TOKEN_BUCKET
+            strategy=RateLimitStrategy.TOKEN_BUCKET,
         )
         limiter = RateLimiter(config)
 
@@ -181,8 +180,7 @@ class TestRateLimiter:
     async def test_browser_action_limiting(self):
         """Test browser action rate limiting."""
         config = RateLimitConfig(
-            automation_actions_per_minute=120,
-            automation_actions_burst=3
+            automation_actions_per_minute=120, automation_actions_burst=3
         )
         limiter = RateLimiter(config)
 
@@ -199,7 +197,7 @@ class TestRateLimiter:
         """Test waiting for rate limit."""
         config = RateLimitConfig(
             api_calls_per_minute=60,  # 1 per second
-            api_burst_size=1
+            api_burst_size=1,
         )
         limiter = RateLimiter(config)
 
@@ -227,10 +225,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_statistics(self):
         """Test rate limiter statistics."""
-        config = RateLimitConfig(
-            api_calls_per_minute=60,
-            api_burst_size=2
-        )
+        config = RateLimitConfig(api_calls_per_minute=60, api_burst_size=2)
         limiter = RateLimiter(config)
 
         # Make some requests
@@ -246,14 +241,13 @@ class TestRateLimiter:
         stats = limiter.get_statistics()
         assert stats["api"]["allowed"] == 2
         assert stats["api"]["rejected"] == 1
-        assert stats["api"]["rejection_rate"] == 1/3
+        assert stats["api"]["rejection_rate"] == 1 / 3
 
     @pytest.mark.asyncio
     async def test_sliding_window_strategy(self):
         """Test sliding window strategy."""
         config = RateLimitConfig(
-            api_calls_per_minute=60,
-            strategy=RateLimitStrategy.SLIDING_WINDOW
+            api_calls_per_minute=60, strategy=RateLimitStrategy.SLIDING_WINDOW
         )
         limiter = RateLimiter(config)
 

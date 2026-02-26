@@ -65,7 +65,9 @@ def normalize_driver_action(raw: dict[str, Any]) -> dict[str, Any]:
         x = _require_int(raw.get("x"), field="x")
         y = _require_int(raw.get("y"), field="y")
         button = _normalize_button(raw.get("button"))
-        click_count = max(_require_int(raw.get("click_count", 1), field="click_count"), 1)
+        click_count = max(
+            _require_int(raw.get("click_count", 1), field="click_count"), 1
+        )
         return {
             "type": "click",
             "x": x,
@@ -131,7 +133,9 @@ async def replay_driver_actions(
     """Replay recorded driver actions using the browser driver."""
     stabilization = max(int(stabilization_wait_ms), 0)
     timeout = (
-        max(float(action_timeout_seconds), 0.5) if action_timeout_seconds is not None else None
+        max(float(action_timeout_seconds), 0.5)
+        if action_timeout_seconds is not None
+        else None
     )
     normalized = normalize_driver_actions(actions)
     for action in normalized:

@@ -35,14 +35,12 @@ class EvidenceManager:
     @staticmethod
     def _prune_dir(directory: Path, max_items: int) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        files: list[Path] = [
-            p for p in directory.glob("*.png") if p.is_file()
-        ]
+        files: list[Path] = [p for p in directory.glob("*.png") if p.is_file()]
         if len(files) <= max_items:
             return
 
         files.sort(key=lambda p: p.stat().st_mtime)
-        to_delete = files[: -max_items]
+        to_delete = files[:-max_items]
         for path in to_delete:
             try:
                 path.unlink()

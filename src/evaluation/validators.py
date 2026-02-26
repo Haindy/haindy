@@ -29,10 +29,10 @@ class ValidationHelpers:
         """
         # Look for URL patterns
         url_patterns = [
-            r'URL:\s*([^\s\n]+)',
-            r'NEW_URL:\s*([^\s\n]+)',
+            r"URL:\s*([^\s\n]+)",
+            r"NEW_URL:\s*([^\s\n]+)",
             r'url["\']?\s*:\s*["\']([^"\']+)["\']',
-            r'https?://[^\s\n]+',
+            r"https?://[^\s\n]+",
         ]
 
         for pattern in url_patterns:
@@ -94,12 +94,12 @@ class ValidationHelpers:
             list_content = list_content[1:-1]
 
         # Split by common delimiters
-        items = re.split(r'[,;|]', list_content)
+        items = re.split(r"[,;|]", list_content)
 
         # Clean and filter items
         cleaned_items = []
         for item in items:
-            item = item.strip().strip('"\'')
+            item = item.strip().strip("\"'")
             if item and item.lower() not in ["none", "n/a", "null", ""]:
                 cleaned_items.append(item)
 
@@ -107,8 +107,7 @@ class ValidationHelpers:
 
     @staticmethod
     def validate_expected_text_present(
-        text_list: list[str],
-        expected_texts: list[str]
+        text_list: list[str], expected_texts: list[str]
     ) -> tuple[bool, list[str], list[str]]:
         """
         Validate that expected text appears in found text.
@@ -185,8 +184,7 @@ class ValidationHelpers:
 
     @staticmethod
     def detect_common_ui_states(
-        text_content: list[str],
-        element_descriptions: list[str]
+        text_content: list[str], element_descriptions: list[str]
     ) -> dict[str, bool]:
         """
         Detect common UI states from content.
@@ -201,16 +199,26 @@ class ValidationHelpers:
         all_content = " ".join(text_content + element_descriptions).lower()
 
         states = {
-            "loading": any(indicator in all_content for indicator in
-                          ["loading", "spinner", "progress", "please wait"]),
-            "error": any(indicator in all_content for indicator in
-                        ["error", "fail", "invalid", "exception"]),
-            "success": any(indicator in all_content for indicator in
-                          ["success", "complete", "done", "✓", "✔"]),
-            "form": any(indicator in all_content for indicator in
-                       ["input", "field", "form", "textbox", "submit"]),
-            "modal": any(indicator in all_content for indicator in
-                        ["modal", "dialog", "popup", "overlay"]),
+            "loading": any(
+                indicator in all_content
+                for indicator in ["loading", "spinner", "progress", "please wait"]
+            ),
+            "error": any(
+                indicator in all_content
+                for indicator in ["error", "fail", "invalid", "exception"]
+            ),
+            "success": any(
+                indicator in all_content
+                for indicator in ["success", "complete", "done", "✓", "✔"]
+            ),
+            "form": any(
+                indicator in all_content
+                for indicator in ["input", "field", "form", "textbox", "submit"]
+            ),
+            "modal": any(
+                indicator in all_content
+                for indicator in ["modal", "dialog", "popup", "overlay"]
+            ),
             "empty": len(text_content) < 3 and "empty" in all_content,
         }
 
@@ -220,7 +228,7 @@ class ValidationHelpers:
     def validate_ui_transition(
         before_state: dict[str, Any],
         after_state: dict[str, Any],
-        expected_changes: list[str]
+        expected_changes: list[str],
     ) -> dict[str, Any]:
         """
         Validate that a UI transition occurred as expected.
@@ -272,5 +280,5 @@ class ValidationHelpers:
             "actual_changes": actual_changes,
             "unexpected_changes": unexpected_changes,
             "missing_changes": missing_changes,
-            "change_count": len(actual_changes)
+            "change_count": len(actual_changes),
         }

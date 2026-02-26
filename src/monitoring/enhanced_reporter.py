@@ -780,7 +780,7 @@ class EnhancedReporter:
         self,
         test_state: TestState,
         output_dir: Path,
-        action_storage: dict[str, Any] | None = None
+        action_storage: dict[str, Any] | None = None,
     ) -> tuple[Path, Path | None]:
         """
         Generate an enhanced HTML report.
@@ -811,10 +811,12 @@ class EnhancedReporter:
         # Save actions file if provided
         actions_path = None
         if action_storage and action_storage.get("test_cases"):
-            actions_filename = f"{test_state.test_report.test_plan_id}_{timestamp}-actions.json"
+            actions_filename = (
+                f"{test_state.test_report.test_plan_id}_{timestamp}-actions.json"
+            )
             actions_path = output_dir / actions_filename
 
-            with open(actions_path, 'w') as f:
+            with open(actions_path, "w") as f:
                 json.dump(action_storage, f, indent=2, default=str)
 
             self.logger.info(f"Generated actions file: {actions_path}")
@@ -822,9 +824,7 @@ class EnhancedReporter:
         return output_path, actions_path
 
     def _extract_template_data(
-        self,
-        test_state: TestState,
-        action_storage: dict[str, Any] | None
+        self, test_state: TestState, action_storage: dict[str, Any] | None
     ) -> dict[str, Any]:
         """Extract data from test state for template rendering."""
         test_report = test_state.test_report
@@ -836,7 +836,9 @@ class EnhancedReporter:
 
         # Calculate duration
         if test_report.completed_at and test_report.started_at:
-            duration = (test_report.completed_at - test_report.started_at).total_seconds()
+            duration = (
+                test_report.completed_at - test_report.started_at
+            ).total_seconds()
         else:
             duration = 0
 
@@ -874,7 +876,9 @@ class EnhancedReporter:
                     for stored_step in tc_actions.get("steps", []):
                         if stored_step.get("step_id") == str(step.step_id):
                             step_actions = stored_step.get("actions", [])
-                            test_runner_conversation = stored_step.get("test_runner_interpretation")
+                            test_runner_conversation = stored_step.get(
+                                "test_runner_interpretation"
+                            )
                             break
 
                 # Process actions
@@ -883,31 +887,41 @@ class EnhancedReporter:
                     for action in step_actions:
                         # Calculate action duration
                         action_duration = 0
-                        if action.get("timestamp_start") and action.get("timestamp_end"):
+                        if action.get("timestamp_start") and action.get(
+                            "timestamp_end"
+                        ):
                             start = datetime.fromisoformat(action["timestamp_start"])
                             end = datetime.fromisoformat(action["timestamp_end"])
                             action_duration = int((end - start).total_seconds() * 1000)
 
                         # Clean AI conversation to remove image data
-                        ai_conversation = action.get("ai_conversation", {}).get("action_agent_execution")
+                        ai_conversation = action.get("ai_conversation", {}).get(
+                            "action_agent_execution"
+                        )
                         if ai_conversation:
-                            ai_conversation = self._clean_ai_conversation(ai_conversation)
+                            ai_conversation = self._clean_ai_conversation(
+                                ai_conversation
+                            )
 
-                        actions_data.append({
-                            "action_type": action.get("action_type", "unknown"),
-                            "target": action.get("target", ""),
-                            "value": action.get("value"),
-                            "description": action.get("description", ""),
-                            "duration": action_duration,
-                            "result": action.get("result"),
-                            "ai_conversation": ai_conversation,
-                            "automation_calls": action.get("automation_calls", []),
-                            "screenshots": {
-                                k: v
-                                for k, v in (action.get("screenshots", {}) or {}).items()
-                                if k in {"before", "after"}
-                            },
-                        })
+                        actions_data.append(
+                            {
+                                "action_type": action.get("action_type", "unknown"),
+                                "target": action.get("target", ""),
+                                "value": action.get("value"),
+                                "description": action.get("description", ""),
+                                "duration": action_duration,
+                                "result": action.get("result"),
+                                "ai_conversation": ai_conversation,
+                                "automation_calls": action.get("automation_calls", []),
+                                "screenshots": {
+                                    k: v
+                                    for k, v in (
+                                        action.get("screenshots", {}) or {}
+                                    ).items()
+                                    if k in {"before", "after"}
+                                },
+                            }
+                        )
 
                 # Calculate step duration
                 step_duration = (step.completed_at - step.started_at).total_seconds()
@@ -921,29 +935,33 @@ class EnhancedReporter:
                     if step.screenshot_after:
                         screenshots["after"] = Path(step.screenshot_after).absolute()
 
-                steps_data.append({
-                    "id": str(step.step_id),
-                    "number": step.step_number,
-                    "status": step.status.value,
-                    "action": step.action,
-                    "expected_result": step.expected_result,
-                    "actual_result": step.actual_result,
-                    "error_message": step.error_message,
-                    "confidence": step.confidence,
-                    "duration": round(step_duration, 2),
-                    "screenshots": screenshots,
-                    "bug_report": {
-                        "description": bug_report.description,
-                        "severity": bug_report.severity.value,
-                        "error_type": bug_report.error_type,
-                        "expected_result": bug_report.expected_result,
-                        "actual_result": bug_report.actual_result,
-                        "error_details": bug_report.error_details,
-                        "reproduction_steps": bug_report.reproduction_steps
-                    } if bug_report else None,
-                    "test_runner_conversation": test_runner_conversation,
-                    "actions": actions_data
-                })
+                steps_data.append(
+                    {
+                        "id": str(step.step_id),
+                        "number": step.step_number,
+                        "status": step.status.value,
+                        "action": step.action,
+                        "expected_result": step.expected_result,
+                        "actual_result": step.actual_result,
+                        "error_message": step.error_message,
+                        "confidence": step.confidence,
+                        "duration": round(step_duration, 2),
+                        "screenshots": screenshots,
+                        "bug_report": {
+                            "description": bug_report.description,
+                            "severity": bug_report.severity.value,
+                            "error_type": bug_report.error_type,
+                            "expected_result": bug_report.expected_result,
+                            "actual_result": bug_report.actual_result,
+                            "error_details": bug_report.error_details,
+                            "reproduction_steps": bug_report.reproduction_steps,
+                        }
+                        if bug_report
+                        else None,
+                        "test_runner_conversation": test_runner_conversation,
+                        "actions": actions_data,
+                    }
+                )
 
             # Get test case from test plan for metadata
             test_case_meta = None
@@ -952,29 +970,43 @@ class EnhancedReporter:
                     test_case_meta = plan_tc
                     break
 
-            test_cases_data.append({
-                "id": str(tc.case_id),
-                "name": tc.name,
-                "status": tc.status.value,
-                "priority": test_case_meta.priority.value if test_case_meta else "medium",
-                "prerequisites": test_case_meta.prerequisites if test_case_meta else [],
-                "steps_total": tc.steps_total,
-                "steps_completed": tc.steps_completed,
-                "steps_failed": tc.steps_failed,
-                "error_message": tc.error_message,
-                "duration": round(tc_duration, 2),
-                "steps": steps_data
-            })
+            test_cases_data.append(
+                {
+                    "id": str(tc.case_id),
+                    "name": tc.name,
+                    "status": tc.status.value,
+                    "priority": test_case_meta.priority.value
+                    if test_case_meta
+                    else "medium",
+                    "prerequisites": test_case_meta.prerequisites
+                    if test_case_meta
+                    else [],
+                    "steps_total": tc.steps_total,
+                    "steps_completed": tc.steps_completed,
+                    "steps_failed": tc.steps_failed,
+                    "error_message": tc.error_message,
+                    "duration": round(tc_duration, 2),
+                    "steps": steps_data,
+                }
+            )
 
         # Build template data
         return {
             "test_plan_id": str(test_report.test_plan_id),
             "test_plan_name": test_report.test_plan_name,
-            "test_plan_description": test_state.test_plan.description if test_state.test_plan else "",
-            "test_plan_created": test_state.test_plan.created_at.isoformat() if test_state.test_plan and hasattr(test_state.test_plan, 'created_at') else "N/A",
+            "test_plan_description": test_state.test_plan.description
+            if test_state.test_plan
+            else "",
+            "test_plan_created": test_state.test_plan.created_at.isoformat()
+            if test_state.test_plan and hasattr(test_state.test_plan, "created_at")
+            else "N/A",
             "test_started": test_report.started_at.isoformat(),
-            "test_completed": test_report.completed_at.isoformat() if test_report.completed_at else "In Progress",
-            "environment": json.dumps(test_report.environment, indent=2) if test_report.environment else "{}",
+            "test_completed": test_report.completed_at.isoformat()
+            if test_report.completed_at
+            else "In Progress",
+            "environment": json.dumps(test_report.environment, indent=2)
+            if test_report.environment
+            else "{}",
             "overall_status": test_report.status.value,
             "duration": round(duration, 2),
             "success_rate": round(success_rate, 1),
@@ -993,7 +1025,7 @@ class EnhancedReporter:
         for message in conversation.get("messages", []):
             cleaned_message = {
                 "role": message.get("role", ""),
-                "content": message.get("content", "")
+                "content": message.get("content", ""),
             }
 
             # If content is a list (multimodal), process each item
@@ -1005,10 +1037,12 @@ class EnhancedReporter:
                             cleaned_content.append(item)
                         elif item.get("type") == "image_url":
                             # Replace image data with a placeholder
-                            cleaned_content.append({
-                                "type": "text",
-                                "text": "[IMAGE: Screenshot provided to AI]"
-                            })
+                            cleaned_content.append(
+                                {
+                                    "type": "text",
+                                    "text": "[IMAGE: Screenshot provided to AI]",
+                                }
+                            )
                     else:
                         cleaned_content.append(item)
                 cleaned_message["content"] = cleaned_content

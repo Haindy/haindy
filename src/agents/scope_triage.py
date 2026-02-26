@@ -40,12 +40,18 @@ class ScopeTriageAgent(BaseAgent):
         """
         logger.info(
             "Running scope triage",
-            extra={"requirements_length": len(requirements), "has_context": context is not None},
+            extra={
+                "requirements_length": len(requirements),
+                "has_context": context is not None,
+            },
         )
 
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": self._build_triage_message(requirements, context)},
+            {
+                "role": "user",
+                "content": self._build_triage_message(requirements, context),
+            },
         ]
 
         response = await self.call_openai(
@@ -103,7 +109,9 @@ class ScopeTriageAgent(BaseAgent):
             try:
                 payload = json.loads(content)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Scope triage response was not valid JSON: {exc}") from exc
+                raise ValueError(
+                    f"Scope triage response was not valid JSON: {exc}"
+                ) from exc
         elif isinstance(content, dict):
             payload = content
         else:
@@ -118,7 +126,9 @@ class ScopeTriageAgent(BaseAgent):
 
         in_scope_value = payload.get("in_scope")
         if isinstance(in_scope_value, list):
-            in_scope = "\n".join(str(item).strip() for item in in_scope_value if str(item).strip())
+            in_scope = "\n".join(
+                str(item).strip() for item in in_scope_value if str(item).strip()
+            )
         else:
             in_scope = str(in_scope_value) if in_scope_value is not None else ""
         explicit_exclusions = _ensure_list(payload.get("explicit_exclusions"))

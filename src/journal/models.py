@@ -15,13 +15,15 @@ from src.core.types import ActionType
 
 class ExecutionMode(str, Enum):
     """Mode of test execution."""
-    VISUAL = "visual"      # AI-driven visual interaction
+
+    VISUAL = "visual"  # AI-driven visual interaction
     SCRIPTED = "scripted"  # Direct WebDriver commands
-    HYBRID = "hybrid"      # Mix of both modes
+    HYBRID = "hybrid"  # Mix of both modes
 
 
 class PatternType(str, Enum):
     """Types of action patterns."""
+
     CLICK = "click"
     TYPE = "type"
     NAVIGATE = "navigate"
@@ -63,14 +65,12 @@ class JournalEntry(BaseModel):
 
     # Scripted command for replay mode
     scripted_command: str | None = Field(
-        default=None,
-        description="Automation command for direct execution"
+        default=None, description="Automation command for direct execution"
     )
 
     # Selectors discovered during execution
     selectors: dict[str, str] | None = Field(
-        default=None,
-        description="CSS/XPath selectors found for the element"
+        default=None, description="CSS/XPath selectors found for the element"
     )
 
     # Execution details
@@ -90,17 +90,16 @@ class JournalEntry(BaseModel):
 
     # Pattern matching data
     pattern_id: UUID | None = Field(
-        default=None,
-        description="ID of matched pattern if reused"
+        default=None, description="ID of matched pattern if reused"
     )
 
     model_config = ConfigDict()
 
-    @field_serializer('timestamp')
+    @field_serializer("timestamp")
     def serialize_timestamp(self, timestamp: datetime) -> str:
         return timestamp.isoformat()
 
-    @field_serializer('entry_id', 'pattern_id')
+    @field_serializer("entry_id", "pattern_id")
     def serialize_uuid(self, value: UUID | None) -> str | None:
         return str(value) if value else None
 
@@ -113,16 +112,14 @@ class ActionRecord(BaseModel):
 
     # Visual pattern data
     visual_signature: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Visual characteristics for pattern matching"
+        default_factory=dict, description="Visual characteristics for pattern matching"
     )
 
     # Scripted replay data
     automation_command: str
     selectors: dict[str, str] = Field(default_factory=dict)
     fallback_commands: list[str] = Field(
-        default_factory=list,
-        description="Alternative commands if primary fails"
+        default_factory=list, description="Alternative commands if primary fails"
     )
 
     # Context and metadata
@@ -138,11 +135,11 @@ class ActionRecord(BaseModel):
 
     model_config = ConfigDict()
 
-    @field_serializer('last_used')
+    @field_serializer("last_used")
     def serialize_last_used(self, last_used: datetime | None) -> str | None:
         return last_used.isoformat() if last_used else None
 
-    @field_serializer('record_id')
+    @field_serializer("record_id")
     def serialize_record_id(self, record_id: UUID) -> str:
         return str(record_id)
 
@@ -154,8 +151,7 @@ class PatternMatch(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     match_type: str  # exact, similar, partial
     adjustments: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Required adjustments to apply pattern"
+        default_factory=dict, description="Required adjustments to apply pattern"
     )
 
 
@@ -163,10 +159,9 @@ class ScriptedCommand(BaseModel):
     """A scripted command ready for execution."""
 
     command_type: str  # click, type, navigate, etc.
-    command: str       # The actual Automation command
+    command: str  # The actual Automation command
     selectors: list[str] = Field(
-        default_factory=list,
-        description="Ordered list of selectors to try"
+        default_factory=list, description="Ordered list of selectors to try"
     )
     parameters: dict[str, Any] = Field(default_factory=dict)
     timeout_ms: int = 30000
@@ -174,8 +169,7 @@ class ScriptedCommand(BaseModel):
 
     # Fallback to visual mode criteria
     fallback_threshold: float = Field(
-        default=0.8,
-        description="Confidence threshold to trigger visual fallback"
+        default=0.8, description="Confidence threshold to trigger visual fallback"
     )
     allow_visual_fallback: bool = True
 
@@ -211,15 +205,15 @@ class ExecutionJournal(BaseModel):
 
     model_config = ConfigDict()
 
-    @field_serializer('start_time', 'end_time')
+    @field_serializer("start_time", "end_time")
     def serialize_datetime(self, dt: datetime | None) -> str | None:
         return dt.isoformat() if dt else None
 
-    @field_serializer('journal_id', 'test_plan_id')
+    @field_serializer("journal_id", "test_plan_id")
     def serialize_uuid(self, value: UUID) -> str:
         return str(value)
 
-    @field_serializer('reused_patterns')
+    @field_serializer("reused_patterns")
     def serialize_uuid_list(self, patterns: list[UUID]) -> list[str]:
         return [str(uuid) for uuid in patterns]
 
@@ -255,17 +249,19 @@ class ExecutionJournal(BaseModel):
         return {
             "test_name": self.test_name,
             "total_steps": self.total_steps,
-            "success_rate": self.successful_steps / self.total_steps if self.total_steps > 0 else 0,
+            "success_rate": self.successful_steps / self.total_steps
+            if self.total_steps > 0
+            else 0,
             "execution_modes": {
                 "visual": self.visual_interactions,
-                "scripted": self.scripted_interactions
+                "scripted": self.scripted_interactions,
             },
             "patterns": {
                 "discovered": len(self.discovered_patterns),
-                "reused": len(self.reused_patterns)
+                "reused": len(self.reused_patterns),
             },
             "performance": {
                 "total_time_seconds": duration,
-                "avg_step_time_ms": self.avg_step_time_ms
-            }
+                "avg_step_time_ms": self.avg_step_time_ms,
+            },
         }

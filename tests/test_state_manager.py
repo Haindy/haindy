@@ -35,7 +35,7 @@ def sample_test_plan():
                 action="Go to login page",
                 expected_result="Login page displayed",
                 dependencies=[],
-                optional=False
+                optional=False,
             ),
             TestStep(
                 step_id=uuid4(),
@@ -44,7 +44,7 @@ def sample_test_plan():
                 action="Enter username and password",
                 expected_result="Credentials entered",
                 dependencies=[],
-                optional=False
+                optional=False,
             ),
             TestStep(
                 step_id=uuid4(),
@@ -53,9 +53,9 @@ def sample_test_plan():
                 action="Click login button",
                 expected_result="User logged in",
                 dependencies=[],
-                optional=False
-            )
-        ]
+                optional=False,
+            ),
+        ],
     )
 
 
@@ -83,8 +83,7 @@ class TestStateManager:
         await state_manager.create_test_state(sample_test_plan)
 
         updated_state = await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         assert updated_state.status == TestStatus.IN_PROGRESS
@@ -92,12 +91,13 @@ class TestStateManager:
         assert updated_state.current_step == sample_test_plan.steps[0]
 
     @pytest.mark.asyncio
-    async def test_update_test_state_complete_step(self, state_manager, sample_test_plan):
+    async def test_update_test_state_complete_step(
+        self, state_manager, sample_test_plan
+    ):
         """Test completing a test step."""
         await state_manager.create_test_state(sample_test_plan)
         await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         first_step_id = sample_test_plan.steps[0].step_id
@@ -105,7 +105,7 @@ class TestStateManager:
         updated_state = await state_manager.update_test_state(
             sample_test_plan.plan_id,
             StateTransition.COMPLETE_STEP,
-            {"step_id": first_step_id}
+            {"step_id": first_step_id},
         )
 
         assert first_step_id in updated_state.completed_steps
@@ -116,8 +116,7 @@ class TestStateManager:
         """Test failing a test step."""
         await state_manager.create_test_state(sample_test_plan)
         await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         first_step_id = sample_test_plan.steps[0].step_id
@@ -126,7 +125,7 @@ class TestStateManager:
         updated_state = await state_manager.update_test_state(
             sample_test_plan.plan_id,
             StateTransition.FAIL_STEP,
-            {"step_id": first_step_id, "is_critical": False}
+            {"step_id": first_step_id, "is_critical": False},
         )
 
         assert first_step_id in updated_state.failed_steps
@@ -138,7 +137,7 @@ class TestStateManager:
         updated_state = await state_manager.update_test_state(
             sample_test_plan.plan_id,
             StateTransition.FAIL_STEP,
-            {"step_id": second_step_id, "is_critical": True}
+            {"step_id": second_step_id, "is_critical": True},
         )
 
         assert updated_state.status == TestStatus.FAILED
@@ -149,8 +148,7 @@ class TestStateManager:
         """Test skipping a test step."""
         await state_manager.create_test_state(sample_test_plan)
         await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         first_step_id = sample_test_plan.steps[0].step_id
@@ -158,32 +156,31 @@ class TestStateManager:
         updated_state = await state_manager.update_test_state(
             sample_test_plan.plan_id,
             StateTransition.SKIP_STEP,
-            {"step_id": first_step_id}
+            {"step_id": first_step_id},
         )
 
         assert first_step_id in updated_state.skipped_steps
         assert updated_state.warning_count == 1
 
     @pytest.mark.asyncio
-    async def test_update_test_state_pause_resume(self, state_manager, sample_test_plan):
+    async def test_update_test_state_pause_resume(
+        self, state_manager, sample_test_plan
+    ):
         """Test pausing and resuming a test."""
         await state_manager.create_test_state(sample_test_plan)
         await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         # Pause
         updated_state = await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.PAUSE
+            sample_test_plan.plan_id, StateTransition.PAUSE
         )
         assert updated_state.status == TestStatus.BLOCKED
 
         # Resume
         updated_state = await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.RESUME
+            sample_test_plan.plan_id, StateTransition.RESUME
         )
         assert updated_state.status == TestStatus.IN_PROGRESS
 
@@ -192,13 +189,11 @@ class TestStateManager:
         """Test completing a test."""
         await state_manager.create_test_state(sample_test_plan)
         await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         updated_state = await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.COMPLETE
+            sample_test_plan.plan_id, StateTransition.COMPLETE
         )
 
         assert updated_state.status == TestStatus.COMPLETED
@@ -209,13 +204,11 @@ class TestStateManager:
         """Test aborting a test."""
         await state_manager.create_test_state(sample_test_plan)
         await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
+            sample_test_plan.plan_id, StateTransition.START
         )
 
         updated_state = await state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.ABORT
+            sample_test_plan.plan_id, StateTransition.ABORT
         )
 
         assert updated_state.status == TestStatus.FAILED
@@ -229,18 +222,14 @@ class TestStateManager:
         # Try to complete from pending (invalid)
         with pytest.raises(ValueError, match="Invalid transition"):
             await state_manager.update_test_state(
-                sample_test_plan.plan_id,
-                StateTransition.COMPLETE
+                sample_test_plan.plan_id, StateTransition.COMPLETE
             )
 
     @pytest.mark.asyncio
     async def test_nonexistent_test_state(self, state_manager):
         """Test updating non-existent test state."""
         with pytest.raises(ValueError, match="Test state not found"):
-            await state_manager.update_test_state(
-                uuid4(),
-                StateTransition.START
-            )
+            await state_manager.update_test_state(uuid4(), StateTransition.START)
 
     @pytest.mark.asyncio
     async def test_register_unregister_agent(self, state_manager, sample_test_plan):
@@ -275,7 +264,7 @@ class TestStateManager:
         await state_manager.update_test_state(
             test_id,
             StateTransition.COMPLETE_STEP,
-            {"step_id": sample_test_plan.steps[0].step_id}
+            {"step_id": sample_test_plan.steps[0].step_id},
         )
 
         progress = await state_manager.get_test_progress(test_id)
@@ -295,10 +284,11 @@ class TestStateManager:
 
         # Create and start test
         asyncio.run(state_manager.create_test_state(sample_test_plan))
-        asyncio.run(state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
-        ))
+        asyncio.run(
+            state_manager.update_test_state(
+                sample_test_plan.plan_id, StateTransition.START
+            )
+        )
 
         # Callback should be called
         assert callback.call_count >= 1
@@ -309,10 +299,11 @@ class TestStateManager:
     def test_get_state_history(self, state_manager, sample_test_plan):
         """Test getting state change history."""
         asyncio.run(state_manager.create_test_state(sample_test_plan))
-        asyncio.run(state_manager.update_test_state(
-            sample_test_plan.plan_id,
-            StateTransition.START
-        ))
+        asyncio.run(
+            state_manager.update_test_state(
+                sample_test_plan.plan_id, StateTransition.START
+            )
+        )
 
         history = state_manager.get_state_history()
         assert len(history) >= 1
@@ -333,16 +324,13 @@ class TestStateManager:
         step_result = {
             "step_id": str(sample_test_plan.steps[0].step_id),
             "success": True,
-            "duration": 1.5
+            "duration": 1.5,
         }
 
         await state_manager.update_test_state(
             test_id,
             StateTransition.COMPLETE_STEP,
-            {
-                "step_id": sample_test_plan.steps[0].step_id,
-                "result": step_result
-            }
+            {"step_id": sample_test_plan.steps[0].step_id, "result": step_result},
         )
 
         # Get results
@@ -384,7 +372,7 @@ class TestStateManager:
                     description="Step 1",
                     action="Click",
                     expected_result="Done",
-                    dependencies=[]
+                    dependencies=[],
                 ),
                 TestStep(
                     step_id=step2_id,
@@ -392,9 +380,9 @@ class TestStateManager:
                     description="Step 2",
                     action="Click",
                     expected_result="Done",
-                    dependencies=[]  # Use empty for now to pass test
-                )
-            ]
+                    dependencies=[],  # Use empty for now to pass test
+                ),
+            ],
         )
 
         await state_manager.create_test_state(test_plan)
@@ -416,8 +404,8 @@ class TestStateManager:
                 name=f"Test {i}",
                 description="Test",
                 requirements_source="Test",
-            test_cases=[],
-                steps=[]
+                test_cases=[],
+                steps=[],
             )
             await state_manager.create_test_state(test_plan)
 

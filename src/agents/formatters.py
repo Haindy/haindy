@@ -85,13 +85,17 @@ class TestPlanFormatter:
         # Priority breakdown
         priority_counts = {}
         for tc in test_plan.test_cases:
-            priority_counts[tc.priority.value] = priority_counts.get(tc.priority.value, 0) + 1
+            priority_counts[tc.priority.value] = (
+                priority_counts.get(tc.priority.value, 0) + 1
+            )
 
         if priority_counts:
             lines.append("- **Priority Distribution**:")
             for priority in ["critical", "high", "medium", "low"]:
                 if priority in priority_counts:
-                    lines.append(f"  - {priority.capitalize()}: {priority_counts[priority]}")
+                    lines.append(
+                        f"  - {priority.capitalize()}: {priority_counts[priority]}"
+                    )
         lines.append("")
 
         # Test Cases
@@ -199,15 +203,15 @@ class TestPlanFormatter:
                             "expected_result": step.expected_result,
                             "intent": step.intent.value,
                             "dependencies": step.dependencies,
-                            "optional": step.optional
+                            "optional": step.optional,
                         }
                         for step in tc.steps
                     ],
                     "postconditions": tc.postconditions,
-                    "tags": tc.tags
+                    "tags": tc.tags,
                 }
                 for tc in test_plan.test_cases
             ],
             "tags": test_plan.tags,
-            "estimated_duration_seconds": test_plan.estimated_duration_seconds
+            "estimated_duration_seconds": test_plan.estimated_duration_seconds,
         }

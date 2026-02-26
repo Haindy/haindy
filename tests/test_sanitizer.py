@@ -22,10 +22,10 @@ class TestSensitiveDataPattern:
         """Test pattern creation and configuration."""
         pattern = SensitiveDataPattern(
             name="test_pattern",
-            pattern=re.compile(r'\d{3}-\d{2}-\d{4}'),
+            pattern=re.compile(r"\d{3}-\d{2}-\d{4}"),
             redaction_method=RedactionMethod.MASK,
             placeholder="[REDACTED]",
-            description="Test pattern"
+            description="Test pattern",
         )
 
         assert pattern.name == "test_pattern"
@@ -35,8 +35,7 @@ class TestSensitiveDataPattern:
     def test_pattern_matching(self):
         """Test pattern matching functionality."""
         pattern = SensitiveDataPattern(
-            name="ssn",
-            pattern=re.compile(r'\b\d{3}-\d{2}-\d{4}\b')
+            name="ssn", pattern=re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
         )
 
         text = "My SSN is 123-45-6789 and my friend's is 987-65-4321."
@@ -49,9 +48,7 @@ class TestSensitiveDataPattern:
     def test_disabled_pattern(self):
         """Test disabled patterns don't match."""
         pattern = SensitiveDataPattern(
-            name="test",
-            pattern=re.compile(r'test'),
-            enabled=False
+            name="test", pattern=re.compile(r"test"), enabled=False
         )
 
         matches = pattern.matches("This is a test")
@@ -127,8 +124,8 @@ class TestDataSanitizer:
         # MASK method
         pattern_mask = SensitiveDataPattern(
             name="test_mask",
-            pattern=re.compile(r'SECRET'),
-            redaction_method=RedactionMethod.MASK
+            pattern=re.compile(r"SECRET"),
+            redaction_method=RedactionMethod.MASK,
         )
         sanitizer.add_pattern(pattern_mask)
 
@@ -138,9 +135,9 @@ class TestDataSanitizer:
         # PLACEHOLDER method
         pattern_placeholder = SensitiveDataPattern(
             name="test_placeholder",
-            pattern=re.compile(r'CONFIDENTIAL'),
+            pattern=re.compile(r"CONFIDENTIAL"),
             redaction_method=RedactionMethod.PLACEHOLDER,
-            placeholder="[REMOVED]"
+            placeholder="[REMOVED]",
         )
         sanitizer.add_pattern(pattern_placeholder)
 
@@ -150,8 +147,8 @@ class TestDataSanitizer:
         # REMOVE method
         pattern_remove = SensitiveDataPattern(
             name="test_remove",
-            pattern=re.compile(r'DELETE_ME'),
-            redaction_method=RedactionMethod.REMOVE
+            pattern=re.compile(r"DELETE_ME"),
+            redaction_method=RedactionMethod.REMOVE,
         )
         sanitizer.add_pattern(pattern_remove)
 
@@ -168,12 +165,9 @@ class TestDataSanitizer:
             "user": {
                 "email": "user@example.com",
                 "password": "supersecret123",
-                "name": "John Doe"
+                "name": "John Doe",
             },
-            "payment": {
-                "card_number": "4111111111111111",
-                "cvv": "123"
-            }
+            "payment": {"card_number": "4111111111111111", "cvv": "123"},
         }
 
         result = sanitizer.sanitize_dict(data)
@@ -188,15 +182,7 @@ class TestDataSanitizer:
         """Test deeply nested dictionary sanitization."""
         sanitizer = DataSanitizer()
 
-        data = {
-            "level1": {
-                "level2": {
-                    "level3": {
-                        "secret": "api_key: secret123"
-                    }
-                }
-            }
-        }
+        data = {"level1": {"level2": {"level3": {"secret": "api_key: secret123"}}}}
 
         result = sanitizer.sanitize_dict(data)
         assert "secret123" not in str(result)
@@ -207,7 +193,7 @@ class TestDataSanitizer:
 
         data = {
             "emails": ["user1@example.com", "user2@example.com"],
-            "tokens": ["Bearer abc123", "Bearer xyz789"]
+            "tokens": ["Bearer abc123", "Bearer xyz789"],
         }
 
         result = sanitizer.sanitize_dict(data)
@@ -230,10 +216,7 @@ class TestDataSanitizer:
 
         sanitizer.add_custom_sanitizer("custom_field", custom_redact)
 
-        data = {
-            "custom_field": "sensitive data",
-            "normal_field": "normal data"
-        }
+        data = {"custom_field": "sensitive data", "normal_field": "normal data"}
 
         result = sanitizer.sanitize_dict(data)
         assert result["custom_field"] == "CUSTOM_REDACTED"
@@ -251,7 +234,7 @@ class TestDataSanitizer:
             lineno=1,
             msg="User email is %s and token is %s",
             args=("user@example.com", "Bearer secret123"),
-            exc_info=None
+            exc_info=None,
         )
 
         sanitized = sanitizer.sanitize_log_record(record)

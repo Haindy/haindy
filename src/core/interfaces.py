@@ -143,7 +143,6 @@ class ActionAgent(Agent):
         pass
 
 
-
 class AutomationDriver(ABC):
     """Abstract interface for environment automation."""
 
@@ -237,6 +236,7 @@ class AutomationDriver(ABC):
         """Get the current page title."""
         pass
 
+
 class TestExecutor(ABC):
     """Abstract interface for test execution orchestration."""
 
@@ -254,9 +254,7 @@ class TestExecutor(ABC):
         pass
 
     @abstractmethod
-    async def execute_step(
-        self, step: TestStep, state: TestState
-    ) -> ActionResult:
+    async def execute_step(self, step: TestStep, state: TestState) -> ActionResult:
         """
         Execute a single test step.
 

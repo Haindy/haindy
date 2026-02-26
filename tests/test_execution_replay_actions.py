@@ -44,7 +44,9 @@ async def test_replay_press_key_passes_string_to_driver() -> None:
         async def drag_mouse(self, *args, **kwargs):  # pragma: no cover - not used
             return
 
-        async def scroll_by_pixels(self, *args, **kwargs):  # pragma: no cover - not used
+        async def scroll_by_pixels(
+            self, *args, **kwargs
+        ):  # pragma: no cover - not used
             return
 
         async def type_text(self, *args, **kwargs):  # pragma: no cover - not used

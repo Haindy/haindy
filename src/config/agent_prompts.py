@@ -157,7 +157,7 @@ TEST_PLANNER_EXAMPLES = [
             "description": "Verify that users can successfully log in to the application with valid credentials",
             "prerequisites": [
                 "Test user account exists with known credentials",
-                "Application is accessible at the login page"
+                "Application is accessible at the login page",
             ],
             "steps": [
                 {
@@ -165,48 +165,48 @@ TEST_PLANNER_EXAMPLES = [
                     "action": "Navigate to the login page",
                     "expected_result": "Login page loads with username and password fields visible",
                     "depends_on": [],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 2,
                     "action": "Enter valid username in the username field",
                     "expected_result": "Username is entered and visible in the field",
                     "depends_on": [1],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 3,
                     "action": "Enter valid password in the password field",
                     "expected_result": "Password is entered (masked) in the field",
                     "depends_on": [1],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 4,
                     "action": "Click the 'Login' button",
                     "expected_result": "Login process initiates, loading indicator may appear",
                     "depends_on": [2, 3],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 5,
                     "action": "Wait for login to complete",
                     "expected_result": "User is redirected to dashboard/home page with user info displayed",
                     "depends_on": [4],
-                    "is_critical": True
-                }
+                    "is_critical": True,
+                },
             ],
             "success_criteria": [
                 "User successfully logs in with valid credentials",
                 "User is redirected to the appropriate landing page",
-                "User session is established"
+                "User session is established",
             ],
             "edge_cases": [
                 "Invalid username/password combination",
                 "Empty username or password fields",
-                "Account locked after multiple failed attempts"
-            ]
-        }
+                "Account locked after multiple failed attempts",
+            ],
+        },
     }
 ]
 
@@ -279,7 +279,9 @@ Feedback/Additional Requirements:
 Please provide an updated test plan that addresses the feedback while maintaining the same JSON format."""
 
     @staticmethod
-    def action_identification(instruction: str, confidence_threshold: float = 0.8) -> str:
+    def action_identification(
+        instruction: str, confidence_threshold: float = 0.8
+    ) -> str:
         """Template for action identification from screenshot."""
         return f"""Instruction: {instruction}
 

@@ -325,6 +325,96 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
     assert result.safety_events == []
     assert result.terminal_status == "success"
     mock_browser.click.assert_awaited_once_with(11, 22, button="left", click_count=1)
+    assert result.actions[0].acknowledged is True
+    assert result.actions[0].metadata.get("acknowledged_safety_checks") == [
+        {
+            "id": "sc1",
+            "code": "review_required",
+            "message": "Safety review requested.",
+        }
+    ]
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
+        {
+            "id": "sc1",
+            "code": "review_required",
+            "message": "Safety review requested.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_safety_auto_approve_with_override_when_fail_fast_enabled(
+    mock_client, mock_browser, session_settings
+):
+    """Safety auto-approve override should acknowledge checks even with fail-fast enabled."""
+    session_settings.actions_computer_tool_fail_fast_on_safety = True
+    session_settings.cu_safety_policy = "auto_approve"
+
+    first_response = DummyResponse(
+        {
+            "id": "resp_safe_override_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_safe_override",
+                    "action": {"type": "click", "x": 13, "y": 24},
+                    "pending_safety_checks": [
+                        {
+                            "id": "sc_override",
+                            "code": "review_required",
+                            "message": "Approval override required.",
+                        }
+                    ],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    second_response = DummyResponse(
+        {
+            "id": "resp_safe_override_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Done with override."}],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [first_response, second_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+    result = await session.run(
+        goal="Click continue with override.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 7, "allow_safety_auto_approve": True},
+    )
+
+    assert result.terminal_status == "success"
+    mock_browser.click.assert_awaited_once_with(13, 24, button="left", click_count=1)
+    assert result.actions[0].acknowledged is True
+    assert result.actions[0].metadata.get("acknowledged_safety_checks") == [
+        {
+            "id": "sc_override",
+            "code": "review_required",
+            "message": "Approval override required.",
+        }
+    ]
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
+        {
+            "id": "sc_override",
+            "code": "review_required",
+            "message": "Approval override required.",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -773,6 +863,35 @@ def test_computer_use_session_google_client_uses_vertex_project_location(
     session_settings.vertex_project = "demo-project"
     session_settings.vertex_location = "us-east5"
     session_settings.vertex_api_key = ""
+    client_factory = MagicMock(return_value=object())
+    monkeypatch.setattr(
+        cu_session_module, "genai", SimpleNamespace(Client=client_factory)
+    )
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        debug_logger=None,
+    )
+    session._ensure_google_client()
+
+    client_factory.assert_called_once_with(
+        vertexai=True,
+        project="demo-project",
+        location="us-east5",
+    )
+
+
+def test_computer_use_session_google_client_ignores_api_key_in_vertex_mode(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google client should ignore API key when Vertex project/location mode is used."""
+    session_settings.cu_provider = "google"
+    session_settings.vertex_project = "demo-project"
+    session_settings.vertex_location = "us-east5"
+    session_settings.vertex_api_key = "vertex-key"
     client_factory = MagicMock(return_value=object())
     monkeypatch.setattr(
         cu_session_module, "genai", SimpleNamespace(Client=client_factory)

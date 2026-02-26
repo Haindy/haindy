@@ -26,10 +26,7 @@ class TestRecoveryContext:
     def test_context_creation(self):
         """Test context initialization."""
         error = ValueError("Test error")
-        context = RecoveryContext(
-            error=error,
-            operation_name="test_op"
-        )
+        context = RecoveryContext(error=error, operation_name="test_op")
 
         assert context.error == error
         assert context.operation_name == "test_op"
@@ -39,10 +36,7 @@ class TestRecoveryContext:
 
     def test_elapsed_time(self):
         """Test elapsed time calculation."""
-        context = RecoveryContext(
-            error=ValueError(),
-            operation_name="test_op"
-        )
+        context = RecoveryContext(error=ValueError(), operation_name="test_op")
 
         # Mock start time to be 1 second ago
         context.start_time = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -93,9 +87,7 @@ class TestExponentialBackoffStrategy:
     def test_delay_calculation_no_jitter(self):
         """Test delay calculation without jitter."""
         strategy = ExponentialBackoffStrategy(
-            base_delay_ms=100,
-            multiplier=2.0,
-            jitter=False
+            base_delay_ms=100, multiplier=2.0, jitter=False
         )
 
         assert strategy.get_delay_ms(1) == 100  # 100 * 2^0
@@ -106,9 +98,7 @@ class TestExponentialBackoffStrategy:
     def test_max_delay_cap(self):
         """Test maximum delay capping."""
         strategy = ExponentialBackoffStrategy(
-            base_delay_ms=1000,
-            max_delay_ms=3000,
-            jitter=False
+            base_delay_ms=1000, max_delay_ms=3000, jitter=False
         )
 
         assert strategy.get_delay_ms(1) == 1000
@@ -118,10 +108,7 @@ class TestExponentialBackoffStrategy:
 
     def test_delay_with_jitter(self):
         """Test delay calculation with jitter."""
-        strategy = ExponentialBackoffStrategy(
-            base_delay_ms=1000,
-            jitter=True
-        )
+        strategy = ExponentialBackoffStrategy(base_delay_ms=1000, jitter=True)
 
         # Get multiple delays for same attempt
         delays = [strategy.get_delay_ms(2) for _ in range(10)]
@@ -165,10 +152,7 @@ class TestLinearBackoffStrategy:
 
     def test_delay_calculation(self):
         """Test linear delay calculation."""
-        strategy = LinearBackoffStrategy(
-            delay_increment_ms=500,
-            max_delay_ms=2000
-        )
+        strategy = LinearBackoffStrategy(delay_increment_ms=500, max_delay_ms=2000)
 
         assert strategy.get_delay_ms(1) == 500
         assert strategy.get_delay_ms(2) == 1000
@@ -199,11 +183,7 @@ class TestRecoveryManager:
         async def successful_op(value):
             return value * 2
 
-        result = await manager.execute_with_recovery(
-            successful_op,
-            "test_op",
-            21
-        )
+        result = await manager.execute_with_recovery(successful_op, "test_op", 21)
 
         assert result == 42
         stats = manager.get_statistics()
@@ -228,13 +208,11 @@ class TestRecoveryManager:
         # Use fast retry strategy for test with enough attempts
         strategy = LinearBackoffStrategy(
             delay_increment_ms=10,
-            max_attempts=4  # Allow 4 attempts total (initial + 3 retries)
+            max_attempts=4,  # Allow 4 attempts total (initial + 3 retries)
         )
 
         result = await manager.execute_with_recovery(
-            flaky_op,
-            "flaky_op",
-            retry_strategy=strategy
+            flaky_op, "flaky_op", retry_strategy=strategy
         )
 
         assert result == "success"
@@ -253,10 +231,7 @@ class TestRecoveryManager:
             raise NonRetryableError("Permanent failure")
 
         with pytest.raises(RecoveryError) as exc_info:
-            await manager.execute_with_recovery(
-                failing_op,
-                "failing_op"
-            )
+            await manager.execute_with_recovery(failing_op, "failing_op")
 
         assert "All recovery attempts failed" in str(exc_info.value)
         assert exc_info.value.recovery_strategy == "ExponentialBackoffStrategy"
@@ -272,16 +247,13 @@ class TestRecoveryManager:
         async def fallback_op():
             return "fallback_result"
 
-        strategy = LinearBackoffStrategy(
-            max_attempts=1,
-            delay_increment_ms=10
-        )
+        strategy = LinearBackoffStrategy(max_attempts=1, delay_increment_ms=10)
 
         result = await manager.execute_with_recovery(
             failing_op,
             "op_with_fallback",
             retry_strategy=strategy,
-            fallback=fallback_op
+            fallback=fallback_op,
         )
 
         assert result == "fallback_result"
@@ -297,17 +269,14 @@ class TestRecoveryManager:
         async def failing_fallback():
             raise ValueError("Fallback fails too")
 
-        strategy = LinearBackoffStrategy(
-            max_attempts=1,
-            delay_increment_ms=10
-        )
+        strategy = LinearBackoffStrategy(max_attempts=1, delay_increment_ms=10)
 
         with pytest.raises(RecoveryError) as exc_info:
             await manager.execute_with_recovery(
                 failing_op,
                 "double_failure",
                 retry_strategy=strategy,
-                fallback=failing_fallback
+                fallback=failing_fallback,
             )
 
         assert "Fallback failed" in str(exc_info.value)
@@ -322,20 +291,12 @@ class TestRecoveryManager:
             return "done"
 
         # Should succeed with sufficient timeout
-        result = await manager.execute_with_recovery(
-            slow_op,
-            "slow_op",
-            timeout_ms=300
-        )
+        result = await manager.execute_with_recovery(slow_op, "slow_op", timeout_ms=300)
         assert result == "done"
 
         # Should fail with insufficient timeout
         with pytest.raises(RecoveryError) as exc_info:
-            await manager.execute_with_recovery(
-                slow_op,
-                "slow_op",
-                timeout_ms=50
-            )
+            await manager.execute_with_recovery(slow_op, "slow_op", timeout_ms=50)
 
         # Check for timeout error in chain
         assert isinstance(exc_info.value.cause, asyncio.TimeoutError)
@@ -350,16 +311,13 @@ class TestRecoveryManager:
             handled = True
             return "handled"
 
-        manager = RecoveryManager(
-            error_handlers={ValueError: custom_handler}
-        )
+        manager = RecoveryManager(error_handlers={ValueError: custom_handler})
 
         async def op_with_value_error():
             raise ValueError("Test error")
 
         result = await manager.execute_with_recovery(
-            op_with_value_error,
-            "custom_handled"
+            op_with_value_error, "custom_handled"
         )
 
         assert result == "handled"
@@ -373,12 +331,8 @@ class TestRecoveryManager:
         assert manager.get_statistics() == {}
 
         # Add some stats manually (normally done via execute_with_recovery)
-        manager._record_success(
-            RecoveryContext(error=None, operation_name="op1")
-        )
-        manager._record_failure(
-            RecoveryContext(error=None, operation_name="op2")
-        )
+        manager._record_success(RecoveryContext(error=None, operation_name="op1"))
+        manager._record_failure(RecoveryContext(error=None, operation_name="op2"))
 
         stats = manager.get_statistics()
         assert stats["op1"]["successes"] == 1

@@ -24,7 +24,7 @@ def sample_message():
         from_agent="test_agent_1",
         to_agent="test_agent_2",
         message_type=MessageType.EXECUTE_STEP,
-        content={"step": "test_step"}
+        content={"step": "test_step"},
     )
 
 
@@ -81,7 +81,7 @@ class TestMessageBus:
             from_agent="test_agent_1",
             to_agent="broadcast",
             message_type=MessageType.EXECUTE_STEP,
-            content={"test": "data"}
+            content={"test": "data"},
         )
 
         await message_bus.publish(message)
@@ -100,7 +100,7 @@ class TestMessageBus:
             from_agent="sender",
             to_agent="receiver",
             message_type=MessageType.EXECUTE_STEP,
-            content={"test": "data"}
+            content={"test": "data"},
         )
 
         await message_bus.publish(message)
@@ -144,19 +144,13 @@ class TestMessageBus:
         assert history[0] == sample_message
 
         # Test filtered history
-        history = message_bus.get_message_history(
-            message_type=MessageType.EXECUTE_STEP
-        )
+        history = message_bus.get_message_history(message_type=MessageType.EXECUTE_STEP)
         assert len(history) == 1
 
-        history = message_bus.get_message_history(
-            from_agent="test_agent_1"
-        )
+        history = message_bus.get_message_history(from_agent="test_agent_1")
         assert len(history) == 1
 
-        history = message_bus.get_message_history(
-            to_agent="test_agent_2"
-        )
+        history = message_bus.get_message_history(to_agent="test_agent_2")
         assert len(history) == 1
 
     def test_statistics(self, message_bus, sample_message):
@@ -196,7 +190,7 @@ class TestMessageBus:
             from_agent="sender",
             to_agent="broadcast",
             message_type=MessageType.INFO,
-            content={"info": "test"}
+            content={"info": "test"},
         )
 
         await message_bus.publish(message)
@@ -218,7 +212,7 @@ class TestMessageBus:
                 from_agent="sender",
                 to_agent="broadcast",
                 message_type=MessageType.INFO,
-                content={"index": i}
+                content={"index": i},
             )
             await message_bus.publish(message)
 
@@ -234,7 +228,7 @@ class TestMessageBus:
             from_agent="unregistered",
             to_agent="broadcast",
             message_type=MessageType.INFO,
-            content={}
+            content={},
         )
 
         # Should not raise, just warn
@@ -249,7 +243,7 @@ class TestMessageBus:
             from_agent="sender",
             to_agent="unregistered",
             message_type=MessageType.INFO,
-            content={}
+            content={},
         )
 
         # Should not raise, just warn
@@ -277,11 +271,21 @@ class TestMessageTypes:
     def test_message_types_defined(self):
         """Test all message types are defined."""
         expected_types = [
-            "START_TEST", "STOP_TEST", "PAUSE_TEST", "RESUME_TEST",
-            "EXECUTE_STEP", "DETERMINE_ACTION", "PLAN_TEST",
-            "STEP_COMPLETED", "STEP_FAILED",
-            "ACTION_DETERMINED", "PLAN_CREATED",
-            "STATUS_UPDATE", "ERROR", "WARNING", "INFO"
+            "START_TEST",
+            "STOP_TEST",
+            "PAUSE_TEST",
+            "RESUME_TEST",
+            "EXECUTE_STEP",
+            "DETERMINE_ACTION",
+            "PLAN_TEST",
+            "STEP_COMPLETED",
+            "STEP_FAILED",
+            "ACTION_DETERMINED",
+            "PLAN_CREATED",
+            "STATUS_UPDATE",
+            "ERROR",
+            "WARNING",
+            "INFO",
         ]
 
         for msg_type in expected_types:

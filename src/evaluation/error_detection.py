@@ -12,6 +12,7 @@ from typing import Any
 
 class ErrorType(str, Enum):
     """Types of errors that can be detected in UI."""
+
     VALIDATION = "validation"
     SYSTEM = "system"
     NETWORK = "network"
@@ -24,6 +25,7 @@ class ErrorType(str, Enum):
 
 class ErrorSeverity(str, Enum):
     """Error severity levels."""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -34,6 +36,7 @@ class ErrorSeverity(str, Enum):
 @dataclass
 class DetectedError:
     """Represents a detected error in the UI."""
+
     error_type: ErrorType
     message: str
     location: str
@@ -52,9 +55,22 @@ class ErrorDetector:
 
     # Common error indicators to look for
     ERROR_KEYWORDS = [
-        "error", "fail", "invalid", "unauthorized", "forbidden",
-        "not found", "404", "500", "503", "timeout", "expired",
-        "denied", "rejected", "unable", "cannot", "exception"
+        "error",
+        "fail",
+        "invalid",
+        "unauthorized",
+        "forbidden",
+        "not found",
+        "404",
+        "500",
+        "503",
+        "timeout",
+        "expired",
+        "denied",
+        "rejected",
+        "unable",
+        "cannot",
+        "exception",
     ]
 
     # Common error UI patterns
@@ -77,12 +93,12 @@ class ErrorDetector:
 Look for:
 1. Error messages or alerts
 2. Red text or error colors
-3. Warning icons or symbols ({', '.join(cls.ERROR_PATTERNS['error_icons'])})
+3. Warning icons or symbols ({", ".join(cls.ERROR_PATTERNS["error_icons"])})
 4. Modal dialogs with errors
 5. Form validation errors
 6. System error pages (404, 500, etc.)
 7. Loading/timeout indicators stuck
-8. Keywords like: {', '.join(cls.ERROR_KEYWORDS[:10])}
+8. Keywords like: {", ".join(cls.ERROR_KEYWORDS[:10])}
 
 Provide response in JSON format:
 {{
@@ -90,10 +106,10 @@ Provide response in JSON format:
     "error_count": 0,
     "errors": [
         {{
-            "type": "{'/'.join([e.value for e in ErrorType])}",
+            "type": "{"/".join([e.value for e in ErrorType])}",
             "message": "error message if visible",
             "location": "where on screen",
-            "severity": "{'/'.join([s.value for s in ErrorSeverity])}"
+            "severity": "{"/".join([s.value for s in ErrorSeverity])}"
         }}
     ],
     "confidence": 0.0-1.0
@@ -122,7 +138,7 @@ Provide response in JSON format:
                     message=error_data.get("message", "Unknown error"),
                     location=error_data.get("location", "Unknown location"),
                     severity=ErrorSeverity(error_data.get("severity", "medium")),
-                    confidence=response.get("confidence", 0.5)
+                    confidence=response.get("confidence", 0.5),
                 )
                 errors.append(error)
             except (ValueError, KeyError):
@@ -144,17 +160,31 @@ Provide response in JSON format:
         """
         message_lower = message.lower()
 
-        if any(word in message_lower for word in ["401", "403", "unauthorized", "forbidden", "denied"]):
+        if any(
+            word in message_lower
+            for word in ["401", "403", "unauthorized", "forbidden", "denied"]
+        ):
             return ErrorType.AUTHENTICATION
         elif any(word in message_lower for word in ["404", "not found", "missing"]):
             return ErrorType.NOT_FOUND
-        elif any(word in message_lower for word in ["500", "502", "503", "server error", "internal"]):
+        elif any(
+            word in message_lower
+            for word in ["500", "502", "503", "server error", "internal"]
+        ):
             return ErrorType.SYSTEM
-        elif any(word in message_lower for word in ["timeout", "timed out", "network", "connection"]):
+        elif any(
+            word in message_lower
+            for word in ["timeout", "timed out", "network", "connection"]
+        ):
             return ErrorType.NETWORK
-        elif any(word in message_lower for word in ["invalid", "validation", "required", "must"]):
+        elif any(
+            word in message_lower
+            for word in ["invalid", "validation", "required", "must"]
+        ):
             return ErrorType.VALIDATION
-        elif any(word in message_lower for word in ["permission", "access", "privilege"]):
+        elif any(
+            word in message_lower for word in ["permission", "access", "privilege"]
+        ):
             return ErrorType.PERMISSION
         else:
             return ErrorType.UNKNOWN
@@ -176,7 +206,7 @@ Provide response in JSON format:
                 "highest_severity": None,
                 "error_count": 0,
                 "can_continue": True,
-                "recommendations": []
+                "recommendations": [],
             }
 
         severities = [error.severity for error in errors]
@@ -202,5 +232,5 @@ Provide response in JSON format:
             "error_count": len(errors),
             "can_continue": not has_blocking,
             "recommendations": recommendations,
-            "error_types": list({e.error_type for e in errors})
+            "error_types": list({e.error_type for e in errors}),
         }

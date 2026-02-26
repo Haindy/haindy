@@ -492,7 +492,7 @@ class SimpleHTMLReporter:
         self,
         test_state: TestState,
         execution_history: list[TestStepResult],
-        output_path: Path
+        output_path: Path,
     ) -> Path:
         """
         Generate HTML report from test state and execution history.
@@ -521,9 +521,7 @@ class SimpleHTMLReporter:
         return output_path
 
     def _prepare_template_data(
-        self,
-        test_state: TestState,
-        execution_history: list[TestStepResult]
+        self, test_state: TestState, execution_history: list[TestStepResult]
     ) -> dict:
         """Prepare data for template rendering."""
 
@@ -581,13 +579,17 @@ class SimpleHTMLReporter:
         test_report = test_state.test_report
         duration = 0
         if test_state.start_time and test_state.end_time:
-            duration = round((test_state.end_time - test_state.start_time).total_seconds(), 2)
+            duration = round(
+                (test_state.end_time - test_state.start_time).total_seconds(), 2
+            )
 
         if test_report:
             total_steps = sum(tc.steps_total for tc in test_report.test_cases)
             passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
             failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
-            success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
+            success_rate = int(
+                (passed_steps / total_steps * 100) if total_steps > 0 else 0
+            )
 
             steps: list[dict] = []
             for test_case in test_report.test_cases:
@@ -604,14 +606,19 @@ class SimpleHTMLReporter:
 
                     steps.append(
                         {
-                            "number": getattr(step_result, "step_number", len(steps) + 1),
+                            "number": getattr(
+                                step_result, "step_number", len(steps) + 1
+                            ),
                             "description": getattr(
-                                step_result, "step_description", getattr(test_case, "name", "Step")
+                                step_result,
+                                "step_description",
+                                getattr(test_case, "name", "Step"),
                             ),
                             "action": getattr(step_result, "action_taken", "N/A"),
                             "status": status,
                             "status_class": status,
-                            "result": getattr(step_result, "actual_result", "N/A") or "N/A",
+                            "result": getattr(step_result, "actual_result", "N/A")
+                            or "N/A",
                             "mode": getattr(step_result, "execution_mode", "enhanced"),
                         }
                     )
@@ -628,7 +635,9 @@ class SimpleHTMLReporter:
             total_steps = len(getattr(test_state.test_plan, "steps", []))
             passed_steps = len(getattr(test_state, "completed_steps", []))
             failed_steps = len(getattr(test_state, "failed_steps", []))
-            success_rate = int((passed_steps / total_steps * 100) if total_steps > 0 else 0)
+            success_rate = int(
+                (passed_steps / total_steps * 100) if total_steps > 0 else 0
+            )
 
             steps: list[dict] = []
             for index, step_result in enumerate(execution_history, start=1):
@@ -657,7 +666,9 @@ class SimpleHTMLReporter:
                     steps.append(
                         {
                             "number": getattr(step, "step_number", index),
-                            "description": getattr(step, "description", f"Step {index}"),
+                            "description": getattr(
+                                step, "description", f"Step {index}"
+                            ),
                             "action": getattr(step, "action", "N/A"),
                             "status": "skipped",
                             "status_class": "skipped",
@@ -689,11 +700,13 @@ class SimpleHTMLReporter:
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "duration": duration,
             "status": test_state.status.value,
-            "status_class": status_class_map.get(test_state.status.value, "in-progress"),
+            "status_class": status_class_map.get(
+                test_state.status.value, "in-progress"
+            ),
             "total_steps": total_steps,
             "passed_steps": passed_steps,
             "failed_steps": failed_steps,
             "success_rate": success_rate,
             "steps": steps,
-            "bug_reports": bug_reports
+            "bug_reports": bug_reports,
         }

@@ -100,7 +100,9 @@ class TaskPlanCache:
                 try:
                     entries.append(CachedPlan.from_dict(item))
                 except Exception:
-                    logger.debug("Skipping malformed task plan cache entry", exc_info=True)
+                    logger.debug(
+                        "Skipping malformed task plan cache entry", exc_info=True
+                    )
         return entries
 
     def _save(self, entries: list[CachedPlan]) -> None:

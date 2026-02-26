@@ -13,8 +13,7 @@ from src.journal.models import JournalActionResult
 
 
 def enhanced_to_journal_action_result(
-    enhanced_result: EnhancedActionResult,
-    action_type: ActionType | None = None
+    enhanced_result: EnhancedActionResult, action_type: ActionType | None = None
 ) -> JournalActionResult:
     """
     Convert an EnhancedActionResult to a JournalActionResult.
@@ -61,7 +60,9 @@ def enhanced_to_journal_action_result(
 
         # Add adjustment details if available
         if enhanced_result.coordinates.adjustment_details:
-            coordinate_metadata["adjustment_details"] = enhanced_result.coordinates.adjustment_details
+            coordinate_metadata["adjustment_details"] = (
+                enhanced_result.coordinates.adjustment_details
+            )
 
     # Extract automation command (would come from scripting system)
     automation_command: str | None = None
@@ -75,7 +76,10 @@ def enhanced_to_journal_action_result(
 
     # Extract input text from test step if it's a type action
     input_text: str | None = None
-    if action_type == ActionType.TYPE and enhanced_result.test_step.action_instruction.value:
+    if (
+        action_type == ActionType.TYPE
+        and enhanced_result.test_step.action_instruction.value
+    ):
         input_text = enhanced_result.test_step.action_instruction.value
 
     # Extract element text (not available in current enhanced result)
@@ -106,7 +110,7 @@ def enhanced_to_journal_action_result(
         input_text=input_text,
         element_text=element_text,
         actual_outcome=actual_outcome,
-        error_message=error_message
+        error_message=error_message,
     )
 
 
@@ -126,12 +130,16 @@ def extract_journal_context(enhanced_result: EnhancedActionResult) -> dict[str, 
     if enhanced_result.environment_state_before:
         context["url_before"] = enhanced_result.environment_state_before.url
         context["title_before"] = enhanced_result.environment_state_before.title
-        context["viewport_before"] = enhanced_result.environment_state_before.viewport_size
+        context["viewport_before"] = (
+            enhanced_result.environment_state_before.viewport_size
+        )
 
     if enhanced_result.environment_state_after:
         context["url_after"] = enhanced_result.environment_state_after.url
         context["title_after"] = enhanced_result.environment_state_after.title
-        context["viewport_after"] = enhanced_result.environment_state_after.viewport_size
+        context["viewport_after"] = (
+            enhanced_result.environment_state_after.viewport_size
+        )
 
     # Add validation information
     if enhanced_result.validation:
@@ -153,19 +161,31 @@ def extract_journal_context(enhanced_result: EnhancedActionResult) -> dict[str, 
         context["ai_matches_expected"] = enhanced_result.ai_analysis.matches_expected
 
     # Add screenshot availability information
-    if enhanced_result.environment_state_before and enhanced_result.environment_state_before.screenshot:
+    if (
+        enhanced_result.environment_state_before
+        and enhanced_result.environment_state_before.screenshot
+    ):
         context["has_screenshot_before"] = True
-        context["screenshot_before_size"] = len(enhanced_result.environment_state_before.screenshot)
+        context["screenshot_before_size"] = len(
+            enhanced_result.environment_state_before.screenshot
+        )
 
-    if enhanced_result.environment_state_after and enhanced_result.environment_state_after.screenshot:
+    if (
+        enhanced_result.environment_state_after
+        and enhanced_result.environment_state_after.screenshot
+    ):
         context["has_screenshot_after"] = True
-        context["screenshot_after_size"] = len(enhanced_result.environment_state_after.screenshot)
+        context["screenshot_after_size"] = len(
+            enhanced_result.environment_state_after.screenshot
+        )
 
     # Add timing information
     context["timestamp_start"] = enhanced_result.timestamp_start.isoformat()
     if enhanced_result.timestamp_end:
         context["timestamp_end"] = enhanced_result.timestamp_end.isoformat()
-        duration_ms = (enhanced_result.timestamp_end - enhanced_result.timestamp_start).total_seconds() * 1000
+        duration_ms = (
+            enhanced_result.timestamp_end - enhanced_result.timestamp_start
+        ).total_seconds() * 1000
         context["total_duration_ms"] = duration_ms
 
     return context

@@ -74,8 +74,7 @@ class JournalManager:
         """
         async with self._lock:
             journal = ExecutionJournal(
-                test_plan_id=test_plan.plan_id,
-                test_name=test_plan.name
+                test_plan_id=test_plan.plan_id, test_name=test_plan.name
             )
 
             self._active_journals[journal.journal_id] = journal
@@ -92,7 +91,7 @@ class JournalManager:
         execution_mode: ExecutionMode,
         execution_time_ms: int | None = None,
         screenshot_before: str | None = None,
-        screenshot_after: str | None = None
+        screenshot_after: str | None = None,
     ) -> JournalEntry:
         """
         Record an action in the journal.
@@ -127,11 +126,14 @@ class JournalManager:
                 # Extract additional context
                 extract_journal_context(action_result)
 
-                logger.debug("Converted EnhancedActionResult to JournalActionResult", extra={
-                    "enhanced_success": action_result.overall_success,
-                    "journal_success": journal_result.success,
-                    "execution_time_ms": execution_time_ms
-                })
+                logger.debug(
+                    "Converted EnhancedActionResult to JournalActionResult",
+                    extra={
+                        "enhanced_success": action_result.overall_success,
+                        "journal_success": journal_result.success,
+                        "execution_time_ms": execution_time_ms,
+                    },
+                )
             else:
                 # Already in journal format
                 journal_result = action_result
@@ -160,7 +162,7 @@ class JournalManager:
                 success=journal_result.success,
                 error_message=journal_result.error_message,
                 screenshot_before=screenshot_before,
-                screenshot_after=screenshot_after
+                screenshot_after=screenshot_after,
             )
 
             # Add to journal
@@ -177,9 +179,7 @@ class JournalManager:
             return entry
 
     async def find_matching_pattern(
-        self,
-        step: TestStep,
-        context: dict[str, Any]
+        self, step: TestStep, context: dict[str, Any]
     ) -> ActionRecord | None:
         """
         Find a matching pattern for a test step.
@@ -272,7 +272,7 @@ class JournalManager:
             "total_patterns": len(self._pattern_library),
             "patterns_by_type": {},
             "most_successful": [],
-            "most_used": []
+            "most_used": [],
         }
 
         # Count by type
@@ -284,35 +284,35 @@ class JournalManager:
 
         # Find most successful (highest success rate)
         patterns_with_usage = [
-            p for p in self._pattern_library.values()
+            p
+            for p in self._pattern_library.values()
             if p.success_count + p.failure_count > 0
         ]
 
         patterns_with_usage.sort(
             key=lambda p: p.success_count / (p.success_count + p.failure_count),
-            reverse=True
+            reverse=True,
         )
         stats["most_successful"] = [
             {
                 "pattern_id": str(p.record_id),
                 "type": p.pattern_type,
                 "success_rate": p.success_count / (p.success_count + p.failure_count),
-                "total_uses": p.success_count + p.failure_count
+                "total_uses": p.success_count + p.failure_count,
             }
             for p in patterns_with_usage[:5]
         ]
 
         # Find most used
         patterns_with_usage.sort(
-            key=lambda p: p.success_count + p.failure_count,
-            reverse=True
+            key=lambda p: p.success_count + p.failure_count, reverse=True
         )
         stats["most_used"] = [
             {
                 "pattern_id": str(p.record_id),
                 "type": p.pattern_type,
                 "total_uses": p.success_count + p.failure_count,
-                "success_rate": p.success_count / (p.success_count + p.failure_count)
+                "success_rate": p.success_count / (p.success_count + p.failure_count),
             }
             for p in patterns_with_usage[:5]
         ]
@@ -352,16 +352,16 @@ class JournalManager:
         action_text = step.action.lower()
 
         # Simple heuristic based on action text
-        if 'click' in action_text:
-            action_type = 'click'
-        elif 'type' in action_text or 'enter' in action_text:
-            action_type = 'type'
-        elif 'navigate' in action_text or 'go to' in action_text:
-            action_type = 'navigate'
-        elif 'scroll' in action_text:
-            action_type = 'scroll'
+        if "click" in action_text:
+            action_type = "click"
+        elif "type" in action_text or "enter" in action_text:
+            action_type = "type"
+        elif "navigate" in action_text or "go to" in action_text:
+            action_type = "navigate"
+        elif "scroll" in action_text:
+            action_type = "scroll"
         else:
-            action_type = 'click'  # default
+            action_type = "click"  # default
 
         mapping = {
             "click": PatternType.CLICK,
@@ -369,16 +369,13 @@ class JournalManager:
             "navigate": PatternType.NAVIGATE,
             "scroll": PatternType.SCROLL,
             "wait": PatternType.WAIT,
-            "screenshot": PatternType.SCREENSHOT
+            "screenshot": PatternType.SCREENSHOT,
         }
 
         return mapping.get(action_type, PatternType.CLICK)
 
     async def _create_action_pattern(
-        self,
-        step: TestStep,
-        result: JournalActionResult,
-        entry: JournalEntry
+        self, step: TestStep, result: JournalActionResult, entry: JournalEntry
     ) -> ActionRecord | None:
         """Create an action pattern from successful execution."""
         if not result.automation_command:
@@ -396,7 +393,7 @@ class JournalManager:
             element_text=result.element_text,
             success_count=1,
             avg_execution_time_ms=float(entry.execution_time_ms),
-            last_used=datetime.now(timezone.utc)
+            last_used=datetime.now(timezone.utc),
         )
 
         logger.debug(f"Created action pattern: {pattern.pattern_type}")
@@ -447,10 +444,9 @@ class JournalManager:
         try:
             data = {
                 "patterns": [
-                    pattern.model_dump()
-                    for pattern in self._pattern_library.values()
+                    pattern.model_dump() for pattern in self._pattern_library.values()
                 ],
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
             with open(pattern_file, "w") as f:

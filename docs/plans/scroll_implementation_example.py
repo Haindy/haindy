@@ -12,10 +12,12 @@ class ScrollDirection(Enum):
     LEFT = "left"
     RIGHT = "right"
 
+
 class VisibilityStatus(Enum):
     FULLY_VISIBLE = "fully_visible"
     PARTIALLY_VISIBLE = "partially_visible"
     NOT_VISIBLE = "not_visible"
+
 
 @dataclass
 class VisibilityResult:
@@ -27,12 +29,14 @@ class VisibilityResult:
     direction_confidence: float = 0.0
     ai_notes: str = ""  # Additional context from AI
 
+
 @dataclass
 class ScrollAction:
     direction: ScrollDirection
     distance: int  # pixels
     is_correction: bool = False
     executed_at: float | None = None
+
 
 @dataclass
 class ScrollState:
@@ -49,6 +53,7 @@ class ScrollState:
         if self.scroll_history is None:
             self.scroll_history = []
 
+
 class ActionAgent:
     """Extended ActionAgent with scroll capabilities"""
 
@@ -62,36 +67,40 @@ class ActionAgent:
 
         self.logger.info(
             "Starting scroll-to-element workflow",
-            extra={
-                "target": instruction,
-                "max_attempts": state.max_attempts
-            }
+            extra={"target": instruction, "max_attempts": state.max_attempts},
         )
 
         while state.attempts < state.max_attempts:
             state.attempts += 1
 
             # Check current visibility
-            visibility = await self._check_element_visibility(screenshot, instruction, state)
+            visibility = await self._check_element_visibility(
+                screenshot, instruction, state
+            )
 
             self.logger.info(
                 f"Visibility check attempt {state.attempts}",
                 extra={
                     "status": visibility.status.value,
                     "confidence": visibility.confidence,
-                    "coordinates": visibility.coordinates
-                }
+                    "coordinates": visibility.coordinates,
+                },
             )
 
             # Success case - element fully visible
-            if visibility.status == VisibilityStatus.FULLY_VISIBLE and visibility.confidence > 80:
+            if (
+                visibility.status == VisibilityStatus.FULLY_VISIBLE
+                and visibility.confidence > 80
+            ):
                 return {
                     "action": "scroll_to_element",
                     "success": True,
                     "coordinates": visibility.coordinates,
                     "confidence": visibility.confidence,
                     "attempts": state.attempts,
-                    "total_scroll_distance": sum(abs(s.distance) for s in state.scroll_history)
+                    "total_scroll_distance": sum(
+                        abs(s.distance) for s in state.scroll_history
+                    ),
                 }
 
             # Plan next scroll action
@@ -103,7 +112,7 @@ class ActionAgent:
                     "action": "scroll_to_element",
                     "success": False,
                     "error": "Could not determine scroll direction",
-                    "attempts": state.attempts
+                    "attempts": state.attempts,
                 }
 
             # Execute scroll
@@ -131,17 +140,14 @@ class ActionAgent:
                 {
                     "direction": s.direction.value,
                     "distance": s.distance,
-                    "is_correction": s.is_correction
+                    "is_correction": s.is_correction,
                 }
                 for s in state.scroll_history
-            ]
+            ],
         }
 
     async def _check_element_visibility(
-        self,
-        screenshot: bytes,
-        target: str,
-        state: ScrollState
+        self, screenshot: bytes, target: str, state: ScrollState
     ) -> VisibilityResult:
         """
         Use AI to check if target element is visible in screenshot.
@@ -215,9 +221,7 @@ class ActionAgent:
         return "\n".join(context_parts)
 
     async def _plan_scroll_action(
-        self,
-        state: ScrollState,
-        visibility: VisibilityResult
+        self, state: ScrollState, visibility: VisibilityResult
     ) -> ScrollAction | None:
         """
         Plan the next scroll action based on current visibility and history.
@@ -243,15 +247,13 @@ class ActionAgent:
             return ScrollAction(
                 direction=visibility.suggested_direction,
                 distance=distance,
-                is_correction=False
+                is_correction=False,
             )
 
         return None
 
     def _calculate_scroll_distance(
-        self,
-        state: ScrollState,
-        visibility: VisibilityResult
+        self, state: ScrollState, visibility: VisibilityResult
     ) -> int:
         """
         Calculate optimal scroll distance based on confidence and history.
@@ -293,24 +295,33 @@ class ActionAgent:
         return ScrollAction(
             direction=visibility.suggested_direction,
             distance=distance,
-            is_correction=False
+            is_correction=False,
         )
 
-    def _detect_overshoot(self, state: ScrollState, visibility: VisibilityResult) -> bool:
+    def _detect_overshoot(
+        self, state: ScrollState, visibility: VisibilityResult
+    ) -> bool:
         """Detect if we've scrolled past the target element."""
 
         if state.attempts < 2:
             return False
 
         # Was partially visible, now not visible = likely overshot
-        if state.element_partially_visible and visibility.status == VisibilityStatus.NOT_VISIBLE:
+        if (
+            state.element_partially_visible
+            and visibility.status == VisibilityStatus.NOT_VISIBLE
+        ):
             return True
 
         # Direction reversal with high confidence = likely overshot
-        if (state.last_direction and
-            visibility.suggested_direction and
-            self._is_opposite_direction(state.last_direction, visibility.suggested_direction) and
-            visibility.direction_confidence > 80):
+        if (
+            state.last_direction
+            and visibility.suggested_direction
+            and self._is_opposite_direction(
+                state.last_direction, visibility.suggested_direction
+            )
+            and visibility.direction_confidence > 80
+        ):
             return True
 
         return False
@@ -327,7 +338,7 @@ class ActionAgent:
         return ScrollAction(
             direction=opposite_dir,
             distance=max(50, correction_distance),  # Minimum 50px
-            is_correction=True
+            is_correction=True,
         )
 
     def _is_oscillating(self, history: list[ScrollAction], window: int = 4) -> bool:
@@ -342,18 +353,20 @@ class ActionAgent:
         # Check for alternating directions
         changes = 0
         for i in range(1, len(directions)):
-            if directions[i] != directions[i-1]:
+            if directions[i] != directions[i - 1]:
                 changes += 1
 
         return changes >= window - 1
 
-    def _is_opposite_direction(self, dir1: ScrollDirection, dir2: ScrollDirection) -> bool:
+    def _is_opposite_direction(
+        self, dir1: ScrollDirection, dir2: ScrollDirection
+    ) -> bool:
         """Check if two directions are opposite."""
         opposites = {
             ScrollDirection.UP: ScrollDirection.DOWN,
             ScrollDirection.DOWN: ScrollDirection.UP,
             ScrollDirection.LEFT: ScrollDirection.RIGHT,
-            ScrollDirection.RIGHT: ScrollDirection.LEFT
+            ScrollDirection.RIGHT: ScrollDirection.LEFT,
         }
         return opposites.get(dir1) == dir2
 
@@ -363,7 +376,7 @@ class ActionAgent:
             ScrollDirection.UP: ScrollDirection.DOWN,
             ScrollDirection.DOWN: ScrollDirection.UP,
             ScrollDirection.LEFT: ScrollDirection.RIGHT,
-            ScrollDirection.RIGHT: ScrollDirection.LEFT
+            ScrollDirection.RIGHT: ScrollDirection.LEFT,
         }
         return opposites[direction]
 
@@ -383,7 +396,7 @@ class ActionAgent:
 
         self.logger.debug(
             f"Executing scroll: {action.direction.value} by {action.distance}px",
-            extra={"x": x, "y": y, "is_correction": action.is_correction}
+            extra={"x": x, "y": y, "is_correction": action.is_correction},
         )
 
         # Use smooth scrolling for better UX
@@ -417,30 +430,30 @@ class ActionAgent:
         """Parse AI response into VisibilityResult object."""
 
         # Parse the structured response
-        lines = ai_response.strip().split('\n')
+        lines = ai_response.strip().split("\n")
         result = VisibilityResult(status=VisibilityStatus.NOT_VISIBLE)
 
         for line in lines:
-            if line.startswith('STATUS:'):
-                status_str = line.split(':', 1)[1].strip()
+            if line.startswith("STATUS:"):
+                status_str = line.split(":", 1)[1].strip()
                 result.status = VisibilityStatus[status_str]
-            elif line.startswith('COORDINATES:'):
-                coords = line.split(':', 1)[1].strip()
-                if coords and coords != 'None':
+            elif line.startswith("COORDINATES:"):
+                coords = line.split(":", 1)[1].strip()
+                if coords and coords != "None":
                     result.coordinates = coords
-            elif line.startswith('CONFIDENCE:'):
-                result.confidence = float(line.split(':', 1)[1].strip())
-            elif line.startswith('VISIBLE_PERCENT:'):
-                pct = line.split(':', 1)[1].strip()
-                if pct and pct != 'None':
+            elif line.startswith("CONFIDENCE:"):
+                result.confidence = float(line.split(":", 1)[1].strip())
+            elif line.startswith("VISIBLE_PERCENT:"):
+                pct = line.split(":", 1)[1].strip()
+                if pct and pct != "None":
                     result.visible_percentage = int(pct)
-            elif line.startswith('DIRECTION:'):
-                dir_str = line.split(':', 1)[1].strip()
+            elif line.startswith("DIRECTION:"):
+                dir_str = line.split(":", 1)[1].strip()
                 if dir_str in [d.name for d in ScrollDirection]:
                     result.suggested_direction = ScrollDirection[dir_str]
-            elif line.startswith('DIRECTION_CONFIDENCE:'):
-                result.direction_confidence = float(line.split(':', 1)[1].strip())
-            elif line.startswith('NOTES:'):
-                result.ai_notes = line.split(':', 1)[1].strip()
+            elif line.startswith("DIRECTION_CONFIDENCE:"):
+                result.direction_confidence = float(line.split(":", 1)[1].strip())
+            elif line.startswith("NOTES:"):
+                result.ai_notes = line.split(":", 1)[1].strip()
 
         return result

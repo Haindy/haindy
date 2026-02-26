@@ -53,7 +53,9 @@ class TestExecutionReport:
         self.journal = journal
         self.config = config or ReportConfig()
         self.generated_at = datetime.now(timezone.utc)
-        self.bug_reports: list[dict[str, Any]] = []  # Will be populated after initialization
+        self.bug_reports: list[
+            dict[str, Any]
+        ] = []  # Will be populated after initialization
         self.artifacts = artifacts or {}
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,26 +65,30 @@ class TestExecutionReport:
                 "report_version": "1.0",
                 "generated_at": self.generated_at.isoformat(),
                 "test_id": str(self.test_metrics.test_id),
-                "test_name": self.test_metrics.test_name
+                "test_name": self.test_metrics.test_name,
             },
             "summary": {
-                "outcome": self.test_metrics.outcome.value if self.test_metrics.outcome else "unknown",
+                "outcome": self.test_metrics.outcome.value
+                if self.test_metrics.outcome
+                else "unknown",
                 "duration_seconds": self.test_metrics.duration_seconds,
                 "start_time": self.test_metrics.start_time.isoformat(),
-                "end_time": self.test_metrics.end_time.isoformat() if self.test_metrics.end_time else None,
-                "success_rate": self.test_metrics.success_rate
+                "end_time": self.test_metrics.end_time.isoformat()
+                if self.test_metrics.end_time
+                else None,
+                "success_rate": self.test_metrics.success_rate,
             },
             "steps": {
                 "total": self.test_metrics.steps_total,
                 "passed": self.test_metrics.steps_passed,
                 "failed": self.test_metrics.steps_failed,
-                "skipped": self.test_metrics.steps_skipped
+                "skipped": self.test_metrics.steps_skipped,
             },
             "resources": {
                 "api_calls": self.test_metrics.api_calls,
                 "automation_actions": self.test_metrics.automation_actions,
-                "screenshots": self.test_metrics.screenshots_taken
-            }
+                "screenshots": self.test_metrics.screenshots_taken,
+            },
         }
 
         # Add performance metrics
@@ -99,14 +105,16 @@ class TestExecutionReport:
                 },
                 "critical": self.error_report.critical_errors,
                 "recovery_summary": self.error_report.recovery_summary,
-                "recommendations": self.error_report.recommendations
+                "recommendations": self.error_report.recommendations,
             }
 
         # Add journal entries
         if self.config.include_journal_entries and self.journal:
             report["execution_journal"] = {
                 "entries": len(self.journal.entries),
-                "summary": self.journal.get_summary() if hasattr(self.journal, 'get_summary') else {}
+                "summary": self.journal.get_summary()
+                if hasattr(self.journal, "get_summary")
+                else {},
             }
 
         # Add bug reports
@@ -131,9 +139,11 @@ class TestExecutionReport:
         # Add AI conversations if available
         debug_logger = get_debug_logger()
         if debug_logger:
-            template_data['ai_conversations'] = debug_logger.get_ai_conversations_html()
+            template_data["ai_conversations"] = debug_logger.get_ai_conversations_html()
 
-        return template.render(report=template_data, ai_conversations=template_data.get('ai_conversations'))
+        return template.render(
+            report=template_data, ai_conversations=template_data.get("ai_conversations")
+        )
 
     def to_markdown(self) -> str:
         """Generate Markdown report."""
@@ -145,14 +155,14 @@ class TestExecutionReport:
 
         # Summary
         md += "## Summary\n\n"
-        summary = data['summary']
+        summary = data["summary"]
         md += f"- **Outcome:** {summary['outcome'].upper()}\n"
         md += f"- **Duration:** {summary['duration_seconds']:.2f}s\n"
-        md += f"- **Success Rate:** {summary['success_rate']*100:.1f}%\n\n"
+        md += f"- **Success Rate:** {summary['success_rate'] * 100:.1f}%\n\n"
 
         # Steps
         md += "## Test Steps\n\n"
-        steps = data['steps']
+        steps = data["steps"]
         md += f"- Total: {steps['total']}\n"
         md += f"- Passed: {steps['passed']} ✓\n"
         md += f"- Failed: {steps['failed']} ✗\n"
@@ -160,35 +170,35 @@ class TestExecutionReport:
 
         # Resources
         md += "## Resource Usage\n\n"
-        resources = data['resources']
+        resources = data["resources"]
         md += f"- API Calls: {resources['api_calls']}\n"
         md += f"- Automation Actions: {resources['automation_actions']}\n"
         md += f"- Screenshots: {resources['screenshots']}\n\n"
 
         # Errors
-        if 'errors' in data:
+        if "errors" in data:
             md += "## Errors and Recovery\n\n"
-            errors = data['errors']
+            errors = data["errors"]
             md += f"Total errors: {errors['total']}\n\n"
 
-            if errors['critical']:
+            if errors["critical"]:
                 md += "### Critical Errors\n\n"
-                for error in errors['critical']:
+                for error in errors["critical"]:
                     md += f"- **{error['error_type']}**: {error['count']} occurrences\n"
                 md += "\n"
 
-            if errors['recommendations']:
+            if errors["recommendations"]:
                 md += "### Recommendations\n\n"
-                for rec in errors['recommendations']:
+                for rec in errors["recommendations"]:
                     md += f"- {rec}\n"
                 md += "\n"
 
         # Bug Reports
-        if 'bug_reports' in data and data['bug_reports']:
+        if "bug_reports" in data and data["bug_reports"]:
             md += "## Bug Reports\n\n"
             md += f"Found {len(data['bug_reports'])} bug(s) during test execution:\n\n"
 
-            for bug in data['bug_reports']:
+            for bug in data["bug_reports"]:
                 md += f"### {bug['description']}\n\n"
                 md += f"- **Severity:** {bug['severity'].upper()}\n"
                 md += f"- **Step:** {bug['step_number']}\n"
@@ -196,12 +206,12 @@ class TestExecutionReport:
                 md += f"- **Expected:** {bug['expected_result']}\n"
                 md += f"- **Actual:** {bug['actual_result']}\n"
 
-                if bug.get('error_details'):
+                if bug.get("error_details"):
                     md += f"- **Error Details:** {bug['error_details']}\n"
 
-                if bug.get('reproduction_steps'):
+                if bug.get("reproduction_steps"):
                     md += "\n**Steps to Reproduce:**\n"
-                    for i, step in enumerate(bug['reproduction_steps'], 1):
+                    for i, step in enumerate(bug["reproduction_steps"], 1):
                         md += f"{i}. {step}\n"
 
                 md += "\n"
@@ -231,23 +241,25 @@ class TestExecutionReport:
 
         if "json" in formats:
             json_path = output_dir / f"{base_name}.json"
-            with open(json_path, 'w') as f:
+            with open(json_path, "w") as f:
                 f.write(self.to_json())
             saved_files["json"] = json_path
 
         if "html" in formats:
             html_path = output_dir / f"{base_name}.html"
-            with open(html_path, 'w') as f:
+            with open(html_path, "w") as f:
                 f.write(self.to_html())
             saved_files["html"] = html_path
 
         if "markdown" in formats:
             md_path = output_dir / f"{base_name}.md"
-            with open(md_path, 'w') as f:
+            with open(md_path, "w") as f:
                 f.write(self.to_markdown())
             saved_files["markdown"] = md_path
 
-        logger.info(f"Saved test report to {output_dir} in formats: {list(saved_files.keys())}")
+        logger.info(
+            f"Saved test report to {output_dir} in formats: {list(saved_files.keys())}"
+        )
 
         return saved_files
 
@@ -259,7 +271,7 @@ class ReportGenerator:
         self,
         analytics: MetricsCollector,
         output_dir: Path = Path("reports"),
-        config: ReportConfig | None = None
+        config: ReportConfig | None = None,
     ):
         self.analytics = analytics
         self.output_dir = Path(output_dir)
@@ -270,7 +282,7 @@ class ReportGenerator:
         self,
         test_id: UUID,
         error_report: ErrorReport | None = None,
-        journal: ExecutionJournal | None = None
+        journal: ExecutionJournal | None = None,
     ) -> TestExecutionReport | None:
         """Generate report for a specific test."""
         if test_id not in self.analytics.test_metrics:
@@ -282,7 +294,7 @@ class ReportGenerator:
             test_metrics=test_metrics,
             error_report=error_report,
             journal=journal,
-            config=self.config
+            config=self.config,
         )
 
         return report
@@ -300,10 +312,10 @@ class ReportGenerator:
                     "outcome": metrics.outcome.value if metrics.outcome else "active",
                     "duration": metrics.duration_seconds,
                     "success_rate": metrics.success_rate,
-                    "errors": len(metrics.errors)
+                    "errors": len(metrics.errors),
                 }
                 for metrics in self.analytics.test_metrics.values()
-            ]
+            ],
         }
 
     def generate_performance_report(self) -> dict[str, Any]:
@@ -314,16 +326,18 @@ class ReportGenerator:
         perf_data["trends"] = {
             "api_call_rate_trend": self._calculate_trend("api.calls"),
             "automation_action_trend": self._calculate_trend("automation.actions"),
-            "error_rate_trend": self._calculate_trend("tests.failed")
+            "error_rate_trend": self._calculate_trend("tests.failed"),
         }
 
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "performance_metrics": perf_data,
-            "recommendations": self._generate_performance_recommendations(perf_data)
+            "recommendations": self._generate_performance_recommendations(perf_data),
         }
 
-    def _calculate_trend(self, metric_name: str, windows: list[int] = None) -> dict[str, float]:
+    def _calculate_trend(
+        self, metric_name: str, windows: list[int] = None
+    ) -> dict[str, float]:
         """Calculate metric trends over different time windows."""
         if windows is None:
             windows = [5, 15, 60]
@@ -333,7 +347,9 @@ class ReportGenerator:
             trends[f"{window}min"] = rate
         return trends
 
-    def _generate_performance_recommendations(self, perf_data: dict[str, Any]) -> list[str]:
+    def _generate_performance_recommendations(
+        self, perf_data: dict[str, Any]
+    ) -> list[str]:
         """Generate performance recommendations based on metrics."""
         recommendations = []
 
@@ -355,7 +371,7 @@ class ReportGenerator:
         success_rate = perf_data["steps"]["success_rate"]
         if success_rate < 0.9:
             recommendations.append(
-                f"Low step success rate ({success_rate*100:.1f}%). Review failing steps and improve reliability."
+                f"Low step success rate ({success_rate * 100:.1f}%). Review failing steps and improve reliability."
             )
 
         return recommendations
@@ -368,14 +384,14 @@ class ReportGenerator:
         # Summary report
         summary = self.generate_summary_report()
         summary_path = self.output_dir / f"summary_report_{timestamp}.json"
-        with open(summary_path, 'w') as f:
+        with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
         saved_files["summary"] = summary_path
 
         # Performance report
         perf = self.generate_performance_report()
         perf_path = self.output_dir / f"performance_report_{timestamp}.json"
-        with open(perf_path, 'w') as f:
+        with open(perf_path, "w") as f:
             json.dump(perf, f, indent=2)
         saved_files["performance"] = perf_path
 
@@ -636,8 +652,7 @@ class TestReporter:
         self.config = config or ReportConfig()
         self.metrics_collector = MetricsCollector()
         self.report_generator = ReportGenerator(
-            analytics=self.metrics_collector,
-            config=self.config
+            analytics=self.metrics_collector, config=self.config
         )
 
     async def generate_report(
@@ -645,7 +660,7 @@ class TestReporter:
         test_state: TestState,
         output_dir: Path,
         format: str = "html",
-        action_storage: dict[str, Any] | None = None
+        action_storage: dict[str, Any] | None = None,
     ) -> tuple[Path, Path | None]:
         """
         Generate a test report from TestState.
@@ -662,8 +677,11 @@ class TestReporter:
         # Use enhanced reporter for HTML format
         if format == "html":
             from src.monitoring.enhanced_reporter import EnhancedReporter
+
             enhanced_reporter = EnhancedReporter()
-            return enhanced_reporter.generate_report(test_state, output_dir, action_storage)
+            return enhanced_reporter.generate_report(
+                test_state, output_dir, action_storage
+            )
 
         # For other formats, use the original implementation
         # Convert TestState to TestMetrics
@@ -675,7 +693,9 @@ class TestReporter:
             error_report=self._extract_error_report(test_state),
             journal=None,  # TODO: Extract journal if available
             config=self.config,
-            artifacts=test_state.test_report.artifacts if test_state.test_report else None,
+            artifacts=test_state.test_report.artifacts
+            if test_state.test_report
+            else None,
         )
 
         # Add bug reports to the report data
@@ -683,7 +703,9 @@ class TestReporter:
 
         # Generate the report
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"test_report_{test_state.test_report.test_plan_id}_{timestamp}.{format}"
+        filename = (
+            f"test_report_{test_state.test_report.test_plan_id}_{timestamp}.{format}"
+        )
         output_path = output_dir / filename
 
         if format == "json":
@@ -706,7 +728,7 @@ class TestReporter:
             actions_path = output_dir / actions_filename
 
             # Write actions data with pretty formatting
-            with open(actions_path, 'w') as f:
+            with open(actions_path, "w") as f:
                 json.dump(action_storage, f, indent=2, default=str)
 
             logger.info(f"Generated actions file: {actions_path}")
@@ -730,6 +752,7 @@ class TestReporter:
 
         # Determine overall outcome
         from src.core.types import TestStatus
+
         if test_state.status == TestStatus.PASSED and failed_steps == 0:
             outcome = TestOutcome.PASSED
         elif test_state.status == TestStatus.FAILED or failed_steps > 0:
@@ -757,7 +780,10 @@ class TestReporter:
         test_name = test_state.test_report.test_plan_name
         start_time = test_state.test_report.started_at
         end_time = test_state.test_report.completed_at or now
-        skipped_steps = sum(tc.steps_total - tc.steps_completed - tc.steps_failed for tc in test_state.test_report.test_cases)
+        skipped_steps = sum(
+            tc.steps_total - tc.steps_completed - tc.steps_failed
+            for tc in test_state.test_report.test_cases
+        )
 
         return TestMetrics(
             test_id=test_id,
@@ -773,7 +799,7 @@ class TestReporter:
             automation_actions=0,  # TODO: Track automation actions
             screenshots_taken=0,  # TODO: Track screenshots
             errors=[],  # TODO: Track errors
-            performance_metrics={}
+            performance_metrics={},
         )
 
     def _extract_error_report(self, test_state: TestState) -> ErrorReport | None:
@@ -793,7 +819,7 @@ class TestReporter:
             errors_by_type={},
             critical_errors=[],
             recovery_summary={"total_attempts": 0, "successful_recoveries": 0},
-            recommendations=[]
+            recommendations=[],
         )
 
     def _extract_bug_reports(self, test_state: TestState) -> list[dict[str, Any]]:
@@ -803,19 +829,21 @@ class TestReporter:
 
         bug_reports = []
         for bug in test_state.test_report.bugs:
-            bug_reports.append({
-                "bug_id": str(bug.bug_id),
-                "step_id": str(bug.step_id),
-                "test_case_id": str(bug.test_case_id),
-                "step_number": bug.step_number,
-                "description": bug.description,
-                "severity": bug.severity.value,
-                "error_type": bug.error_type,
-                "expected_result": bug.expected_result,
-                "actual_result": bug.actual_result,
-                "screenshot_path": bug.screenshot_path,
-                "error_details": bug.error_details,
-                "reproduction_steps": bug.reproduction_steps
-            })
+            bug_reports.append(
+                {
+                    "bug_id": str(bug.bug_id),
+                    "step_id": str(bug.step_id),
+                    "test_case_id": str(bug.test_case_id),
+                    "step_number": bug.step_number,
+                    "description": bug.description,
+                    "severity": bug.severity.value,
+                    "error_type": bug.error_type,
+                    "expected_result": bug.expected_result,
+                    "actual_result": bug.actual_result,
+                    "screenshot_path": bug.screenshot_path,
+                    "error_details": bug.error_details,
+                    "reproduction_steps": bug.reproduction_steps,
+                }
+            )
 
         return bug_reports

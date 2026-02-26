@@ -27,11 +27,12 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class RecoveryAction(Enum):
     """Available recovery actions."""
+
     RETRY = auto()
     FALLBACK = auto()
     SKIP = auto()
@@ -42,6 +43,7 @@ class RecoveryAction(Enum):
 @dataclass
 class RecoveryContext:
     """Context information for recovery decisions."""
+
     error: Exception
     operation_name: str
     attempt_number: int = 1
@@ -89,7 +91,7 @@ class ExponentialBackoffStrategy(RetryStrategy):
         max_delay_ms: int = 60000,
         max_attempts: int = 5,
         multiplier: float = 2.0,
-        jitter: bool = True
+        jitter: bool = True,
     ):
         self.base_delay_ms = base_delay_ms
         self.max_delay_ms = max_delay_ms
@@ -100,8 +102,7 @@ class ExponentialBackoffStrategy(RetryStrategy):
     def get_delay_ms(self, attempt: int) -> int:
         """Calculate exponential backoff delay with optional jitter."""
         delay = min(
-            self.base_delay_ms * (self.multiplier ** (attempt - 1)),
-            self.max_delay_ms
+            self.base_delay_ms * (self.multiplier ** (attempt - 1)), self.max_delay_ms
         )
 
         if self.jitter:
@@ -136,7 +137,7 @@ class LinearBackoffStrategy(RetryStrategy):
         self,
         delay_increment_ms: int = 1000,
         max_delay_ms: int = 10000,
-        max_attempts: int = 3
+        max_attempts: int = 3,
     ):
         self.delay_increment_ms = delay_increment_ms
         self.max_delay_ms = max_delay_ms
@@ -149,10 +150,7 @@ class LinearBackoffStrategy(RetryStrategy):
 
     def should_retry(self, context: RecoveryContext) -> bool:
         """Check if retry should be attempted."""
-        return (
-            context.is_retryable and
-            context.attempt_number < self.max_attempts
-        )
+        return context.is_retryable and context.attempt_number < self.max_attempts
 
 
 class RecoveryManager:
@@ -161,7 +159,7 @@ class RecoveryManager:
     def __init__(
         self,
         default_strategy: RetryStrategy | None = None,
-        error_handlers: dict[type[Exception], Callable] | None = None
+        error_handlers: dict[type[Exception], Callable] | None = None,
     ):
         self.default_strategy = default_strategy or ExponentialBackoffStrategy()
         self.error_handlers = error_handlers or {}
@@ -175,7 +173,7 @@ class RecoveryManager:
         retry_strategy: RetryStrategy | None = None,
         fallback: Callable[..., Awaitable[T]] | None = None,
         timeout_ms: int | None = None,
-        **kwargs
+        **kwargs,
     ) -> T:
         """
         Execute an operation with automatic retry and recovery.
@@ -196,8 +194,7 @@ class RecoveryManager:
         """
         strategy = retry_strategy or self.default_strategy
         context = RecoveryContext(
-            error=Exception("Not started"),
-            operation_name=operation_name
+            error=Exception("Not started"), operation_name=operation_name
         )
 
         start_time = asyncio.get_event_loop().time()
@@ -213,12 +210,11 @@ class RecoveryManager:
                         raise TimeoutError(
                             f"Operation {operation_name} timed out",
                             operation=operation_name,
-                            timeout_ms=timeout_ms
+                            timeout_ms=timeout_ms,
                         )
 
                     result = await asyncio.wait_for(
-                        operation(*args, **kwargs),
-                        timeout=remaining_ms / 1000
+                        operation(*args, **kwargs), timeout=remaining_ms / 1000
                     )
                 else:
                     result = await operation(*args, **kwargs)
@@ -260,7 +256,7 @@ class RecoveryManager:
                         raise RecoveryError(
                             f"Fallback failed for {operation_name}",
                             recovery_strategy="fallback",
-                            original_error=e
+                            original_error=e,
                         ) from fallback_error
 
                 else:
@@ -269,14 +265,11 @@ class RecoveryManager:
                     raise RecoveryError(
                         f"All recovery attempts failed for {operation_name}",
                         recovery_strategy=strategy.__class__.__name__,
-                        original_error=e
+                        original_error=e,
                     ) from e
 
     def _determine_recovery_action(
-        self,
-        error: Exception,
-        context: RecoveryContext,
-        strategy: RetryStrategy
+        self, error: Exception, context: RecoveryContext, strategy: RetryStrategy
     ) -> RecoveryAction:
         """Determine the appropriate recovery action."""
         # Non-retryable errors should not be retried
@@ -290,10 +283,7 @@ class RecoveryManager:
         # If we have a fallback available, try it
         return RecoveryAction.FALLBACK
 
-    def _get_error_handler(
-        self,
-        error: Exception
-    ) -> Callable | None:
+    def _get_error_handler(self, error: Exception) -> Callable | None:
         """Get custom error handler for exception type."""
         for error_type, handler in self.error_handlers.items():
             if isinstance(error, error_type):
@@ -301,10 +291,7 @@ class RecoveryManager:
         return None
 
     async def _apply_handler(
-        self,
-        handler: Callable,
-        error: Exception,
-        context: RecoveryContext
+        self, handler: Callable, error: Exception, context: RecoveryContext
     ) -> Any:
         """Apply custom error handler."""
         if asyncio.iscoroutinefunction(handler):
@@ -315,8 +302,7 @@ class RecoveryManager:
     def _record_success(self, context: RecoveryContext) -> None:
         """Record successful operation statistics."""
         stats = self._recovery_stats.setdefault(
-            context.operation_name,
-            {"successes": 0, "failures": 0, "retries": 0}
+            context.operation_name, {"successes": 0, "failures": 0, "retries": 0}
         )
         stats["successes"] += 1
         if context.attempt_number > 1:
@@ -325,8 +311,7 @@ class RecoveryManager:
     def _record_failure(self, context: RecoveryContext) -> None:
         """Record failed operation statistics."""
         stats = self._recovery_stats.setdefault(
-            context.operation_name,
-            {"successes": 0, "failures": 0, "retries": 0}
+            context.operation_name, {"successes": 0, "failures": 0, "retries": 0}
         )
         stats["failures"] += 1
         stats["retries"] += context.attempt_number - 1

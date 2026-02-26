@@ -67,9 +67,7 @@ class StateManager:
         logger.info("State manager initialized")
 
     async def create_test_state(
-        self,
-        test_plan: TestPlan,
-        initial_context: dict[str, Any] | None = None
+        self, test_plan: TestPlan, initial_context: dict[str, Any] | None = None
     ) -> TestState:
         """
         Create a new test state for a test plan.
@@ -93,7 +91,7 @@ class StateManager:
                 start_time=None,
                 end_time=None,
                 error_count=0,
-                warning_count=0
+                warning_count=0,
             )
 
             # Store state and plan
@@ -104,14 +102,13 @@ class StateManager:
 
             # Record state change
             await self._record_state_change(
-                test_plan.plan_id,
-                StateTransition.START,
-                {"status": "created"}
+                test_plan.plan_id, StateTransition.START, {"status": "created"}
             )
 
-            logger.info(f"Test state created for plan: {test_plan.name}", extra={
-                "test_id": str(test_plan.plan_id)
-            })
+            logger.info(
+                f"Test state created for plan: {test_plan.name}",
+                extra={"test_id": str(test_plan.plan_id)},
+            )
 
             return test_state
 
@@ -132,7 +129,7 @@ class StateManager:
         self,
         test_id: UUID,
         transition: StateTransition,
-        data: dict[str, Any] | None = None
+        data: dict[str, Any] | None = None,
     ) -> TestState:
         """
         Update test state with transition validation.
@@ -219,35 +216,27 @@ class StateManager:
             return test_state
 
     def _is_valid_transition(
-        self,
-        test_state: TestState,
-        transition: StateTransition
+        self, test_state: TestState, transition: StateTransition
     ) -> bool:
         """Check if a state transition is valid."""
         current_status = test_state.status
 
         # Define valid transitions
         valid_transitions = {
-            TestStatus.PENDING: [
-                StateTransition.START,
-                StateTransition.ABORT
-            ],
+            TestStatus.PENDING: [StateTransition.START, StateTransition.ABORT],
             TestStatus.IN_PROGRESS: [
                 StateTransition.PAUSE,
                 StateTransition.COMPLETE_STEP,
                 StateTransition.FAIL_STEP,
                 StateTransition.SKIP_STEP,
                 StateTransition.ABORT,
-                StateTransition.COMPLETE
+                StateTransition.COMPLETE,
             ],
-            TestStatus.BLOCKED: [
-                StateTransition.RESUME,
-                StateTransition.ABORT
-            ],
+            TestStatus.BLOCKED: [StateTransition.RESUME, StateTransition.ABORT],
             TestStatus.SKIPPED: [],
             TestStatus.COMPLETED: [],
             TestStatus.PASSED: [],
-            TestStatus.FAILED: []
+            TestStatus.FAILED: [],
         }
 
         return transition in valid_transitions.get(current_status, [])
@@ -262,9 +251,9 @@ class StateManager:
 
         # Find completed/failed/skipped steps
         processed_steps = set(
-            test_state.completed_steps +
-            test_state.failed_steps +
-            test_state.skipped_steps
+            test_state.completed_steps
+            + test_state.failed_steps
+            + test_state.skipped_steps
         )
 
         # Find next unprocessed step
@@ -276,20 +265,13 @@ class StateManager:
 
         return None
 
-    def _check_dependencies(
-        self,
-        step: TestStep,
-        test_state: TestState
-    ) -> bool:
+    def _check_dependencies(self, step: TestStep, test_state: TestState) -> bool:
         """Check if step dependencies are satisfied."""
         if not step.dependencies:
             return True
 
         # All dependencies must be completed
-        return all(
-            dep_id in test_state.completed_steps
-            for dep_id in step.dependencies
-        )
+        return all(dep_id in test_state.completed_steps for dep_id in step.dependencies)
 
     async def register_agent(self, test_id: UUID, agent_name: str) -> None:
         """Register an agent as active for a test."""
@@ -311,30 +293,24 @@ class StateManager:
             return self._active_agents.get(test_id, set()).copy()
 
     async def _record_state_change(
-        self,
-        test_id: UUID,
-        transition: StateTransition,
-        data: dict[str, Any] | None
+        self, test_id: UUID, transition: StateTransition, data: dict[str, Any] | None
     ) -> None:
         """Record state change in history."""
         change_record = {
             "test_id": str(test_id),
             "transition": transition,
             "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         self._state_history.append(change_record)
 
         # Trim history
         if len(self._state_history) > self._history_limit:
-            self._state_history = self._state_history[-self._history_limit:]
+            self._state_history = self._state_history[-self._history_limit :]
 
     async def _notify_state_change(
-        self,
-        test_id: UUID,
-        test_state: TestState,
-        transition: StateTransition
+        self, test_id: UUID, test_state: TestState, transition: StateTransition
     ) -> None:
         """Notify registered callbacks of state change."""
         for callback in self._state_change_callbacks:
@@ -379,22 +355,24 @@ class StateManager:
                 "skipped_steps": skipped_steps,
                 "progress_percentage": (
                     (completed_steps + failed_steps + skipped_steps) / total_steps * 100
-                    if total_steps > 0 else 0
+                    if total_steps > 0
+                    else 0
                 ),
                 "current_step": (
                     test_state.current_step.description
-                    if test_state.current_step else None
+                    if test_state.current_step
+                    else None
                 ),
                 "error_count": test_state.error_count,
                 "warning_count": test_state.warning_count,
                 "start_time": (
-                    test_state.start_time.isoformat()
-                    if test_state.start_time else None
+                    test_state.start_time.isoformat() if test_state.start_time else None
                 ),
                 "elapsed_time": (
                     (datetime.now(timezone.utc) - test_state.start_time).total_seconds()
-                    if test_state.start_time else 0
-                )
+                    if test_state.start_time
+                    else 0
+                ),
             }
 
             return progress
@@ -405,18 +383,13 @@ class StateManager:
             return self._step_results.get(test_id, []).copy()
 
     def get_state_history(
-        self,
-        test_id: UUID | None = None,
-        limit: int = 100
+        self, test_id: UUID | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         """Get state change history."""
         history = self._state_history
 
         if test_id:
-            history = [
-                h for h in history
-                if h.get("test_id") == str(test_id)
-            ]
+            history = [h for h in history if h.get("test_id") == str(test_id)]
 
         return history[-limit:]
 

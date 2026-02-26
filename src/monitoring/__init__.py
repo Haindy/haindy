@@ -36,7 +36,6 @@ __all__ = [
     "log_performance_metric",
     "JSONFormatter",
     "SanitizingHandler",
-
     # Analytics
     "MetricsCollector",
     "TestOutcome",
@@ -46,7 +45,6 @@ __all__ = [
     "record_api_call",
     "record_automation_action",
     "get_analytics",
-
     # Reporter
     "ReportGenerator",
     "TestExecutionReport",

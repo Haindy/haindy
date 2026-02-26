@@ -50,8 +50,8 @@ async def demonstrate_journal_recording():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.NAVIGATE,
                     description="Go to product listing",
-                    expected_outcome="Product page displayed"
-                )
+                    expected_outcome="Product page displayed",
+                ),
             ),
             TestStep(
                 step_id=uuid4(),
@@ -60,8 +60,8 @@ async def demonstrate_journal_recording():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.CLICK,
                     description="Click 'Add to Cart' button",
-                    expected_outcome="Product added to cart"
-                )
+                    expected_outcome="Product added to cart",
+                ),
             ),
             TestStep(
                 step_id=uuid4(),
@@ -70,10 +70,10 @@ async def demonstrate_journal_recording():
                 action_instruction=ActionInstruction(
                     action_type=ActionType.CLICK,
                     description="Click 'Checkout' button",
-                    expected_outcome="Checkout page displayed"
-                )
-            )
-        ]
+                    expected_outcome="Checkout page displayed",
+                ),
+            ),
+        ],
     )
 
     # Create journal
@@ -94,7 +94,7 @@ async def demonstrate_journal_recording():
                 success=True,
                 action=ActionType.NAVIGATE,
                 confidence=1.0,
-                actual_outcome="Page loaded successfully"
+                actual_outcome="Page loaded successfully",
             )
             execution_mode = ExecutionMode.SCRIPTED
             execution_time = 500
@@ -104,24 +104,24 @@ async def demonstrate_journal_recording():
                 success=True,
                 action=ActionType.CLICK,
                 confidence=0.95 if i == 1 else 0.88,
-                coordinates=(500 + i*100, 300),
+                coordinates=(500 + i * 100, 300),
                 grid_coordinates={
-                    "initial_selection": f"M{23+i}",
+                    "initial_selection": f"M{23 + i}",
                     "initial_confidence": 0.70,
                     "refinement_applied": True,
-                    "refined_coordinates": f"M{23+i}+offset(0.7,0.4)",
-                    "final_confidence": 0.95 if i == 1 else 0.88
+                    "refined_coordinates": f"M{23 + i}+offset(0.7,0.4)",
+                    "final_confidence": 0.95 if i == 1 else 0.88,
                 },
                 playwright_command=f"await page.click('#{step.description.lower().replace(' ', '-')}')",
                 selectors={
                     "primary": f"#{step.description.lower().replace(' ', '-')}",
-                    "fallback": f"button:has-text('{step.description.split()[-1]}')"
+                    "fallback": f"button:has-text('{step.description.split()[-1]}')",
                 },
                 element_text=step.description.split()[-1],
-                actual_outcome=step.action_instruction.expected_outcome
+                actual_outcome=step.action_instruction.expected_outcome,
             )
             execution_mode = ExecutionMode.VISUAL
-            execution_time = 1500 + i*200
+            execution_time = 1500 + i * 200
 
         # Record action
         entry = await manager.record_action(
@@ -131,8 +131,8 @@ async def demonstrate_journal_recording():
             action_result=result,
             execution_mode=execution_mode,
             execution_time_ms=execution_time,
-            screenshot_before=f"screenshots/step_{i+1}_before.png",
-            screenshot_after=f"screenshots/step_{i+1}_after.png"
+            screenshot_before=f"screenshots/step_{i + 1}_before.png",
+            screenshot_after=f"screenshots/step_{i + 1}_after.png",
         )
 
         print(f"    - Action: {entry.action_taken}")
@@ -145,7 +145,7 @@ async def demonstrate_journal_recording():
     print("\n\nPattern Library Status:")
     stats = await manager.get_pattern_library_stats()
     print(f"  Total patterns: {stats['total_patterns']}")
-    for pattern_type, count in stats['patterns_by_type'].items():
+    for pattern_type, count in stats["patterns_by_type"].items():
         print(f"  - {pattern_type}: {count}")
 
     # Finalize journal
@@ -155,7 +155,7 @@ async def demonstrate_journal_recording():
     summary = finalized.get_summary()
     print("\nJournal Summary:")
     print(f"  Total steps: {summary['total_steps']}")
-    print(f"  Success rate: {summary['success_rate']*100:.1f}%")
+    print(f"  Success rate: {summary['success_rate'] * 100:.1f}%")
     print("  Execution modes:")
     print(f"    - Visual: {summary['execution_modes']['visual']}")
     print(f"    - Scripted: {summary['execution_modes']['scripted']}")
@@ -177,8 +177,8 @@ async def demonstrate_pattern_matching(manager: JournalManager, test_plan: TestP
         action_instruction=ActionInstruction(
             action_type=ActionType.CLICK,
             description="Click the Add to Basket button",
-            expected_outcome="Item added to basket"
-        )
+            expected_outcome="Item added to basket",
+        ),
     )
 
     # Find matching pattern
@@ -188,7 +188,7 @@ async def demonstrate_pattern_matching(manager: JournalManager, test_plan: TestP
     context = {
         "url": "https://example.com/products",
         "element_text": "Basket",
-        "element_type": "button"
+        "element_type": "button",
     }
 
     match = await manager.find_matching_pattern(similar_step, context)
@@ -197,7 +197,9 @@ async def demonstrate_pattern_matching(manager: JournalManager, test_plan: TestP
         print("\n  ✓ Found matching pattern!")
         print(f"    - Type: {match.pattern_type}")
         print(f"    - Command: {match.playwright_command}")
-        print(f"    - Success rate: {match.success_count}/{match.success_count + match.failure_count}")
+        print(
+            f"    - Success rate: {match.success_count}/{match.success_count + match.failure_count}"
+        )
         print(f"    - Avg execution time: {match.avg_execution_time_ms:.0f}ms")
     else:
         print("  ✗ No matching pattern found")
@@ -222,9 +224,9 @@ async def demonstrate_dual_mode_execution():
         grid_coordinates={
             "initial_selection": "P28",
             "refined_coordinates": "P28+offset(0.6,0.3)",
-            "final_confidence": 0.92
+            "final_confidence": 0.92,
         },
-        actual_outcome="Form submitted"
+        actual_outcome="Form submitted",
     )
 
     element_info = {
@@ -233,15 +235,11 @@ async def demonstrate_dual_mode_execution():
         "class": "btn btn-primary submit-button",
         "text": "Submit Order",
         "data-testid": "order-submit",
-        "role": "button"
+        "role": "button",
     }
 
     # Record as scripted command
-    scripted_cmd = recorder.record_action(
-        ActionType.CLICK,
-        visual_result,
-        element_info
-    )
+    scripted_cmd = recorder.record_action(ActionType.CLICK, visual_result, element_info)
 
     if scripted_cmd:
         print("\n  Scripted command generated:")
@@ -249,7 +247,7 @@ async def demonstrate_dual_mode_execution():
         print(f"    - Command: {scripted_cmd.command}")
         print(f"    - Selectors ({len(scripted_cmd.selectors)}):")
         for i, selector in enumerate(scripted_cmd.selectors[:3]):
-            print(f"      {i+1}. {selector}")
+            print(f"      {i + 1}. {selector}")
 
         # Show execution mode decision
         print("\n  Execution mode decision:")
@@ -264,8 +262,7 @@ async def demonstrate_execution_journal_analysis():
 
     # Create sample journal with mixed execution modes
     journal = ExecutionJournal(
-        test_plan_id=uuid4(),
-        test_name="Performance Comparison Test"
+        test_plan_id=uuid4(), test_name="Performance Comparison Test"
     )
 
     # Add entries with different execution modes
@@ -277,14 +274,16 @@ async def demonstrate_execution_journal_analysis():
 
         entry = JournalEntry(
             test_scenario="Performance Test",
-            step_reference=f"Step {i+1}",
-            action_taken=f"Action {i+1}",
+            step_reference=f"Step {i + 1}",
+            action_taken=f"Action {i + 1}",
             expected_result="Success",
             actual_result="Success",
             success=True,
-            execution_mode=ExecutionMode.SCRIPTED if is_scripted else ExecutionMode.VISUAL,
+            execution_mode=ExecutionMode.SCRIPTED
+            if is_scripted
+            else ExecutionMode.VISUAL,
             execution_time_ms=150 if is_scripted else 1800,
-            agent_confidence=1.0 if is_scripted else 0.9
+            agent_confidence=1.0 if is_scripted else 0.9,
         )
 
         journal.add_entry(entry)
@@ -299,16 +298,22 @@ async def demonstrate_execution_journal_analysis():
     # Analyze performance
     print("\nPerformance Analysis:")
     print(f"  Scripted executions: {len(scripted_times)}")
-    print(f"    - Average time: {sum(scripted_times)/len(scripted_times):.0f}ms")
+    print(f"    - Average time: {sum(scripted_times) / len(scripted_times):.0f}ms")
     print(f"    - Total time: {sum(scripted_times)}ms")
 
     print(f"\n  Visual executions: {len(visual_times)}")
-    print(f"    - Average time: {sum(visual_times)/len(visual_times):.0f}ms")
+    print(f"    - Average time: {sum(visual_times) / len(visual_times):.0f}ms")
     print(f"    - Total time: {sum(visual_times)}ms")
 
-    time_saved = sum(visual_times) * (len(scripted_times) / len(visual_times)) - sum(scripted_times)
-    print(f"\n  Time saved by scripted execution: {time_saved:.0f}ms ({time_saved/1000:.1f}s)")
-    print(f"  Speed improvement: {sum(visual_times)/len(visual_times) / (sum(scripted_times)/len(scripted_times)):.1f}x faster")
+    time_saved = sum(visual_times) * (len(scripted_times) / len(visual_times)) - sum(
+        scripted_times
+    )
+    print(
+        f"\n  Time saved by scripted execution: {time_saved:.0f}ms ({time_saved / 1000:.1f}s)"
+    )
+    print(
+        f"  Speed improvement: {sum(visual_times) / len(visual_times) / (sum(scripted_times) / len(scripted_times)):.1f}x faster"
+    )
 
 
 async def main():
@@ -341,6 +346,7 @@ async def main():
     except Exception as e:
         print(f"\nError during demo: {e}")
         import traceback
+
         traceback.print_exc()
 
 

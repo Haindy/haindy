@@ -10,6 +10,7 @@ from enum import Enum
 
 class ConfidenceLevel(str, Enum):
     """Confidence level categories."""
+
     VERY_HIGH = "very_high"
     HIGH = "high"
     MEDIUM = "medium"
@@ -20,6 +21,7 @@ class ConfidenceLevel(str, Enum):
 @dataclass
 class ConfidenceThresholds:
     """Configurable confidence thresholds."""
+
     very_high: float = 0.95
     high: float = 0.85
     medium: float = 0.70
@@ -57,7 +59,7 @@ class ConfidenceScorer:
         ai_confidence: float,
         validation_passed: bool,
         execution_success: bool,
-        has_errors: bool = False
+        has_errors: bool = False,
     ) -> tuple[float, ConfidenceLevel]:
         """
         Calculate overall confidence for an action result.
@@ -96,7 +98,7 @@ class ConfidenceScorer:
         self,
         expected_elements: list[str],
         found_elements: list[str],
-        unexpected_elements: list[str]
+        unexpected_elements: list[str],
     ) -> float:
         """
         Calculate confidence based on visual element matching.
@@ -124,8 +126,7 @@ class ConfidenceScorer:
         return max(0.0, min(1.0, confidence))
 
     def aggregate_step_confidence(
-        self,
-        action_confidences: list[float]
+        self, action_confidences: list[float]
     ) -> tuple[float, dict[str, float]]:
         """
         Aggregate confidence scores from multiple actions in a step.
@@ -156,14 +157,11 @@ class ConfidenceScorer:
             "min": min_conf,
             "max": max_conf,
             "avg": avg_conf,
-            "count": len(action_confidences)
+            "count": len(action_confidences),
         }
 
     def should_retry_action(
-        self,
-        confidence: float,
-        attempt_number: int,
-        max_retries: int = 3
+        self, confidence: float, attempt_number: int, max_retries: int = 3
     ) -> bool:
         """
         Determine if an action should be retried based on confidence.
@@ -184,9 +182,7 @@ class ConfidenceScorer:
         return level in [ConfidenceLevel.LOW, ConfidenceLevel.MEDIUM]
 
     def get_confidence_interpretation(
-        self,
-        score: float,
-        level: ConfidenceLevel
+        self, score: float, level: ConfidenceLevel
     ) -> str:
         """
         Get human-readable interpretation of confidence.
@@ -203,6 +199,6 @@ class ConfidenceScorer:
             ConfidenceLevel.HIGH: f"High confidence ({score:.0%}) - Result is likely correct",
             ConfidenceLevel.MEDIUM: f"Medium confidence ({score:.0%}) - Result may be correct but verify",
             ConfidenceLevel.LOW: f"Low confidence ({score:.0%}) - Result is questionable",
-            ConfidenceLevel.VERY_LOW: f"Very low confidence ({score:.0%}) - Result is likely incorrect"
+            ConfidenceLevel.VERY_LOW: f"Very low confidence ({score:.0%}) - Result is likely incorrect",
         }
         return interpretations.get(level, f"Unknown confidence level ({score:.0%})")

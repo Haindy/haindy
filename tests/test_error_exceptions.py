@@ -33,11 +33,7 @@ class TestHAINDYError:
     def test_with_details(self):
         """Test error with details."""
         details = {"key": "value", "count": 42}
-        error = HAINDYError(
-            "Test error",
-            error_code="TEST001",
-            details=details
-        )
+        error = HAINDYError("Test error", error_code="TEST001", details=details)
         assert error.error_code == "TEST001"
         assert error.details == details
 
@@ -50,9 +46,7 @@ class TestHAINDYError:
     def test_to_dict(self):
         """Test conversion to dictionary."""
         error = HAINDYError(
-            "Test error",
-            error_code="TEST001",
-            details={"key": "value"}
+            "Test error", error_code="TEST001", details={"key": "value"}
         )
 
         result = error.to_dict()
@@ -77,11 +71,7 @@ class TestRetryableError:
 
     def test_custom_retry_settings(self):
         """Test custom retry configuration."""
-        error = RetryableError(
-            "Retry me",
-            max_retries=5,
-            retry_delay_ms=2000
-        )
+        error = RetryableError("Retry me", max_retries=5, retry_delay_ms=2000)
         assert error.max_retries == 5
         assert error.retry_delay_ms == 2000
 
@@ -105,9 +95,7 @@ class TestAgentError:
     def test_agent_error_creation(self):
         """Test agent error with required fields."""
         error = AgentError(
-            "Agent failed",
-            agent_name="test_runner",
-            agent_type="TestRunnerAgent"
+            "Agent failed", agent_name="test_runner", agent_type="TestRunnerAgent"
         )
 
         assert error.message == "Agent failed"
@@ -126,7 +114,7 @@ class TestBrowserError:
             "Click failed",
             url="https://example.com",
             selector="#submit-button",
-            action="click"
+            action="click",
         )
 
         assert error.message == "Click failed"
@@ -152,7 +140,7 @@ class TestValidationError:
         error = ValidationError(
             "Validation failed",
             validation_type="action_validation",
-            failed_rules=failed_rules
+            failed_rules=failed_rules,
         )
 
         assert error.validation_type == "action_validation"
@@ -171,7 +159,7 @@ class TestHallucinationError:
             agent_name="action_agent",
             hallucination_type="PHANTOM_ELEMENT",
             confidence_score=0.85,
-            evidence=evidence
+            evidence=evidence,
         )
 
         assert error.agent_name == "action_agent"
@@ -187,9 +175,7 @@ class TestTimeoutError:
     def test_timeout_error(self):
         """Test timeout error creation."""
         error = TimeoutError(
-            "Operation timed out",
-            operation="page_load",
-            timeout_ms=5000
+            "Operation timed out", operation="page_load", timeout_ms=5000
         )
 
         assert error.operation == "page_load"
@@ -206,7 +192,7 @@ class TestCoordinationError:
         error = CoordinationError(
             "Agent communication failed",
             agents_involved=agents,
-            coordination_phase="test_execution"
+            coordination_phase="test_execution",
         )
 
         assert error.agents_involved == agents

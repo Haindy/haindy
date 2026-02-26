@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 
 class RedactionMethod(Enum):
     """Methods for redacting sensitive data."""
-    MASK = auto()          # Replace with asterisks
-    HASH = auto()          # Replace with hash
-    REMOVE = auto()        # Remove entirely
-    PARTIAL = auto()       # Show partial (first/last few chars)
-    PLACEHOLDER = auto()   # Replace with placeholder text
+
+    MASK = auto()  # Replace with asterisks
+    HASH = auto()  # Replace with hash
+    REMOVE = auto()  # Remove entirely
+    PARTIAL = auto()  # Show partial (first/last few chars)
+    PLACEHOLDER = auto()  # Replace with placeholder text
 
 
 @dataclass
@@ -71,117 +72,147 @@ class DataSanitizer:
     def _setup_default_patterns(self) -> None:
         """Set up default sensitive data patterns."""
         # API Keys
-        self.patterns.extend([
-            SensitiveDataPattern(
-                name="api_key_sk_format",
-                pattern=re.compile(r'\bsk_[a-zA-Z0-9_]{8,}\b'),
-                description="Stripe-style sk_ API keys"
-            ),
-            SensitiveDataPattern(
-                name="api_key_generic",
-                pattern=re.compile(r'\b[A-Za-z0-9_]{20,}\b'),
-                description="Generic API key pattern"
-            ),
-            SensitiveDataPattern(
-                name="api_key_prefix",
-                pattern=re.compile(r'(api[_-]?key|apikey|api_secret|access[_-]?token)\s*[:=]\s*["\']?([^"\'\s]+)["\']?', re.IGNORECASE),
-                description="API key with common prefixes"
-            ),
-            SensitiveDataPattern(
-                name="bearer_token",
-                pattern=re.compile(r'Bearer\s+[A-Za-z0-9\-._~+/]+=*', re.IGNORECASE),
-                description="Bearer authentication tokens"
-            ),
-        ])
+        self.patterns.extend(
+            [
+                SensitiveDataPattern(
+                    name="api_key_sk_format",
+                    pattern=re.compile(r"\bsk_[a-zA-Z0-9_]{8,}\b"),
+                    description="Stripe-style sk_ API keys",
+                ),
+                SensitiveDataPattern(
+                    name="api_key_generic",
+                    pattern=re.compile(r"\b[A-Za-z0-9_]{20,}\b"),
+                    description="Generic API key pattern",
+                ),
+                SensitiveDataPattern(
+                    name="api_key_prefix",
+                    pattern=re.compile(
+                        r'(api[_-]?key|apikey|api_secret|access[_-]?token)\s*[:=]\s*["\']?([^"\'\s]+)["\']?',
+                        re.IGNORECASE,
+                    ),
+                    description="API key with common prefixes",
+                ),
+                SensitiveDataPattern(
+                    name="bearer_token",
+                    pattern=re.compile(
+                        r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE
+                    ),
+                    description="Bearer authentication tokens",
+                ),
+            ]
+        )
 
         # Credit Cards
-        self.patterns.extend([
-            SensitiveDataPattern(
-                name="credit_card_visa",
-                pattern=re.compile(r'\b4[0-9]{3}[\s-]?[0-9]{4}[\s-]?[0-9]{4}[\s-]?[0-9]{4}\b'),
-                redaction_method=RedactionMethod.PARTIAL,
-                description="Visa card numbers"
-            ),
-            SensitiveDataPattern(
-                name="credit_card_mastercard",
-                pattern=re.compile(r'\b5[1-5][0-9]{2}[\s-]?[0-9]{4}[\s-]?[0-9]{4}[\s-]?[0-9]{4}\b'),
-                redaction_method=RedactionMethod.PARTIAL,
-                description="Mastercard numbers"
-            ),
-            SensitiveDataPattern(
-                name="credit_card_amex",
-                pattern=re.compile(r'\b3[47][0-9]{2}[\s-]?[0-9]{6}[\s-]?[0-9]{5}\b'),
-                redaction_method=RedactionMethod.PARTIAL,
-                description="American Express numbers"
-            ),
-        ])
+        self.patterns.extend(
+            [
+                SensitiveDataPattern(
+                    name="credit_card_visa",
+                    pattern=re.compile(
+                        r"\b4[0-9]{3}[\s-]?[0-9]{4}[\s-]?[0-9]{4}[\s-]?[0-9]{4}\b"
+                    ),
+                    redaction_method=RedactionMethod.PARTIAL,
+                    description="Visa card numbers",
+                ),
+                SensitiveDataPattern(
+                    name="credit_card_mastercard",
+                    pattern=re.compile(
+                        r"\b5[1-5][0-9]{2}[\s-]?[0-9]{4}[\s-]?[0-9]{4}[\s-]?[0-9]{4}\b"
+                    ),
+                    redaction_method=RedactionMethod.PARTIAL,
+                    description="Mastercard numbers",
+                ),
+                SensitiveDataPattern(
+                    name="credit_card_amex",
+                    pattern=re.compile(
+                        r"\b3[47][0-9]{2}[\s-]?[0-9]{6}[\s-]?[0-9]{5}\b"
+                    ),
+                    redaction_method=RedactionMethod.PARTIAL,
+                    description="American Express numbers",
+                ),
+            ]
+        )
 
         # Personal Information
-        self.patterns.extend([
-            SensitiveDataPattern(
-                name="ssn",
-                pattern=re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
-                redaction_method=RedactionMethod.MASK,
-                description="Social Security Numbers"
-            ),
-            SensitiveDataPattern(
-                name="email",
-                pattern=re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
-                redaction_method=RedactionMethod.PARTIAL,
-                partial_chars=3,
-                description="Email addresses"
-            ),
-            SensitiveDataPattern(
-                name="phone_us",
-                pattern=re.compile(r'\b(?:\+?1[-.]?)?\(?([0-9]{3})\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\b'),
-                redaction_method=RedactionMethod.PARTIAL,
-                description="US phone numbers"
-            ),
-            SensitiveDataPattern(
-                name="ip_address",
-                pattern=re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'),
-                redaction_method=RedactionMethod.PARTIAL,
-                partial_chars=6,
-                description="IPv4 addresses"
-            ),
-        ])
+        self.patterns.extend(
+            [
+                SensitiveDataPattern(
+                    name="ssn",
+                    pattern=re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+                    redaction_method=RedactionMethod.MASK,
+                    description="Social Security Numbers",
+                ),
+                SensitiveDataPattern(
+                    name="email",
+                    pattern=re.compile(
+                        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+                    ),
+                    redaction_method=RedactionMethod.PARTIAL,
+                    partial_chars=3,
+                    description="Email addresses",
+                ),
+                SensitiveDataPattern(
+                    name="phone_us",
+                    pattern=re.compile(
+                        r"\b(?:\+?1[-.]?)?\(?([0-9]{3})\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\b"
+                    ),
+                    redaction_method=RedactionMethod.PARTIAL,
+                    description="US phone numbers",
+                ),
+                SensitiveDataPattern(
+                    name="ip_address",
+                    pattern=re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"),
+                    redaction_method=RedactionMethod.PARTIAL,
+                    partial_chars=6,
+                    description="IPv4 addresses",
+                ),
+            ]
+        )
 
         # Authentication
-        self.patterns.extend([
-            SensitiveDataPattern(
-                name="password_field",
-                pattern=re.compile(r'(password|passwd|pwd)\s*[:=]\s*["\']?([^"\'\s]+)["\']?', re.IGNORECASE),
-                placeholder="[PASSWORD]",
-                description="Password fields"
-            ),
-            SensitiveDataPattern(
-                name="password_value",
-                pattern=re.compile(r'\b\w*[sS]ecret\w*\b'),
-                description="Common password patterns"
-            ),
-            SensitiveDataPattern(
-                name="jwt_token",
-                pattern=re.compile(r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'),
-                redaction_method=RedactionMethod.HASH,
-                description="JWT tokens"
-            ),
-        ])
+        self.patterns.extend(
+            [
+                SensitiveDataPattern(
+                    name="password_field",
+                    pattern=re.compile(
+                        r'(password|passwd|pwd)\s*[:=]\s*["\']?([^"\'\s]+)["\']?',
+                        re.IGNORECASE,
+                    ),
+                    placeholder="[PASSWORD]",
+                    description="Password fields",
+                ),
+                SensitiveDataPattern(
+                    name="password_value",
+                    pattern=re.compile(r"\b\w*[sS]ecret\w*\b"),
+                    description="Common password patterns",
+                ),
+                SensitiveDataPattern(
+                    name="jwt_token",
+                    pattern=re.compile(
+                        r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
+                    ),
+                    redaction_method=RedactionMethod.HASH,
+                    description="JWT tokens",
+                ),
+            ]
+        )
 
         # Financial
-        self.patterns.extend([
-            SensitiveDataPattern(
-                name="bank_account",
-                pattern=re.compile(r'\b[0-9]{8,17}\b'),
-                enabled=False,  # Disabled by default due to false positives
-                description="Bank account numbers"
-            ),
-            SensitiveDataPattern(
-                name="routing_number",
-                pattern=re.compile(r'\b[0-9]{9}\b'),
-                enabled=False,  # Disabled by default due to false positives
-                description="Bank routing numbers"
-            ),
-        ])
+        self.patterns.extend(
+            [
+                SensitiveDataPattern(
+                    name="bank_account",
+                    pattern=re.compile(r"\b[0-9]{8,17}\b"),
+                    enabled=False,  # Disabled by default due to false positives
+                    description="Bank account numbers",
+                ),
+                SensitiveDataPattern(
+                    name="routing_number",
+                    pattern=re.compile(r"\b[0-9]{9}\b"),
+                    enabled=False,  # Disabled by default due to false positives
+                    description="Bank routing numbers",
+                ),
+            ]
+        )
 
     def _setup_default_rules(self) -> None:
         """Set up default sanitization rules."""
@@ -189,13 +220,31 @@ class DataSanitizer:
         self.rules.append(
             SanitizationRule(
                 name="auth_keys",
-                patterns=[p for p in self.patterns if p.name in [
-                    "api_key_sk_format", "api_key_generic", "api_key_prefix",
-                    "password_field", "password_value", "bearer_token", "jwt_token"
-                ]],
-                apply_to_keys=["password", "api_key", "apikey", "token", "secret",
-                              "auth", "authorization", "x-api-key"],
-                apply_to_values=True
+                patterns=[
+                    p
+                    for p in self.patterns
+                    if p.name
+                    in [
+                        "api_key_sk_format",
+                        "api_key_generic",
+                        "api_key_prefix",
+                        "password_field",
+                        "password_value",
+                        "bearer_token",
+                        "jwt_token",
+                    ]
+                ],
+                apply_to_keys=[
+                    "password",
+                    "api_key",
+                    "apikey",
+                    "token",
+                    "secret",
+                    "auth",
+                    "authorization",
+                    "x-api-key",
+                ],
+                apply_to_values=True,
             )
         )
 
@@ -203,11 +252,21 @@ class DataSanitizer:
         self.rules.append(
             SanitizationRule(
                 name="personal_info",
-                patterns=[p for p in self.patterns if p.name in [
-                    "email", "phone_us", "ssn", "credit_card_visa",
-                    "credit_card_mastercard", "credit_card_amex", "credit_card_generic"
-                ]],
-                apply_to_values=True
+                patterns=[
+                    p
+                    for p in self.patterns
+                    if p.name
+                    in [
+                        "email",
+                        "phone_us",
+                        "ssn",
+                        "credit_card_visa",
+                        "credit_card_mastercard",
+                        "credit_card_amex",
+                        "credit_card_generic",
+                    ]
+                ],
+                apply_to_values=True,
             )
         )
 
@@ -224,9 +283,7 @@ class DataSanitizer:
         self.custom_sanitizers[name] = func
 
     def sanitize_string(
-        self,
-        text: str,
-        patterns: list[SensitiveDataPattern] | None = None
+        self, text: str, patterns: list[SensitiveDataPattern] | None = None
     ) -> str:
         """
         Sanitize a string using specified patterns.
@@ -260,10 +317,7 @@ class DataSanitizer:
         return result
 
     def _apply_redaction(
-        self,
-        text: str,
-        match: re.Match,
-        pattern: SensitiveDataPattern
+        self, text: str, match: re.Match, pattern: SensitiveDataPattern
     ) -> str:
         """Apply redaction based on method."""
         start, end = match.span()
@@ -276,6 +330,7 @@ class DataSanitizer:
         elif pattern.redaction_method == RedactionMethod.HASH:
             # Replace with hash
             import hashlib
+
             hash_val = hashlib.sha256(matched_text.encode()).hexdigest()[:8]
             replacement = f"[HASH:{hash_val}]"
 
@@ -287,9 +342,9 @@ class DataSanitizer:
             # Show partial
             if len(matched_text) > pattern.partial_chars * 2:
                 replacement = (
-                    matched_text[:pattern.partial_chars] +
-                    "*" * (len(matched_text) - pattern.partial_chars * 2) +
-                    matched_text[-pattern.partial_chars:]
+                    matched_text[: pattern.partial_chars]
+                    + "*" * (len(matched_text) - pattern.partial_chars * 2)
+                    + matched_text[-pattern.partial_chars :]
                 )
             else:
                 replacement = "*" * len(matched_text)
@@ -303,7 +358,7 @@ class DataSanitizer:
         self,
         data: dict[str, Any],
         rules: list[SanitizationRule] | None = None,
-        max_depth: int = 10
+        max_depth: int = 10,
     ) -> dict[str, Any]:
         """
         Sanitize a dictionary recursively.
@@ -333,7 +388,9 @@ class DataSanitizer:
                     if key:
                         if not rule.case_sensitive:
                             key_lower = key.lower()
-                            key_matches = any(k.lower() in key_lower for k in rule.apply_to_keys)
+                            key_matches = any(
+                                k.lower() in key_lower for k in rule.apply_to_keys
+                            )
                         else:
                             key_matches = any(k in key for k in rule.apply_to_keys)
 
@@ -373,11 +430,11 @@ class DataSanitizer:
             Sanitized log record
         """
         # Sanitize message
-        if hasattr(record, 'msg'):
+        if hasattr(record, "msg"):
             record.msg = self.sanitize_string(str(record.msg))
 
         # Sanitize args
-        if hasattr(record, 'args') and record.args:
+        if hasattr(record, "args") and record.args:
             if isinstance(record.args, dict):
                 record.args = self.sanitize_dict(record.args)
             else:
@@ -395,34 +452,35 @@ class DataSanitizer:
                 "total": len(self.patterns),
                 "enabled": len([p for p in self.patterns if p.enabled]),
                 "by_type": {
-                    method.name: len([p for p in self.patterns if p.redaction_method == method])
+                    method.name: len(
+                        [p for p in self.patterns if p.redaction_method == method]
+                    )
                     for method in RedactionMethod
-                }
+                },
             },
             "rules": {
                 "total": len(self.rules),
-                "enabled": len([r for r in self.rules if r.enabled])
+                "enabled": len([r for r in self.rules if r.enabled]),
             },
-            "custom_sanitizers": len(self.custom_sanitizers)
+            "custom_sanitizers": len(self.custom_sanitizers),
         }
 
 
 # Convenience functions
 _default_sanitizer = DataSanitizer()
 
+
 def sanitize_string(text: str) -> str:
     """Sanitize a string using default patterns."""
     return _default_sanitizer.sanitize_string(text)
+
 
 def sanitize_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Sanitize a dictionary using default rules."""
     return _default_sanitizer.sanitize_dict(data)
 
-def mask_sensitive_data(
-    text: str,
-    start_chars: int = 4,
-    end_chars: int = 4
-) -> str:
+
+def mask_sensitive_data(text: str, start_chars: int = 4, end_chars: int = 4) -> str:
     """
     Mask sensitive data showing only start/end characters.
 
@@ -438,7 +496,7 @@ def mask_sensitive_data(
         return "*" * len(text)
 
     return (
-        text[:start_chars] +
-        "*" * (len(text) - start_chars - end_chars) +
-        text[-end_chars:]
+        text[:start_chars]
+        + "*" * (len(text) - start_chars - end_chars)
+        + text[-end_chars:]
     )

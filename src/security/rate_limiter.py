@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 class RateLimitStrategy(Enum):
     """Available rate limiting strategies."""
+
     TOKEN_BUCKET = auto()
     SLIDING_WINDOW = auto()
     FIXED_WINDOW = auto()
@@ -31,7 +32,7 @@ class RateLimitExceeded(Exception):
         message: str,
         limit: int,
         window_seconds: int,
-        retry_after: float | None = None
+        retry_after: float | None = None,
     ):
         super().__init__(message)
         self.limit = limit
@@ -70,10 +71,7 @@ class TokenBucket:
     """Token bucket rate limiting algorithm."""
 
     def __init__(
-        self,
-        capacity: int,
-        refill_rate: float,
-        initial_tokens: int | None = None
+        self, capacity: int, refill_rate: float, initial_tokens: int | None = None
     ):
         """
         Initialize token bucket.
@@ -107,7 +105,9 @@ class TokenBucket:
                 return True
             return False
 
-    async def acquire_or_wait(self, tokens: int = 1, timeout: float | None = None) -> bool:
+    async def acquire_or_wait(
+        self, tokens: int = 1, timeout: float | None = None
+    ) -> bool:
         """
         Acquire tokens, waiting if necessary.
 
@@ -148,7 +148,7 @@ class TokenBucket:
     def _calculate_wait_time(self, tokens: int) -> float:
         """Calculate time to wait for tokens."""
         if self.refill_rate <= 0:
-            return float('inf')
+            return float("inf")
 
         tokens_needed = tokens - self.tokens
         if tokens_needed <= 0:
@@ -224,7 +224,9 @@ class RateLimiter:
         """Initialize rate limiter with configuration."""
         self.config = config or RateLimitConfig()
         self._limiters: dict[str, Any] = {}
-        self._stats: dict[str, dict[str, int]] = defaultdict(lambda: {"allowed": 0, "rejected": 0})
+        self._stats: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"allowed": 0, "rejected": 0}
+        )
 
         if self.config.enabled:
             self._setup_limiters()
@@ -235,50 +237,46 @@ class RateLimiter:
             # API limiter
             self._limiters["api"] = TokenBucket(
                 capacity=self.config.api_burst_size,
-                refill_rate=self.config.api_calls_per_minute / 60
+                refill_rate=self.config.api_calls_per_minute / 60,
             )
 
             # Browser actions limiter
             self._limiters["automation"] = TokenBucket(
                 capacity=self.config.automation_actions_burst,
-                refill_rate=self.config.automation_actions_per_minute / 60
+                refill_rate=self.config.automation_actions_per_minute / 60,
             )
 
             # Agent messages limiter
             self._limiters["agent"] = TokenBucket(
                 capacity=self.config.agent_messages_burst,
-                refill_rate=self.config.agent_messages_per_minute / 60
+                refill_rate=self.config.agent_messages_per_minute / 60,
             )
 
             # Screenshots limiter
             self._limiters["screenshot"] = TokenBucket(
                 capacity=self.config.screenshots_burst,
-                refill_rate=self.config.screenshots_per_minute / 60
+                refill_rate=self.config.screenshots_per_minute / 60,
             )
 
         elif self.config.strategy == RateLimitStrategy.SLIDING_WINDOW:
             # API limiter
             self._limiters["api"] = SlidingWindowCounter(
-                window_seconds=60,
-                limit=self.config.api_calls_per_minute
+                window_seconds=60, limit=self.config.api_calls_per_minute
             )
 
             # Browser actions limiter
             self._limiters["automation"] = SlidingWindowCounter(
-                window_seconds=60,
-                limit=self.config.automation_actions_per_minute
+                window_seconds=60, limit=self.config.automation_actions_per_minute
             )
 
             # Agent messages limiter
             self._limiters["agent"] = SlidingWindowCounter(
-                window_seconds=60,
-                limit=self.config.agent_messages_per_minute
+                window_seconds=60, limit=self.config.agent_messages_per_minute
             )
 
             # Screenshots limiter
             self._limiters["screenshot"] = SlidingWindowCounter(
-                window_seconds=60,
-                limit=self.config.screenshots_per_minute
+                window_seconds=60, limit=self.config.screenshots_per_minute
             )
 
     async def check_api_call(self, wait: bool = False) -> bool:
@@ -363,7 +361,7 @@ class RateLimiter:
                     f"Rate limit exceeded for {limit_type}",
                     limit=self._get_limit_for_type(limit_type),
                     window_seconds=60,
-                    retry_after=retry_after
+                    retry_after=retry_after,
                 )
 
         return allowed
@@ -374,7 +372,7 @@ class RateLimiter:
             "api": self.config.api_calls_per_minute,
             "automation": self.config.automation_actions_per_minute,
             "agent": self.config.agent_messages_per_minute,
-            "screenshot": self.config.screenshots_per_minute
+            "screenshot": self.config.screenshots_per_minute,
         }
         return limits.get(limit_type, 0)
 
@@ -387,7 +385,8 @@ class RateLimiter:
                 "allowed": counts["allowed"],
                 "rejected": counts["rejected"],
                 "total": counts["allowed"] + counts["rejected"],
-                "rejection_rate": counts["rejected"] / max(1, counts["allowed"] + counts["rejected"])
+                "rejection_rate": counts["rejected"]
+                / max(1, counts["allowed"] + counts["rejected"]),
             }
 
             # Add current state

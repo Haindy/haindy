@@ -101,7 +101,10 @@ class JSONFormatter(logging.Formatter):
         # Get all attributes from the record
         # Add any extra fields that were passed
         for attr_name in dir(record):
-            if not attr_name.startswith('_') and attr_name not in STANDARD_LOG_RECORD_ATTRS:
+            if (
+                not attr_name.startswith("_")
+                and attr_name not in STANDARD_LOG_RECORD_ATTRS
+            ):
                 attr_value = getattr(record, attr_name, None)
                 if attr_value is not None and not callable(attr_value):
                     log_data[attr_name] = attr_value
@@ -120,7 +123,9 @@ class JSONFormatter(logging.Formatter):
 class SanitizingHandler(logging.Handler):
     """Log handler that sanitizes messages before passing to wrapped handler."""
 
-    def __init__(self, handler: logging.Handler, sanitizer: DataSanitizer | None = None):
+    def __init__(
+        self, handler: logging.Handler, sanitizer: DataSanitizer | None = None
+    ):
         super().__init__()
         self.handler = handler
         self.sanitizer = sanitizer or DataSanitizer()
@@ -234,9 +239,7 @@ class HumanReadableFormatter(logging.Formatter):
 class AgentLogAdapter(logging.LoggerAdapter):
     """Log adapter for agent-specific logging."""
 
-    def process(
-        self, msg: str, kwargs: dict[str, Any]
-    ) -> tuple[str, dict[str, Any]]:
+    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Add agent context to log records."""
         extra = kwargs.get("extra", {})
         extra.update(self.extra)

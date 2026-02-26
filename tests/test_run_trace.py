@@ -53,8 +53,14 @@ def test_run_trace_writer_writes_trace(tmp_path: Path) -> None:
     stored_step = payload["steps"][0]
     assert stored_step["scenario"] == "test_scenario"
     assert stored_step["plan_cache_hit"] is True
-    assert stored_step["step_result"]["screenshot_before"] == "data/screenshots/step_before.png"
-    assert stored_step["step_result"]["screenshot_after"] == "data/screenshots/step_after.png"
+    assert (
+        stored_step["step_result"]["screenshot_before"]
+        == "data/screenshots/step_before.png"
+    )
+    assert (
+        stored_step["step_result"]["screenshot_after"]
+        == "data/screenshots/step_after.png"
+    )
     assert stored_step["step_result"]["actions_performed"][0]["action_type"] == "click"
 
 

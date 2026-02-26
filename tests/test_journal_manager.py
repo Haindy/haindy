@@ -24,7 +24,9 @@ def _plan() -> TestPlan:
 
 
 @pytest.mark.asyncio
-async def test_record_action_uses_coordinate_metadata_in_action_description(tmp_path) -> None:
+async def test_record_action_uses_coordinate_metadata_in_action_description(
+    tmp_path,
+) -> None:
     manager = JournalManager(journal_dir=tmp_path)
     plan = _plan()
     journal = await manager.create_journal(plan)

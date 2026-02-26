@@ -8,7 +8,9 @@ from src.core.types import CoordinateReference
 
 
 def test_coordinate_reference_defaults() -> None:
-    ref = CoordinateReference(target_reference="search_input", pixel_coordinates=(100, 200), confidence=0.9)
+    ref = CoordinateReference(
+        target_reference="search_input", pixel_coordinates=(100, 200), confidence=0.9
+    )
     assert ref.target_reference == "search_input"
     assert ref.pixel_coordinates == (100, 200)
     assert ref.relative_x == 0.5

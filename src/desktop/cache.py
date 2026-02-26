@@ -47,7 +47,9 @@ class CoordinateCache:
         try:
             raw = json.loads(self.cache_path.read_text())
         except Exception:
-            logger.debug("Failed to parse coordinate cache; starting empty.", exc_info=True)
+            logger.debug(
+                "Failed to parse coordinate cache; starting empty.", exc_info=True
+            )
             return []
 
         entries: list[CachedCoordinate] = []
@@ -72,7 +74,9 @@ class CoordinateCache:
         screenshot_bytes: bytes | None = None,
     ) -> CachedCoordinate | None:
         """Return the newest cached coordinate matching the lookup key."""
-        screenshot_hash = self._hash_bytes(screenshot_bytes) if screenshot_bytes else None
+        screenshot_hash = (
+            self._hash_bytes(screenshot_bytes) if screenshot_bytes else None
+        )
         candidates: list[CachedCoordinate] = []
         for entry in self._load():
             if entry.label.lower().strip() != label.lower().strip():
@@ -81,7 +85,11 @@ class CoordinateCache:
                 continue
             if tuple(entry.resolution) != tuple(resolution):
                 continue
-            if screenshot_hash and entry.screenshot_hash and entry.screenshot_hash != screenshot_hash:
+            if (
+                screenshot_hash
+                and entry.screenshot_hash
+                and entry.screenshot_hash != screenshot_hash
+            ):
                 continue
             candidates.append(entry)
 
@@ -106,7 +114,9 @@ class CoordinateCache:
             x=x,
             y=y,
             resolution=resolution,
-            screenshot_hash=self._hash_bytes(screenshot_bytes) if screenshot_bytes else None,
+            screenshot_hash=self._hash_bytes(screenshot_bytes)
+            if screenshot_bytes
+            else None,
         )
         entries.append(entry)
         self._save(entries)

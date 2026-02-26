@@ -73,7 +73,12 @@ def test_computer_actions_and_safety_events_are_serialized_in_compat_dict() -> N
         validation=ValidationResult(valid=True, confidence=0.7, reasoning="ok"),
         execution=ExecutionResult(success=True, execution_time_ms=10.0),
         computer_actions=[
-            ComputerToolTurn(call_id="call_1", action_type="click", parameters={"x": 1, "y": 2}, status="executed")
+            ComputerToolTurn(
+                call_id="call_1",
+                action_type="click",
+                parameters={"x": 1, "y": 2},
+                status="executed",
+            )
         ],
         safety_events=[
             SafetyEvent(call_id="call_1", code="none", message="No safety issues")

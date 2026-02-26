@@ -112,10 +112,13 @@ class MessageBus:
         # Remove all subscriptions for this agent
         for message_type in self._subscribers:
             self._subscribers[message_type] = [
-                sub for sub in self._subscribers[message_type]
-                if not (hasattr(sub, '__self__') and
-                       hasattr(sub.__self__, 'name') and
-                       sub.__self__.name == agent_name)
+                sub
+                for sub in self._subscribers[message_type]
+                if not (
+                    hasattr(sub, "__self__")
+                    and hasattr(sub.__self__, "name")
+                    and sub.__self__.name == agent_name
+                )
             ]
 
         logger.info(f"Agent unregistered: {agent_name}")
@@ -124,7 +127,7 @@ class MessageBus:
         self,
         message_type: str,
         handler: Callable[[AgentMessage], None],
-        agent_name: str | None = None
+        agent_name: str | None = None,
     ) -> None:
         """
         Subscribe to messages of a specific type.
@@ -142,9 +145,7 @@ class MessageBus:
         logger.debug(log_msg)
 
     def unsubscribe(
-        self,
-        message_type: str,
-        handler: Callable[[AgentMessage], None]
+        self, message_type: str, handler: Callable[[AgentMessage], None]
     ) -> None:
         """
         Unsubscribe from messages of a specific type.
@@ -158,9 +159,7 @@ class MessageBus:
             logger.debug(f"Subscription removed for {message_type}")
 
     async def publish(
-        self,
-        message: AgentMessage,
-        priority: MessagePriority = MessagePriority.NORMAL
+        self, message: AgentMessage, priority: MessagePriority = MessagePriority.NORMAL
     ) -> None:
         """
         Publish a message to all subscribers.
@@ -182,10 +181,7 @@ class MessageBus:
         # Log message
         logger.info(
             f"Message published: {message.message_type} from {message.from_agent} to {message.to_agent}",
-            extra={
-                "message_id": str(message.message_id),
-                "priority": priority
-            }
+            extra={"message_id": str(message.message_id), "priority": priority},
         )
 
         # Handle broadcast or targeted message
@@ -205,9 +201,7 @@ class MessageBus:
                 tasks.append(handler(message))
             else:
                 # Wrap sync handlers
-                tasks.append(asyncio.create_task(
-                    asyncio.to_thread(handler, message)
-                ))
+                tasks.append(asyncio.create_task(asyncio.to_thread(handler, message)))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -227,9 +221,7 @@ class MessageBus:
         await self._broadcast_message(message)
 
     async def get_messages(
-        self,
-        agent_name: str,
-        timeout: float | None = None
+        self, agent_name: str, timeout: float | None = None
     ) -> list[AgentMessage]:
         """
         Get pending messages for an agent.
@@ -254,10 +246,7 @@ class MessageBus:
             # Get all available messages
             while True:
                 if timeout is not None:
-                    message = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=timeout
-                    )
+                    message = await asyncio.wait_for(queue.get(), timeout=timeout)
                 else:
                     message = queue.get_nowait()
                 messages.append(message)
@@ -272,14 +261,14 @@ class MessageBus:
 
         # Trim history if needed
         if len(self._message_history) > self._history_limit:
-            self._message_history = self._message_history[-self._history_limit:]
+            self._message_history = self._message_history[-self._history_limit :]
 
     def get_message_history(
         self,
         message_type: str | None = None,
         from_agent: str | None = None,
         to_agent: str | None = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> list[AgentMessage]:
         """
         Get message history with optional filters.
@@ -316,7 +305,7 @@ class MessageBus:
             "active_subscriptions": {
                 msg_type: len(handlers)
                 for msg_type, handlers in self._subscribers.items()
-            }
+            },
         }
 
     def clear_history(self) -> None:

@@ -65,7 +65,9 @@ class MockBrowserDriver:
 class MockActionAgent:
     """Mock action agent for demo."""
 
-    async def determine_action(self, screenshot: bytes, instruction: str) -> ActionResult:
+    async def determine_action(
+        self, screenshot: bytes, instruction: str
+    ) -> ActionResult:
         print(f"   Action Agent: Analyzing - '{instruction}'")
 
         # Simulate different actions based on instruction
@@ -76,7 +78,7 @@ class MockActionAgent:
                 offset_x=0.5,
                 offset_y=0.3,
                 confidence=0.95,
-                requires_refinement=False
+                requires_refinement=False,
             )
         elif "password" in instruction.lower():
             return ActionResult(
@@ -85,7 +87,7 @@ class MockActionAgent:
                 offset_x=0.5,
                 offset_y=0.4,
                 confidence=0.93,
-                requires_refinement=False
+                requires_refinement=False,
             )
         else:
             return ActionResult(
@@ -94,7 +96,7 @@ class MockActionAgent:
                 offset_x=0.5,
                 offset_y=0.6,
                 confidence=0.92,
-                requires_refinement=False
+                requires_refinement=False,
             )
 
 
@@ -129,7 +131,7 @@ class MockEvaluatorAgent:
             expected_outcome=expected_outcome,
             actual_outcome=actual,
             deviations=[] if success else ["Unexpected result"],
-            suggestions=[] if success else ["Check element visibility"]
+            suggestions=[] if success else ["Check element visibility"],
         )
 
 
@@ -148,17 +150,19 @@ async def demonstrate_test_runner():
     runner = TestRunnerAgent(
         browser_driver=browser,
         action_agent=action_agent,
-        evaluator_agent=evaluator_agent
+        evaluator_agent=evaluator_agent,
     )
 
     # Mock AI responses
     async def mock_ai_analysis(messages, **kwargs):
         return {
-            "content": json.dumps({
-                "assessment": "Test execution proceeding smoothly",
-                "concerns": [],
-                "recommendations": ["Continue with remaining steps"]
-            })
+            "content": json.dumps(
+                {
+                    "assessment": "Test execution proceeding smoothly",
+                    "concerns": [],
+                    "recommendations": ["Continue with remaining steps"],
+                }
+            )
         }
 
     runner.call_ai = mock_ai_analysis
@@ -179,7 +183,7 @@ async def demonstrate_test_runner():
                 action="Navigate to login page",
                 expected_result="Login page displayed with form fields",
                 depends_on=[],
-                is_critical=True
+                is_critical=True,
             ),
             TestStep(
                 id=uuid4(),
@@ -187,7 +191,7 @@ async def demonstrate_test_runner():
                 action="Enter username 'testuser'",
                 expected_result="Username entered in field",
                 depends_on=[1],
-                is_critical=True
+                is_critical=True,
             ),
             TestStep(
                 id=uuid4(),
@@ -195,7 +199,7 @@ async def demonstrate_test_runner():
                 action="Enter password",
                 expected_result="Password entered (masked)",
                 depends_on=[1],
-                is_critical=True
+                is_critical=True,
             ),
             TestStep(
                 id=uuid4(),
@@ -203,7 +207,7 @@ async def demonstrate_test_runner():
                 action="Click login button",
                 expected_result="User redirected to dashboard",
                 depends_on=[2, 3],
-                is_critical=True
+                is_critical=True,
             ),
             TestStep(
                 id=uuid4(),
@@ -211,15 +215,15 @@ async def demonstrate_test_runner():
                 action="Verify user info displayed",
                 expected_result="Dashboard shows logged-in user info",
                 depends_on=[4],
-                is_critical=False
+                is_critical=False,
             ),
         ],
         success_criteria=[
             "User can log in with valid credentials",
             "Dashboard displays after login",
-            "User info visible on dashboard"
+            "User info visible on dashboard",
         ],
-        edge_cases=["Invalid credentials", "Network timeout"]
+        edge_cases=["Invalid credentials", "Network timeout"],
     )
 
     print(f"   ✓ Test plan created: '{test_plan.name}'")
@@ -231,14 +235,15 @@ async def demonstrate_test_runner():
 
     # Execute
     final_state = await runner.execute_test_plan(
-        test_plan,
-        initial_url="https://example.com/login"
+        test_plan, initial_url="https://example.com/login"
     )
 
     # Show results
     print("\n4. Test Execution Results:")
     print(f"   Status: {final_state.test_status.upper()}")
-    print(f"   Completed Steps: {len(final_state.completed_steps)}/{len(test_plan.steps)}")
+    print(
+        f"   Completed Steps: {len(final_state.completed_steps)}/{len(test_plan.steps)}"
+    )
     print(f"   Final Context: {final_state.context.get('test_plan_name')}")
 
     # Show execution history
@@ -249,13 +254,17 @@ async def demonstrate_test_runner():
         print(f"   - Mode: {result.execution_mode}")
         print(f"   - Result: {result.actual_result}")
         if result.action_taken:
-            print(f"   - Action: {result.action_taken.action_type} at {result.action_taken.grid_cell}")
+            print(
+                f"   - Action: {result.action_taken.action_type} at {result.action_taken.grid_cell}"
+            )
             print(f"   - Confidence: {result.action_taken.confidence:.0%}")
 
     # Show scripted actions recorded
     print(f"\n6. Scripted Actions Recorded: {len(runner._scripted_actions)}")
     for key, action in runner._scripted_actions.items():
-        print(f"   - {key}: {action['action_type']} at ({action['x']:.0f}, {action['y']:.0f})")
+        print(
+            f"   - {key}: {action['action_type']} at ({action['x']:.0f}, {action['y']:.0f})"
+        )
 
     # Demonstrate execution modes
     print("\n7. Execution Mode Demo:")
@@ -266,7 +275,9 @@ async def demonstrate_test_runner():
     browser.logged_in = False
 
     # Execute again - this time scripted actions will be used
-    final_state2 = await runner.execute_test_plan(test_plan, initial_url="https://example.com/login")
+    final_state2 = await runner.execute_test_plan(
+        test_plan, initial_url="https://example.com/login"
+    )
 
     print(f"\n   Second run status: {final_state2.test_status.upper()}")
     print("   Scripted actions were used where available!")
@@ -304,7 +315,7 @@ async def demonstrate_conditional_execution():
     runner = TestRunnerAgent(
         browser_driver=browser,
         action_agent=action_agent,
-        evaluator_agent=evaluator_agent
+        evaluator_agent=evaluator_agent,
     )
 
     # Mock AI for decision making
@@ -316,16 +327,16 @@ async def demonstrate_conditional_execution():
 
         if decision_count == 1:
             return {
-                "content": json.dumps({
-                    "assessment": "Login failed, need to retry",
-                    "concerns": ["Authentication error detected"],
-                    "recommendations": ["Retry with different credentials"]
-                })
+                "content": json.dumps(
+                    {
+                        "assessment": "Login failed, need to retry",
+                        "concerns": ["Authentication error detected"],
+                        "recommendations": ["Retry with different credentials"],
+                    }
+                )
             }
         else:
-            return {
-                "content": "Proceed with the current step as planned"
-            }
+            return {"content": "Proceed with the current step as planned"}
 
     runner.call_ai = mock_ai_decision
 
@@ -342,7 +353,7 @@ async def demonstrate_conditional_execution():
                 action="Attempt login",
                 expected_result="Login successful or error displayed",
                 depends_on=[],
-                is_critical=False  # Non-critical to allow retry
+                is_critical=False,  # Non-critical to allow retry
             ),
             TestStep(
                 id=uuid4(),
@@ -350,7 +361,7 @@ async def demonstrate_conditional_execution():
                 action="Check for errors",
                 expected_result="No errors present",
                 depends_on=[1],
-                is_critical=False
+                is_critical=False,
             ),
             TestStep(
                 id=uuid4(),
@@ -358,43 +369,45 @@ async def demonstrate_conditional_execution():
                 action="Retry login if needed",
                 expected_result="Login successful",
                 depends_on=[2],
-                is_critical=True
+                is_critical=True,
             ),
         ],
         success_criteria=["User logged in"],
-        edge_cases=[]
+        edge_cases=[],
     )
 
     # Simulate failure on first attempt
-    evaluator_agent.evaluate_result = AsyncMock(side_effect=[
-        EvaluationResult(
-            step_id=uuid4(),
-            success=False,  # First attempt fails
-            confidence=0.85,
-            expected_outcome="Login successful",
-            actual_outcome="Login failed - invalid credentials",
-            deviations=["Error message displayed"],
-            suggestions=["Check credentials"]
-        ),
-        EvaluationResult(
-            step_id=uuid4(),
-            success=True,  # Error check confirms error
-            confidence=0.95,
-            expected_outcome="No errors present",
-            actual_outcome="Error detected: Invalid credentials",
-            deviations=[],
-            suggestions=[]
-        ),
-        EvaluationResult(
-            step_id=uuid4(),
-            success=True,  # Retry succeeds
-            confidence=0.90,
-            expected_outcome="Login successful",
-            actual_outcome="Login successful after retry",
-            deviations=[],
-            suggestions=[]
-        ),
-    ])
+    evaluator_agent.evaluate_result = AsyncMock(
+        side_effect=[
+            EvaluationResult(
+                step_id=uuid4(),
+                success=False,  # First attempt fails
+                confidence=0.85,
+                expected_outcome="Login successful",
+                actual_outcome="Login failed - invalid credentials",
+                deviations=["Error message displayed"],
+                suggestions=["Check credentials"],
+            ),
+            EvaluationResult(
+                step_id=uuid4(),
+                success=True,  # Error check confirms error
+                confidence=0.95,
+                expected_outcome="No errors present",
+                actual_outcome="Error detected: Invalid credentials",
+                deviations=[],
+                suggestions=[],
+            ),
+            EvaluationResult(
+                step_id=uuid4(),
+                success=True,  # Retry succeeds
+                confidence=0.90,
+                expected_outcome="Login successful",
+                actual_outcome="Login successful after retry",
+                deviations=[],
+                suggestions=[],
+            ),
+        ]
+    )
 
     print("\n1. Executing test with conditional retry logic...")
 
@@ -404,7 +417,7 @@ async def demonstrate_conditional_execution():
         current_step=0,
         completed_steps=[],
         remaining_steps=[0, 1, 2],
-        test_status="in_progress"
+        test_status="in_progress",
     )
 
     recommendation = await runner.get_next_action(test_plan, test_state)
@@ -435,6 +448,7 @@ async def main():
     except Exception as e:
         print(f"\nError during demo: {e}")
         import traceback
+
         traceback.print_exc()
 
 

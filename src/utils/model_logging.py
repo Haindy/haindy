@@ -17,15 +17,14 @@ logger = logging.getLogger(__name__)
 try:
     from src.monitoring.logger import get_run_id
 except Exception:  # pragma: no cover - defensive import
+
     def get_run_id():
         return "unknown"  # type: ignore[assignment]
 
 
 def _now_iso() -> str:
     return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
+        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
 
 

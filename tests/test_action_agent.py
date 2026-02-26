@@ -18,7 +18,9 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
-            desktop_coordinate_cache_path=Path("data/desktop_cache/test_coordinates.json"),
+            desktop_coordinate_cache_path=Path(
+                "data/desktop_cache/test_coordinates.json"
+            ),
             computer_use_model="computer-use-preview",
             cu_provider="openai",
         ),
@@ -88,7 +90,9 @@ async def test_execute_action_routes_skip_navigation_without_driver(
 
 
 @pytest.mark.asyncio
-async def test_execute_action_delegates_to_computer_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_execute_action_delegates_to_computer_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_settings(monkeypatch)
     agent = ActionAgent()
     step = TestStep(

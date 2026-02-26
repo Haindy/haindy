@@ -28,13 +28,11 @@ class PatternMatcher:
             "text_similarity": 0.25,
             "url_similarity": 0.2,
             "element_type": 0.15,
-            "visual_signature": 0.1
+            "visual_signature": 0.1,
         }
 
     def match_pattern(
-        self,
-        pattern: ActionRecord,
-        features: dict[str, Any]
+        self, pattern: ActionRecord, features: dict[str, Any]
     ) -> PatternMatch | None:
         """
         Match a pattern against given features.
@@ -64,8 +62,7 @@ class PatternMatcher:
         # Element text match
         if pattern.element_text and features.get("element_text"):
             elem_sim = self._text_similarity(
-                pattern.element_text.lower(),
-                features["element_text"].lower()
+                pattern.element_text.lower(), features["element_text"].lower()
             )
             confidence += elem_sim * self.weights["text_similarity"]
 
@@ -85,7 +82,7 @@ class PatternMatcher:
         ):
             visual_sim = self._visual_similarity(
                 pattern.visual_signature["coordinate_metadata"],
-                features["coordinate_metadata"]
+                features["coordinate_metadata"],
             )
             confidence += visual_sim * self.weights["visual_signature"]
 
@@ -106,13 +103,11 @@ class PatternMatcher:
             pattern_id=pattern.record_id,
             confidence=confidence,
             match_type=match_type,
-            adjustments=adjustments
+            adjustments=adjustments,
         )
 
     def rank_patterns(
-        self,
-        patterns: list[ActionRecord],
-        features: dict[str, Any]
+        self, patterns: list[ActionRecord], features: dict[str, Any]
     ) -> list[tuple[ActionRecord, PatternMatch]]:
         """
         Rank patterns by match confidence.
@@ -146,8 +141,8 @@ class PatternMatcher:
             return 0.0
 
         # Tokenize and normalize
-        tokens1 = set(re.findall(r'\w+', text1.lower()))
-        tokens2 = set(re.findall(r'\w+', text2.lower()))
+        tokens1 = set(re.findall(r"\w+", text1.lower()))
+        tokens2 = set(re.findall(r"\w+", text2.lower()))
 
         if not tokens1 or not tokens2:
             return 0.0
@@ -189,7 +184,9 @@ class PatternMatcher:
 
         return 0.0
 
-    def _visual_similarity(self, coords1: dict[str, Any], coords2: dict[str, Any]) -> float:
+    def _visual_similarity(
+        self, coords1: dict[str, Any], coords2: dict[str, Any]
+    ) -> float:
         """
         Calculate similarity for provider-neutral coordinate metadata.
         """
@@ -229,10 +226,11 @@ class PatternMatcher:
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL."""
         import urllib.parse
+
         try:
             # Handle URLs without scheme
-            if not url.startswith(('http://', 'https://')):
-                url = 'http://' + url
+            if not url.startswith(("http://", "https://")):
+                url = "http://" + url
             parsed = urllib.parse.urlparse(url)
             return parsed.netloc or ""
         except Exception:
@@ -241,20 +239,18 @@ class PatternMatcher:
     def _extract_path(self, url: str) -> str:
         """Extract path from URL."""
         import urllib.parse
+
         try:
             # Handle URLs without scheme
-            if not url.startswith(('http://', 'https://')):
-                url = 'http://' + url
+            if not url.startswith(("http://", "https://")):
+                url = "http://" + url
             parsed = urllib.parse.urlparse(url)
             return parsed.path or ""
         except Exception:
             return ""
 
     def update_pattern_performance(
-        self,
-        pattern: ActionRecord,
-        success: bool,
-        execution_time_ms: int
+        self, pattern: ActionRecord, success: bool, execution_time_ms: int
     ) -> None:
         """
         Update pattern performance metrics.
@@ -274,9 +270,9 @@ class PatternMatcher:
         if total_uses > 0:
             # Weighted average
             pattern.avg_execution_time_ms = (
-                (pattern.avg_execution_time_ms * (total_uses - 1) + execution_time_ms)
-                / total_uses
-            )
+                pattern.avg_execution_time_ms * (total_uses - 1) + execution_time_ms
+            ) / total_uses
 
         from datetime import datetime, timezone
+
         pattern.last_used = datetime.now(timezone.utc)

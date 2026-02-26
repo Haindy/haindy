@@ -54,7 +54,9 @@ class ResolutionManager:
         refresh_match = re.search(r"(\d+\.\d+)\*", primary_line)
         refresh = float(refresh_match.group(1)) if refresh_match else None
 
-        mode = DisplayMode(width=width, height=height, refresh=refresh, raw=primary_line)
+        mode = DisplayMode(
+            width=width, height=height, refresh=refresh, raw=primary_line
+        )
         self._current_mode = mode
         return mode
 
@@ -99,7 +101,9 @@ class ResolutionManager:
             target_mode if target_mode in modes else self._fallback_mode(modes)
         )
         if not target_candidate:
-            logger.warning("Preferred resolution not available; continuing with current mode.")
+            logger.warning(
+                "Preferred resolution not available; continuing with current mode."
+            )
             self._current_mode = current
             return current
 
@@ -135,7 +139,13 @@ class ResolutionManager:
             return
         try:
             self._run(
-                ["xrandr", "--output", self._original_output, "--mode", self._original_mode]
+                [
+                    "xrandr",
+                    "--output",
+                    self._original_output,
+                    "--mode",
+                    self._original_mode,
+                ]
             )
             logger.info(
                 "Restored original resolution",
@@ -145,7 +155,9 @@ class ResolutionManager:
                 },
             )
         except Exception as exc:
-            logger.warning("Failed to restore original resolution", extra={"error": str(exc)})
+            logger.warning(
+                "Failed to restore original resolution", extra={"error": str(exc)}
+            )
 
     def viewport_size(self) -> tuple[int, int]:
         """Return the current viewport size."""
@@ -171,7 +183,9 @@ class ResolutionManager:
         modes: list[str] = []
         try:
             start_idx = next(
-                i for i, line in enumerate(lines) if line.strip().startswith(output_name)
+                i
+                for i, line in enumerate(lines)
+                if line.strip().startswith(output_name)
             )
         except StopIteration:
             return modes
@@ -218,7 +232,9 @@ class ResolutionManager:
         refresh_match = re.search(r"(\d+\.\d+)\*", primary_line)
         refresh = float(refresh_match.group(1)) if refresh_match else None
 
-        mode = DisplayMode(width=width, height=height, refresh=refresh, raw=primary_line)
+        mode = DisplayMode(
+            width=width, height=height, refresh=refresh, raw=primary_line
+        )
         self._current_mode = mode
         return mode
 

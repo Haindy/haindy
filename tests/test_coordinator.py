@@ -37,10 +37,7 @@ def mock_browser_driver():
 @pytest.fixture
 def coordinator(mock_browser_driver):
     """Create a WorkflowCoordinator instance for testing."""
-    return WorkflowCoordinator(
-        automation_driver=mock_browser_driver,
-        max_steps=50
-    )
+    return WorkflowCoordinator(automation_driver=mock_browser_driver, max_steps=50)
 
 
 @pytest.fixture
@@ -67,8 +64,8 @@ def sample_test_plan():
                             description="Navigate to login page",
                             target="Login page",
                             value="https://example.com/login",
-                            expected_outcome="Login page is displayed"
-                        )
+                            expected_outcome="Login page is displayed",
+                        ),
                     ),
                     TestStep(
                         step_number=2,
@@ -80,12 +77,12 @@ def sample_test_plan():
                             description="Enter username",
                             target="Username field",
                             value="testuser",
-                            expected_outcome="Username is entered"
-                        )
-                    )
-                ]
+                            expected_outcome="Username is entered",
+                        ),
+                    ),
+                ],
             )
-        ]
+        ],
     )
 
 
@@ -194,7 +191,7 @@ class TestWorkflowCoordinatorTestControl:
             name="Test",
             description="Test",
             requirements_source="Test requirements",
-            test_cases=[]
+            test_cases=[],
         )
         await coordinator.state_manager.create_test_state(test_plan)
 
@@ -231,7 +228,7 @@ class TestWorkflowCoordinatorTestControl:
             name="Test",
             description="Test",
             requirements_source="Test requirements",
-            test_cases=[]
+            test_cases=[],
         )
         await coordinator.state_manager.create_test_state(test_plan)
 
@@ -262,7 +259,7 @@ class TestWorkflowCoordinatorStateAndProgress:
             name="Test",
             description="Test",
             requirements_source="Test requirements",
-            test_cases=[]  # Empty test cases to avoid complexity
+            test_cases=[],  # Empty test cases to avoid complexity
         )
 
         await coordinator.state_manager.create_test_state(test_plan)
@@ -300,7 +297,7 @@ class TestWorkflowCoordinatorCleanup:
         # Create mock active tests
         test_tasks = [
             asyncio.create_task(asyncio.sleep(10)),
-            asyncio.create_task(asyncio.sleep(10))
+            asyncio.create_task(asyncio.sleep(10)),
         ]
 
         for task in test_tasks:

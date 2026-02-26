@@ -10,9 +10,12 @@ from urllib.parse import urlparse
 
 from src.agents.base_agent import BaseAgent
 from src.config.agent_prompts import SITUATIONAL_SYSTEM_PROMPT
+from src.config.settings import get_settings
 from src.core.interfaces import AutomationDriver
 from src.core.types import ActionInstruction, ActionType, StepIntent, TestStep
+from src.monitoring.debug_logger import get_debug_logger
 from src.monitoring.logger import get_logger
+from src.utils.model_logging import ModelCallLogger, get_model_logger
 
 logger = get_logger(__name__)
 
@@ -62,9 +65,19 @@ class SituationalAssessment:
 class SituationalAgent(BaseAgent):
     """Determines if context is executable and prepares the entrypoint state."""
 
-    def __init__(self, name: str = "SituationalAgent", **kwargs: Any) -> None:
+    def __init__(
+        self,
+        name: str = "SituationalAgent",
+        model_logger: ModelCallLogger | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(name=name, **kwargs)
         self.system_prompt = SITUATIONAL_SYSTEM_PROMPT
+        settings = get_settings()
+        self._model_logger = model_logger or get_model_logger(
+            settings.model_log_path,
+            max_screenshots=getattr(settings, "max_screenshots", None),
+        )
 
     async def assess_context(
         self,
@@ -159,26 +172,130 @@ class SituationalAgent(BaseAgent):
             "EXECUTION CONTEXT:\n"
             f"{context_text.strip()}\n"
         )
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        request_payload = {
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+        }
+        response: dict[str, Any] | None = None
+        parsed_payload: dict[str, Any] = {}
+        error_message: str | None = None
+        logged_exception = False
         try:
             response = await self.call_openai(
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.1,
             )
             content = response.get("content", {})
             if isinstance(content, str):
-                return json.loads(content)
-            if isinstance(content, dict):
-                return content
+                parsed_payload = json.loads(content)
+            elif isinstance(content, dict):
+                parsed_payload = content
+            else:
+                error_message = (
+                    "Situational assessment returned unsupported content type: "
+                    f"{type(content).__name__}"
+                )
         except Exception as exc:  # pragma: no cover - defensive fallback
+            error_message = str(exc)
+            logged_exception = True
             logger.warning(
                 "Situational assessment model call failed; using heuristic fallback",
                 extra={"error": str(exc)},
             )
-        return {}
+
+        if error_message and not logged_exception:
+            logger.warning(
+                "Situational assessment model payload unusable; using heuristic fallback",
+                extra={"error": error_message},
+            )
+
+        await self._log_assessment_interaction(
+            prompt=prompt,
+            request_payload=request_payload,
+            response_payload=response,
+            parsed_payload=parsed_payload,
+            error_message=error_message,
+        )
+        return parsed_payload
+
+    async def _log_assessment_interaction(
+        self,
+        *,
+        prompt: str,
+        request_payload: dict[str, Any],
+        response_payload: dict[str, Any] | None,
+        parsed_payload: dict[str, Any],
+        error_message: str | None,
+    ) -> None:
+        """Persist situational prompt/response details for run forensics."""
+        metadata: dict[str, Any] = {
+            "phase": "situational_assessment",
+            "fallback_used": bool(error_message),
+            "error": error_message,
+        }
+        if parsed_payload.get("target_type"):
+            metadata["target_type"] = parsed_payload.get("target_type")
+
+        response_for_log: dict[str, Any]
+        if response_payload is None:
+            response_for_log = {"content": parsed_payload or {}, "error": error_message}
+        else:
+            response_for_log = response_payload
+
+        try:
+            await self._model_logger.log_call(
+                agent="situational.assessment",
+                model=self.model,
+                prompt=prompt,
+                request_payload=request_payload,
+                response=response_for_log,
+                metadata=metadata,
+            )
+        except Exception:  # pragma: no cover - logging should never be fatal
+            logger.debug(
+                "Failed to persist situational assessment model call",
+                exc_info=True,
+            )
+
+        debug_logger = get_debug_logger()
+        if not debug_logger:
+            return
+
+        response_content = response_for_log.get("content", response_for_log)
+        try:
+            if isinstance(response_content, str):
+                response_text = response_content
+            else:
+                response_text = json.dumps(response_content, ensure_ascii=False)
+        except Exception:  # pragma: no cover - defensive string fallback
+            response_text = str(response_content)
+
+        if error_message:
+            response_text = (
+                f"{response_text}\n\nFallback note: {error_message}"
+                if response_text
+                else f"Fallback note: {error_message}"
+            )
+
+        try:
+            debug_logger.log_ai_interaction(
+                agent_name=self.name,
+                action_type="situational_assessment",
+                prompt=prompt,
+                response=response_text,
+                additional_context=metadata,
+            )
+        except Exception:  # pragma: no cover - logging should never be fatal
+            logger.debug(
+                "Failed to persist situational assessment debug interaction",
+                exc_info=True,
+            )
 
     def _parse_assessment(
         self,

@@ -27,7 +27,7 @@ class TestTestMetrics:
         metrics = TestMetrics(
             test_id=test_id,
             test_name="test_example",
-            start_time=datetime.now(timezone.utc)
+            start_time=datetime.now(timezone.utc),
         )
 
         assert metrics.test_id == test_id
@@ -41,10 +41,7 @@ class TestTestMetrics:
         end = start + timedelta(seconds=10)
 
         metrics = TestMetrics(
-            test_id=uuid4(),
-            test_name="test",
-            start_time=start,
-            end_time=end
+            test_id=uuid4(), test_name="test", start_time=start, end_time=end
         )
 
         assert metrics.duration_seconds == 10.0
@@ -52,9 +49,7 @@ class TestTestMetrics:
     def test_success_rate_calculation(self):
         """Test success rate calculation."""
         metrics = TestMetrics(
-            test_id=uuid4(),
-            test_name="test",
-            start_time=datetime.now(timezone.utc)
+            test_id=uuid4(), test_name="test", start_time=datetime.now(timezone.utc)
         )
 
         # No steps
@@ -77,7 +72,7 @@ class TestTestMetrics:
             steps_passed=4,
             steps_failed=1,
             api_calls=10,
-            automation_actions=20
+            automation_actions=20,
         )
 
         data = metrics.to_dict()
@@ -233,7 +228,7 @@ class TestMetricsCollector:
         assert summary["total_tests"] == 3  # Only completed tests
         assert summary["passed"] == 2
         assert summary["failed"] == 1
-        assert summary["success_rate"] == 2/3
+        assert summary["success_rate"] == 2 / 3
         assert summary["active_tests"] == 2  # Still running
 
     @pytest.mark.asyncio

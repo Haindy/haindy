@@ -1681,6 +1681,10 @@ class ComputerUseSession:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
+        acknowledged_safety_checks = self._build_acknowledged_safety_checks(call)
+        if acknowledged_safety_checks:
+            call.acknowledged = True
+            call.metadata["acknowledged_safety_checks"] = acknowledged_safety_checks
 
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
@@ -1702,7 +1706,7 @@ class ComputerUseSession:
                         "image_url": f"data:image/png;base64,{screenshot_b64}",
                     },
                     "current_url": call.metadata.get("current_url"),
-                    "acknowledged_safety_checks": [],
+                    "acknowledged_safety_checks": acknowledged_safety_checks,
                 }
             ],
             "truncation": "auto",
@@ -1748,6 +1752,46 @@ class ComputerUseSession:
         call.metadata.pop("screenshot_base64", None)
 
         return payload
+
+    def _build_acknowledged_safety_checks(
+        self,
+        call: ComputerToolTurn,
+    ) -> list[dict[str, str]]:
+        """Return safety checks to acknowledge when the policy allows auto-approval."""
+        if not call.pending_safety_checks:
+            return []
+
+        policy = self._settings.cu_safety_policy
+        fail_fast = bool(
+            getattr(self._settings, "actions_computer_tool_fail_fast_on_safety", True)
+        )
+        allow_auto_approve_override = bool(
+            call.metadata.get("allow_safety_auto_approve")
+        )
+        should_auto_ack = policy == "auto_approve" and (
+            not fail_fast or allow_auto_approve_override
+        )
+        if not should_auto_ack:
+            return []
+
+        acknowledged: list[dict[str, str]] = []
+        for check in call.pending_safety_checks:
+            if not isinstance(check, dict):
+                continue
+            safety_id = str(check.get("id") or "").strip()
+            if not safety_id:
+                continue
+
+            check_payload: dict[str, str] = {"id": safety_id}
+            code = check.get("code")
+            if isinstance(code, str) and code:
+                check_payload["code"] = code
+            message = check.get("message")
+            if isinstance(message, str) and message:
+                check_payload["message"] = message
+            acknowledged.append(check_payload)
+
+        return acknowledged
 
     def _update_loop_history(
         self,
@@ -2285,7 +2329,9 @@ class ComputerUseSession:
                     "location": vertex_location,
                 }
                 if vertex_api_key:
-                    vertex_kwargs["api_key"] = vertex_api_key
+                    logger.warning(
+                        "Ignoring VERTEX_API_KEY because VERTEX_PROJECT is configured; using Vertex project/location mode."
+                    )
                 self._google_client = genai.Client(
                     **vertex_kwargs,
                 )

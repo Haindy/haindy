@@ -28,7 +28,7 @@ def click_action_result():
         confidence=0.95,
         coordinates=(500, 300),
         automation_command="click selector='#submit-btn'",
-        actual_outcome="Button clicked"
+        actual_outcome="Button clicked",
     )
 
 
@@ -41,7 +41,7 @@ def type_action_result():
         confidence=0.9,
         input_text="test@example.com",
         automation_command="type selector='#email' text='test@example.com'",
-        actual_outcome="Text entered"
+        actual_outcome="Text entered",
     )
 
 
@@ -56,13 +56,11 @@ class TestScriptRecorder:
             "class": "btn btn-primary",
             "text": "Submit",
             "role": "button",
-            "data-testid": "submit-button"
+            "data-testid": "submit-button",
         }
 
         command = script_recorder.record_action(
-            ActionType.CLICK,
-            click_action_result,
-            element_info
+            ActionType.CLICK, click_action_result, element_info
         )
 
         assert command is not None
@@ -70,7 +68,7 @@ class TestScriptRecorder:
         assert command.command == click_action_result.automation_command
         assert len(command.selectors) > 0
         assert '[data-testid="submit-button"]' in command.selectors
-        assert '#submit-btn' in command.selectors
+        assert "#submit-btn" in command.selectors
 
     def test_record_type_action(self, script_recorder, type_action_result):
         """Test recording a type action."""
@@ -78,13 +76,11 @@ class TestScriptRecorder:
             "tag": "input",
             "id": "email",
             "type": "email",
-            "aria-label": "Email address"
+            "aria-label": "Email address",
         }
 
         command = script_recorder.record_action(
-            ActionType.TYPE,
-            type_action_result,
-            element_info
+            ActionType.TYPE, type_action_result, element_info
         )
 
         assert command is not None
@@ -95,17 +91,13 @@ class TestScriptRecorder:
     def test_record_navigate_action(self, script_recorder):
         """Test recording a navigate action."""
         result = JournalActionResult(
-            success=True,
-            action=ActionType.NAVIGATE,
-            confidence=1.0
+            success=True, action=ActionType.NAVIGATE, confidence=1.0
         )
 
         element_info = {"url": "https://example.com/login"}
 
         command = script_recorder.record_action(
-            ActionType.NAVIGATE,
-            result,
-            element_info
+            ActionType.NAVIGATE, result, element_info
         )
 
         assert command is not None
@@ -116,16 +108,10 @@ class TestScriptRecorder:
     def test_record_failed_action(self, script_recorder):
         """Test that failed actions are not recorded."""
         result = JournalActionResult(
-            success=False,
-            action=ActionType.CLICK,
-            error_message="Element not found"
+            success=False, action=ActionType.CLICK, error_message="Element not found"
         )
 
-        command = script_recorder.record_action(
-            ActionType.CLICK,
-            result,
-            {}
-        )
+        command = script_recorder.record_action(ActionType.CLICK, result, {})
 
         assert command is None
 
@@ -138,7 +124,7 @@ class TestScriptRecorder:
             "text": "Log In",
             "class": "btn primary",
             "role": "button",
-            "aria-label": "Login to your account"
+            "aria-label": "Login to your account",
         }
 
         selectors = script_recorder.generate_selectors(element_info)
@@ -146,17 +132,14 @@ class TestScriptRecorder:
         # data-testid should be first priority
         assert selectors[0] == '[data-testid="login-btn"]'
         # ID should be second
-        assert '#loginButton' in selectors[:2]
+        assert "#loginButton" in selectors[:2]
         # Other selectors should be present
         assert any('button:has-text("Log In")' in s for s in selectors)
-        assert any('role=button' in s for s in selectors)
+        assert any("role=button" in s for s in selectors)
 
     def test_generate_selectors_minimal_info(self, script_recorder):
         """Test selector generation with minimal element info."""
-        element_info = {
-            "tag": "div",
-            "text": "Click me"
-        }
+        element_info = {"tag": "div", "text": "Click me"}
 
         selectors = script_recorder.generate_selectors(element_info)
 
@@ -172,8 +155,8 @@ class TestScriptRecorder:
             selectors={
                 "primary": "#btn",
                 "secondary": "button.submit",
-                "tertiary": "button[type=submit]"
-            }
+                "tertiary": "button[type=submit]",
+            },
         )
 
         fallbacks = script_recorder.create_fallback_script(pattern)
@@ -187,21 +170,12 @@ class TestScriptRecorder:
     def test_record_scroll_action(self, script_recorder):
         """Test recording a scroll action."""
         result = JournalActionResult(
-            success=True,
-            action=ActionType.SCROLL,
-            confidence=1.0
+            success=True, action=ActionType.SCROLL, confidence=1.0
         )
 
-        element_info = {
-            "direction": "down",
-            "amount": 500
-        }
+        element_info = {"direction": "down", "amount": 500}
 
-        command = script_recorder.record_action(
-            ActionType.SCROLL,
-            result,
-            element_info
-        )
+        command = script_recorder.record_action(ActionType.SCROLL, result, element_info)
 
         assert command is not None
         assert command.command_type == "scroll"
@@ -211,18 +185,12 @@ class TestScriptRecorder:
     def test_record_wait_action(self, script_recorder):
         """Test recording a wait action."""
         result = JournalActionResult(
-            success=True,
-            action=ActionType.WAIT,
-            confidence=1.0
+            success=True, action=ActionType.WAIT, confidence=1.0
         )
 
         element_info = {"duration": 2000}
 
-        command = script_recorder.record_action(
-            ActionType.WAIT,
-            result,
-            element_info
-        )
+        command = script_recorder.record_action(ActionType.WAIT, result, element_info)
 
         assert command is not None
         assert command.command_type == "wait"
@@ -230,10 +198,7 @@ class TestScriptRecorder:
 
     def test_text_selector_escaping(self, script_recorder):
         """Test that text in selectors is properly escaped."""
-        element_info = {
-            "tag": "button",
-            "text": 'Click "here" to continue'
-        }
+        element_info = {"tag": "button", "text": 'Click "here" to continue'}
 
         selectors = script_recorder.generate_selectors(element_info)
         text_selector = next((s for s in selectors if ":has-text" in s), None)
@@ -244,10 +209,7 @@ class TestScriptRecorder:
 
     def test_xpath_selector_generation(self, script_recorder):
         """Test XPath selector generation as fallback."""
-        element_info = {
-            "tag": "span",
-            "text": "Special Text"
-        }
+        element_info = {"tag": "span", "text": "Special Text"}
 
         selectors = script_recorder.generate_selectors(element_info)
         xpath_selector = next((s for s in selectors if s.startswith("//")), None)
@@ -270,18 +232,15 @@ class TestScriptRecorder:
         result = JournalActionResult(
             success=True,
             action=None,  # No action type
-            confidence=1.0
+            confidence=1.0,
         )
 
         # Use a mock action type that's not in the mapping
         from unittest.mock import Mock
+
         unknown_action = Mock()
         unknown_action.value = "unknown_action"
 
-        command = script_recorder.record_action(
-            unknown_action,
-            result,
-            {}
-        )
+        command = script_recorder.record_action(unknown_action, result, {})
 
         assert command is None

@@ -18,26 +18,21 @@ SUPPORTED_OPENAI_MODEL = "gpt-5.2"
 class ResponseStreamObserver(Protocol):
     """Observer that receives streaming updates from the Responses API."""
 
-    def on_stream_start(self) -> Any:
-        ...
+    def on_stream_start(self) -> Any: ...
 
-    def on_text_delta(self, delta: str) -> Any:
-        ...
+    def on_text_delta(self, delta: str) -> Any: ...
 
-    def on_usage_delta(self, delta: dict[str, int]) -> Any:
-        ...
+    def on_usage_delta(self, delta: dict[str, int]) -> Any: ...
 
-    def on_usage_total(self, totals: dict[str, int]) -> Any:
-        ...
+    def on_usage_total(self, totals: dict[str, int]) -> Any: ...
 
-    def on_token_progress(self, total_tokens: int, delta_tokens: int, delta_chars: int) -> Any:
-        ...
+    def on_token_progress(
+        self, total_tokens: int, delta_tokens: int, delta_chars: int
+    ) -> Any: ...
 
-    def on_error(self, error: Any) -> Any:
-        ...
+    def on_error(self, error: Any) -> Any: ...
 
-    def on_stream_end(self) -> Any:
-        ...
+    def on_stream_end(self) -> Any: ...
 
 
 class OpenAIClient:
@@ -261,9 +256,7 @@ class OpenAIClient:
 
         return prompt_cost + completion_cost
 
-    def _supports_responses_temperature(
-        self, reasoning_level: str | None
-    ) -> bool:
+    def _supports_responses_temperature(self, reasoning_level: str | None) -> bool:
         """Return True if the Responses model accepts the temperature parameter."""
         return (reasoning_level or "medium") == "none"
 
@@ -276,7 +269,9 @@ class OpenAIClient:
         reasoning_level: str | None,
         system_prompt: str | None,
     ) -> dict[str, Any]:
-        instructions, input_items = self._prepare_responses_input(final_messages, system_prompt)
+        instructions, input_items = self._prepare_responses_input(
+            final_messages, system_prompt
+        )
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -347,7 +342,9 @@ class OpenAIClient:
         system_prompt: str | None,
         observer: ResponseStreamObserver | None,
     ) -> dict[str, Any]:
-        instructions, input_items = self._prepare_responses_input(final_messages, system_prompt)
+        instructions, input_items = self._prepare_responses_input(
+            final_messages, system_prompt
+        )
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -388,11 +385,17 @@ class OpenAIClient:
                     event_type = getattr(event, "type", "")
 
                     if event_type == "response.output_text.delta":
-                        delta_text = self._resolve_text_delta(getattr(event, "delta", None))
+                        delta_text = self._resolve_text_delta(
+                            getattr(event, "delta", None)
+                        )
                         if delta_text:
-                            await self._dispatch_observer(observer, "on_text_delta", delta_text)
+                            await self._dispatch_observer(
+                                observer, "on_text_delta", delta_text
+                            )
                             delta_chars = len(delta_text)
-                            delta_tokens = self._estimate_token_count(delta_text, token_encoder)
+                            delta_tokens = self._estimate_token_count(
+                                delta_text, token_encoder
+                            )
                             if delta_tokens:
                                 estimated_output_tokens += delta_tokens
                             await self._dispatch_observer(
@@ -500,11 +503,15 @@ class OpenAIClient:
             input_items.append({"role": role, "content": content_items})
 
         if not input_items:
-            input_items.append({"role": "user", "content": [{"type": "input_text", "text": ""}]})
+            input_items.append(
+                {"role": "user", "content": [{"type": "input_text", "text": ""}]}
+            )
 
         return instructions, input_items
 
-    def _convert_content_for_role(self, role: str, content: Any) -> list[dict[str, Any]]:
+    def _convert_content_for_role(
+        self, role: str, content: Any
+    ) -> list[dict[str, Any]]:
         content_items: list[dict[str, Any]] = []
         default_type = "output_text" if role == "assistant" else "input_text"
 
@@ -516,7 +523,9 @@ class OpenAIClient:
                         normalized = dict(item)
                         if normalized["type"] == "text":
                             normalized["type"] = default_type
-                        elif role != "assistant" and normalized["type"] == "output_text":
+                        elif (
+                            role != "assistant" and normalized["type"] == "output_text"
+                        ):
                             normalized["type"] = default_type
                         elif role == "assistant" and normalized["type"] == "input_text":
                             normalized["type"] = default_type
@@ -527,7 +536,9 @@ class OpenAIClient:
 
                         if isinstance(image_data, dict):
                             detail = detail or image_data.get("detail")
-                            image_url = image_data.get("url") or image_data.get("image_url")
+                            image_url = image_data.get("url") or image_data.get(
+                                "image_url"
+                            )
                         else:
                             image_url = image_data
 
@@ -544,7 +555,9 @@ class OpenAIClient:
                                 image_item["detail"] = detail
                             content_items.append(image_item)
                     else:
-                        content_items.append({"type": default_type, "text": json.dumps(item)})
+                        content_items.append(
+                            {"type": default_type, "text": json.dumps(item)}
+                        )
                 else:
                     content_items.append({"type": default_type, "text": str(item)})
         else:
@@ -713,9 +726,7 @@ class OpenAIClient:
         completion_tokens = self._lookup_usage_with_aliases(
             usage, ("completion_tokens", "output_tokens")
         )
-        total_tokens = self._lookup_usage_with_aliases(
-            usage, ("total_tokens",)
-        )
+        total_tokens = self._lookup_usage_with_aliases(usage, ("total_tokens",))
 
         # Derive totals if missing
         if total_tokens == 0 and prompt_tokens and completion_tokens:

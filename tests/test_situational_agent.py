@@ -1,5 +1,10 @@
 """Unit tests for SituationalAgent."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from src.agents.situational_agent import SituationalAgent
 from src.core.types import ActionType
 
@@ -88,3 +93,73 @@ def test_parse_assessment_treats_desktop_missing_items_as_non_blocking() -> None
     assert not assessment.missing_items
     assert assessment.entry_actions
     assert any("Non-blocking context gap" in note for note in assessment.notes)
+
+
+@pytest.mark.asyncio
+async def test_assess_context_persists_model_and_debug_logs(monkeypatch) -> None:
+    model_logger = SimpleNamespace(log_call=AsyncMock())
+    debug_logger = MagicMock()
+    monkeypatch.setattr(
+        "src.agents.situational_agent.get_debug_logger", lambda: debug_logger
+    )
+
+    agent = SituationalAgent(model_logger=model_logger)
+    agent.call_openai = AsyncMock(
+        return_value={
+            "content": {
+                "target_type": "desktop_app",
+                "sufficient": True,
+                "missing_items": [],
+                "setup": {"app_name": "KeenBench"},
+                "entry_actions": [],
+                "notes": [],
+            }
+        }
+    )
+
+    assessment = await agent.assess_context(
+        requirements="Validate KeenBench desktop workflow.",
+        context_text="KeenBench is open in GNOME.",
+    )
+
+    assert assessment.sufficient is True
+    model_logger.log_call.assert_awaited_once()
+    logged_kwargs = model_logger.log_call.await_args.kwargs
+    assert logged_kwargs["agent"] == "situational.assessment"
+    assert "REQUIREMENTS:" in logged_kwargs["prompt"]
+    assert "EXECUTION CONTEXT:" in logged_kwargs["prompt"]
+    assert logged_kwargs["metadata"]["fallback_used"] is False
+
+    debug_logger.log_ai_interaction.assert_called_once()
+    debug_kwargs = debug_logger.log_ai_interaction.call_args.kwargs
+    assert debug_kwargs["action_type"] == "situational_assessment"
+    assert "REQUIREMENTS:" in debug_kwargs["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_assess_context_logs_fallback_when_model_call_fails(monkeypatch) -> None:
+    model_logger = SimpleNamespace(log_call=AsyncMock())
+    debug_logger = MagicMock()
+    monkeypatch.setattr(
+        "src.agents.situational_agent.get_debug_logger", lambda: debug_logger
+    )
+
+    agent = SituationalAgent(model_logger=model_logger)
+    agent.call_openai = AsyncMock(side_effect=RuntimeError("simulated API failure"))
+
+    assessment = await agent.assess_context(
+        requirements="Target desktop app flow.",
+        context_text="app_name: Calculator",
+    )
+
+    assert assessment.target_type == "desktop_app"
+    assert assessment.sufficient is True
+
+    model_logger.log_call.assert_awaited_once()
+    logged_kwargs = model_logger.log_call.await_args.kwargs
+    assert logged_kwargs["metadata"]["fallback_used"] is True
+    assert "simulated API failure" in (logged_kwargs["metadata"]["error"] or "")
+
+    debug_logger.log_ai_interaction.assert_called_once()
+    debug_response = debug_logger.log_ai_interaction.call_args.kwargs["response"]
+    assert "Fallback note" in debug_response

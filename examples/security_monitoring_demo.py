@@ -49,7 +49,7 @@ async def demonstrate_rate_limiting():
         api_calls_per_minute=30,  # 0.5 per second
         api_burst_size=3,
         browser_actions_per_minute=60,  # 1 per second
-        browser_actions_burst=5
+        browser_actions_burst=5,
     )
 
     limiter = RateLimiter(config)
@@ -61,11 +61,13 @@ async def demonstrate_rate_limiting():
         try:
             allowed = await limiter.check_api_call()
             if allowed:
-                print(f"    API call {i+1}: ✓ Allowed")
+                print(f"    API call {i + 1}: ✓ Allowed")
             else:
-                print(f"    API call {i+1}: ✗ Blocked")
+                print(f"    API call {i + 1}: ✗ Blocked")
         except RateLimitExceeded as e:
-            print(f"    API call {i+1}: ✗ Rate limit exceeded (retry after {e.retry_after:.1f}s)")
+            print(
+                f"    API call {i + 1}: ✗ Rate limit exceeded (retry after {e.retry_after:.1f}s)"
+            )
 
     print("\n  Waiting for token refill...")
     await asyncio.sleep(2)  # Wait for tokens to refill
@@ -98,24 +100,24 @@ def demonstrate_data_sanitization():
     test_cases = [
         {
             "message": "User login with email user@example.com",
-            "description": "Email address"
+            "description": "Email address",
         },
         {
             "message": "API call with key: sk_test_123456789abcdef",
-            "description": "API key"
+            "description": "API key",
         },
         {
             "message": "Credit card payment: 4111-1111-1111-1111",
-            "description": "Credit card number"
+            "description": "Credit card number",
         },
         {
             "message": "Password reset for password=SuperSecret123!",
-            "description": "Password field"
+            "description": "Password field",
         },
         {
             "message": "SSN verification: 123-45-6789",
-            "description": "Social Security Number"
-        }
+            "description": "Social Security Number",
+        },
     ]
 
     sanitizer = DataSanitizer()
@@ -123,11 +125,11 @@ def demonstrate_data_sanitization():
     for test in test_cases:
         print(f"\n  {test['description']}:")
         print(f"    Original: {test['message']}")
-        sanitized = sanitizer.sanitize_string(test['message'])
+        sanitized = sanitizer.sanitize_string(test["message"])
         print(f"    Sanitized: {sanitized}")
 
         # Also log it (will be sanitized by logger)
-        demo_logger.info(test['message'])
+        demo_logger.info(test["message"])
 
     # Test dictionary sanitization
     print("\n  Dictionary sanitization:")
@@ -137,13 +139,10 @@ def demonstrate_data_sanitization():
             "api_key": "sk_live_super_secret_key_123",
             "profile": {
                 "phone": "555-123-4567",
-                "address": "123 Main St"  # Not sensitive
-            }
+                "address": "123 Main St",  # Not sensitive
+            },
         },
-        "payment": {
-            "card_last_four": "1234",
-            "card_full": "4532-1234-5678-9012"
-        }
+        "payment": {"card_last_four": "1234", "card_full": "4532-1234-5678-9012"},
     }
 
     print("    Original data:")
@@ -182,7 +181,7 @@ async def demonstrate_analytics_and_reporting():
         ("Enter shipping info", False, 1200, "form"),  # Failed
         ("Retry shipping info", True, 800, "form"),
         ("Enter payment", True, 600, "form"),
-        ("Submit order", True, 400, "click")
+        ("Submit order", True, 400, "click"),
     ]
 
     for step_name, success, duration_ms, action_type in steps:
@@ -190,7 +189,9 @@ async def demonstrate_analytics_and_reporting():
         await record_step(test_id, step_name, success, duration_ms)
 
         # Record browser action
-        await analytics.record_browser_action(test_id, action_type, duration_ms, success)
+        await analytics.record_browser_action(
+            test_id, action_type, duration_ms, success
+        )
 
         # Simulate API calls for some steps
         if action_type in ["search", "form"]:
@@ -215,7 +216,9 @@ async def demonstrate_analytics_and_reporting():
     print("\n  Performance Summary:")
     perf_summary = analytics.get_performance_summary()
     print(f"    - API calls/min: {perf_summary['api_calls']['rate_per_minute']:.1f}")
-    print(f"    - Browser actions/min: {perf_summary['browser_actions']['rate_per_minute']:.1f}")
+    print(
+        f"    - Browser actions/min: {perf_summary['browser_actions']['rate_per_minute']:.1f}"
+    )
     print(f"    - Step success rate: {perf_summary['steps']['success_rate']:.1%}")
 
     # Generate report
@@ -232,8 +235,7 @@ async def demonstrate_analytics_and_reporting():
     if test_report:
         # Save reports
         saved_files = test_report.save(
-            Path("reports"),
-            formats=["json", "html", "markdown"]
+            Path("reports"), formats=["json", "html", "markdown"]
         )
 
         print("    Reports saved:")
@@ -251,8 +253,7 @@ async def demonstrate_integrated_monitoring():
 
     # Configure components
     rate_config = RateLimitConfig(
-        api_calls_per_minute=60,
-        browser_actions_per_minute=120
+        api_calls_per_minute=60, browser_actions_per_minute=120
     )
 
     limiter = RateLimiter(rate_config)
@@ -260,12 +261,14 @@ async def demonstrate_integrated_monitoring():
     analytics = get_analytics()
 
     # Add custom sanitization pattern
-    sanitizer.add_pattern(SensitiveDataPattern(
-        name="internal_id",
-        pattern=re.compile(r'ID-\d{6}'),
-        redaction_method=RedactionMethod.HASH,
-        description="Internal ID pattern"
-    ))
+    sanitizer.add_pattern(
+        SensitiveDataPattern(
+            name="internal_id",
+            pattern=re.compile(r"ID-\d{6}"),
+            redaction_method=RedactionMethod.HASH,
+            description="Internal ID pattern",
+        )
+    )
 
     logger = get_logger("demo.integrated")
 
@@ -286,14 +289,14 @@ async def demonstrate_integrated_monitoring():
         try:
             await limiter.check_api_call()
             await record_api_call(test_id, "protected_api", 100)
-            logger.info(f"API call {i+1} successful with ID-{123456+i}")
+            logger.info(f"API call {i + 1} successful with ID-{123456 + i}")
         except RateLimitExceeded:
-            logger.warning(f"API call {i+1} rate limited")
+            logger.warning(f"API call {i + 1} rate limited")
 
     # Log with sensitive data (will be sanitized)
     logger.info(
         "Test user user@test.com authenticated with token Bearer abc123def456",
-        extra={"internal_id": "ID-789012", "test_id": str(test_id)}
+        extra={"internal_id": "ID-789012", "test_id": str(test_id)},
     )
 
     await end_test(test_id, TestOutcome.PASSED)
@@ -304,8 +307,10 @@ async def demonstrate_integrated_monitoring():
     rate_stats = limiter.get_statistics()
     print("    Rate limiting:")
     for limit_type, stats in rate_stats.items():
-        if stats.get('allowed', 0) > 0:
-            print(f"      - {limit_type}: {stats['allowed']} allowed, {stats['rejected']} rejected")
+        if stats.get("allowed", 0) > 0:
+            print(
+                f"      - {limit_type}: {stats['allowed']} allowed, {stats['rejected']} rejected"
+            )
 
     sanitizer_stats = sanitizer.get_statistics()
     print("\n    Sanitization:")
@@ -346,6 +351,7 @@ async def main():
     except Exception as e:
         print(f"\nError during demo: {e}")
         import traceback
+
         traceback.print_exc()
 
 
