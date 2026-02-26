@@ -9,7 +9,6 @@ import pytest
 
 import src.agents.computer_use.session as cu_session_module
 from src.agents.computer_use import ComputerUseExecutionError, ComputerUseSession
-from src.agents.computer_use.session import ComputerUseSessionResult
 from src.core.enhanced_types import ComputerToolTurn
 
 
@@ -403,10 +402,10 @@ async def test_computer_use_session_safety_auto_approve_with_override_when_fail_
 
 
 @pytest.mark.asyncio
-async def test_computer_use_session_per_call_fallback_is_not_sticky(
+async def test_computer_use_session_google_failure_does_not_fallback_to_openai(
     mock_client, mock_browser, session_settings
 ):
-    """Google fallback to OpenAI should apply only to one run() call."""
+    """Google provider failures should be explicit and never fallback to OpenAI."""
     session_settings.cu_provider = "google"
     session_settings.vertex_api_key = "dummy-key"
 
@@ -418,29 +417,19 @@ async def test_computer_use_session_per_call_fallback_is_not_sticky(
         provider="google",
     )
 
-    google_success = ComputerUseSessionResult(final_output="google-success")
-    openai_fallback = ComputerUseSessionResult(final_output="openai-fallback")
-    session._run_google = AsyncMock(  # type: ignore[assignment]
-        side_effect=[RuntimeError("google failed"), google_success]
-    )
-    session._run_openai = AsyncMock(return_value=openai_fallback)  # type: ignore[assignment]
+    session._run_google = AsyncMock(side_effect=RuntimeError("google failed"))  # type: ignore[assignment]
+    session._run_openai = AsyncMock()  # type: ignore[assignment]
 
-    first = await session.run(
-        goal="Run once",
-        initial_screenshot=b"initial",
-        metadata={"step_number": 1},
-    )
-    second = await session.run(
-        goal="Run twice",
-        initial_screenshot=b"initial",
-        metadata={"step_number": 2},
-    )
+    with pytest.raises(RuntimeError, match="google failed"):
+        await session.run(
+            goal="Run once",
+            initial_screenshot=b"initial",
+            metadata={"step_number": 1},
+        )
 
-    assert first.final_output == "openai-fallback"
-    assert second.final_output == "google-success"
     assert session._provider == "google"
-    assert session._run_google.await_count == 2  # type: ignore[attr-defined]
-    assert session._run_openai.await_count == 1  # type: ignore[attr-defined]
+    assert session._run_google.await_count == 1  # type: ignore[attr-defined]
+    session._run_openai.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

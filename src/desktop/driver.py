@@ -108,13 +108,23 @@ class DesktopDriver(AutomationDriver):
         await self.press_key("enter")
 
     async def click(
-        self, x: int, y: int, button: str = "left", click_count: int = 1
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+        modifiers: list[str] | None = None,
     ) -> None:
         await self._ensure_ready()
-        await self.virtual_input.click(x, y, button=button, click_count=click_count)
-        self._capture_call(
-            "click", {"x": x, "y": y, "button": button, "click_count": click_count}
+        await self.virtual_input.click(
+            x, y, button=button, click_count=click_count, modifiers=modifiers
         )
+        call_info: dict[str, object] = {
+            "x": x, "y": y, "button": button, "click_count": click_count,
+        }
+        if modifiers:
+            call_info["modifiers"] = modifiers
+        self._capture_call("click", call_info)
 
     async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
         await self._ensure_ready()

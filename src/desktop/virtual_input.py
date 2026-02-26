@@ -210,17 +210,27 @@ class VirtualInput:
                 await asyncio.sleep(0.01)
 
     async def click(
-        self, x: int, y: int, button: str = "left", click_count: int = 1
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+        modifiers: list[str] | None = None,
     ) -> None:
-        """Click at absolute coordinates."""
+        """Click at absolute coordinates, optionally holding modifier keys."""
         code = self._button_code(button)
         x_clamped, y_clamped = self._clamp(x, y)
         if self._ui is None:
             await self._xdotool_click(
-                x_clamped, y_clamped, button=button, click_count=click_count
+                x_clamped, y_clamped, button=button, click_count=click_count,
+                modifiers=modifiers,
             )
             return
 
+        modifier_codes = self._modifier_codes(modifiers)
+        for mc in modifier_codes:
+            self._ui.write(ecodes.EV_KEY, mc, 1)
+            self._ui.syn()
         for _ in range(max(click_count, 1)):
             self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, x_clamped)
             self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, y_clamped)
@@ -230,6 +240,9 @@ class VirtualInput:
             self._ui.write(ecodes.EV_KEY, code, 0)
             self._ui.syn()
             await asyncio.sleep(0.02)
+        for mc in reversed(modifier_codes):
+            self._ui.write(ecodes.EV_KEY, mc, 0)
+            self._ui.syn()
 
     async def drag(
         self, start: tuple[int, int], end: tuple[int, int], steps: int = 1
@@ -361,6 +374,36 @@ class VirtualInput:
             self._ui.write(ecodes.EV_MSC, ecodes.MSC_SCAN, scancode)
         self._ui.write(ecodes.EV_KEY, key_code, value)
 
+    @staticmethod
+    def _modifier_codes(modifiers: list[str] | None) -> list[int]:
+        """Map modifier name strings to evdev key codes."""
+        if not modifiers:
+            return []
+        mapping: dict[str, int] = {
+            "ctrl": ecodes.KEY_LEFTCTRL,
+            "control": ecodes.KEY_LEFTCTRL,
+            "shift": ecodes.KEY_LEFTSHIFT,
+            "alt": ecodes.KEY_LEFTALT,
+            "meta": ecodes.KEY_LEFTMETA,
+            "super": ecodes.KEY_LEFTMETA,
+        }
+        return [mapping[m] for m in modifiers if m in mapping]
+
+    @staticmethod
+    def _modifier_xdotool_names(modifiers: list[str] | None) -> list[str]:
+        """Map modifier name strings to xdotool key names."""
+        if not modifiers:
+            return []
+        mapping: dict[str, str] = {
+            "ctrl": "ctrl",
+            "control": "ctrl",
+            "shift": "shift",
+            "alt": "alt",
+            "meta": "super",
+            "super": "super",
+        }
+        return [mapping[m] for m in modifiers if m in mapping]
+
     async def _run_xdotool(self, *args: str) -> None:
         if not self._xdotool_binary:
             raise RuntimeError(
@@ -383,10 +426,18 @@ class VirtualInput:
         await self._run_xdotool("mousemove", "--sync", str(x), str(y))
 
     async def _xdotool_click(
-        self, x: int, y: int, button: str = "left", click_count: int = 1
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+        modifiers: list[str] | None = None,
     ) -> None:
         button_map = {"left": 1, "middle": 2, "right": 3}
         button_code = button_map.get((button or "left").lower(), 1)
+        mod_key_names = self._modifier_xdotool_names(modifiers)
+        for k in mod_key_names:
+            await self._run_xdotool("keydown", k)
         await self._xdotool_move(x, y)
         await self._run_xdotool(
             "click",
@@ -394,6 +445,8 @@ class VirtualInput:
             str(max(click_count, 1)),
             str(button_code),
         )
+        for k in reversed(mod_key_names):
+            await self._run_xdotool("keyup", k)
         await asyncio.sleep(0.02)
 
     async def _xdotool_drag(
