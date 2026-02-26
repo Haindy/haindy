@@ -9,7 +9,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -20,13 +20,17 @@ try:  # Optional dependency for Gemini computer-use
 except Exception:  # pragma: no cover - optional dependency
     genai = None
 
+try:  # Optional dependency for Claude computer-use
+    from anthropic import AsyncAnthropic as _AsyncAnthropic
+except Exception:  # pragma: no cover - optional dependency
+    _AsyncAnthropic = None
+
 from src.config.settings import Settings
-from src.desktop.cache import CoordinateCache
 from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
-from src.core.interfaces import BrowserDriver
+from src.core.interfaces import AutomationDriver
+from src.desktop.cache import CoordinateCache
 from src.monitoring.debug_logger import DebugLogger
 from src.utils.model_logging import ModelCallLogger, get_model_logger
-
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +54,9 @@ class InteractionConstraints:
             lines.append("- Do NOT scroll (no scroll actions; no mouse wheel).")
         return "\n".join(lines)
 
-    def apply_overrides(self, metadata: Optional[Dict[str, Any]]) -> "InteractionConstraints":
+    def apply_overrides(
+        self, metadata: dict[str, Any] | None
+    ) -> InteractionConstraints:
         """Apply optional constraint overrides supplied via runtime metadata."""
         if not metadata:
             return self
@@ -69,7 +75,7 @@ class InteractionConstraints:
         return self
 
     @staticmethod
-    def from_text(text: str) -> "InteractionConstraints":
+    def from_text(text: str) -> InteractionConstraints:
         lowered = (text or "").lower()
         strict_no_scroll = any(
             phrase in lowered
@@ -115,18 +121,19 @@ class InteractionConstraints:
         )
         return InteractionConstraints(disallow_scroll=not allows_scroll)
 
+
 @dataclass
 class ComputerUseSessionResult:
     """Result of executing a Computer Use session."""
 
-    actions: List[ComputerToolTurn] = field(default_factory=list)
-    safety_events: List[SafetyEvent] = field(default_factory=list)
-    final_output: Optional[str] = None
-    response_ids: List[str] = field(default_factory=list)
-    last_response: Optional[Dict[str, Any]] = None
+    actions: list[ComputerToolTurn] = field(default_factory=list)
+    safety_events: list[SafetyEvent] = field(default_factory=list)
+    final_output: str | None = None
+    response_ids: list[str] = field(default_factory=list)
+    last_response: dict[str, Any] | None = None
     terminal_status: Literal["success", "failed"] = "success"
-    terminal_failure_reason: Optional[str] = None
-    terminal_failure_code: Optional[str] = None
+    terminal_failure_reason: str | None = None
+    terminal_failure_code: str | None = None
 
 
 class ComputerUseSession:
@@ -145,21 +152,28 @@ class ComputerUseSession:
     def __init__(
         self,
         client: AsyncOpenAI,
-        browser: BrowserDriver,
+        automation_driver: AutomationDriver,
         settings: Settings,
-        debug_logger: Optional[DebugLogger] = None,
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
-        google_client: Optional[Any] = None,
+        debug_logger: DebugLogger | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        google_client: Any | None = None,
+        anthropic_client: Any | None = None,
         environment: str = "browser",
-        coordinate_cache: Optional[CoordinateCache] = None,
-        model_logger: Optional[ModelCallLogger] = None,
+        coordinate_cache: CoordinateCache | None = None,
+        model_logger: ModelCallLogger | None = None,
     ) -> None:
         self._client = client
-        self._browser = browser
+        self._automation_driver = automation_driver
         self._settings = settings
         self._debug_logger = debug_logger
-        self._provider = (provider or settings.cu_provider or "openai").lower()
+        raw_provider = provider if provider is not None else settings.cu_provider
+        self._provider = str(raw_provider or "").strip().lower()
+        if self._provider not in {"openai", "google", "anthropic"}:
+            raise ValueError(
+                f"Unsupported computer-use provider '{raw_provider}'. "
+                "Supported providers are 'openai', 'google', and 'anthropic'."
+            )
         self._openai_model = (
             model
             if model and self._provider == "openai"
@@ -168,12 +182,29 @@ class ComputerUseSession:
         self._google_model = (
             model
             if model and self._provider == "google"
-            else settings.google_cu_model
+            else getattr(
+                settings, "google_cu_model", "gemini-2.5-computer-use-preview-10-2025"
+            )
         )
-        self._model = (
-            self._google_model if self._provider == "google" else self._openai_model
+        self._anthropic_model = (
+            model
+            if model and self._provider == "anthropic"
+            else getattr(settings, "anthropic_cu_model", "claude-sonnet-4-6")
         )
+        self._model = {
+            "google": self._google_model,
+            "anthropic": self._anthropic_model,
+        }.get(self._provider, self._openai_model)
         self._google_client = google_client
+        self._anthropic_client = anthropic_client
+        self._anthropic_tool_type = "computer_20251124"
+        self._anthropic_tool_name = "computer"
+        self._anthropic_betas = self._parse_betas(
+            str(getattr(self._settings, "anthropic_cu_beta", "") or "")
+        )
+        self._anthropic_max_tokens = int(
+            getattr(self._settings, "anthropic_cu_max_tokens", 16384)
+        )
         self._default_environment = self._normalize_environment_name(environment)
         self._coordinate_cache = coordinate_cache or CoordinateCache(
             self._settings.desktop_coordinate_cache_path
@@ -182,14 +213,14 @@ class ComputerUseSession:
             self._settings.model_log_path,
             max_screenshots=getattr(self._settings, "max_screenshots", None),
         )
-        self._allowed_actions: Optional[Set[str]] = None
-        self._allowed_domains: Set[str] = self._normalize_domain_set(
+        self._allowed_actions: set[str] | None = None
+        self._allowed_domains: set[str] = self._normalize_domain_set(
             settings.actions_computer_tool_allowed_domains
         )
-        self._blocked_domains: Set[str] = self._normalize_domain_set(
+        self._blocked_domains: set[str] = self._normalize_domain_set(
             settings.actions_computer_tool_blocked_domains
         )
-        self._stateful_actions: Set[str] = {
+        self._stateful_actions: set[str] = {
             "click",
             "double_click",
             "right_click",
@@ -217,15 +248,16 @@ class ComputerUseSession:
         )
         self._pending_context_menu_selection = False
         self._interaction_constraints = InteractionConstraints()
+        self._last_pointer_position: tuple[int, int] | None = None
 
     async def run(
         self,
         goal: str,
-        initial_screenshot: Optional[bytes],
-        metadata: Optional[Dict[str, Any]] = None,
-        allowed_actions: Optional[Set[str]] = None,
-        environment: Optional[str] = None,
-        cache_label: Optional[str] = None,
+        initial_screenshot: bytes | None,
+        metadata: dict[str, Any] | None = None,
+        allowed_actions: set[str] | None = None,
+        environment: str | None = None,
+        cache_label: str | None = None,
         cache_action: str = "click",
         use_cache: bool = True,
     ) -> ComputerUseSessionResult:
@@ -243,15 +275,17 @@ class ComputerUseSession:
         metadata = metadata or {}
         self._allowed_actions = allowed_actions
         self._pending_context_menu_selection = False
+        self._last_pointer_position = None
 
         step_goal = str(metadata.get("step_goal") or "").strip()
         constraint_source = " ".join([step_goal, goal]).strip()
-        self._interaction_constraints = (
-            InteractionConstraints.from_text(constraint_source)
-            .apply_overrides(metadata)
-        )
+        self._interaction_constraints = InteractionConstraints.from_text(
+            constraint_source
+        ).apply_overrides(metadata)
         if self._interaction_constraints.has_any():
-            goal = goal + "\n\nCONSTRAINTS:\n" + self._interaction_constraints.to_prompt()
+            goal = (
+                goal + "\n\nCONSTRAINTS:\n" + self._interaction_constraints.to_prompt()
+            )
 
         env_mode = self._normalize_environment_name(
             environment or metadata.get("environment") or self._default_environment
@@ -269,19 +303,47 @@ class ComputerUseSession:
                         model=self._google_model,
                     )
                 except Exception as exc:
+                    if not self._can_fallback_to_openai():
+                        raise
                     logger.warning(
-                        "Google Computer Use provider failed; falling back to OpenAI",
+                        "Google CU provider failed; falling back to OpenAI for this action",
                         extra={"error": str(exc)},
                     )
-            return await self._run_openai(
-                goal=goal,
-                initial_screenshot=initial_screenshot,
-                metadata=metadata,
-                environment=env_mode,
-                cache_label=cache_label,
-                cache_action=cache_action,
-                use_cache=use_cache,
-                model=self._openai_model,
+                    return await self._run_openai(
+                        goal=goal,
+                        initial_screenshot=initial_screenshot,
+                        metadata=metadata,
+                        environment=env_mode,
+                        cache_label=cache_label,
+                        cache_action=cache_action,
+                        use_cache=use_cache,
+                        model=self._openai_model,
+                    )
+            if self._provider == "openai":
+                return await self._run_openai(
+                    goal=goal,
+                    initial_screenshot=initial_screenshot,
+                    metadata=metadata,
+                    environment=env_mode,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                    use_cache=use_cache,
+                    model=self._openai_model,
+                )
+            if self._provider == "anthropic":
+                return await self._run_anthropic(
+                    goal=goal,
+                    initial_screenshot=initial_screenshot,
+                    metadata=metadata,
+                    environment=env_mode,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                    use_cache=use_cache,
+                    model=self._anthropic_model,
+                )
+            raise ComputerUseExecutionError(
+                f"Unsupported computer-use provider '{self._provider}'. "
+                "Supported providers are 'openai', 'google', and 'anthropic'."
             )
         finally:
             self._allowed_actions = None
@@ -290,20 +352,23 @@ class ComputerUseSession:
         self,
         *,
         goal: str,
-        initial_screenshot: Optional[bytes],
-        metadata: Dict[str, Any],
+        initial_screenshot: bytes | None,
+        metadata: dict[str, Any],
         environment: str,
-        cache_label: Optional[str],
+        cache_label: str | None,
         cache_action: str,
         use_cache: bool,
         model: str,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
-        await self._ensure_browser_ready()
+        await self._ensure_automation_driver_ready()
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
-        screenshot = initial_screenshot or await self._browser.screenshot()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
+        screenshot = initial_screenshot or await self._automation_driver.screenshot()
         screenshot_b64 = encode_png_base64(screenshot)
         tool_environment = self._map_openai_environment(environment)
 
@@ -333,7 +398,7 @@ class ComputerUseSession:
         turn_counter = 0
         previous_response_id = response_dict.get("id")
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
-        loop_history: Deque[Tuple[Tuple[str, ...], str]] = deque(maxlen=loop_window)
+        loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
             computer_calls = extract_computer_calls(response_dict)
@@ -378,9 +443,7 @@ class ComputerUseSession:
             turn_counter += 1
             if turn_counter > self._settings.actions_computer_tool_max_turns:
                 max_turns = self._settings.actions_computer_tool_max_turns
-                message = (
-                    f"Computer Use max turns exceeded after {turn_counter} turns (limit: {max_turns})."
-                )
+                message = f"Computer Use max turns exceeded after {turn_counter} turns (limit: {max_turns})."
                 logger.warning(
                     "Computer Use max turns exceeded",
                     extra={
@@ -437,7 +500,8 @@ class ComputerUseSession:
                 turn.status = "failed"
                 turn.error_message = str(exc)
                 logger.exception(
-                    "Computer Use action execution failed", extra={"call_id": turn.call_id}
+                    "Computer Use action execution failed",
+                    extra={"call_id": turn.call_id},
                 )
 
             result.actions.append(turn)
@@ -484,7 +548,7 @@ class ComputerUseSession:
             )
 
             response = await self._create_response(follow_up_payload)
-            follow_up_screenshot: Optional[bytes] = None
+            follow_up_screenshot: bytes | None = None
             try:
                 image_url = (
                     follow_up_payload.get("input", [{}])[0]
@@ -514,22 +578,29 @@ class ComputerUseSession:
 
         return result
 
+    def _can_fallback_to_openai(self) -> bool:
+        """Return True when an OpenAI client is available for fallback execution."""
+        return self._client is not None
+
     async def _run_google(
         self,
         *,
         goal: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         environment: str,
-        cache_label: Optional[str],
+        cache_label: str | None,
         cache_action: str,
         use_cache: bool,
         model: str,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
-        await self._ensure_browser_ready()
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
-        initial_screenshot = await self._browser.screenshot()
+        await self._ensure_automation_driver_ready()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
+        initial_screenshot = await self._automation_driver.screenshot()
         wrapped_goal = self._wrap_goal_for_google(goal, environment)
         contents, config = self._build_google_initial_request(
             goal=wrapped_goal,
@@ -539,7 +610,7 @@ class ComputerUseSession:
             environment=environment,
         )
 
-        history: List[Any] = list(contents)
+        history: list[Any] = list(contents)
         initial_request = {"model": model, "contents": contents, "config": config}
         response = await self._create_google_response(initial_request)
         await self._model_logger.log_call(
@@ -570,12 +641,12 @@ class ComputerUseSession:
         scroll_turns = 0
         consecutive_ignored = 0
         max_turn_hit = False
-        max_turn_reason: Optional[str] = None
-        max_turn_code: Optional[str] = None
-        last_assistant_text: Optional[str] = None
-        last_response_dict: Optional[Dict[str, Any]] = None
+        max_turn_reason: str | None = None
+        max_turn_code: str | None = None
+        last_assistant_text: str | None = None
+        last_response_dict: dict[str, Any] | None = None
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
-        loop_history: Deque[Tuple[Tuple[str, ...], str]] = deque(maxlen=loop_window)
+        loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
             calls = extract_google_function_calls(response)
@@ -589,7 +660,7 @@ class ComputerUseSession:
             if not calls:
                 break
 
-            executed_turns: List[ComputerToolTurn] = []
+            executed_turns: list[ComputerToolTurn] = []
             for call in calls:
                 turn = ComputerToolTurn(
                     call_id=str(getattr(call, "name", "") or ""),
@@ -609,7 +680,7 @@ class ComputerUseSession:
                         metadata=metadata,
                         turn_index=turn_counter + 1,
                         normalized_coords=True,
-                        allow_unknown=True,
+                        allow_unknown=False,
                         environment=environment,
                         cache_label=cache_label,
                         cache_action=cache_action,
@@ -707,14 +778,16 @@ class ComputerUseSession:
             if max_turn_hit:
                 break
 
-            follow_up_payload, func_response_content, follow_up_screenshot = (
-                await self._build_google_follow_up_request(
-                    goal=goal,
-                    history=history,
-                    turns=executed_turns,
-                    environment=environment,
-                    model=model,
-                )
+            (
+                follow_up_payload,
+                func_response_content,
+                follow_up_screenshot,
+            ) = await self._build_google_follow_up_request(
+                goal=goal,
+                history=history,
+                turns=executed_turns,
+                environment=environment,
+                model=model,
             )
             history.append(func_response_content)
             response = await self._create_google_response(follow_up_payload)
@@ -770,19 +843,264 @@ class ComputerUseSession:
 
         return result
 
+    async def _run_anthropic(
+        self,
+        *,
+        goal: str,
+        initial_screenshot: bytes | None,
+        metadata: dict[str, Any],
+        environment: str,
+        cache_label: str | None,
+        cache_action: str,
+        use_cache: bool,
+        model: str,
+    ) -> ComputerUseSessionResult:
+        result = ComputerUseSessionResult()
+
+        await self._ensure_automation_driver_ready()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
+        screenshot = initial_screenshot or await self._automation_driver.screenshot()
+
+        request_payload = self._build_anthropic_initial_request(
+            goal=goal,
+            screenshot_bytes=screenshot,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            metadata=metadata,
+            model=model,
+        )
+
+        response = await self._create_anthropic_response(request_payload)
+        await self._model_logger.log_call(
+            agent="computer_use.anthropic.initial",
+            model=model,
+            prompt=goal,
+            request_payload=self._sanitize_payload_for_log(request_payload),
+            response=response,
+            screenshots=[("computer_use_initial", screenshot)],
+            metadata={"environment": environment, **metadata},
+        )
+
+        response_dict = normalize_response(response)
+        result.response_ids.append(response_dict.get("id", ""))
+
+        history_messages = list(request_payload.get("messages", []))
+        turn_counter = 0
+        scroll_turns = 0
+        consecutive_ignored = 0
+        max_turn_hit = False
+        max_turn_reason: str | None = None
+        max_turn_code: str | None = None
+        last_assistant_text: str | None = None
+        last_response_dict: dict[str, Any] | None = None
+        loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
+        loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
+
+        while True:
+            calls = extract_anthropic_computer_calls(response_dict)
+            assistant_text = extract_assistant_text(response_dict)
+            if assistant_text:
+                result.final_output = assistant_text
+                last_assistant_text = assistant_text
+            result.last_response = response_dict
+            last_response_dict = response_dict
+
+            if not calls:
+                break
+
+            executed_turns: list[ComputerToolTurn] = []
+            for call in calls:
+                translated_action = self._translate_anthropic_action(
+                    call.get("action") or {}
+                )
+                turn = ComputerToolTurn(
+                    call_id=str(call.get("id") or ""),
+                    action_type=str(translated_action.get("type") or "unknown"),
+                    parameters=translated_action,
+                    response_id=response_dict.get("id"),
+                    pending_safety_checks=[],
+                )
+                _inject_context_metadata(turn, metadata)
+
+                if self._should_abort_on_safety(turn, result):
+                    return result
+
+                try:
+                    await self._execute_tool_action(
+                        turn=turn,
+                        metadata=metadata,
+                        turn_index=turn_counter + 1,
+                        normalized_coords=False,
+                        allow_unknown=False,
+                        environment=environment,
+                        cache_label=cache_label,
+                        cache_action=cache_action,
+                        use_cache=use_cache,
+                    )
+                except Exception as exc:
+                    turn.status = "failed"
+                    turn.error_message = str(exc)
+                    logger.exception(
+                        "Computer Use action execution failed (anthropic)",
+                        extra={"call_id": turn.call_id},
+                    )
+
+                self._update_last_pointer_position(turn)
+                result.actions.append(turn)
+                executed_turns.append(turn)
+
+                loop_detection = self._update_loop_history(
+                    turn=turn,
+                    history=loop_history,
+                    window=loop_window,
+                )
+                if loop_detection:
+                    message = loop_detection["message"]
+                    logger.warning(
+                        "Computer Use loop detected (anthropic)",
+                        extra={
+                            "step_number": metadata.get("step_number"),
+                            "action_type": turn.action_type,
+                            "signature": loop_detection.get("signature"),
+                            "loop_window": loop_detection.get("loop_window"),
+                        },
+                    )
+                    self._append_terminal_failure_turn(
+                        result=result,
+                        metadata=metadata,
+                        response_id=response_dict.get("id"),
+                        reason=message,
+                        code="loop_detected",
+                        parameters={
+                            "signature": loop_detection.get("signature"),
+                            "screenshot_hash": loop_detection.get("screenshot_hash"),
+                            "loop_window": loop_detection.get("loop_window"),
+                        },
+                        metadata_updates=loop_detection,
+                        call_id_prefix="loop-detected",
+                    )
+                    max_turn_hit = True
+                    break
+
+                if turn.status == "ignored":
+                    consecutive_ignored += 1
+                    if consecutive_ignored >= 4:
+                        raise ComputerUseExecutionError(
+                            "Repeated disallowed actions ignored; refusing to continue tool loop."
+                        )
+                    continue
+                consecutive_ignored = 0
+
+                if self._is_scroll_action(turn.action_type):
+                    scroll_turns += 1
+                    if scroll_turns >= self._scroll_turn_limit:
+                        logger.warning(
+                            "Computer Use scroll turn limit reached (anthropic)",
+                            extra={
+                                "scroll_turns": scroll_turns,
+                                "scroll_turn_limit": self._scroll_turn_limit,
+                                "max_turns": self._settings.actions_computer_tool_max_turns,
+                            },
+                        )
+                        max_turn_code = "scroll_turn_limit_reached"
+                        max_turn_reason = (
+                            "Computer Use max turns exceeded: "
+                            f"scroll turn limit reached after {scroll_turns} scroll actions."
+                        )
+                        max_turn_hit = True
+                        break
+                else:
+                    turn_counter += 1
+                    if turn_counter >= self._settings.actions_computer_tool_max_turns:
+                        logger.warning(
+                            "Computer Use max turns reached (anthropic)",
+                            extra={
+                                "max_turns": self._settings.actions_computer_tool_max_turns
+                            },
+                        )
+                        max_turn_code = "max_turns_exceeded"
+                        max_turn_reason = (
+                            "Computer Use max turns exceeded after "
+                            f"{turn_counter} turns (limit: "
+                            f"{self._settings.actions_computer_tool_max_turns})."
+                        )
+                        max_turn_hit = True
+                        break
+
+            if max_turn_hit:
+                break
+
+            (
+                follow_up_payload,
+                follow_up_screenshot,
+            ) = await self._build_anthropic_follow_up_request(
+                history_messages=history_messages,
+                previous_response=response_dict,
+                turns=executed_turns,
+                model=model,
+            )
+            history_messages = list(follow_up_payload.get("messages", []))
+            response = await self._create_anthropic_response(follow_up_payload)
+            await self._model_logger.log_call(
+                agent="computer_use.anthropic.follow_up",
+                model=model,
+                prompt=f"{goal} (follow-up)",
+                request_payload=self._sanitize_payload_for_log(follow_up_payload),
+                response=response,
+                screenshots=(
+                    [("computer_use_follow_up", follow_up_screenshot)]
+                    if follow_up_screenshot
+                    else None
+                ),
+                metadata={"environment": environment, **metadata},
+            )
+            response_dict = normalize_response(response)
+            result.response_ids.append(response_dict.get("id", ""))
+
+        if max_turn_hit:
+            if result.terminal_status != "failed":
+                self._append_terminal_failure_turn(
+                    result=result,
+                    metadata=metadata,
+                    response_id=(
+                        last_response_dict.get("id")
+                        if isinstance(last_response_dict, dict)
+                        else None
+                    ),
+                    reason=max_turn_reason
+                    or "Computer Use max turn limit reached (anthropic).",
+                    code=max_turn_code or "max_turns_exceeded",
+                )
+            logger.error(
+                "Computer Use max turns reached (anthropic)",
+                extra={
+                    "goal": goal,
+                    "max_turns": self._settings.actions_computer_tool_max_turns,
+                    "reason": max_turn_reason,
+                    "code": max_turn_code,
+                    "last_assistant_text": last_assistant_text,
+                    "last_response": last_response_dict,
+                },
+            )
+
+        return result
+
     async def _execute_tool_action(
         self,
         turn: ComputerToolTurn,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         turn_index: int,
         normalized_coords: bool = False,
         allow_unknown: bool = False,
         environment: str = "browser",
-        cache_label: Optional[str] = None,
+        cache_label: str | None = None,
         cache_action: str = "click",
         use_cache: bool = True,
     ) -> None:
-        """Execute a single Computer Use tool action via the browser driver."""
+        """Execute a single Computer Use tool action via the automation driver."""
         action = turn.parameters or {}
         raw_action_type = action.get("type") or turn.action_type
         action_type = self._canonicalize_action_type(raw_action_type)
@@ -791,7 +1109,10 @@ class ComputerUseSession:
             turn.action_type = action_type
         start = time.perf_counter()
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
         turn.metadata["resolution"] = (viewport_width, viewport_height)
         turn.metadata["normalized_coords"] = bool(normalized_coords)
         allow_action, deny_reason = self._is_action_allowed(action_type)
@@ -829,7 +1150,10 @@ class ComputerUseSession:
             else:
                 await self._enforce_domain_policy(action_type)
 
-                if self._interaction_constraints.disallow_scroll and self._is_scroll_action(action_type):
+                if (
+                    self._interaction_constraints.disallow_scroll
+                    and self._is_scroll_action(action_type)
+                ):
                     raise ComputerUseExecutionError(
                         "Step context prohibits scrolling for this action."
                     )
@@ -855,7 +1179,9 @@ class ComputerUseSession:
                     button = (action.get("button", "left") or "left").lower()
                     click_count = int(action.get("click_count", 1))
                     await asyncio.wait_for(
-                        self._browser.click(x, y, button=button, click_count=click_count),
+                        self._automation_driver.click(
+                            x, y, button=button, click_count=click_count
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -880,7 +1206,9 @@ class ComputerUseSession:
                     button = "right" if action_type == "right_click" else "left"
                     click_count = 2 if action_type == "double_click" else 1
                     await asyncio.wait_for(
-                        self._browser.click(x, y, button=button, click_count=click_count),
+                        self._automation_driver.click(
+                            x, y, button=button, click_count=click_count
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
@@ -907,13 +1235,14 @@ class ComputerUseSession:
                     if steps <= 0:
                         steps = 1
                     await asyncio.wait_for(
-                        self._browser.move_mouse(x, y, steps=steps),
+                        self._automation_driver.move_mouse(x, y, steps=steps),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "drag":
-                    def _coerce_float(value: Any) -> Optional[float]:
+
+                    def _coerce_float(value: Any) -> float | None:
                         if value is None:
                             return None
                         try:
@@ -944,16 +1273,24 @@ class ComputerUseSession:
                             end_y_raw = _coerce_float(last_point.get("y"))
 
                     if start_x_raw is None or start_y_raw is None:
-                        raise ComputerUseExecutionError("Drag action missing start coordinates.")
+                        raise ComputerUseExecutionError(
+                            "Drag action missing start coordinates."
+                        )
 
-                    delta_x_raw = _coerce_float(action.get("dx") or action.get("delta_x"))
-                    delta_y_raw = _coerce_float(action.get("dy") or action.get("delta_y"))
+                    delta_x_raw = _coerce_float(
+                        action.get("dx") or action.get("delta_x")
+                    )
+                    delta_y_raw = _coerce_float(
+                        action.get("dy") or action.get("delta_y")
+                    )
                     if end_x_raw is None and delta_x_raw is not None:
                         end_x_raw = start_x_raw + delta_x_raw
                     if end_y_raw is None and delta_y_raw is not None:
                         end_y_raw = start_y_raw + delta_y_raw
                     if end_x_raw is None or end_y_raw is None:
-                        raise ComputerUseExecutionError("Drag action missing destination coordinates.")
+                        raise ComputerUseExecutionError(
+                            "Drag action missing destination coordinates."
+                        )
 
                     if normalized_coords:
                         start_x, start_y = denormalize_coordinates(
@@ -983,11 +1320,18 @@ class ComputerUseSession:
                         steps = 1
 
                     await asyncio.wait_for(
-                        self._browser.drag_mouse(start_x, start_y, end_x, end_y, steps=steps),
+                        self._automation_driver.drag_mouse(
+                            start_x, start_y, end_x, end_y, steps=steps
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update(
-                        {"start_x": start_x, "start_y": start_y, "end_x": end_x, "end_y": end_y}
+                        {
+                            "start_x": start_x,
+                            "start_y": start_y,
+                            "end_x": end_x,
+                            "end_y": end_y,
+                        }
                     )
                     turn.status = "executed"
                 elif action_type == "drag_and_drop":
@@ -1005,7 +1349,9 @@ class ComputerUseSession:
                         normalized=normalized_coords,
                     )
                     await asyncio.wait_for(
-                        self._browser.drag_mouse(start_x, start_y, end_x, end_y, steps=1),
+                        self._automation_driver.drag_mouse(
+                            start_x, start_y, end_x, end_y, steps=1
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update(
@@ -1029,14 +1375,18 @@ class ComputerUseSession:
                     turn.metadata["scroll_x"] = scroll_x
                     turn.metadata["scroll_y"] = scroll_y
                     await asyncio.wait_for(
-                        self._browser.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+                        self._automation_driver.scroll_by_pixels(
+                            x=scroll_x, y=scroll_y, smooth=False
+                        ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.status = "executed"
                 elif action_type == "scroll_document":
                     direction = (action.get("direction") or "").lower()
                     if direction not in {"up", "down", "left", "right"}:
-                        raise ComputerUseExecutionError("scroll_document action missing direction.")
+                        raise ComputerUseExecutionError(
+                            "scroll_document action missing direction."
+                        )
                     magnitude_raw = action.get("magnitude")
                     magnitude = (
                         abs(int(magnitude_raw))
@@ -1046,12 +1396,14 @@ class ComputerUseSession:
                     magnitude = min(magnitude, int(self._settings.scroll_max_magnitude))
                     turn.metadata["scroll_direction"] = direction
                     turn.metadata["scroll_magnitude"] = magnitude
-                    await self._browser.scroll(direction, magnitude)
+                    await self._automation_driver.scroll(direction, magnitude)
                     turn.status = "executed"
                 elif action_type == "scroll_at":
                     direction = (action.get("direction") or "").lower()
                     if direction not in {"up", "down", "left", "right"}:
-                        raise ComputerUseExecutionError("scroll_at action missing direction.")
+                        raise ComputerUseExecutionError(
+                            "scroll_at action missing direction."
+                        )
                     magnitude_raw = action.get("magnitude")
                     magnitude = (
                         abs(int(magnitude_raw))
@@ -1070,8 +1422,8 @@ class ComputerUseSession:
                         )
                     turn.metadata["scroll_direction"] = direction
                     turn.metadata["scroll_magnitude"] = magnitude
-                    await self._browser.move_mouse(x, y, steps=1)
-                    await self._browser.scroll(direction, magnitude)
+                    await self._automation_driver.move_mouse(x, y, steps=1)
+                    await self._automation_driver.scroll(direction, magnitude)
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "type":
@@ -1085,13 +1437,17 @@ class ComputerUseSession:
                         if text_payload:
                             turn.metadata["synthetic_text_payload"] = text_payload
                     if not text_payload:
-                        raise ComputerUseExecutionError("Type action missing text payload.")
-                    await self._browser.type_text(text_payload)
+                        raise ComputerUseExecutionError(
+                            "Type action missing text payload."
+                        )
+                    await self._automation_driver.type_text(text_payload)
                     turn.status = "executed"
                 elif action_type == "type_text_at":
                     text_payload = action.get("text")
                     if text_payload is None:
-                        raise ComputerUseExecutionError("type_text_at action missing text.")
+                        raise ComputerUseExecutionError(
+                            "type_text_at action missing text."
+                        )
                     press_enter_default = False if normalized_coords else True
                     press_enter = bool(action.get("press_enter", press_enter_default))
                     clear_before = bool(action.get("clear_before_typing", True))
@@ -1104,13 +1460,15 @@ class ComputerUseSession:
                             viewport_height,
                             normalized=normalized_coords,
                         )
-                    await self._browser.click(x, y, button="left", click_count=1)
+                    await self._automation_driver.click(
+                        x, y, button="left", click_count=1
+                    )
                     if clear_before:
-                        await self._browser.press_key("ctrl+a")
-                        await self._browser.press_key("backspace")
-                    await self._browser.type_text(str(text_payload))
+                        await self._automation_driver.press_key("ctrl+a")
+                        await self._automation_driver.press_key("backspace")
+                    await self._automation_driver.type_text(str(text_payload))
                     if press_enter:
-                        await self._browser.press_key("enter")
+                        await self._automation_driver.press_key("enter")
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type in {"keypress", "key_combination"}:
@@ -1124,8 +1482,10 @@ class ComputerUseSession:
                             turn.metadata["synthetic_key_sequence"] = key_sequence
                         for key in key_sequence:
                             normalized = normalize_key_sequence(key)
-                            await self._browser.press_key(normalized)
-                            if self._should_capture_clipboard_after_key_combo(normalized):
+                            await self._automation_driver.press_key(normalized)
+                            if self._should_capture_clipboard_after_key_combo(
+                                normalized
+                            ):
                                 capture_clipboard_after_action = True
                     else:
                         keys = action.get("keys")
@@ -1136,14 +1496,14 @@ class ComputerUseSession:
                         if isinstance(keys, (list, tuple)):
                             for key in keys:
                                 normalized = normalize_key_sequence(str(key))
-                                await self._browser.press_key(normalized)
+                                await self._automation_driver.press_key(normalized)
                                 if self._should_capture_clipboard_after_key_combo(
                                     normalized
                                 ):
                                     capture_clipboard_after_action = True
                         else:
                             normalized = normalize_key_sequence(str(keys))
-                            await self._browser.press_key(normalized)
+                            await self._automation_driver.press_key(normalized)
                             if self._should_capture_clipboard_after_key_combo(
                                 normalized
                             ):
@@ -1159,18 +1519,18 @@ class ComputerUseSession:
                         action.get("duration_ms")
                         or self._settings.actions_computer_tool_stabilization_wait_ms
                     )
-                    await self._browser.wait(duration)
+                    await self._automation_driver.wait(duration)
                     turn.metadata["duration_ms"] = duration
                     turn.status = "executed"
                 elif action_type == "wait_5_seconds":
-                    await self._browser.wait(5000)
+                    await self._automation_driver.wait(5000)
                     turn.metadata["duration_ms"] = 5000
                     turn.status = "executed"
                 elif action_type == "go_back":
-                    await self._browser.press_key("alt+left")
+                    await self._automation_driver.press_key("alt+left")
                     turn.status = "executed"
                 elif action_type == "go_forward":
-                    await self._browser.press_key("alt+right")
+                    await self._automation_driver.press_key("alt+right")
                     turn.status = "executed"
                 elif action_type == "search":
                     await self._navigate_via_address_bar("https://www.google.com/")
@@ -1183,7 +1543,7 @@ class ComputerUseSession:
                     turn.status = "executed"
                 elif action_type == "screenshot":
                     logger.debug(
-                        "Computer Use requested screenshot action; no browser operation executed."
+                        "Computer Use requested screenshot action; no automation_driver operation executed."
                     )
                     turn.status = "executed"
                 else:
@@ -1211,7 +1571,9 @@ class ComputerUseSession:
             if cache_allowed and cache_hit:
                 try:
                     self._coordinate_cache.invalidate(
-                        cache_label or "", cache_action, (viewport_width, viewport_height)
+                        cache_label or "",
+                        cache_action,
+                        (viewport_width, viewport_height),
                     )
                 except Exception:
                     logger.debug("Failed to invalidate coordinate cache", exc_info=True)
@@ -1219,7 +1581,9 @@ class ComputerUseSession:
             if cache_allowed and cache_hit:
                 try:
                     self._coordinate_cache.invalidate(
-                        cache_label or "", cache_action, (viewport_width, viewport_height)
+                        cache_label or "",
+                        cache_action,
+                        (viewport_width, viewport_height),
                     )
                 except Exception:
                     logger.debug("Failed to invalidate coordinate cache", exc_info=True)
@@ -1237,11 +1601,11 @@ class ComputerUseSession:
     async def _record_turn_snapshot(
         self,
         turn: ComputerToolTurn,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         turn_index: int,
     ) -> None:
         """Capture screenshot and update metadata after action execution."""
-        screenshot_bytes = await self._browser.screenshot()
+        screenshot_bytes = await self._automation_driver.screenshot()
         turn.screenshot_path = self._save_turn_screenshot(
             screenshot_bytes,
             suffix=f"{turn.action_type}_{turn_index}",
@@ -1256,7 +1620,7 @@ class ComputerUseSession:
         )
 
     async def _execute_click(
-        self, action: Dict[str, Any], viewport_width: int, viewport_height: int
+        self, action: dict[str, Any], viewport_width: int, viewport_height: int
     ) -> None:
         """Execute a primary click event."""
         x, y = normalize_coordinates(
@@ -1265,12 +1629,12 @@ class ComputerUseSession:
         button = action.get("button", "left")
         click_count = int(action.get("click_count", 1))
         await asyncio.wait_for(
-            self._browser.click(x, y, button=button, click_count=click_count),
+            self._automation_driver.click(x, y, button=button, click_count=click_count),
             timeout=self._action_timeout_seconds,
         )
 
     async def _execute_special_click(
-        self, action: Dict[str, Any], viewport_width: int, viewport_height: int
+        self, action: dict[str, Any], viewport_width: int, viewport_height: int
     ) -> None:
         """Execute double or right click events."""
         x, y = normalize_coordinates(
@@ -1279,41 +1643,50 @@ class ComputerUseSession:
         action_type = action.get("type")
         if action_type == "double_click":
             await asyncio.wait_for(
-                self._browser.click(x, y, button="left", click_count=2),
+                self._automation_driver.click(x, y, button="left", click_count=2),
                 timeout=self._action_timeout_seconds,
             )
         elif action_type == "right_click":
             await asyncio.wait_for(
-                self._browser.click(x, y, button="right", click_count=1),
+                self._automation_driver.click(x, y, button="right", click_count=1),
                 timeout=self._action_timeout_seconds,
             )
 
-    async def _execute_scroll(self, action: Dict[str, Any]) -> None:
+    async def _execute_scroll(self, action: dict[str, Any]) -> None:
         """Execute a scroll event via pixel deltas."""
         scroll_x = int(action.get("scroll_x", 0))
         scroll_y = int(action.get("scroll_y", 0))
         await asyncio.wait_for(
-            self._browser.scroll_by_pixels(x=scroll_x, y=scroll_y, smooth=False),
+            self._automation_driver.scroll_by_pixels(
+                x=scroll_x, y=scroll_y, smooth=False
+            ),
             timeout=self._action_timeout_seconds,
         )
 
     async def _build_follow_up_request(
         self,
-        previous_response_id: Optional[str],
+        previous_response_id: str | None,
         call: ComputerToolTurn,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         environment: str = "browser",
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Build the payload for a follow-up request after executing an action."""
         screenshot_b64 = call.metadata.get("screenshot_base64")
         if not screenshot_b64:
-            screenshot_bytes = await self._browser.screenshot()
+            screenshot_bytes = await self._automation_driver.screenshot()
             screenshot_b64 = encode_png_base64(screenshot_bytes)
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
+        acknowledged_safety_checks = self._build_acknowledged_safety_checks(call)
+        if acknowledged_safety_checks:
+            call.acknowledged = True
+            call.metadata["acknowledged_safety_checks"] = acknowledged_safety_checks
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
             "tools": [
@@ -1333,7 +1706,7 @@ class ComputerUseSession:
                         "image_url": f"data:image/png;base64,{screenshot_b64}",
                     },
                     "current_url": call.metadata.get("current_url"),
-                    "acknowledged_safety_checks": [],
+                    "acknowledged_safety_checks": acknowledged_safety_checks,
                 }
             ],
             "truncation": "auto",
@@ -1380,12 +1753,52 @@ class ComputerUseSession:
 
         return payload
 
+    def _build_acknowledged_safety_checks(
+        self,
+        call: ComputerToolTurn,
+    ) -> list[dict[str, str]]:
+        """Return safety checks to acknowledge when the policy allows auto-approval."""
+        if not call.pending_safety_checks:
+            return []
+
+        policy = self._settings.cu_safety_policy
+        fail_fast = bool(
+            getattr(self._settings, "actions_computer_tool_fail_fast_on_safety", True)
+        )
+        allow_auto_approve_override = bool(
+            call.metadata.get("allow_safety_auto_approve")
+        )
+        should_auto_ack = policy == "auto_approve" and (
+            not fail_fast or allow_auto_approve_override
+        )
+        if not should_auto_ack:
+            return []
+
+        acknowledged: list[dict[str, str]] = []
+        for check in call.pending_safety_checks:
+            if not isinstance(check, dict):
+                continue
+            safety_id = str(check.get("id") or "").strip()
+            if not safety_id:
+                continue
+
+            check_payload: dict[str, str] = {"id": safety_id}
+            code = check.get("code")
+            if isinstance(code, str) and code:
+                check_payload["code"] = code
+            message = check.get("message")
+            if isinstance(message, str) and message:
+                check_payload["message"] = message
+            acknowledged.append(check_payload)
+
+        return acknowledged
+
     def _update_loop_history(
         self,
         turn: ComputerToolTurn,
-        history: Deque[Tuple[Tuple[str, ...], str]],
+        history: deque[tuple[tuple[str, ...], str]],
         window: int,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Track repeated Computer Use turns and detect loops."""
         if window < 2:
             return None
@@ -1417,7 +1830,7 @@ class ComputerUseSession:
             }
         return None
 
-    def _compute_turn_signature(self, turn: ComputerToolTurn) -> Optional[Tuple[str, ...]]:
+    def _compute_turn_signature(self, turn: ComputerToolTurn) -> tuple[str, ...] | None:
         """Build a lightweight signature representing the Computer Use turn."""
         action_type_raw = turn.action_type or turn.parameters.get("type")
         if not action_type_raw:
@@ -1427,7 +1840,7 @@ class ComputerUseSession:
             return None
 
         params = turn.parameters or {}
-        signature: List[str] = [action_type]
+        signature: list[str] = [action_type]
 
         def append_coord(label: str, x_value: Any, y_value: Any) -> None:
             coord = self._format_coordinate(x_value, y_value)
@@ -1456,12 +1869,14 @@ class ComputerUseSession:
             signature.append(str(key_value).strip().lower())
 
         if "scroll_x" in params or "scroll_y" in params:
-            signature.append(f"scroll:{params.get('scroll_x', 0)}:{params.get('scroll_y', 0)}")
+            signature.append(
+                f"scroll:{params.get('scroll_x', 0)}:{params.get('scroll_y', 0)}"
+            )
 
         return tuple(component for component in signature if component)
 
     @staticmethod
-    def _format_coordinate(x_value: Any, y_value: Any) -> Optional[str]:
+    def _format_coordinate(x_value: Any, y_value: Any) -> str | None:
         """Format coordinate pairs for signature comparison."""
         if x_value is None or y_value is None:
             return None
@@ -1473,7 +1888,7 @@ class ComputerUseSession:
             return f"{x_value}:{y_value}"
 
     @staticmethod
-    def _hash_base64(value: Optional[str]) -> Optional[str]:
+    def _hash_base64(value: str | None) -> str | None:
         """Hash base64 strings for quick comparison without storing raw data."""
         if not value or not isinstance(value, str):
             return None
@@ -1488,10 +1903,10 @@ class ComputerUseSession:
         screenshot_b64: str,
         viewport_width: int,
         viewport_height: int,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         environment: str = "browser",
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Build the payload for the initial Computer Use request."""
         context_lines = []
         if metadata.get("test_plan_name"):
@@ -1511,9 +1926,11 @@ class ComputerUseSession:
 
         context_text = goal
         if context_lines:
-            context_text = f"{goal}\n\nContext:\n" + "\n".join(f"- {line}" for line in context_lines)
+            context_text = f"{goal}\n\nContext:\n" + "\n".join(
+                f"- {line}" for line in context_lines
+            )
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "tools": [
                 {
@@ -1548,9 +1965,17 @@ class ComputerUseSession:
         return payload
 
     @staticmethod
-    def _sanitize_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_payload_for_log(payload: dict[str, Any]) -> dict[str, Any]:
         def _scrub(value: Any) -> Any:
             if isinstance(value, dict):
+                if (
+                    value.get("type") == "base64"
+                    and "data" in value
+                    and isinstance(value.get("data"), str)
+                ):
+                    copied = dict(value)
+                    copied["data"] = "<<attached screenshot>>"
+                    return copied
                 return {k: _scrub(v) for k, v in value.items()}
             if isinstance(value, list):
                 return [_scrub(item) for item in value]
@@ -1558,7 +1983,7 @@ class ComputerUseSession:
                 return "<<attached screenshot>>"
             return value
 
-        return _scrub(payload)
+        return cast(dict[str, Any], _scrub(payload))
 
     def _build_google_initial_request(
         self,
@@ -1567,7 +1992,7 @@ class ComputerUseSession:
         viewport_width: int,
         viewport_height: int,
         environment: str = "desktop",
-    ) -> Tuple[List[Any], Any]:
+    ) -> tuple[list[Any], Any]:
         from google.genai import types  # type: ignore
 
         contents = [
@@ -1591,22 +2016,22 @@ class ComputerUseSession:
     async def _build_google_follow_up_request(
         self,
         goal: str,
-        history: List[Any],
-        turns: List[ComputerToolTurn],
+        history: list[Any],
+        turns: list[ComputerToolTurn],
         environment: str = "desktop",
-        model: Optional[str] = None,
-    ) -> Tuple[Dict[str, Any], Any, bytes]:
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], Any, bytes]:
         from google.genai import types  # type: ignore
 
-        screenshot_bytes = await self._browser.screenshot()
+        screenshot_bytes = await self._automation_driver.screenshot()
         page_url = ""
         try:
-            page_url = await self._browser.get_page_url()
+            page_url = await self._automation_driver.get_page_url()
         except Exception:
             page_url = ""
         if not page_url:
             page_url = "desktop://"
-        parts: List[Any] = []
+        parts: list[Any] = []
         for turn in turns:
             response_payload = {
                 "status": turn.status,
@@ -1655,13 +2080,181 @@ class ComputerUseSession:
             screenshot_bytes,
         )
 
-    async def _create_response(self, payload: Dict[str, Any]) -> Any:
-        """Call the OpenAI Responses API with the provided payload."""
-        timeout = float(self._settings.openai_request_timeout_seconds)
-        logger.debug("Calling OpenAI Responses API", extra={"model": payload.get("model")})
-        return await self._client.responses.create(timeout=timeout, **payload)
+    def _build_anthropic_initial_request(
+        self,
+        goal: str,
+        screenshot_bytes: bytes,
+        viewport_width: int,
+        viewport_height: int,
+        metadata: dict[str, Any],
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        context_lines = []
+        if metadata.get("test_plan_name"):
+            context_lines.append(f"Test plan: {metadata['test_plan_name']}")
+        if metadata.get("test_case_name"):
+            context_lines.append(f"Test case: {metadata['test_case_name']}")
+        if metadata.get("step_number") is not None:
+            context_lines.append(f"Step number: {metadata['step_number']}")
+        if metadata.get("target"):
+            context_lines.append(f"Target description: {metadata['target']}")
+        if metadata.get("value"):
+            context_lines.append(f"Associated value: {metadata['value']}")
+        if metadata.get("current_url"):
+            context_lines.append(f"Current URL: {metadata['current_url']}")
+        if metadata.get("interaction_mode"):
+            context_lines.append(f"Interaction mode: {metadata['interaction_mode']}")
 
-    async def _create_google_response(self, payload: Dict[str, Any]) -> Any:
+        context_text = goal
+        if context_lines:
+            context_text = f"{goal}\n\nContext:\n" + "\n".join(
+                f"- {line}" for line in context_lines
+            )
+
+        screenshot_b64 = encode_png_base64(screenshot_bytes)
+        payload: dict[str, Any] = {
+            "model": model or self._anthropic_model,
+            "max_tokens": self._anthropic_max_tokens,
+            "betas": list(self._anthropic_betas),
+            "tools": [
+                {
+                    "type": self._anthropic_tool_type,
+                    "name": self._anthropic_tool_name,
+                    "display_width_px": viewport_width,
+                    "display_height_px": viewport_height,
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": context_text},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": screenshot_b64,
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+        return payload
+
+    async def _build_anthropic_follow_up_request(
+        self,
+        history_messages: list[dict[str, Any]],
+        previous_response: dict[str, Any],
+        turns: list[ComputerToolTurn],
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], bytes | None]:
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
+        tool_results: list[dict[str, Any]] = []
+        primary_screenshot: bytes | None = None
+
+        for turn in turns:
+            screenshot_b64 = turn.metadata.get("screenshot_base64")
+            if not screenshot_b64:
+                screenshot_bytes = await self._automation_driver.screenshot()
+                screenshot_b64 = encode_png_base64(screenshot_bytes)
+                turn.metadata["screenshot_base64"] = screenshot_b64
+            elif primary_screenshot is None:
+                try:
+                    primary_screenshot = base64.b64decode(str(screenshot_b64))
+                except Exception:
+                    primary_screenshot = None
+
+            if primary_screenshot is None:
+                try:
+                    primary_screenshot = base64.b64decode(str(screenshot_b64))
+                except Exception:
+                    primary_screenshot = None
+
+            tool_result_block: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": turn.call_id,
+            }
+
+            if turn.status != "executed":
+                # Anthropic requires text-only content when is_error is true.
+                error_text = turn.error_message or "Action execution failed."
+                tool_result_block["content"] = [
+                    {"type": "text", "text": f"Execution error: {error_text}"}
+                ]
+                tool_result_block["is_error"] = True
+            else:
+                tool_result_block["content"] = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": screenshot_b64,
+                        },
+                    }
+                ]
+            tool_results.append(tool_result_block)
+
+            # Remove base64 payload after use to keep metadata lightweight
+            turn.metadata.pop("screenshot_base64", None)
+
+        messages: list[dict[str, Any]] = list(history_messages)
+        assistant_content = previous_response.get("content") or []
+        messages.append({"role": "assistant", "content": assistant_content})
+        messages.append({"role": "user", "content": tool_results})
+
+        payload: dict[str, Any] = {
+            "model": model or self._anthropic_model,
+            "max_tokens": self._anthropic_max_tokens,
+            "betas": list(self._anthropic_betas),
+            "tools": [
+                {
+                    "type": self._anthropic_tool_type,
+                    "name": self._anthropic_tool_name,
+                    "display_width_px": viewport_width,
+                    "display_height_px": viewport_height,
+                }
+            ],
+            "messages": messages,
+        }
+        return payload, primary_screenshot
+
+    async def _create_response(self, payload: dict[str, Any]) -> Any:
+        """Call the OpenAI Responses API with the provided payload."""
+        logger.debug(
+            "Calling OpenAI Responses API", extra={"model": payload.get("model")}
+        )
+        return await self._client.responses.create(**payload)
+
+    async def _create_anthropic_response(self, payload: dict[str, Any]) -> Any:
+        client = self._ensure_anthropic_client()
+        if not client:
+            raise ComputerUseExecutionError(
+                "Anthropic computer-use provider requested but anthropic SDK is not installed."
+            )
+
+        if hasattr(client, "beta") and hasattr(client.beta, "messages"):
+            create_call = getattr(client.beta.messages, "create", None)
+            if callable(create_call):
+                return await create_call(**payload)
+
+        if hasattr(client, "messages"):
+            create_call = getattr(client.messages, "create", None)
+            if callable(create_call):
+                fallback_payload = dict(payload)
+                fallback_payload.pop("betas", None)
+                return await create_call(**fallback_payload)
+
+        raise ComputerUseExecutionError(
+            "Anthropic client does not support messages.create calls."
+        )
+
+    async def _create_google_response(self, payload: dict[str, Any]) -> Any:
         client = self._ensure_google_client()
         if not client:
             raise ComputerUseExecutionError(
@@ -1676,7 +2269,7 @@ class ComputerUseSession:
                     model=payload.get("model"), contents=contents, config=config
                 )
             if hasattr(client, "responses"):
-                responses = getattr(client, "responses")
+                responses = client.responses
                 if hasattr(responses, "generate"):
                     return responses.generate(**payload)
                 if hasattr(responses, "create"):
@@ -1687,18 +2280,42 @@ class ComputerUseSession:
 
         return await asyncio.to_thread(_call)
 
-    def _ensure_google_client(self) -> Optional[Any]:
+    def _ensure_anthropic_client(self) -> Any | None:
+        if self._provider != "anthropic":
+            return None
+        if self._anthropic_client:
+            return self._anthropic_client
+        if _AsyncAnthropic is None:
+            return None
+
+        anthropic_api_key = str(
+            getattr(self._settings, "anthropic_api_key", "") or ""
+        ).strip()
+        if not anthropic_api_key:
+            raise ComputerUseExecutionError(
+                "Anthropic CU provider requires ANTHROPIC_API_KEY."
+            )
+
+        self._anthropic_client = _AsyncAnthropic(api_key=anthropic_api_key)
+        logger.info("Initialized Anthropic CU client in API key mode")
+        return self._anthropic_client
+
+    def _ensure_google_client(self) -> Any | None:
         if self._provider != "google":
             return None
         if self._google_client:
             return self._google_client
         if genai is None:
             return None
-        vertex_project = str(getattr(self._settings, "vertex_project", "") or "").strip()
+        vertex_project = str(
+            getattr(self._settings, "vertex_project", "") or ""
+        ).strip()
         vertex_location = str(
             getattr(self._settings, "vertex_location", "us-central1") or ""
         ).strip()
-        vertex_api_key = str(getattr(self._settings, "vertex_api_key", "") or "").strip()
+        vertex_api_key = str(
+            getattr(self._settings, "vertex_api_key", "") or ""
+        ).strip()
 
         if vertex_project:
             if not vertex_location:
@@ -1706,13 +2323,15 @@ class ComputerUseSession:
                     "VERTEX_LOCATION is required when VERTEX_PROJECT is configured."
                 )
             try:
-                vertex_kwargs: Dict[str, Any] = {
+                vertex_kwargs: dict[str, Any] = {
                     "vertexai": True,
                     "project": vertex_project,
                     "location": vertex_location,
                 }
                 if vertex_api_key:
-                    vertex_kwargs["api_key"] = vertex_api_key
+                    logger.warning(
+                        "Ignoring VERTEX_API_KEY because VERTEX_PROJECT is configured; using Vertex project/location mode."
+                    )
                 self._google_client = genai.Client(
                     **vertex_kwargs,
                 )
@@ -1737,15 +2356,15 @@ class ComputerUseSession:
         logger.info("Initialized Google CU client in API key mode")
         return self._google_client
 
-    async def _ensure_browser_ready(self) -> None:
-        """Ensure the browser session is started before execution."""
-        await self._browser.start()
+    async def _ensure_automation_driver_ready(self) -> None:
+        """Ensure the automation_driver session is started before execution."""
+        await self._automation_driver.start()
 
     async def invalidate_cache(self, cache_label: str, cache_action: str) -> None:
         """Invalidate a cached coordinate for the current resolution."""
         logger.info("ComputerUseSession: invalidating coordinate cache after failure")
         try:
-            resolution = await self._browser.get_viewport_size()
+            resolution = await self._automation_driver.get_viewport_size()
             self._coordinate_cache.invalidate(cache_label, cache_action, resolution)
         except Exception:
             logger.debug(
@@ -1758,30 +2377,39 @@ class ComputerUseSession:
         """Wait for the configured stabilization interval."""
         wait_ms = self._settings.actions_computer_tool_stabilization_wait_ms
         if wait_ms > 0:
-            await self._browser.wait(wait_ms)
+            await self._automation_driver.wait(wait_ms)
 
-    async def _maybe_get_current_url(self) -> Optional[str]:
-        """Attempt to retrieve the current page URL from the browser driver."""
-        get_url = getattr(self._browser, "get_page_url", None)
+    async def _maybe_get_current_url(self) -> str | None:
+        """Attempt to retrieve the current page URL from the automation driver."""
+        get_url = getattr(self._automation_driver, "get_page_url", None)
         if callable(get_url):
             try:
-                return await get_url()
+                value = await get_url()
+                if value is None:
+                    return None
+                return str(value)
             except Exception:
-                logger.debug("Failed to retrieve current URL from browser driver", exc_info=True)
+                logger.debug(
+                    "Failed to retrieve current URL from automation driver",
+                    exc_info=True,
+                )
         return None
 
     @staticmethod
-    def _canonicalize_action_type(action_type: Optional[str]) -> Optional[str]:
-        """Normalize OpenAI action types to the browser driver's expectations."""
+    def _canonicalize_action_type(action_type: str | None) -> str | None:
+        """Normalize provider action types to the automation driver's expectations."""
         if not action_type:
             return action_type
 
         normalized = action_type.replace("-", "_").lower()
         alias_map = {
+            "left_click": "click",
+            "middle_click": "click",
             "key_press": "keypress",
             "keypress": "keypress",
             "press_key": "keypress",
             "press": "keypress",
+            "key": "keypress",
             "type_text": "type",
             "input": "type",
             "doubleclick": "double_click",
@@ -1792,17 +2420,154 @@ class ComputerUseSession:
             "mouse_move": "move",
             "hover": "move",
             "pointer_drag": "drag",
+            "left_click_drag": "drag",
             "drag_and_drop": "drag",
             "dragdrop": "drag",
             "mouse_drag": "drag",
         }
         return alias_map.get(normalized, normalized)
 
+    def _translate_anthropic_action(self, raw_action: dict[str, Any]) -> dict[str, Any]:
+        """Translate Anthropic computer tool payloads into internal action payloads."""
+        if not isinstance(raw_action, dict):
+            return {"type": "unknown"}
+
+        translated = dict(raw_action)
+        action_name = str(
+            raw_action.get("action") or raw_action.get("type") or ""
+        ).strip()
+        if not action_name:
+            return {"type": "unknown"}
+        translated["type"] = action_name
+
+        coordinate = raw_action.get("coordinate") or raw_action.get("coordinates")
+        coord_pair = self._extract_anthropic_coordinate_pair(coordinate)
+        if coord_pair is not None:
+            translated["x"], translated["y"] = coord_pair
+
+        normalized_name = action_name.replace("-", "_").strip().lower()
+        if normalized_name in {
+            "left_click",
+            "right_click",
+            "middle_click",
+            "double_click",
+            "triple_click",
+        }:
+            if coord_pair is None and self._last_pointer_position is not None:
+                translated["x"], translated["y"] = self._last_pointer_position
+            if normalized_name == "middle_click":
+                translated["type"] = "click"
+                translated["button"] = "middle"
+            elif normalized_name == "triple_click":
+                translated["type"] = "click"
+                translated["click_count"] = 3
+        elif normalized_name == "mouse_move":
+            if coord_pair is None and self._last_pointer_position is not None:
+                translated["x"], translated["y"] = self._last_pointer_position
+        elif normalized_name == "left_click_drag":
+            translated["type"] = "drag"
+            if self._last_pointer_position is not None:
+                translated["start_x"], translated["start_y"] = (
+                    self._last_pointer_position
+                )
+            if coord_pair is not None:
+                translated["end_x"], translated["end_y"] = coord_pair
+        elif normalized_name == "key":
+            key_value = (
+                raw_action.get("text")
+                or raw_action.get("key")
+                or raw_action.get("keys")
+                or raw_action.get("value")
+            )
+            translated = {"type": "keypress", "key": str(key_value or "")}
+        elif normalized_name == "type":
+            translated = {
+                "type": "type",
+                "text": str(
+                    raw_action.get("text")
+                    or raw_action.get("value")
+                    or raw_action.get("input")
+                    or ""
+                ),
+            }
+        elif normalized_name == "scroll":
+            direction = str(
+                raw_action.get("scroll_direction")
+                or raw_action.get("direction")
+                or "down"
+            ).strip()
+            amount = raw_action.get("scroll_amount")
+            if amount is None:
+                amount = raw_action.get("amount")
+            if amount is None:
+                amount = self._settings.scroll_default_magnitude
+            try:
+                magnitude = abs(int(float(amount)))
+            except (TypeError, ValueError):
+                magnitude = int(self._settings.scroll_default_magnitude)
+            translated = {
+                "type": "scroll_document",
+                "direction": direction.lower() or "down",
+                "magnitude": magnitude,
+            }
+        elif normalized_name == "wait":
+            translated = {
+                "type": "wait",
+                "duration_ms": raw_action.get("duration_ms")
+                or raw_action.get("duration")
+                or 1000,
+            }
+        elif normalized_name == "screenshot":
+            translated = {"type": "screenshot"}
+
+        return translated
+
+    @staticmethod
+    def _extract_anthropic_coordinate_pair(
+        raw_coordinate: Any,
+    ) -> tuple[int, int] | None:
+        if isinstance(raw_coordinate, (list, tuple)) and len(raw_coordinate) == 2:
+            try:
+                return int(float(raw_coordinate[0])), int(float(raw_coordinate[1]))
+            except (TypeError, ValueError):
+                return None
+        if isinstance(raw_coordinate, dict):
+            if "x" in raw_coordinate and "y" in raw_coordinate:
+                try:
+                    return int(float(raw_coordinate["x"])), int(
+                        float(raw_coordinate["y"])
+                    )
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _update_last_pointer_position(self, turn: ComputerToolTurn) -> None:
+        if turn.status != "executed":
+            return
+
+        end_x = turn.metadata.get("end_x")
+        end_y = turn.metadata.get("end_y")
+        if end_x is not None and end_y is not None:
+            try:
+                self._last_pointer_position = (int(end_x), int(end_y))
+                return
+            except (TypeError, ValueError):
+                pass
+
+        x = turn.metadata.get("x")
+        y = turn.metadata.get("y")
+        if x is None or y is None:
+            return
+        try:
+            self._last_pointer_position = (int(x), int(y))
+        except (TypeError, ValueError):
+            return
+
     def _resolve_key_sequence(
         self,
-        action: Dict[str, Any],
-        metadata: Dict[str, Any],
-    ) -> List[str]:
+        action: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> list[str]:
         """Resolve keyboard keys to press from the tool payload or fallback metadata."""
         keys = action.get("keys")
         if isinstance(keys, list) and keys:
@@ -1850,22 +2615,23 @@ class ComputerUseSession:
 
     async def _build_confirmation_request(
         self,
-        previous_response_id: Optional[str],
-        metadata: Dict[str, Any],
+        previous_response_id: str | None,
+        metadata: dict[str, Any],
         environment: str = "browser",
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        model: str | None = None,
+    ) -> dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
-        confirmation_text = (
-            "Yes, proceed. Execute the requested action now without asking for additional confirmation."
-        )
+        confirmation_text = "Yes, proceed. Execute the requested action now without asking for additional confirmation."
         target_text = metadata.get("target")
         if target_text:
             confirmation_text += f" Focus on: {target_text}."
 
-        viewport_width, viewport_height = await self._browser.get_viewport_size()
+        (
+            viewport_width,
+            viewport_height,
+        ) = await self._automation_driver.get_viewport_size()
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
             "tools": [
@@ -1879,9 +2645,7 @@ class ComputerUseSession:
             "input": [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": confirmation_text}
-                    ],
+                    "content": [{"type": "input_text", "text": confirmation_text}],
                 }
             ],
             "truncation": "auto",
@@ -1893,7 +2657,7 @@ class ComputerUseSession:
 
         return payload
 
-    def _is_action_allowed(self, action_type: Optional[str]) -> tuple[bool, Optional[str]]:
+    def _is_action_allowed(self, action_type: str | None) -> tuple[bool, str | None]:
         """Determine if the requested action type is permitted in the current mode."""
         if not action_type:
             return False, "Computer Use response omitted action type information."
@@ -1902,9 +2666,7 @@ class ComputerUseSession:
         if action_type in self._allowed_actions:
             return True, None
 
-        return False, (
-            f"Action '{action_type}' is not permitted in observe-only mode."
-        )
+        return False, (f"Action '{action_type}' is not permitted in observe-only mode.")
 
     def _should_abort_on_safety(
         self,
@@ -1919,7 +2681,10 @@ class ComputerUseSession:
         fail_fast = bool(
             getattr(self._settings, "actions_computer_tool_fail_fast_on_safety", True)
         )
-        if not fail_fast and policy == "auto_approve":
+        allow_auto_approve_override = bool(
+            turn.metadata.get("allow_safety_auto_approve")
+        )
+        if policy == "auto_approve" and (not fail_fast or allow_auto_approve_override):
             return False
 
         safety_payload = turn.pending_safety_checks[0]
@@ -1969,12 +2734,12 @@ class ComputerUseSession:
         self,
         *,
         result: ComputerUseSessionResult,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         reason: str,
         code: str,
-        response_id: Optional[str],
-        parameters: Optional[Dict[str, Any]] = None,
-        metadata_updates: Optional[Dict[str, Any]] = None,
+        response_id: str | None,
+        parameters: dict[str, Any] | None = None,
+        metadata_updates: dict[str, Any] | None = None,
         call_id_prefix: str = "terminal",
     ) -> ComputerToolTurn:
         """Append a terminal failed system notice turn and mark the result as failed."""
@@ -2002,7 +2767,7 @@ class ComputerUseSession:
         result.terminal_failure_code = code
         return failure_turn
 
-    async def _enforce_domain_policy(self, action_type: Optional[str]) -> None:
+    async def _enforce_domain_policy(self, action_type: str | None) -> None:
         """Prevent interactions with domains outside defined allow/block lists."""
         if (not self._allowed_domains and not self._blocked_domains) or not action_type:
             return
@@ -2021,14 +2786,16 @@ class ComputerUseSession:
         normalized_host = hostname.lower()
 
         if self._allowed_domains and not any(
-            self._domain_matches(normalized_host, domain) for domain in self._allowed_domains
+            self._domain_matches(normalized_host, domain)
+            for domain in self._allowed_domains
         ):
             raise ComputerUseExecutionError(
                 f"Current domain '{hostname}' is not in the allowlist."
             )
 
         if self._blocked_domains and any(
-            self._domain_matches(normalized_host, domain) for domain in self._blocked_domains
+            self._domain_matches(normalized_host, domain)
+            for domain in self._blocked_domains
         ):
             raise ComputerUseExecutionError(
                 f"Current domain '{hostname}' is blocked by policy."
@@ -2036,8 +2803,8 @@ class ComputerUseSession:
 
     @classmethod
     def _disallowed_action_reason(
-        cls, action_type: Optional[str], environment: str
-    ) -> Optional[str]:
+        cls, action_type: str | None, environment: str
+    ) -> str | None:
         if not action_type:
             return None
         env_mode = cls._normalize_environment_name(environment)
@@ -2054,13 +2821,13 @@ class ComputerUseSession:
 
     def _resolve_coordinates(
         self,
-        action: Dict[str, Any],
+        action: dict[str, Any],
         viewport_width: int,
         viewport_height: int,
         *,
         prefix: str = "",
         normalized: bool = False,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         x = action.get(f"{prefix}x")
         y = action.get(f"{prefix}y")
 
@@ -2084,7 +2851,7 @@ class ComputerUseSession:
         return normalize_coordinates(x, y, viewport_width, viewport_height)
 
     @staticmethod
-    def _action_matches_cache(action_type: Optional[str], cache_action: str) -> bool:
+    def _action_matches_cache(action_type: str | None, cache_action: str) -> bool:
         if not action_type:
             return False
         normalized_action = action_type.lower().strip()
@@ -2102,7 +2869,9 @@ class ComputerUseSession:
         return False
 
     @staticmethod
-    def _extract_scroll_direction(action_type: str, action: Dict[str, Any]) -> Optional[str]:
+    def _extract_scroll_direction(
+        action_type: str, action: dict[str, Any]
+    ) -> str | None:
         normalized = (action_type or "").lower()
         if normalized in {"scroll_document", "scroll_at", "scroll_window"}:
             direction = (action.get("direction") or "").lower()
@@ -2138,14 +2907,14 @@ class ComputerUseSession:
         normalized = keys_str.lower().replace(" ", "")
         if normalized in {"ctrl+c", "control+c"}:
             return True
-        if (("ctrl+" in normalized) or ("control+" in normalized)) and normalized.endswith(
-            "+c"
-        ):
+        if (
+            ("ctrl+" in normalized) or ("control+" in normalized)
+        ) and normalized.endswith("+c"):
             return True
         return False
 
-    async def _maybe_read_clipboard(self, turn: ComputerToolTurn) -> Optional[str]:
-        reader = getattr(self._browser, "read_clipboard", None)
+    async def _maybe_read_clipboard(self, turn: ComputerToolTurn) -> str | None:
+        reader = getattr(self._automation_driver, "read_clipboard", None)
         if not callable(reader):
             return None
         try:
@@ -2159,23 +2928,24 @@ class ComputerUseSession:
         max_chars = 6000
         truncated = len(clipboard_text) > max_chars
         turn.metadata["clipboard_truncated"] = truncated
-        return clipboard_text[:max_chars]
+        return str(clipboard_text)[:max_chars]
 
     async def _navigate_via_address_bar(self, url: str) -> None:
-        await self._browser.press_key("ctrl+l")
-        await self._browser.type_text(url)
-        await self._browser.press_key("enter")
+        await self._automation_driver.press_key("ctrl+l")
+        await self._automation_driver.type_text(url)
+        await self._automation_driver.press_key("enter")
 
     def _save_turn_screenshot(
-        self, screenshot_bytes: bytes, suffix: str, step_number: Optional[int]
-    ) -> Optional[str]:
+        self, screenshot_bytes: bytes, suffix: str, step_number: int | None
+    ) -> str | None:
         """Persist a screenshot for observability if a debug logger is available."""
         if not self._debug_logger:
             return None
         name = f"computer_use_turn_{suffix}"
-        return self._debug_logger.save_screenshot(
+        screenshot_path = self._debug_logger.save_screenshot(
             screenshot_bytes, name=name, step_number=step_number
         )
+        return cast(str | None, screenshot_path)
 
     def _wrap_goal_for_google(self, goal: str, env_mode: str) -> str:
         """Wrap the goal with context for Google CU per environment."""
@@ -2246,7 +3016,7 @@ class ComputerUseSession:
         return '{"' in raw_text or "[{" in raw_text
 
     @staticmethod
-    def _normalize_environment_name(environment: Optional[str]) -> str:
+    def _normalize_environment_name(environment: str | None) -> str:
         value = (environment or "desktop").strip().lower()
         if value in {"unspecified", "env_unspecified", "default"}:
             return "unspecified"
@@ -2273,15 +3043,20 @@ class ComputerUseSession:
         return types.Environment.ENVIRONMENT_UNSPECIFIED
 
     @staticmethod
-    def _is_scroll_action(action_type: Optional[str]) -> bool:
+    def _parse_betas(raw: str) -> list[str]:
+        values = [part.strip() for part in str(raw or "").split(",")]
+        return [value for value in values if value]
+
+    @staticmethod
+    def _is_scroll_action(action_type: str | None) -> bool:
         if not action_type:
             return False
         normalized = action_type.lower()
         return normalized in {"scroll", "scroll_at", "scroll_document", "scroll_window"}
 
     @staticmethod
-    def _normalize_domain_set(domains: List[str]) -> Set[str]:
-        normalized: Set[str] = set()
+    def _normalize_domain_set(domains: list[str]) -> set[str]:
+        normalized: set[str] = set()
         for domain in domains or []:
             if not domain:
                 continue
@@ -2306,15 +3081,15 @@ def encode_png_base64(data: bytes) -> str:
     return base64.b64encode(data).decode("utf-8")
 
 
-def normalize_response(response: Any) -> Dict[str, Any]:
+def normalize_response(response: Any) -> dict[str, Any]:
     """Normalize OpenAI response objects into standard dictionaries."""
     if response is None:
         return {}
     if hasattr(response, "model_dump"):
-        return response.model_dump()
+        return cast(dict[str, Any], response.model_dump())
     if hasattr(response, "to_dict"):
         try:
-            return response.to_dict()
+            return cast(dict[str, Any], response.to_dict())
         except Exception:
             pass
     if isinstance(response, dict):
@@ -2324,10 +3099,10 @@ def normalize_response(response: Any) -> Dict[str, Any]:
 
 def normalize_key_sequence(key: str) -> str:
     """
-    Convert Computer Use key strings to Playwright-compatible sequences.
+    Convert Computer Use key strings to Automation-compatible sequences.
 
     The model commonly emits uppercase tokens (e.g., "ENTER") or modifier
-    combinations like "CTRL+ENTER". Playwright expects specific casing, so we
+    combinations like "CTRL+ENTER". Automation expects specific casing, so we
     normalize each segment before execution.
     """
     if not key:
@@ -2373,7 +3148,7 @@ def normalize_key_sequence(key: str) -> str:
             return mapping[token_upper]
 
         if token_upper.startswith("F") and token_upper[1:].isdigit():
-            return token_upper  # Playwright expects F-keys uppercase.
+            return token_upper  # Automation expects F-keys uppercase.
 
         if len(token) == 1:
             return token
@@ -2388,7 +3163,7 @@ def normalize_key_sequence(key: str) -> str:
     return normalize_single(key.strip())
 
 
-def extract_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+def extract_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract computer_call items from a response."""
     return [
         item
@@ -2397,9 +3172,9 @@ def extract_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]
     ]
 
 
-def extract_google_function_calls(response_obj: Any) -> List[Any]:
+def extract_google_function_calls(response_obj: Any) -> list[Any]:
     """Extract function_call parts from a Google response object."""
-    calls: List[Any] = []
+    calls: list[Any] = []
     candidates = getattr(response_obj, "candidates", []) or []
     for candidate in candidates:
         content = getattr(candidate, "content", None)
@@ -2413,9 +3188,11 @@ def extract_google_function_calls(response_obj: Any) -> List[Any]:
     return calls
 
 
-def extract_google_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+def extract_google_computer_calls(
+    response_dict: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Extract function/call items from a Google response."""
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
     output_items = response_dict.get("output", [])
     for item in output_items:
         if item.get("type") in {"function_call", "computer_call"}:
@@ -2444,14 +3221,40 @@ def extract_google_computer_calls(response_dict: Dict[str, Any]) -> List[Dict[st
     return calls
 
 
-def extract_assistant_text(response_dict: Dict[str, Any]) -> Optional[str]:
+def extract_anthropic_computer_calls(
+    response_dict: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Extract Anthropic computer tool-use calls from a response."""
+    calls: list[dict[str, Any]] = []
+    for item in response_dict.get("content", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "tool_use":
+            continue
+        tool_name = str(item.get("name") or "").strip().lower()
+        if tool_name and tool_name != "computer":
+            continue
+        action_payload = item.get("input")
+        if not isinstance(action_payload, dict):
+            action_payload = {}
+        calls.append(
+            {
+                "id": item.get("id") or "",
+                "name": item.get("name") or "computer",
+                "action": action_payload,
+            }
+        )
+    return calls
+
+
+def extract_assistant_text(response_dict: dict[str, Any]) -> str | None:
     """Extract assistant text output from a response."""
     messages = [
         item
         for item in response_dict.get("output", [])
         if item.get("type") == "message"
     ]
-    texts: List[str] = []
+    texts: list[str] = []
     for message in messages:
         for content in message.get("content", []):
             if content.get("type") == "output_text":
@@ -2465,17 +3268,30 @@ def extract_assistant_text(response_dict: Dict[str, Any]) -> Optional[str]:
                 text = part.get("text") or part.get("output_text")
                 if text:
                     texts.append(text)
+    if not texts:
+        for content in response_dict.get("content", []) or []:
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") != "text":
+                continue
+            text = content.get("text")
+            if isinstance(text, str) and text:
+                texts.append(text)
     combined = "\n".join(texts).strip()
     return combined or None
 
 
-def _inject_context_metadata(turn: ComputerToolTurn, metadata: Dict[str, Any]) -> None:
+def _inject_context_metadata(turn: ComputerToolTurn, metadata: dict[str, Any]) -> None:
     """Copy high-level context into the turn metadata for observability."""
     if not isinstance(turn.metadata, dict):
         return
     for key in ("step_number", "test_plan_name", "test_case_name", "target", "value"):
         if metadata.get(key) is not None:
             turn.metadata[key] = metadata[key]
+    if metadata.get("allow_safety_auto_approve") is not None:
+        turn.metadata["allow_safety_auto_approve"] = bool(
+            metadata["allow_safety_auto_approve"]
+        )
     if metadata.get("safety_identifier") is not None:
         turn.metadata["safety_identifier"] = metadata["safety_identifier"]
     if metadata.get("interaction_mode") is not None:
@@ -2483,12 +3299,13 @@ def _inject_context_metadata(turn: ComputerToolTurn, metadata: Dict[str, Any]) -
 
 
 def normalize_coordinates(
-    x: Optional[float],
-    y: Optional[float],
+    x: float | None,
+    y: float | None,
     viewport_width: int,
     viewport_height: int,
 ) -> tuple[int, int]:
     """Normalize coordinates into the viewport bounds."""
+
     def _clamp(value: float, maximum: int) -> int:
         return max(0, min(int(round(value)), max(0, maximum - 1)))
 
@@ -2498,8 +3315,8 @@ def normalize_coordinates(
 
 
 def denormalize_coordinates(
-    x: Optional[float],
-    y: Optional[float],
+    x: float | None,
+    y: float | None,
     viewport_width: int,
     viewport_height: int,
 ) -> tuple[int, int]:

@@ -27,11 +27,15 @@ class TestScopeTriageAgent:
         mock_payload = {
             "in_scope": "Only test the admin portal bundle creation flows.",
             "explicit_exclusions": ["Do not touch the FMC frontend."],
-            "ambiguous_points": ["Clarify whether translation workflows must be validated."],
+            "ambiguous_points": [
+                "Clarify whether translation workflows must be validated."
+            ],
             "blocking_questions": [],
         }
 
-        agent.call_openai = AsyncMock(return_value={"content": json.dumps(mock_payload)})
+        agent.call_openai = AsyncMock(
+            return_value={"content": json.dumps(mock_payload)}
+        )
 
         result = await agent.triage_scope("Test requirements text")
 
@@ -42,7 +46,9 @@ class TestScopeTriageAgent:
         assert not result.has_blockers()
 
     @pytest.mark.asyncio
-    async def test_triage_scope_handles_scalar_arrays(self, agent: ScopeTriageAgent) -> None:
+    async def test_triage_scope_handles_scalar_arrays(
+        self, agent: ScopeTriageAgent
+    ) -> None:
         """Lists should be coerced even when the model returns scalars."""
         mock_payload = {
             "in_scope": "Full scope permitted.",
@@ -51,7 +57,9 @@ class TestScopeTriageAgent:
             "blocking_questions": "Need staging URL before executing.",
         }
 
-        agent.call_openai = AsyncMock(return_value={"content": json.dumps(mock_payload)})
+        agent.call_openai = AsyncMock(
+            return_value={"content": json.dumps(mock_payload)}
+        )
 
         result = await agent.triage_scope("requirements")
 

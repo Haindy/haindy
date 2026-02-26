@@ -4,7 +4,7 @@ Core data models and types for the HAINDY testing framework.
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, model_validator
 
 class TestStatus(str, Enum):
     """Status of a test execution."""
+
+    __test__ = False
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -52,21 +54,38 @@ class ConfidenceLevel(str, Enum):
     VERY_LOW = "very_low"  # 0-39%
 
 
-class GridCoordinate(BaseModel):
-    """Represents a coordinate in the grid system."""
+class CoordinateReference(BaseModel):
+    """Provider-neutral coordinate metadata for an interaction target."""
 
-    cell: str = Field(..., description="Grid cell identifier (e.g., 'M23')")
-    offset_x: float = Field(
-        0.5, ge=0.0, le=1.0, description="X offset within cell (0.0-1.0)"
+    target_reference: str | None = Field(
+        None,
+        description="Provider-neutral target reference when available",
     )
-    offset_y: float = Field(
-        0.5, ge=0.0, le=1.0, description="Y offset within cell (0.0-1.0)"
+    pixel_coordinates: tuple[int, int] | None = Field(
+        None,
+        description="Absolute pixel coordinates as (x, y)",
+    )
+    relative_x: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Normalized horizontal position within the selected target area",
+    )
+    relative_y: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Normalized vertical position within the selected target area",
     )
     confidence: float = Field(
-        ..., ge=0.0, le=1.0, description="Confidence score for this coordinate"
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for this coordinate reference",
     )
-    refined: bool = Field(
-        False, description="Whether adaptive refinement was applied"
+    adjusted: bool = Field(
+        False,
+        description="Whether post-selection coordinate adjustment was applied",
     )
 
 
@@ -75,25 +94,25 @@ class ActionInstruction(BaseModel):
 
     action_type: ActionType
     description: str = Field(..., description="Human-readable action description")
-    target: Optional[str] = Field(None, description="Target element description")
-    value: Optional[str] = Field(None, description="Value for type actions")
+    target: str | None = Field(None, description="Target element description")
+    value: str | None = Field(None, description="Value for type actions")
     expected_outcome: str = Field(..., description="Expected result of the action")
-    computer_use_prompt: Optional[str] = Field(
+    computer_use_prompt: str | None = Field(
         None,
         description="Fully prepared prompt for the Computer Use executor",
     )
     timeout: int = Field(5000, description="Timeout in milliseconds")
 
 
-class GridAction(BaseModel):
-    """A grid-based action to be performed."""
+class ResolvedAction(BaseModel):
+    """A resolved action with provider-neutral coordinate metadata."""
 
     instruction: ActionInstruction
-    coordinate: GridCoordinate
-    screenshot_before: Optional[str] = Field(
+    coordinates: CoordinateReference | None = None
+    screenshot_before: str | None = Field(
         None, description="Path to screenshot before action"
     )
-    fallback_strategy: Optional[str] = Field(
+    fallback_strategy: str | None = Field(
         None, description="Alternative approach if primary fails"
     )
 
@@ -103,12 +122,12 @@ class ActionResult(BaseModel):
 
     action_id: UUID = Field(default_factory=uuid4)
     success: bool
-    action: GridAction
-    screenshot_after: Optional[str] = Field(
+    action: ResolvedAction
+    screenshot_after: str | None = Field(
         None, description="Path to screenshot after action"
     )
     execution_time_ms: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
     confidence: float = Field(..., ge=0.0, le=1.0)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -124,14 +143,18 @@ class StepIntent(str, Enum):
 class TestStep(BaseModel):
     """A single step in a test case."""
 
+    __test__ = False
+
     step_id: UUID = Field(default_factory=uuid4)
     step_number: int
     description: str = Field(..., description="Human-readable description of the step")
     action: str = Field(..., description="Action to be performed")
     expected_result: str = Field(..., description="Expected outcome of the action")
     # Keep action_instruction for backward compatibility during transition
-    action_instruction: Optional[ActionInstruction] = Field(None, description="Detailed action instruction (deprecated)")
-    dependencies: List[int] = Field(
+    action_instruction: ActionInstruction | None = Field(
+        None, description="Detailed action instruction (deprecated)"
+    )
+    dependencies: list[int] = Field(
         default_factory=list, description="Step numbers that must complete first"
     )
     optional: bool = Field(False, description="Whether this step can be skipped")
@@ -140,16 +163,16 @@ class TestStep(BaseModel):
         description="Execution intent that guides runner heuristics",
     )
     max_retries: int = Field(3, description="Maximum retry attempts")
-    cache_label: Optional[str] = Field(
+    cache_label: str | None = Field(
         None, description="Cache label for coordinate caching and replay"
     )
     cache_action: str = Field(
         "click", description="Cache action type for coordinate caching"
     )
-    environment: Optional[str] = Field(
-        None, description="Execution environment override (desktop or browser)"
+    environment: str | None = Field(
+        None, description="Execution environment override (desktop or web)"
     )
-    can_be_replayed: Optional[bool] = Field(
+    can_be_replayed: bool | None = Field(
         None, description="Allow execution replay cache for this step"
     )
     loop: bool = Field(False, description="Repeat the step until validated")
@@ -159,14 +182,16 @@ class TestStep(BaseModel):
     capture_clipboard: bool = Field(
         False, description="Capture clipboard output during execution"
     )
-    clipboard_output_key: Optional[str] = Field(
+    clipboard_output_key: str | None = Field(
         None, description="Key to attach clipboard output to action results"
     )
 
 
 class TestCasePriority(str, Enum):
     """Priority levels for test cases."""
-    
+
+    __test__ = False
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -175,34 +200,54 @@ class TestCasePriority(str, Enum):
 
 class TestCase(BaseModel):
     """A test case containing multiple test steps."""
-    
+
+    __test__ = False
+
     case_id: UUID = Field(default_factory=uuid4)
     test_id: str = Field(..., description="Human-readable test case ID (e.g., TC001)")
     name: str = Field(..., description="Test case name")
-    description: str = Field(..., description="Detailed description of what is being tested")
-    priority: TestCasePriority = Field(TestCasePriority.MEDIUM, description="Test case priority")
-    prerequisites: List[str] = Field(default_factory=list, description="Prerequisites for this test case")
-    steps: List[TestStep] = Field(..., description="Ordered list of test steps")
-    postconditions: List[str] = Field(default_factory=list, description="Expected state after test completion")
-    tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+    description: str = Field(
+        ..., description="Detailed description of what is being tested"
+    )
+    priority: TestCasePriority = Field(
+        TestCasePriority.MEDIUM, description="Test case priority"
+    )
+    prerequisites: list[str] = Field(
+        default_factory=list, description="Prerequisites for this test case"
+    )
+    steps: list[TestStep] = Field(..., description="Ordered list of test steps")
+    postconditions: list[str] = Field(
+        default_factory=list, description="Expected state after test completion"
+    )
+    tags: list[str] = Field(default_factory=list, description="Tags for categorization")
 
 
 class TestPlan(BaseModel):
     """A complete test plan containing multiple test cases."""
 
+    __test__ = False
+
     plan_id: UUID = Field(default_factory=uuid4)
     name: str = Field(..., description="Test plan name")
     description: str = Field(..., description="Overall test plan description")
-    requirements_source: str = Field(..., description="Source of requirements (e.g., PRD v1.2, URL)")
-    test_cases: List[TestCase] = Field(..., description="List of test cases in this plan")
-    steps: List[TestStep] = Field(
+    requirements_source: str = Field(
+        ..., description="Source of requirements (e.g., PRD v1.2, URL)"
+    )
+    test_cases: list[TestCase] = Field(
+        ..., description="List of test cases in this plan"
+    )
+    steps: list[TestStep] = Field(
         default_factory=list,
         description="Flattened list of all steps for legacy consumers",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    created_by: str = Field("HAINDY Test Planner", description="Who/what created this plan")
-    tags: List[str] = Field(default_factory=list, description="Overall plan tags")
-    estimated_duration_seconds: Optional[int] = Field(None, description="Total estimated duration")
+    created_by: str = Field(
+        "HAINDY Test Planner", description="Who/what created this plan"
+    )
+    tags: list[str] = Field(default_factory=list, description="Overall plan tags")
+    estimated_duration_seconds: int | None = Field(
+        None, description="Total estimated duration"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -215,7 +260,7 @@ class TestPlan(BaseModel):
         steps = data.get("steps")
 
         if test_cases:
-            aggregated_steps: List[Any] = []
+            aggregated_steps: list[Any] = []
             for case in test_cases:
                 if isinstance(case, TestCase):
                     aggregated_steps.extend(case.steps)
@@ -251,15 +296,15 @@ class ScopeTriageResult(BaseModel):
         "",
         description="Plain-language summary of functionality explicitly in scope",
     )
-    explicit_exclusions: List[str] = Field(
+    explicit_exclusions: list[str] = Field(
         default_factory=list,
         description="Items explicitly ruled out of scope",
     )
-    ambiguous_points: List[str] = Field(
+    ambiguous_points: list[str] = Field(
         default_factory=list,
         description="Requirements or details that remain unclear but are not blockers",
     )
-    blocking_questions: List[str] = Field(
+    blocking_questions: list[str] = Field(
         default_factory=list,
         description="Contradictions or missing details that must be resolved before planning",
     )
@@ -270,7 +315,7 @@ class ScopeTriageResult(BaseModel):
 
     def build_planner_brief(self) -> str:
         """Generate the curated scope brief for the test planner."""
-        sections: List[str] = []
+        sections: list[str] = []
 
         normalized_scope = self.in_scope.strip()
         if normalized_scope:
@@ -286,7 +331,7 @@ class ScopeTriageResult(BaseModel):
 
         return "\n\n".join(sections)
 
-    def ambiguous_report(self) -> Optional[str]:
+    def ambiguous_report(self) -> str | None:
         """Return a formatted ambiguous points report, if any."""
         items = [item.strip() for item in self.ambiguous_points if item.strip()]
         if not items:
@@ -294,7 +339,7 @@ class ScopeTriageResult(BaseModel):
         lines = "\n".join(f"- {item}" for item in items)
         return f"FOLLOW-UP NOTES:\n{lines}"
 
-    def blocking_report(self) -> Optional[str]:
+    def blocking_report(self) -> str | None:
         """Return a formatted blocking questions report, if any."""
         items = [item.strip() for item in self.blocking_questions if item.strip()]
         if not items:
@@ -306,18 +351,22 @@ class ScopeTriageResult(BaseModel):
 class TestState(BaseModel):
     """Current state of test execution."""
 
+    __test__ = False
+
     test_plan: TestPlan
-    current_step: Optional[TestStep] = None
-    completed_steps: List[UUID] = Field(default_factory=list)
-    failed_steps: List[UUID] = Field(default_factory=list)
-    skipped_steps: List[UUID] = Field(default_factory=list)
+    current_step: TestStep | None = None
+    completed_steps: list[UUID] = Field(default_factory=list)
+    failed_steps: list[UUID] = Field(default_factory=list)
+    skipped_steps: list[UUID] = Field(default_factory=list)
     status: TestStatus = TestStatus.PENDING
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     error_count: int = 0
     warning_count: int = 0
-    context: Dict[str, Any] = Field(default_factory=dict)
-    test_report: Optional['TestReport'] = Field(None, description="Comprehensive test execution report")  # Will be populated by TestRunner
+    context: dict[str, Any] = Field(default_factory=dict)
+    test_report: Optional["TestReport"] = Field(
+        None, description="Comprehensive test execution report"
+    )  # Will be populated by TestRunner
 
 
 class EvaluationResult(BaseModel):
@@ -328,13 +377,13 @@ class EvaluationResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     expected_outcome: str
     actual_outcome: str
-    deviations: List[str] = Field(
+    deviations: list[str] = Field(
         default_factory=list, description="List of deviations from expected"
     )
-    suggestions: List[str] = Field(
+    suggestions: list[str] = Field(
         default_factory=list, description="Suggestions for next actions"
     )
-    screenshot_analysis: Optional[Dict[str, Any]] = Field(
+    screenshot_analysis: dict[str, Any] | None = Field(
         None, description="Detailed screenshot analysis data"
     )
 
@@ -346,18 +395,19 @@ class ExecutionJournal(BaseModel):
     test_scenario: str
     step_reference: str
     action_taken: str
-    grid_coordinates: Dict[str, Any] = Field(
-        ..., description="Grid coordinate details including refinement"
+    coordinate_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-neutral coordinate metadata for visual interactions",
     )
     expected_result: str
     actual_result: str
     agent_confidence: float = Field(..., ge=0.0, le=1.0)
-    screenshot_before: Optional[str] = None
-    screenshot_after: Optional[str] = None
+    screenshot_before: str | None = None
+    screenshot_after: str | None = None
     execution_time_ms: int
     success: bool
-    playwright_command: Optional[str] = Field(
-        None, description="Recorded Playwright command for replay"
+    automation_command: str | None = Field(
+        None, description="Recorded Automation command for replay"
     )
 
 
@@ -368,10 +418,10 @@ class AgentMessage(BaseModel):
     from_agent: str
     to_agent: str
     message_type: str
-    content: Dict[str, Any]
+    content: dict[str, Any]
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requires_response: bool = False
-    correlation_id: Optional[UUID] = Field(
+    correlation_id: UUID | None = Field(
         None, description="ID to correlate related messages"
     )
 
@@ -379,7 +429,7 @@ class AgentMessage(BaseModel):
 # Scroll-specific models
 class ScrollDirection(str, Enum):
     """Direction for scrolling actions."""
-    
+
     UP = "up"
     DOWN = "down"
     LEFT = "left"
@@ -388,7 +438,7 @@ class ScrollDirection(str, Enum):
 
 class VisibilityStatus(str, Enum):
     """Element visibility status for scroll operations."""
-    
+
     FULLY_VISIBLE = "fully_visible"
     PARTIALLY_VISIBLE = "partially_visible"
     NOT_VISIBLE = "not_visible"
@@ -396,62 +446,75 @@ class VisibilityStatus(str, Enum):
 
 class ScrollParameters(BaseModel):
     """Parameters for scroll actions."""
-    
-    direction: Optional[ScrollDirection] = Field(None, description="Scroll direction")
-    pixels: Optional[int] = Field(None, description="Number of pixels to scroll")
-    target_element: Optional[str] = Field(None, description="Description of element to scroll to")
+
+    direction: ScrollDirection | None = Field(None, description="Scroll direction")
+    pixels: int | None = Field(None, description="Number of pixels to scroll")
+    target_element: str | None = Field(
+        None, description="Description of element to scroll to"
+    )
     max_attempts: int = Field(15, description="Maximum scroll attempts")
-    
+
 
 class VisibilityResult(BaseModel):
     """Result of element visibility check."""
-    
+
     status: VisibilityStatus
-    coordinates: Optional[GridCoordinate] = Field(None, description="Grid coordinates if visible")
-    visible_percentage: Optional[int] = Field(None, description="Percentage visible if partial")
-    suggested_direction: Optional[ScrollDirection] = Field(None, description="Suggested scroll direction")
-    direction_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Confidence in direction")
+    coordinates: CoordinateReference | None = Field(
+        None,
+        description="Coordinate metadata if the target is visible",
+    )
+    visible_percentage: int | None = Field(
+        None, description="Percentage visible if partial"
+    )
+    suggested_direction: ScrollDirection | None = Field(
+        None, description="Suggested scroll direction"
+    )
+    direction_confidence: float = Field(
+        0.0, ge=0.0, le=1.0, description="Confidence in direction"
+    )
     notes: str = Field("", description="Additional AI observations")
 
 
 class ScrollAction(BaseModel):
     """A scroll action to be executed."""
-    
+
     direction: ScrollDirection
     distance: int = Field(..., description="Distance in pixels")
-    is_correction: bool = Field(False, description="Whether this is a correction scroll")
-    executed_at: Optional[datetime] = None
+    is_correction: bool = Field(
+        False, description="Whether this is a correction scroll"
+    )
+    executed_at: datetime | None = None
 
 
 class ScrollState(BaseModel):
     """State tracking for scroll operations."""
-    
+
     target_element: str
     attempts: int = 0
     max_attempts: int = 15
-    scroll_history: List[ScrollAction] = Field(default_factory=list)
-    last_direction: Optional[ScrollDirection] = None
+    scroll_history: list[ScrollAction] = Field(default_factory=list)
+    last_direction: ScrollDirection | None = None
     overshoot_detected: bool = False
     element_partially_visible: bool = False
-    last_screenshot_hash: Optional[str] = None
+    last_screenshot_hash: str | None = None
 
 
 class ScrollResult(BaseModel):
     """Result of a scroll operation."""
-    
+
     success: bool
     action_type: str = "scroll_to_element"
-    coordinates: Optional[GridCoordinate] = None
-    confidence: Optional[float] = None
-    attempts: Optional[int] = None
-    total_scroll_distance: Optional[int] = None
-    error: Optional[str] = None
-    scroll_history: Optional[List[Dict[str, Any]]] = None
+    coordinates: CoordinateReference | None = None
+    confidence: float | None = None
+    attempts: int | None = None
+    total_scroll_distance: int | None = None
+    error: str | None = None
+    scroll_history: list[dict[str, Any]] | None = None
 
 
 class BugSeverity(str, Enum):
     """Severity levels for bug reports."""
-    
+
     CRITICAL = "critical"  # Blocks test execution
     HIGH = "high"  # Major functionality broken
     MEDIUM = "medium"  # Minor functionality issue
@@ -460,7 +523,7 @@ class BugSeverity(str, Enum):
 
 class StepResult(BaseModel):
     """Result of executing a single test step."""
-    
+
     step_id: UUID
     step_number: int
     status: TestStatus
@@ -469,16 +532,22 @@ class StepResult(BaseModel):
     action: str
     expected_result: str
     actual_result: str
-    screenshot_before: Optional[str] = Field(None, description="Path to screenshot before action")
-    screenshot_after: Optional[str] = Field(None, description="Path to screenshot after action")
-    error_message: Optional[str] = None
+    screenshot_before: str | None = Field(
+        None, description="Path to screenshot before action"
+    )
+    screenshot_after: str | None = Field(
+        None, description="Path to screenshot after action"
+    )
+    error_message: str | None = None
     confidence: float = Field(1.0, ge=0.0, le=1.0)
-    actions_performed: List[Dict[str, Any]] = Field(default_factory=list, description="List of sub-actions performed")
+    actions_performed: list[dict[str, Any]] = Field(
+        default_factory=list, description="List of sub-actions performed"
+    )
 
 
 class BugReport(BaseModel):
     """Detailed bug report for a failed test step."""
-    
+
     bug_id: UUID = Field(default_factory=uuid4)
     step_id: UUID
     test_case_id: UUID
@@ -486,55 +555,57 @@ class BugReport(BaseModel):
     step_number: int
     description: str
     severity: BugSeverity
-    error_type: str = Field(..., description="Type of error (e.g., 'element_not_found', 'assertion_failed')")
+    error_type: str = Field(
+        ..., description="Type of error (e.g., 'element_not_found', 'assertion_failed')"
+    )
     expected_result: str
     actual_result: str
-    screenshot_path: Optional[str] = None
-    error_details: Optional[str] = None
-    reproduction_steps: List[str] = Field(default_factory=list)
+    screenshot_path: str | None = None
+    error_details: str | None = None
+    reproduction_steps: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    plan_blocker: Optional[bool] = Field(
+    plan_blocker: bool | None = Field(
         None,
         description="Whether plan-level evaluation marked this issue as blocking",
     )
-    plan_blocker_reason: Optional[str] = Field(
+    plan_blocker_reason: str | None = Field(
         None,
         description="Plan-level rationale for blocking determination",
     )
-    plan_recommended_severity: Optional[BugSeverity] = Field(
+    plan_recommended_severity: BugSeverity | None = Field(
         None,
         description="Severity suggested by plan-level analysis",
     )
-    plan_assessment_notes: Optional[str] = Field(
+    plan_assessment_notes: str | None = Field(
         None,
         description="Additional notes captured during plan-level assessment",
     )
-    plan_recommendations: List[str] = Field(
+    plan_recommendations: list[str] = Field(
         default_factory=list,
         description="Suggested follow-up actions from plan-level assessment",
     )
-    
+
 
 class TestCaseResult(BaseModel):
     """Result of executing a test case."""
-    
+
     case_id: UUID
     test_id: str
     name: str
     status: TestStatus
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     steps_total: int
     steps_completed: int
     steps_failed: int
-    step_results: List[StepResult] = Field(default_factory=list)
-    bugs: List[BugReport] = Field(default_factory=list)
-    error_message: Optional[str] = None
+    step_results: list[StepResult] = Field(default_factory=list)
+    bugs: list[BugReport] = Field(default_factory=list)
+    error_message: str | None = None
 
 
 class TestSummary(BaseModel):
     """Summary statistics for test execution."""
-    
+
     total_test_cases: int
     completed_test_cases: int
     failed_test_cases: int
@@ -551,18 +622,22 @@ class TestSummary(BaseModel):
 
 class TestReport(BaseModel):
     """Comprehensive test execution report."""
-    
+
     report_id: UUID = Field(default_factory=uuid4)
     test_plan_id: UUID
     test_plan_name: str
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     status: TestStatus
-    test_cases: List[TestCaseResult] = Field(default_factory=list)
-    summary: Optional[TestSummary] = None
-    bugs: List[BugReport] = Field(default_factory=list)
-    environment: Dict[str, Any] = Field(default_factory=dict, description="Test environment details")
-    artifacts: Dict[str, Any] = Field(
+    test_cases: list[TestCaseResult] = Field(default_factory=list)
+    summary: TestSummary | None = None
+    bugs: list[BugReport] = Field(default_factory=list)
+    environment: dict[str, Any] = Field(
+        default_factory=dict, description="Test environment details"
+    )
+    artifacts: dict[str, Any] = Field(
         default_factory=dict, description="Paths to additional run artifacts"
     )
-    created_by: str = Field("HAINDY Test Runner", description="Who/what executed the tests")
+    created_by: str = Field(
+        "HAINDY Test Runner", description="Who/what executed the tests"
+    )

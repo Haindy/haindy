@@ -1,40 +1,38 @@
 """OpenAI API client wrapper for the HAINDY framework."""
 
+import inspect
 import json
 import logging
 import math
-import inspect
-from typing import Any, Dict, List, Optional, Sequence, Set, Protocol
+from collections.abc import Sequence
+from typing import Any, Optional, Protocol
 
 import openai
 from openai import AsyncOpenAI
 
 from src.config.settings import get_settings
 
+SUPPORTED_OPENAI_MODEL = "gpt-5.2"
+
 
 class ResponseStreamObserver(Protocol):
     """Observer that receives streaming updates from the Responses API."""
 
-    def on_stream_start(self) -> Any:
-        ...
+    def on_stream_start(self) -> Any: ...
 
-    def on_text_delta(self, delta: str) -> Any:
-        ...
+    def on_text_delta(self, delta: str) -> Any: ...
 
-    def on_usage_delta(self, delta: Dict[str, int]) -> Any:
-        ...
+    def on_usage_delta(self, delta: dict[str, int]) -> Any: ...
 
-    def on_usage_total(self, totals: Dict[str, int]) -> Any:
-        ...
+    def on_usage_total(self, totals: dict[str, int]) -> Any: ...
 
-    def on_token_progress(self, total_tokens: int, delta_tokens: int, delta_chars: int) -> Any:
-        ...
+    def on_token_progress(
+        self, total_tokens: int, delta_tokens: int, delta_chars: int
+    ) -> Any: ...
 
-    def on_error(self, error: Any) -> Any:
-        ...
+    def on_error(self, error: Any) -> Any: ...
 
-    def on_stream_end(self) -> Any:
-        ...
+    def on_stream_end(self) -> Any: ...
 
 
 class OpenAIClient:
@@ -42,12 +40,12 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "gpt-5",
-        api_key: Optional[str] = None,
+        model: str = "gpt-5.2",
+        api_key: str | None = None,
         max_retries: int = 3,
         reasoning_level: str = "medium",
-        modalities: Optional[Set[str]] = None,
-        request_timeout: Optional[float] = None,
+        modalities: set[str] | None = None,
+        request_timeout: float | None = None,
     ) -> None:
         """
         Initialize OpenAI client.
@@ -57,12 +55,11 @@ class OpenAIClient:
             api_key: Optional API key (defaults to env/config)
             max_retries: Maximum number of retry attempts
         """
-        self.model = model
         self.max_retries = max_retries
         self.reasoning_level = reasoning_level
         self.modalities = modalities or {"text"}
         self.logger = logging.getLogger("openai_client")
-        self._token_encoder_cache: Dict[str, Any] = {}
+        self._token_encoder_cache: dict[str, Any] = {}
 
         settings = get_settings()
         self.api_key = api_key or settings.openai_api_key
@@ -75,6 +72,13 @@ class OpenAIClient:
                 "OpenAI API key not provided. Set OPENAI_API_KEY environment variable."
             )
 
+        if model != SUPPORTED_OPENAI_MODEL:
+            raise ValueError(
+                f"Unsupported OpenAI model '{model}'. "
+                f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
+            )
+        self.model = model
+
         self.client = AsyncOpenAI(
             api_key=self.api_key,
             max_retries=self.max_retries,
@@ -82,16 +86,16 @@ class OpenAIClient:
 
     async def call(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-        system_prompt: Optional[str] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-        reasoning_level: Optional[str] = None,
-        modalities: Optional[Set[str]] = None,
+        max_tokens: int | None = None,
+        system_prompt: str | None = None,
+        response_format: dict[str, Any] | None = None,
+        reasoning_level: str | None = None,
+        modalities: set[str] | None = None,
         stream: bool = False,
         stream_observer: Optional["ResponseStreamObserver"] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Make a call to the OpenAI API."""
 
         final_messages = []
@@ -104,42 +108,31 @@ class OpenAIClient:
             f"messages={len(final_messages)}, temperature={temperature}"
         )
 
-        use_responses = self._should_use_responses_api(self.model)
-
         try:
-            if use_responses:
-                if stream or stream_observer is not None:
-                    try:
-                        return await self._call_responses_api_streaming(
-                            final_messages=final_messages,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            response_format=response_format,
-                            reasoning_level=reasoning_level or self.reasoning_level,
-                            system_prompt=system_prompt,
-                            observer=stream_observer,
-                        )
-                    except Exception as stream_error:
-                        self.logger.warning(
-                            "Streaming responses call failed; falling back to standard execution",
-                            exc_info=True,
-                        )
+            if stream or stream_observer is not None:
+                try:
+                    return await self._call_responses_api_streaming(
+                        final_messages=final_messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        response_format=response_format,
+                        reasoning_level=reasoning_level or self.reasoning_level,
+                        system_prompt=system_prompt,
+                        observer=stream_observer,
+                    )
+                except Exception:
+                    self.logger.warning(
+                        "Streaming responses call failed; falling back to standard execution",
+                        exc_info=True,
+                    )
 
-                return await self._call_responses_api(
-                    final_messages=final_messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    response_format=response_format,
-                    reasoning_level=reasoning_level or self.reasoning_level,
-                    system_prompt=system_prompt,
-                )
-
-            return await self._call_chat_completions(
+            return await self._call_responses_api(
                 final_messages=final_messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 response_format=response_format,
-                modalities=modalities,
+                reasoning_level=reasoning_level or self.reasoning_level,
+                system_prompt=system_prompt,
             )
 
         except openai.APIError as e:
@@ -155,7 +148,7 @@ class OpenAIClient:
         prompt: str,
         temperature: float = 0.7,
         detail: str = "high",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Analyze an image using vision capabilities.
 
@@ -194,10 +187,10 @@ class OpenAIClient:
     async def create_structured_output(
         self,
         prompt: str,
-        response_schema: Dict[str, Any],
+        response_schema: dict[str, Any],
         temperature: float = 0.7,
-        examples: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        examples: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """
         Create structured output with schema validation.
 
@@ -241,7 +234,7 @@ class OpenAIClient:
 
         return response["content"]
 
-    def estimate_cost(self, usage: Dict[str, int]) -> float:
+    def estimate_cost(self, usage: dict[str, int]) -> float:
         """
         Estimate cost based on token usage.
 
@@ -251,36 +244,10 @@ class OpenAIClient:
         Returns:
             Estimated cost in USD
         """
-        # Pricing as of GPT-4o mini (adjust as needed)
-        # These are example prices - update with actual pricing
-        pricing = {
-            "gpt-5": {
-                "prompt": 1.25 / 1_000_000,
-                "completion": 5.0 / 1_000_000,
-            },
-            "gpt-4.1": {
-                "prompt": 0.75 / 1_000_000,
-                "completion": 2.5 / 1_000_000,
-            },
-            "gpt-4.1-mini": {
-                "prompt": 0.5 / 1_000_000,
-                "completion": 1.2 / 1_000_000,
-            },
-            "gpt-4.1-mini-vision": {
-                "prompt": 0.3 / 1_000_000,
-                "completion": 0.9 / 1_000_000,
-            },
-            "gpt-4o-mini": {
-                "prompt": 0.15 / 1_000_000,
-                "completion": 0.6 / 1_000_000,
-            },
-            "gpt-4o": {
-                "prompt": 5.0 / 1_000_000,
-                "completion": 15.0 / 1_000_000,
-            },
+        model_pricing = {
+            "prompt": 1.25 / 1_000_000,
+            "completion": 5.0 / 1_000_000,
         }
-
-        model_pricing = self._resolve_pricing(pricing)
 
         prompt_cost = usage.get("prompt_tokens", 0) * model_pricing["prompt"]
         completion_cost = (
@@ -289,85 +256,24 @@ class OpenAIClient:
 
         return prompt_cost + completion_cost
 
-    def _resolve_pricing(self, pricing: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-        """Resolve pricing entry for the configured model."""
-        if self.model in pricing:
-            return pricing[self.model]
-
-        # Attempt to match by family prefix (e.g., gpt-4.1-mini-high)
-        for key in pricing:
-            if self.model.startswith(key):
-                return pricing[key]
-
-        return pricing["gpt-4o-mini"]
-
-    def _should_use_responses_api(self, model: str) -> bool:
-        """Return True when the Responses API should be used."""
-        return model.startswith("gpt-5") or model.startswith("gpt-4.1")
-
-    def _supports_responses_temperature(self, model: str) -> bool:
-        """Return True if the Responses model accepts temperature parameter."""
-        # Reasoning models such as GPT-5 ignore temperature; omit it to avoid 400s.
-        return not model.startswith("gpt-5")
-
-    async def _call_chat_completions(
-        self,
-        final_messages: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: Optional[int],
-        response_format: Optional[Dict[str, Any]],
-        modalities: Optional[Set[str]],
-    ) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {
-            "model": self.model,
-            "messages": final_messages,
-            "temperature": temperature,
-        }
-
-        if max_tokens:
-            kwargs["max_completion_tokens"] = max_tokens
-
-        if response_format:
-            kwargs["response_format"] = response_format
-
-        selected_modalities = modalities or self.modalities
-        if selected_modalities:
-            kwargs["modalities"] = sorted(selected_modalities)
-
-        response = await self.client.chat.completions.create(
-            timeout=self.request_timeout,
-            **kwargs,
-        )
-
-        content = response.choices[0].message.content
-        if response_format and response_format.get("type") == "json_object":
-            try:
-                content = json.loads(content)
-            except json.JSONDecodeError as exc:
-                self.logger.error(f"Failed to parse JSON response: {exc}")
-                content = {"error": "Invalid JSON response", "raw": content}
-
-        usage_payload = self._normalize_chat_usage(response.usage)
-
-        return {
-            "content": content,
-            "usage": usage_payload,
-            "model": response.model,
-            "finish_reason": response.choices[0].finish_reason,
-        }
+    def _supports_responses_temperature(self, reasoning_level: str | None) -> bool:
+        """Return True if the Responses model accepts the temperature parameter."""
+        return (reasoning_level or "medium") == "none"
 
     async def _call_responses_api(
         self,
-        final_messages: List[Dict[str, str]],
+        final_messages: list[dict[str, str]],
         temperature: float,
-        max_tokens: Optional[int],
-        response_format: Optional[Dict[str, Any]],
-        reasoning_level: Optional[str],
-        system_prompt: Optional[str],
-    ) -> Dict[str, Any]:
-        instructions, input_items = self._prepare_responses_input(final_messages, system_prompt)
+        max_tokens: int | None,
+        response_format: dict[str, Any] | None,
+        reasoning_level: str | None,
+        system_prompt: str | None,
+    ) -> dict[str, Any]:
+        instructions, input_items = self._prepare_responses_input(
+            final_messages, system_prompt
+        )
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "input": input_items,
         }
@@ -385,7 +291,7 @@ class OpenAIClient:
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
 
-        if self._supports_responses_temperature(self.model):
+        if self._supports_responses_temperature(reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
         response = await self.client.responses.create(
@@ -428,17 +334,19 @@ class OpenAIClient:
 
     async def _call_responses_api_streaming(
         self,
-        final_messages: List[Dict[str, str]],
+        final_messages: list[dict[str, str]],
         temperature: float,
-        max_tokens: Optional[int],
-        response_format: Optional[Dict[str, Any]],
-        reasoning_level: Optional[str],
-        system_prompt: Optional[str],
-        observer: Optional[ResponseStreamObserver],
-    ) -> Dict[str, Any]:
-        instructions, input_items = self._prepare_responses_input(final_messages, system_prompt)
+        max_tokens: int | None,
+        response_format: dict[str, Any] | None,
+        reasoning_level: str | None,
+        system_prompt: str | None,
+        observer: ResponseStreamObserver | None,
+    ) -> dict[str, Any]:
+        instructions, input_items = self._prepare_responses_input(
+            final_messages, system_prompt
+        )
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "input": input_items,
         }
@@ -456,7 +364,7 @@ class OpenAIClient:
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
 
-        if self._supports_responses_temperature(self.model):
+        if self._supports_responses_temperature(reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
         usage_totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -477,11 +385,17 @@ class OpenAIClient:
                     event_type = getattr(event, "type", "")
 
                     if event_type == "response.output_text.delta":
-                        delta_text = self._resolve_text_delta(getattr(event, "delta", None))
+                        delta_text = self._resolve_text_delta(
+                            getattr(event, "delta", None)
+                        )
                         if delta_text:
-                            await self._dispatch_observer(observer, "on_text_delta", delta_text)
+                            await self._dispatch_observer(
+                                observer, "on_text_delta", delta_text
+                            )
                             delta_chars = len(delta_text)
-                            delta_tokens = self._estimate_token_count(delta_text, token_encoder)
+                            delta_tokens = self._estimate_token_count(
+                                delta_text, token_encoder
+                            )
                             if delta_tokens:
                                 estimated_output_tokens += delta_tokens
                             await self._dispatch_observer(
@@ -566,11 +480,11 @@ class OpenAIClient:
 
     def _prepare_responses_input(
         self,
-        final_messages: Sequence[Dict[str, Any]],
-        system_prompt: Optional[str],
-    ) -> tuple[Optional[str], List[Dict[str, Any]]]:
+        final_messages: Sequence[dict[str, Any]],
+        system_prompt: str | None,
+    ) -> tuple[str | None, list[dict[str, Any]]]:
         instructions = system_prompt or None
-        input_items: List[Dict[str, Any]] = []
+        input_items: list[dict[str, Any]] = []
 
         for message in final_messages:
             role = message.get("role", "user")
@@ -589,12 +503,16 @@ class OpenAIClient:
             input_items.append({"role": role, "content": content_items})
 
         if not input_items:
-            input_items.append({"role": "user", "content": [{"type": "input_text", "text": ""}]})
+            input_items.append(
+                {"role": "user", "content": [{"type": "input_text", "text": ""}]}
+            )
 
         return instructions, input_items
 
-    def _convert_content_for_role(self, role: str, content: Any) -> List[Dict[str, Any]]:
-        content_items: List[Dict[str, Any]] = []
+    def _convert_content_for_role(
+        self, role: str, content: Any
+    ) -> list[dict[str, Any]]:
+        content_items: list[dict[str, Any]] = []
         default_type = "output_text" if role == "assistant" else "input_text"
 
         if isinstance(content, list):
@@ -605,7 +523,9 @@ class OpenAIClient:
                         normalized = dict(item)
                         if normalized["type"] == "text":
                             normalized["type"] = default_type
-                        elif role != "assistant" and normalized["type"] == "output_text":
+                        elif (
+                            role != "assistant" and normalized["type"] == "output_text"
+                        ):
                             normalized["type"] = default_type
                         elif role == "assistant" and normalized["type"] == "input_text":
                             normalized["type"] = default_type
@@ -616,7 +536,9 @@ class OpenAIClient:
 
                         if isinstance(image_data, dict):
                             detail = detail or image_data.get("detail")
-                            image_url = image_data.get("url") or image_data.get("image_url")
+                            image_url = image_data.get("url") or image_data.get(
+                                "image_url"
+                            )
                         else:
                             image_url = image_data
 
@@ -633,7 +555,9 @@ class OpenAIClient:
                                 image_item["detail"] = detail
                             content_items.append(image_item)
                     else:
-                        content_items.append({"type": default_type, "text": json.dumps(item)})
+                        content_items.append(
+                            {"type": default_type, "text": json.dumps(item)}
+                        )
                 else:
                     content_items.append({"type": default_type, "text": str(item)})
         else:
@@ -649,7 +573,7 @@ class OpenAIClient:
         if not output_segments:
             return ""
 
-        texts: List[str] = []
+        texts: list[str] = []
         for segment in output_segments:
             for piece in segment.get("content", []):
                 text_value = piece.get("text")
@@ -665,7 +589,7 @@ class OpenAIClient:
             return int(usage.get(key, 0))
         return int(getattr(usage, key, 0))
 
-    def _get_token_encoder(self, model: str) -> Optional[Any]:
+    def _get_token_encoder(self, model: str) -> Any | None:
         if model in self._token_encoder_cache:
             return self._token_encoder_cache[model]
 
@@ -686,7 +610,7 @@ class OpenAIClient:
         self._token_encoder_cache[model] = encoder
         return encoder
 
-    def _estimate_token_count(self, text: str, encoder: Optional[Any]) -> int:
+    def _estimate_token_count(self, text: str, encoder: Any | None) -> int:
         if not text:
             return 0
 
@@ -700,8 +624,8 @@ class OpenAIClient:
         return max(1, math.ceil(len(text) / 4))
 
     def _map_response_format_to_text_config(
-        self, response_format: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+        self, response_format: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         """Translate legacy response_format into Responses API text config."""
         if not response_format:
             return None
@@ -722,7 +646,7 @@ class OpenAIClient:
 
     async def _dispatch_observer(
         self,
-        observer: Optional[ResponseStreamObserver],
+        observer: ResponseStreamObserver | None,
         method_name: str,
         *args: Any,
     ) -> None:
@@ -746,7 +670,7 @@ class OpenAIClient:
         if inspect.isawaitable(result):
             await result
 
-    def _extract_usage_from_event(self, event: Any) -> Dict[str, int]:
+    def _extract_usage_from_event(self, event: Any) -> dict[str, int]:
         response_obj = getattr(event, "response", None)
         if response_obj is None:
             return {}
@@ -755,9 +679,9 @@ class OpenAIClient:
         return self._normalize_usage_dict(usage_obj)
 
     def _calculate_usage_delta(
-        self, previous: Dict[str, int], current: Dict[str, int]
-    ) -> Dict[str, int]:
-        delta: Dict[str, int] = {}
+        self, previous: dict[str, int], current: dict[str, int]
+    ) -> dict[str, int]:
+        delta: dict[str, int] = {}
         for key in ("input_tokens", "output_tokens", "total_tokens"):
             new_value = int(current.get(key, previous.get(key, 0)) or 0)
             old_value = int(previous.get(key, 0) or 0)
@@ -766,13 +690,13 @@ class OpenAIClient:
                 delta[key] = difference
         return delta
 
-    def _normalize_usage_dict(self, usage: Any) -> Dict[str, int]:
-        payload: Dict[str, int] = {}
+    def _normalize_usage_dict(self, usage: Any) -> dict[str, int]:
+        payload: dict[str, int] = {}
         if usage is None:
             return payload
 
         for key in ("input_tokens", "output_tokens", "total_tokens"):
-            value: Optional[int]
+            value: int | None
             if isinstance(usage, dict):
                 value = usage.get(key)
             else:
@@ -788,7 +712,7 @@ class OpenAIClient:
 
         return payload
 
-    def _normalize_chat_usage(self, usage: Any) -> Dict[str, int]:
+    def _normalize_chat_usage(self, usage: Any) -> dict[str, int]:
         """
         Normalize chat completion usage payloads across SDK versions.
 
@@ -802,9 +726,7 @@ class OpenAIClient:
         completion_tokens = self._lookup_usage_with_aliases(
             usage, ("completion_tokens", "output_tokens")
         )
-        total_tokens = self._lookup_usage_with_aliases(
-            usage, ("total_tokens",)
-        )
+        total_tokens = self._lookup_usage_with_aliases(usage, ("total_tokens",))
 
         # Derive totals if missing
         if total_tokens == 0 and prompt_tokens and completion_tokens:
@@ -823,11 +745,11 @@ class OpenAIClient:
                 return value
         return 0
 
-    def _extract_usage_value(self, usage: Any, key: str) -> Optional[int]:
+    def _extract_usage_value(self, usage: Any, key: str) -> int | None:
         if usage is None:
             return None
 
-        raw_value: Optional[Any]
+        raw_value: Any | None
         if isinstance(usage, dict):
             if key not in usage:
                 return None

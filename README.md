@@ -1,265 +1,68 @@
-# HAINDY - Autonomous AI Testing Agent
+# HAINDY
 
-AI-driven autonomous testing agent — Transform requirements into comprehensive test scenarios with coordinated multi-agent AI workflow
+Desktop-first autonomous testing agent that turns requirements into executable test runs.
 
-## Overview
+## Quick project map
 
-HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs three specialized AI agents coordinating together to plan, execute, and evaluate tests.
+- `src/main.py`: CLI entrypoint
+- `src/agents/`: orchestrator/planner/runner/action agents
+- `src/agents/computer_use/session.py`: computer-use action loop
+- `src/config/settings.py`: configuration and env handling
+- `tests/`: test suite
+- `test_scenarios/`: sample inputs
+- `docs/RUNBOOK.md`: operational setup notes
+- `docs/plans/`: implementation plans
 
-## Key Features
+## Setup
 
-- **Multi-Agent Architecture**: Three specialized AI agents (Test Planner, Test Runner, Action Agent)
-- **DOM-Free Visual Interaction**: Adaptive grid-based interaction with automatic refinement
-- **Desktop + Gemini Computer Use**: Optional OS-level driver with Gemini provider support
-- **Just-In-Time Scripted Automation**: Records successful actions for faster replay
-- **Hierarchical Validation**: Multi-layer validation to prevent hallucinations
-- **Detailed Execution Journaling**: Comprehensive logging in structured natural language
-
-## Setup Instructions
-
-### Prerequisites
-
-- Python 3.10 or higher
-- Git
-
-### Installation
-
-1. Clone the repository:
+1. Create and activate a virtual environment:
 ```bash
-git clone https://github.com/fkeegan/haindy.git
-cd haindy
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-2. Create a virtual environment:
+2. Install dependencies:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+.venv/bin/pip install -r requirements.lock
+.venv/bin/pip install -e ".[dev]"
 ```
 
-3. Install the package in development mode:
+3. Install Playwright runtime:
 ```bash
-pip install -e ".[dev]"
+.venv/bin/playwright install chromium
 ```
 
-4. Install Playwright browsers:
+4. Configure environment:
 ```bash
-playwright install chromium
+cp .env.example .env
 ```
 
-5. Set up pre-commit hooks:
+Minimum required settings:
+- `OPENAI_API_KEY` (used by orchestration)
+- `CU_PROVIDER=openai`, `CU_PROVIDER=google`, or `CU_PROVIDER=anthropic`
+
+Provider-specific:
+- OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (typically `computer-use-preview`)
+- Google computer-use: `GOOGLE_CU_MODEL` and Vertex credentials/settings (see `.env.example`)
+- Anthropic computer-use: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_CU_MODEL` (default `claude-sonnet-4-6`), optional `ANTHROPIC_CU_MAX_TOKENS` (default `16384`)
+
+## Run
+
+Plan and context files are both required:
 ```bash
-pre-commit install
+.venv/bin/python -m src.main --plan test_scenarios/wikipedia_search_simple.txt --context test_scenarios/wikipedia_search_simple.txt
 ```
 
-### Environment Configuration
-
-Create a `.env` file in the project root:
-```env
-OPENAI_API_KEY=your_api_key_here
-
-# Optional: override defaults globally
-OPENAI_MODEL=gpt-5
-OPENAI_TEMPERATURE=0.7
-OPENAI_REQUEST_TIMEOUT_SECONDS=900
-
-# Agent-specific overrides (recommended)
-HAINDY_TEST_PLANNER_MODEL=gpt-5
-HAINDY_TEST_PLANNER_REASONING_LEVEL=high
-HAINDY_TEST_PLANNER_TEMPERATURE=0.35
-
-HAINDY_TEST_RUNNER_MODEL=gpt-5
-HAINDY_TEST_RUNNER_REASONING_LEVEL=medium
-HAINDY_TEST_RUNNER_TEMPERATURE=0.55
-
-HAINDY_ACTION_AGENT_MODEL=gpt-5
-HAINDY_ACTION_AGENT_REASONING_LEVEL=low
-HAINDY_ACTION_AGENT_TEMPERATURE=0.25
-HAINDY_ACTION_AGENT_MODALITIES=text,vision
-```
-
-If the agent-specific variables are omitted, the system falls back to the global
-`OPENAI_MODEL`, `OPENAI_TEMPERATURE`, and `OPENAI_REQUEST_TIMEOUT_SECONDS`
-values. Override per agent to fine-tune cost vs. accuracy or adjust request timeouts
-for long-running GPT-5 reasoning calls.
-
-#### Computer Use (Gemini + Desktop) Configuration
-```env
-# Enable Computer Use tool execution
-HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
-
-# Choose provider (default: google)
-CU_PROVIDER=google
-GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
-VERTEX_API_KEY=your-vertex-api-key
-VERTEX_PROJECT=your-vertex-project
-VERTEX_LOCATION=us-central1
-CU_SAFETY_POLICY=auto_approve
-
-# Driver backend: playwright or desktop
-HAINDY_DRIVER_BACKEND=desktop
-```
-
-Desktop automation has OS-level dependencies (`ffmpeg`, `xrandr`, `/dev/uinput`, `xclip`).
-See `docs/RUNBOOK.md` for setup details.
-
-## Usage
-
-### Running Tests
-
-#### Document-based Testing
+Optional debug logging:
 ```bash
-# Extract test requirements from a document (PRD, design doc, etc.)
-python -m src.main --plan requirements.md
-
-# Short form
-python -m src.main -p requirements.md
-
-# With debug output for detailed logging
-python -m src.main --plan requirements.md --debug
-
-# Emit structured JSON logs (suitable for automation)
-python -m src.main --plan requirements.md --verbose
-
-# With URL specified in command (overrides URL in file)
-python -m src.main --plan requirements.md --url https://example.com
+.venv/bin/python -m src.main --plan <plan_file> --context <context_file> --debug
 ```
 
-#### Desktop + Gemini Quickstart
+## Developer checks
+
 ```bash
-export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
-export CU_PROVIDER=google
-export HAINDY_DRIVER_BACKEND=desktop
-python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
+.venv/bin/ruff check .
+.venv/bin/ruff format .
+.venv/bin/mypy src
+.venv/bin/pytest
 ```
-
-### Execution Options
-
-#### Berserk Mode
-```bash
-# Fully autonomous mode - no confirmations
-python -m src.main --berserk --plan requirements.pdf
-```
-
-#### Plan-Only Mode
-```bash
-# Generate test plan without executing
-python -m src.main --plan-only --plan test_scenarios/wikipedia_search_simple.txt
-```
-
-#### Browser Options
-```bash
-# Browser runs in headless mode by default
-python -m src.main --plan requirements.md
-
-# Force headless mode explicitly
-python -m src.main --plan requirements.md --headless
-
-# Note: To show browser window, you need to modify the .env file or settings:
-# Add to .env: BROWSER_HEADLESS=false
-# Or modify src/config/settings.py temporarily
-```
-
-### Output Options
-
-#### Report Formats
-```bash
-# HTML report (default)
-python -m src.main --plan requirements.md --format html
-
-# JSON report
-python -m src.main --plan requirements.md --format json
-
-# Markdown report
-python -m src.main --plan requirements.md --format markdown
-
-# Custom output directory
-python -m src.main --plan requirements.md --output custom_reports/
-```
-
-### Advanced Options
-
-#### Timeouts and Limits
-```bash
-# Set execution timeout (default: 7200 seconds)
-python -m src.main --plan requirements.md --timeout 3600
-
-# Set maximum steps (default: 50)
-python -m src.main --plan requirements.md --max-steps 100
-```
-
-### Utility Commands
-```bash
-# Test OpenAI API connection
-python -m src.main --test-api
-
-# Show version information
-python -m src.main --version
-
-# Display help with all options
-python -m src.main --help
-```
-
-### Example Requirement Files
-
-The repository includes sample requirement documents in `test_scenarios/`:
-
-- `wikipedia_search_simple.txt` - simple requirement prompt for a Wikipedia flow
-- `aubilities-bundles-fmc-admin.md` - longer-form scope document example
-
-### Reports and Output
-
-Test execution generates:
-- **HTML Report**: Detailed test report with screenshots and AI conversations
-- **Debug Logs**: Timestamped directory with all screenshots and interactions
-- **Model Logs + Trace**: `data/model_logs/model_calls.jsonl` and `data/traces/<run_id>.json`
-- **Caches**: task plan, execution replay, and desktop coordinate caches under `data/`
-- **Console Output**: Real-time progress and summary
-
-Reports are saved to:
-- Default: `reports/YYYYMMDD_HHMMSS/`
-- Custom: Use `--output` to specify directory
-
-Example report path:
-```
-reports/20250709_231324/test_report_9c16faf8-8ecf-415d-82e8-9bf894f3e0df_20250709_211551.html
-```
-
-### Development
-
-Run tests:
-```bash
-pytest
-```
-
-Run linting and formatting:
-```bash
-black src/ tests/
-isort src/ tests/
-mypy src/
-```
-
-### Project Structure
-
-```
-haindy/
-├── src/
-│   ├── agents/         # AI agent implementations
-│   ├── orchestration/  # Multi-agent coordination
-│   ├── browser/        # Browser automation layer
-│   ├── grid/          # Adaptive grid system
-│   ├── models/        # AI model interfaces
-│   ├── core/          # Core abstractions
-│   ├── error_handling/# Error recovery mechanisms
-│   ├── security/      # Security and rate limiting
-│   ├── monitoring/    # Logging and reporting
-│   └── config/        # Configuration management
-├── tests/             # Unit and integration tests
-├── test_scenarios/    # Example requirements documents
-├── data/             # Runtime data storage
-├── reports/          # Test execution reports
-└── docs/             # Documentation
-```
-
-## Contributing
-
-See [HAINDY_PLAN.md](docs/HAINDY_PLAN.md) for the detailed implementation plan and architecture.

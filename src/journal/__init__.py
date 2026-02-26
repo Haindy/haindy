@@ -2,6 +2,8 @@
 Execution journaling and scripted automation for HAINDY.
 """
 
+from src.journal.dual_mode_executor import DualModeExecutor
+from src.journal.manager import JournalManager
 from src.journal.models import (
     ActionRecord,
     ExecutionJournal,
@@ -10,18 +12,16 @@ from src.journal.models import (
     JournalEntry,
     PatternMatch,
     PatternType,
-    ScriptedCommand
+    ScriptedCommand,
 )
-from src.journal.manager import JournalManager
 from src.journal.pattern_matcher import PatternMatcher
 from src.journal.script_recorder import ScriptRecorder
-from src.journal.dual_mode_executor import DualModeExecutor
 
 __all__ = [
     "ActionRecord",
     "ExecutionJournal",
     "ExecutionMode",
-    "JournalActionResult", 
+    "JournalActionResult",
     "JournalEntry",
     "PatternMatch",
     "PatternType",
@@ -29,5 +29,5 @@ __all__ = [
     "JournalManager",
     "PatternMatcher",
     "ScriptRecorder",
-    "DualModeExecutor"
+    "DualModeExecutor",
 ]

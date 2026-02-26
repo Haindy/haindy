@@ -5,15 +5,14 @@ Logging configuration and utilities for the HAINDY framework.
 import json
 import logging
 import re
-import uuid
 import sys
+import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any
 
 from src.config.settings import get_settings
 from src.security.sanitizer import DataSanitizer
-
 
 STANDARD_LOG_RECORD_ATTRS = {
     "name",
@@ -41,7 +40,7 @@ STANDARD_LOG_RECORD_ATTRS = {
     "asctime",
 }
 
-_CURRENT_RUN_ID: Optional[str] = None
+_CURRENT_RUN_ID: str | None = None
 
 HUMAN_LOG_EXTRA_FIELD_ORDER = [
     "taskName",
@@ -86,7 +85,7 @@ class JSONFormatter(logging.Formatter):
         # Sanitize record if enabled
         if self.sanitize and self.sanitizer:
             record = self.sanitizer.sanitize_log_record(record)
-        
+
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
@@ -102,7 +101,10 @@ class JSONFormatter(logging.Formatter):
         # Get all attributes from the record
         # Add any extra fields that were passed
         for attr_name in dir(record):
-            if not attr_name.startswith('_') and attr_name not in STANDARD_LOG_RECORD_ATTRS:
+            if (
+                not attr_name.startswith("_")
+                and attr_name not in STANDARD_LOG_RECORD_ATTRS
+            ):
                 attr_value = getattr(record, attr_name, None)
                 if attr_value is not None and not callable(attr_value):
                     log_data[attr_name] = attr_value
@@ -120,13 +122,15 @@ class JSONFormatter(logging.Formatter):
 
 class SanitizingHandler(logging.Handler):
     """Log handler that sanitizes messages before passing to wrapped handler."""
-    
-    def __init__(self, handler: logging.Handler, sanitizer: Optional[DataSanitizer] = None):
+
+    def __init__(
+        self, handler: logging.Handler, sanitizer: DataSanitizer | None = None
+    ):
         super().__init__()
         self.handler = handler
         self.sanitizer = sanitizer or DataSanitizer()
         self.setLevel(handler.level)
-    
+
     def emit(self, record: logging.LogRecord) -> None:
         """Emit sanitized record to wrapped handler."""
         try:
@@ -174,8 +178,8 @@ class HumanReadableFormatter(logging.Formatter):
     def _iter_extra_fields(
         self,
         record: logging.LogRecord,
-        consumed: Optional[set[str]] = None,
-    ) -> Iterable[Tuple[str, str]]:
+        consumed: set[str] | None = None,
+    ) -> Iterable[tuple[str, str]]:
         seen = set(consumed or ())
 
         for field in HUMAN_LOG_EXTRA_FIELD_ORDER:
@@ -197,7 +201,7 @@ class HumanReadableFormatter(logging.Formatter):
             yield self._label_for(key), self._stringify(value)
 
     @staticmethod
-    def _resolve_component(record: logging.LogRecord) -> Tuple[Optional[str], Optional[str]]:
+    def _resolve_component(record: logging.LogRecord) -> tuple[str | None, str | None]:
         for candidate in ("component", "agent_name", "agent", "source"):
             value = getattr(record, candidate, None)
             if value:
@@ -235,9 +239,7 @@ class HumanReadableFormatter(logging.Formatter):
 class AgentLogAdapter(logging.LoggerAdapter):
     """Log adapter for agent-specific logging."""
 
-    def process(
-        self, msg: str, kwargs: Dict[str, Any]
-    ) -> tuple[str, Dict[str, Any]]:
+    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Add agent context to log records."""
         extra = kwargs.get("extra", {})
         extra.update(self.extra)
@@ -262,9 +264,9 @@ def get_run_id() -> str:
 
 
 def setup_logging(
-    log_level: Optional[str] = None,
-    log_format: Optional[str] = None,
-    log_file: Optional[str] = None,
+    log_level: str | None = None,
+    log_format: str | None = None,
+    log_file: str | None = None,
     sanitize_logs: bool = True,
 ) -> logging.Logger:
     """
@@ -275,7 +277,7 @@ def setup_logging(
         log_format: Log format 'json' or 'text' (defaults to settings)
         log_file: Optional log file path (defaults to settings)
         sanitize_logs: Whether to sanitize sensitive data in logs
-        
+
     Returns:
         Root logger instance
     """
@@ -306,11 +308,11 @@ def setup_logging(
         console_handler.setLevel(numeric_level)
     else:
         console_handler.setLevel(max(numeric_level, logging.INFO))
-    
+
     # Wrap with sanitizing handler if needed
     if sanitize_logs and format_type != "json":  # JSON formatter already sanitizes
         console_handler = SanitizingHandler(console_handler)
-    
+
     root_logger.addHandler(console_handler)
 
     # Configure file handler if specified
@@ -342,7 +344,7 @@ def setup_logging(
     if get_run_id() == "unknown":
         set_run_id(_generate_run_id())
     logger.info(
-        f"HAINDY logging initialized",
+        "HAINDY logging initialized",
         extra={
             "log_level": level,
             "log_format": format_type,
@@ -350,7 +352,7 @@ def setup_logging(
             "sanitize_logs": sanitize_logs,
         },
     )
-    
+
     return root_logger
 
 
@@ -376,8 +378,8 @@ def get_logger(name: str, **context: Any) -> logging.Logger:
 def log_test_event(
     event_type: str,
     test_id: str,
-    step_id: Optional[str] = None,
-    data: Optional[Dict[str, Any]] = None,
+    step_id: str | None = None,
+    data: dict[str, Any] | None = None,
 ) -> None:
     """
     Log a test execution event.
@@ -389,18 +391,18 @@ def log_test_event(
         data: Additional event data
     """
     logger = logging.getLogger("haindy.test_events")
-    
+
     extra = {
         "event_type": event_type,
         "test_id": test_id,
     }
-    
+
     if step_id:
         extra["step_id"] = step_id
-    
+
     if data:
         extra.update(data)
-    
+
     logger.info(f"Test event: {event_type}", extra=extra)
 
 
@@ -408,8 +410,8 @@ def log_agent_communication(
     from_agent: str,
     to_agent: str,
     message_type: str,
-    content: Dict[str, Any],
-    correlation_id: Optional[str] = None,
+    content: dict[str, Any],
+    correlation_id: str | None = None,
 ) -> None:
     """
     Log inter-agent communication.
@@ -422,17 +424,17 @@ def log_agent_communication(
         correlation_id: Optional correlation ID
     """
     logger = logging.getLogger("haindy.agent_communication")
-    
+
     extra = {
         "from_agent": from_agent,
         "to_agent": to_agent,
         "message_type": message_type,
         "content_summary": str(content)[:200],  # Truncate for logging
     }
-    
+
     if correlation_id:
         extra["correlation_id"] = correlation_id
-    
+
     logger.debug(
         f"Agent communication: {from_agent} -> {to_agent} ({message_type})",
         extra=extra,
@@ -443,7 +445,7 @@ def log_performance_metric(
     metric_name: str,
     value: float,
     unit: str = "ms",
-    context: Optional[Dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
 ) -> None:
     """
     Log a performance metric.
@@ -455,14 +457,14 @@ def log_performance_metric(
         context: Additional context
     """
     logger = logging.getLogger("haindy.performance")
-    
+
     extra = {
         "metric_name": metric_name,
         "value": value,
         "unit": unit,
     }
-    
+
     if context:
         extra.update(context)
-    
+
     logger.info(f"Performance metric: {metric_name}={value}{unit}", extra=extra)

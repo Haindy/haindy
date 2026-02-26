@@ -146,9 +146,7 @@ cython_debug/
 .DS_Store
 
 # Project specific
-data/*.png
-data/*.jpg
-data/*.jsonl
+data/
 reports/
 test_reports/
 test_plans/

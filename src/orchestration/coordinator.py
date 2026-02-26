@@ -4,35 +4,35 @@ Workflow coordinator for managing multi-agent test execution.
 
 import asyncio
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import UUID
 
 from src.agents import (
+    ActionAgent,
     ScopeTriageAgent,
+    SituationalAgent,
     TestPlannerAgent,
     TestRunner,
-    ActionAgent,
 )
-from src.browser.driver import BrowserDriver
+from src.config.settings import get_settings
+from src.core.interfaces import AutomationDriver
 from src.core.types import (
     AgentMessage,
     ScopeTriageResult,
     TestPlan,
     TestState,
-    TestStatus,
 )
-from src.orchestration.communication import MessageBus, MessageType
-from src.orchestration.state_manager import StateManager, StateTransition
 from src.monitoring.logger import get_logger
-from src.config.settings import get_settings
+from src.orchestration.communication import MessageBus, MessageType
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
+from src.orchestration.state_manager import StateManager, StateTransition
 
 logger = get_logger(__name__)
 
 
 class CoordinatorState(str, Enum):
     """States of the workflow coordinator."""
-    
+
     IDLE = "idle"
     PLANNING = "planning"
     EXECUTING = "executing"
@@ -44,48 +44,48 @@ class CoordinatorState(str, Enum):
 class WorkflowCoordinator:
     """
     Central coordinator for multi-agent test execution workflows.
-    
+
     Manages the overall test execution lifecycle, coordinates agents,
     and ensures smooth workflow progression.
     """
-    
+
     def __init__(
         self,
-        message_bus: Optional[MessageBus] = None,
-        state_manager: Optional[StateManager] = None,
-        browser_driver: Optional[BrowserDriver] = None,
-        max_steps: int = 50
+        message_bus: MessageBus | None = None,
+        state_manager: StateManager | None = None,
+        automation_driver: AutomationDriver | None = None,
+        max_steps: int = 50,
     ):
         """
         Initialize the workflow coordinator.
-        
+
         Args:
             message_bus: Message bus for agent communication
             state_manager: State manager for test execution
-            browser_driver: Browser driver for web automation
+            automation_driver: Browser driver for web automation
         """
         self.message_bus = message_bus or MessageBus()
         self.state_manager = state_manager or StateManager()
-        self.browser_driver = browser_driver
-        
+        self.automation_driver = automation_driver
+
         # Register the coordinator itself for message bus diagnostics
         self.message_bus.register_agent("coordinator")
-        
+
         # Agent instances
-        self._agents: Dict[str, Any] = {}
-        self._agent_tasks: Dict[str, asyncio.Task] = {}
-        
+        self._agents: dict[str, Any] = {}
+        self._agent_tasks: dict[str, asyncio.Task] = {}
+
         # Coordinator state
         self._state = CoordinatorState.IDLE
-        self._active_tests: Dict[UUID, asyncio.Task] = {}
-        self._plan_triage_results: Dict[UUID, ScopeTriageResult] = {}
-        
+        self._active_tests: dict[UUID, asyncio.Task] = {}
+        self._plan_triage_results: dict[UUID, ScopeTriageResult] = {}
+
         # Configuration
         self._max_concurrent_tests = 5
         self.max_steps = max_steps
-        
+
         logger.info("Workflow coordinator initialized")
-    
+
     async def initialize(self) -> None:
         """Initialize the coordinator and create agent instances."""
         logger.info("Initializing workflow coordinator")
@@ -95,6 +95,7 @@ class WorkflowCoordinator:
         planner_cfg = settings.get_agent_model_config("test_planner")
         runner_cfg = settings.get_agent_model_config("test_runner")
         action_cfg = settings.get_agent_model_config("action_agent")
+        situational_cfg = settings.get_agent_model_config("situational_agent")
 
         # Create agents
         self._agents = {
@@ -114,7 +115,7 @@ class WorkflowCoordinator:
             ),
             "test_runner": TestRunner(
                 name="TestRunner",
-                browser_driver=self.browser_driver,
+                automation_driver=self.automation_driver,
                 model=runner_cfg.model,
                 temperature=runner_cfg.temperature,
                 reasoning_level=runner_cfg.reasoning_level,
@@ -122,85 +123,86 @@ class WorkflowCoordinator:
             ),
             "action_agent": ActionAgent(
                 name="ActionAgent",
-                browser_driver=self.browser_driver,
+                automation_driver=self.automation_driver,
                 model=action_cfg.model,
                 temperature=action_cfg.temperature,
                 reasoning_level=action_cfg.reasoning_level,
                 modalities=action_cfg.modalities,
-            )
+            ),
+            "situational_agent": SituationalAgent(
+                name="SituationalAgent",
+                model=situational_cfg.model,
+                temperature=situational_cfg.temperature,
+                reasoning_level=situational_cfg.reasoning_level,
+                modalities=situational_cfg.modalities,
+            ),
         }
-        
+
         # Set up test runner dependencies
         if "test_runner" in self._agents:
             self._agents["test_runner"].action_agent = self._agents["action_agent"]
-        
+
         # Register agents with message bus
         for agent_name, agent in self._agents.items():
             self.message_bus.register_agent(agent_name)
-            
+
             # Subscribe to relevant messages
             await self._setup_agent_subscriptions(agent_name, agent)
-        
+
         # Register state callbacks
         self.state_manager.register_state_callback(self._on_state_change)
-        
+
         self._state = CoordinatorState.IDLE
         logger.info("Workflow coordinator initialized successfully")
-    
+
     async def _setup_agent_subscriptions(self, agent_name: str, agent: Any) -> None:
         """Set up message subscriptions for an agent."""
         if agent_name == "test_planner":
             self.message_bus.subscribe(
-                MessageType.PLAN_TEST,
-                self._handle_plan_request,
-                agent_name
+                MessageType.PLAN_TEST, self._handle_plan_request, agent_name
             )
-        
+
         elif agent_name == "test_runner":
             self.message_bus.subscribe(
-                MessageType.EXECUTE_STEP,
-                self._handle_execute_step,
-                agent_name
+                MessageType.EXECUTE_STEP, self._handle_execute_step, agent_name
             )
-        
+
         elif agent_name == "action_agent":
             self.message_bus.subscribe(
-                MessageType.DETERMINE_ACTION,
-                self._handle_determine_action,
-                agent_name
+                MessageType.DETERMINE_ACTION, self._handle_determine_action, agent_name
             )
-        
+
         # Evaluator agent removed - evaluation now handled by Action Agent
-    
+
     async def execute_test_from_requirements(
         self,
         requirements: str,
-        initial_url: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        precomputed_plan: Optional[TestPlan] = None,
-        triage_result: Optional[ScopeTriageResult] = None,
+        initial_url: str | None = None,
+        context: dict[str, Any] | None = None,
+        precomputed_plan: TestPlan | None = None,
+        triage_result: ScopeTriageResult | None = None,
     ) -> TestState:
         """
         Execute a test from high-level requirements.
-        
+
         Args:
             requirements: Natural language test requirements
             initial_url: Optional starting URL
             context: Optional execution context
             precomputed_plan: Optional pre-generated test plan to execute
             triage_result: Optional triage outcome associated with the plan
-            
+
         Returns:
             Final test state
         """
         logger.info("Starting test execution from requirements")
-        
+
         # Check concurrent test limit
         if len(self._active_tests) >= self._max_concurrent_tests:
             raise RuntimeError(
                 f"Maximum concurrent tests ({self._max_concurrent_tests}) reached"
             )
-        
+
         try:
             # Phase 1: Generate test plan
             self._state = CoordinatorState.PLANNING
@@ -222,53 +224,47 @@ class WorkflowCoordinator:
                     requirements,
                     context,
                 )
-            
+
             # Phase 2: Initialize test state
-            test_state = await self.state_manager.create_test_state(
-                test_plan,
-                context
-            )
-            
+            test_state = await self.state_manager.create_test_state(test_plan, context)
+
             # Phase 3: Execute test
             self._state = CoordinatorState.EXECUTING
-            final_state = await self._execute_test_plan(
-                test_state, 
-                initial_url
-            )
-            
+            final_state = await self._execute_test_plan(test_state, initial_url)
+
             self._state = CoordinatorState.COMPLETED
             return final_state
-            
+
         except Exception as e:
             logger.error(f"Test execution failed: {e}")
             self._state = CoordinatorState.ERROR
             raise
-    
+
     async def _generate_test_plan(
         self,
         requirements: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[TestPlan, ScopeTriageResult]:
+        context: dict[str, Any] | None = None,
+    ) -> tuple[TestPlan, ScopeTriageResult]:
         """Generate test plan using Test Planner agent."""
         logger.info("Generating test plan from requirements")
-        
+
         triage_agent = self._agents.get("scope_triage")
         planner = self._agents.get("test_planner")
         if not triage_agent:
             raise RuntimeError("Scope Triage agent not available")
         if not planner:
             raise RuntimeError("Test Planner agent not available")
-        
+
         # Send plan request
         message = AgentMessage(
             from_agent="coordinator",
             to_agent="test_planner",
             message_type=MessageType.PLAN_TEST,
-            content={"requirements": requirements}
+            content={"requirements": requirements},
         )
-        
+
         await self.message_bus.publish(message)
-        
+
         # Create test plan via two-pass flow
         test_plan, triage_result = await run_scope_triage_and_plan(
             requirements=requirements,
@@ -279,161 +275,148 @@ class WorkflowCoordinator:
 
         # Store triage result for downstream consumption
         self._plan_triage_results[test_plan.plan_id] = triage_result
-        
+
         # Notify plan created
         await self.message_bus.publish(
             AgentMessage(
                 from_agent="test_planner",
                 to_agent="broadcast",
                 message_type=MessageType.PLAN_CREATED,
-                content={"test_plan": test_plan.model_dump()}
+                content={"test_plan": test_plan.model_dump()},
             )
         )
-        
+
         return test_plan, triage_result
-    
+
     async def _execute_test_plan(
-        self,
-        test_state: TestState,
-        initial_url: Optional[str] = None
+        self, test_state: TestState, initial_url: str | None = None
     ) -> TestState:
         """Execute test plan using Test Runner agent."""
         logger.info(f"Executing test plan: {test_state.test_plan.name}")
-        
+
         runner = self._agents.get("test_runner")
         if not runner:
             raise RuntimeError("Test Runner agent not available")
-        
+
         # Create execution task
         test_task = asyncio.create_task(
             runner.execute_test_plan(test_state, initial_url)
         )
-        
+
         # Track active test
         self._active_tests[test_state.test_plan.plan_id] = test_task
-        
+
         try:
             # Wait for completion
             final_state = await test_task
-            
+
             return final_state
-            
+
         except asyncio.TimeoutError:
             logger.error("Test execution timed out")
             test_task.cancel()
-            
+
             # Update state to failed
             await self.state_manager.update_test_state(
                 test_state.test_plan.plan_id,
                 StateTransition.ABORT,
-                {"reason": "timeout"}
+                {"reason": "timeout"},
             )
-            
+
             raise
-            
+
         finally:
             # Remove from active tests
             self._active_tests.pop(test_state.test_plan.plan_id, None)
-    
+
     async def pause_test(self, test_id: UUID) -> None:
         """Pause an executing test."""
         logger.info(f"Pausing test: {test_id}")
-        
+
         # Update state
-        await self.state_manager.update_test_state(
-            test_id,
-            StateTransition.PAUSE
-        )
-        
+        await self.state_manager.update_test_state(test_id, StateTransition.PAUSE)
+
         # Send pause message
         await self.message_bus.publish(
             AgentMessage(
                 from_agent="coordinator",
                 to_agent="test_runner",
                 message_type=MessageType.PAUSE_TEST,
-                content={"test_id": str(test_id)}
+                content={"test_id": str(test_id)},
             )
         )
-    
+
     async def resume_test(self, test_id: UUID) -> None:
         """Resume a paused test."""
         logger.info(f"Resuming test: {test_id}")
-        
+
         # Update state
-        await self.state_manager.update_test_state(
-            test_id,
-            StateTransition.RESUME
-        )
-        
+        await self.state_manager.update_test_state(test_id, StateTransition.RESUME)
+
         # Send resume message
         await self.message_bus.publish(
             AgentMessage(
                 from_agent="coordinator",
                 to_agent="test_runner",
                 message_type=MessageType.RESUME_TEST,
-                content={"test_id": str(test_id)}
+                content={"test_id": str(test_id)},
             )
         )
-    
+
     async def stop_test(self, test_id: UUID) -> None:
         """Stop an executing test."""
         logger.info(f"Stopping test: {test_id}")
-        
+
         # Cancel test task if running
         test_task = self._active_tests.get(test_id)
         if test_task and not test_task.done():
             test_task.cancel()
-        
+
         # Remove from active tests
         self._active_tests.pop(test_id, None)
-        
+
         # Update state
         await self.state_manager.update_test_state(
-            test_id,
-            StateTransition.ABORT,
-            {"reason": "user_requested"}
+            test_id, StateTransition.ABORT, {"reason": "user_requested"}
         )
-        
+
         # Send stop message
         await self.message_bus.publish(
             AgentMessage(
                 from_agent="coordinator",
                 to_agent="broadcast",
                 message_type=MessageType.STOP_TEST,
-                content={"test_id": str(test_id)}
+                content={"test_id": str(test_id)},
             )
         )
-    
+
     async def _handle_plan_request(self, message: AgentMessage) -> None:
         """Handle test plan request."""
         logger.debug("Handling plan request")
         # Implementation handled by direct agent call
         pass
-    
+
     async def _handle_execute_step(self, message: AgentMessage) -> None:
         """Handle step execution request."""
         logger.debug("Handling execute step")
         # Implementation handled by Test Runner
         pass
-    
+
     async def _handle_determine_action(self, message: AgentMessage) -> None:
         """Handle action determination request."""
         logger.debug("Handling determine action")
         # Implementation handled by Action Agent
         pass
-    
+
     async def _on_state_change(
-        self,
-        test_id: UUID,
-        test_state: TestState,
-        transition: StateTransition
+        self, test_id: UUID, test_state: TestState, transition: StateTransition
     ) -> None:
         """Handle test state changes."""
         logger.info(
             f"Test state changed: {test_id} - {transition}",
-            extra={"status": test_state.status}
+            extra={"status": test_state.status},
         )
-        
+
         # Broadcast state change
         await self.message_bus.publish(
             AgentMessage(
@@ -443,45 +426,52 @@ class WorkflowCoordinator:
                 content={
                     "test_id": str(test_id),
                     "status": test_state.status,
-                    "transition": transition
-                }
+                    "transition": transition,
+                },
             )
         )
-    
-    def get_active_tests(self) -> List[UUID]:
+
+    def get_active_tests(self) -> list[UUID]:
         """Get list of active test IDs."""
         return list(self._active_tests.keys())
 
-    def get_scope_triage_result(self, plan_id: UUID) -> Optional[ScopeTriageResult]:
+    def get_action_agent(self) -> ActionAgent | None:
+        """Get the initialized ActionAgent instance, if available."""
+        agent = self._agents.get("action_agent")
+        if isinstance(agent, ActionAgent):
+            return agent
+        return None
+
+    def get_scope_triage_result(self, plan_id: UUID) -> ScopeTriageResult | None:
         """Retrieve the stored scope triage result for a generated plan."""
         return self._plan_triage_results.get(plan_id)
-    
-    async def get_test_progress(self, test_id: UUID) -> Dict[str, Any]:
+
+    async def get_test_progress(self, test_id: UUID) -> dict[str, Any]:
         """Get progress for a specific test."""
         return await self.state_manager.get_test_progress(test_id)
-    
-    def get_coordinator_state(self) -> Dict[str, Any]:
+
+    def get_coordinator_state(self) -> dict[str, Any]:
         """Get current coordinator state."""
         return {
             "state": self._state,
             "active_tests": len(self._active_tests),
             "agents": list(self._agents.keys()),
-            "message_stats": self.message_bus.get_statistics()
+            "message_stats": self.message_bus.get_statistics(),
         }
-    
+
     async def generate_test_plan(self, requirements: str) -> TestPlan:
         """
         Generate a test plan from requirements without executing.
-        
+
         Args:
             requirements: Natural language test requirements
-            
+
         Returns:
             Generated test plan
         """
         logger.info("Generating test plan from requirements")
         self._state = CoordinatorState.PLANNING
-        
+
         try:
             # Generate test plan using the planner agent
             test_plan, _ = await self._generate_test_plan(requirements)
@@ -491,35 +481,32 @@ class WorkflowCoordinator:
             self._state = CoordinatorState.ERROR
             logger.error(f"Failed to generate test plan: {e}")
             raise
-    
+
     async def cleanup(self) -> None:
         """Alias for shutdown for compatibility."""
         await self.shutdown()
-    
+
     async def shutdown(self) -> None:
         """Shutdown the coordinator and cleanup resources."""
         logger.info("Shutting down workflow coordinator")
-        
+
         # Cancel all active tests
         for test_id, task in self._active_tests.items():
             if not task.done():
                 logger.warning(f"Cancelling active test: {test_id}")
                 task.cancel()
-        
+
         # Wait for tasks to complete
         if self._active_tests:
-            await asyncio.gather(
-                *self._active_tests.values(),
-                return_exceptions=True
-            )
-        
+            await asyncio.gather(*self._active_tests.values(), return_exceptions=True)
+
         # Clear active tests
         self._active_tests.clear()
-        
+
         # Shutdown components
         await self.message_bus.shutdown()
         await self.state_manager.shutdown()
         self._plan_triage_results.clear()
-        
+
         self._state = CoordinatorState.IDLE
         logger.info("Workflow coordinator shutdown complete")

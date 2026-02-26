@@ -2,15 +2,15 @@
 Tests for the Computer Use session orchestration.
 """
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.computer_use import ComputerUseSession
 import src.agents.computer_use.session as cu_session_module
+from src.agents.computer_use import ComputerUseExecutionError, ComputerUseSession
 from src.agents.computer_use.session import ComputerUseSessionResult
+from src.core.enhanced_types import ComputerToolTurn
 
 
 class DummyResponse:
@@ -39,7 +39,12 @@ def session_settings(tmp_path):
         scroll_default_magnitude=450,
         scroll_max_magnitude=600,
         cu_provider="openai",
+        computer_use_model="computer-use-preview",
         google_cu_model="gemini-2.5-computer-use-preview-10-2025",
+        anthropic_api_key="",
+        anthropic_cu_model="claude-sonnet-4-6",
+        anthropic_cu_beta="computer-use-2025-11-24",
+        anthropic_cu_max_tokens=16384,
         vertex_api_key="",
         vertex_project="",
         vertex_location="us-central1",
@@ -101,7 +106,10 @@ async def test_computer_use_session_executes_actions_successfully(
                     "type": "message",
                     "role": "assistant",
                     "content": [
-                        {"type": "output_text", "text": "Action completed successfully."}
+                        {
+                            "type": "output_text",
+                            "text": "Action completed successfully.",
+                        }
                     ],
                 }
             ],
@@ -112,7 +120,7 @@ async def test_computer_use_session_executes_actions_successfully(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -167,7 +175,10 @@ async def test_computer_use_session_blocks_actions_in_observe_mode(
                     "type": "message",
                     "role": "assistant",
                     "content": [
-                        {"type": "output_text", "text": "Policy rejection acknowledged."}
+                        {
+                            "type": "output_text",
+                            "text": "Policy rejection acknowledged.",
+                        }
                     ],
                 }
             ],
@@ -178,7 +189,7 @@ async def test_computer_use_session_blocks_actions_in_observe_mode(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -237,7 +248,7 @@ async def test_computer_use_session_fail_fast_on_safety(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -301,7 +312,7 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -314,6 +325,96 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
     assert result.safety_events == []
     assert result.terminal_status == "success"
     mock_browser.click.assert_awaited_once_with(11, 22, button="left", click_count=1)
+    assert result.actions[0].acknowledged is True
+    assert result.actions[0].metadata.get("acknowledged_safety_checks") == [
+        {
+            "id": "sc1",
+            "code": "review_required",
+            "message": "Safety review requested.",
+        }
+    ]
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
+        {
+            "id": "sc1",
+            "code": "review_required",
+            "message": "Safety review requested.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_safety_auto_approve_with_override_when_fail_fast_enabled(
+    mock_client, mock_browser, session_settings
+):
+    """Safety auto-approve override should acknowledge checks even with fail-fast enabled."""
+    session_settings.actions_computer_tool_fail_fast_on_safety = True
+    session_settings.cu_safety_policy = "auto_approve"
+
+    first_response = DummyResponse(
+        {
+            "id": "resp_safe_override_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "call_safe_override",
+                    "action": {"type": "click", "x": 13, "y": 24},
+                    "pending_safety_checks": [
+                        {
+                            "id": "sc_override",
+                            "code": "review_required",
+                            "message": "Approval override required.",
+                        }
+                    ],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    second_response = DummyResponse(
+        {
+            "id": "resp_safe_override_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Done with override."}],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [first_response, second_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+    result = await session.run(
+        goal="Click continue with override.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 7, "allow_safety_auto_approve": True},
+    )
+
+    assert result.terminal_status == "success"
+    mock_browser.click.assert_awaited_once_with(13, 24, button="left", click_count=1)
+    assert result.actions[0].acknowledged is True
+    assert result.actions[0].metadata.get("acknowledged_safety_checks") == [
+        {
+            "id": "sc_override",
+            "code": "review_required",
+            "message": "Approval override required.",
+        }
+    ]
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
+        {
+            "id": "sc_override",
+            "code": "review_required",
+            "message": "Approval override required.",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -326,7 +427,7 @@ async def test_computer_use_session_per_call_fallback_is_not_sticky(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
         provider="google",
@@ -396,7 +497,7 @@ async def test_computer_use_session_marks_terminal_failure_on_max_turns(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -455,7 +556,7 @@ async def test_computer_use_session_enforces_domain_allowlist(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -513,7 +614,7 @@ async def test_computer_use_session_records_execution_failure(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         debug_logger=None,
     )
@@ -532,6 +633,228 @@ async def test_computer_use_session_records_execution_failure(
     assert mock_client.responses.create.await_count == 2
 
 
+@pytest.mark.asyncio
+async def test_computer_use_session_anthropic_provider_executes_action(
+    mock_client, mock_browser, session_settings
+):
+    """Anthropic provider should execute translated computer actions via the driver."""
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "test-key"
+
+    initial_response = DummyResponse(
+        {
+            "id": "msg_1",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "computer",
+                    "input": {"action": "left_click", "coordinate": [250, 180]},
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "msg_2",
+            "content": [{"type": "text", "text": "Action completed successfully."}],
+        }
+    )
+    create = AsyncMock(side_effect=[initial_response, final_response])
+    anthropic_client = SimpleNamespace(
+        beta=SimpleNamespace(messages=SimpleNamespace(create=create))
+    )
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="anthropic",
+        anthropic_client=anthropic_client,
+        debug_logger=None,
+    )
+    result = await session.run(
+        goal="Click the primary action button.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 1},
+    )
+
+    assert len(result.actions) == 1
+    assert result.actions[0].action_type == "click"
+    assert result.actions[0].status == "executed"
+    assert result.final_output == "Action completed successfully."
+    mock_browser.click.assert_awaited_once_with(250, 180, button="left", click_count=1)
+    assert create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_anthropic_failure_does_not_fallback_to_openai(
+    mock_client, mock_browser, session_settings
+):
+    """Anthropic provider failures should be explicit and never fallback to OpenAI."""
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "test-key"
+    create = AsyncMock(side_effect=RuntimeError("anthropic failed"))
+    anthropic_client = SimpleNamespace(
+        beta=SimpleNamespace(messages=SimpleNamespace(create=create))
+    )
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="anthropic",
+        anthropic_client=anthropic_client,
+        debug_logger=None,
+    )
+    session._run_openai = AsyncMock()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="anthropic failed"):
+        await session.run(
+            goal="Do something",
+            initial_screenshot=b"initial",
+            metadata={"step_number": 1},
+        )
+
+    session._run_openai.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+def test_computer_use_session_anthropic_client_uses_api_key(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Anthropic client should initialize with ANTHROPIC_API_KEY."""
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "anthropic-key"
+
+    client_factory = MagicMock(return_value=object())
+    monkeypatch.setattr(cu_session_module, "_AsyncAnthropic", client_factory)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="anthropic",
+        debug_logger=None,
+    )
+    session._ensure_anthropic_client()
+
+    client_factory.assert_called_once_with(api_key="anthropic-key")
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_anthropic_requires_api_key(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Anthropic provider should fail fast when API key is missing."""
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = ""
+    monkeypatch.setattr(cu_session_module, "_AsyncAnthropic", MagicMock())
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="anthropic",
+        debug_logger=None,
+    )
+
+    with pytest.raises(
+        ComputerUseExecutionError,
+        match="Anthropic CU provider requires ANTHROPIC_API_KEY",
+    ):
+        await session.run(
+            goal="Observe",
+            initial_screenshot=b"initial_png_bytes",
+            metadata={"step_number": 1},
+        )
+
+
+@pytest.mark.asyncio
+async def test_anthropic_error_tool_result_uses_text_only_content(
+    mock_client, mock_browser, session_settings
+):
+    """Anthropic rejects is_error tool_result blocks that include non-text content."""
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "test-key"
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+        debug_logger=None,
+    )
+
+    failed_turn = ComputerToolTurn(
+        call_id="toolu_error_1",
+        action_type="click",
+        parameters={"type": "click"},
+        response_id="msg_1",
+        pending_safety_checks=[],
+        status="failed",
+        error_message="click failed",
+    )
+
+    payload, _ = await session._build_anthropic_follow_up_request(
+        history_messages=[
+            {"role": "user", "content": [{"type": "text", "text": "go"}]}
+        ],
+        previous_response={"content": []},
+        turns=[failed_turn],
+        model="claude-sonnet-4-6",
+    )
+
+    tool_result = payload["messages"][-1]["content"][0]
+    assert tool_result["type"] == "tool_result"
+    assert tool_result.get("is_error") is True
+    assert all(part.get("type") == "text" for part in tool_result["content"])
+    assert payload["max_tokens"] == 16384
+
+
+@pytest.mark.asyncio
+async def test_openai_computer_use_calls_do_not_pass_request_timeout(
+    mock_client, mock_browser, session_settings
+):
+    """OpenAI CU requests should rely on provider/client defaults for timeouts."""
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="openai",
+        debug_logger=None,
+    )
+
+    payload = {"model": "computer-use-preview", "input": "hello"}
+    await session._create_response(payload)
+
+    mock_client.responses.create.assert_awaited_once_with(**payload)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_computer_use_calls_do_not_pass_request_timeout(
+    mock_client, mock_browser, session_settings
+):
+    """Anthropic CU requests should rely on provider/client defaults for timeouts."""
+    create = AsyncMock(return_value=DummyResponse({"id": "msg_1", "content": []}))
+    anthropic_client = SimpleNamespace(
+        beta=SimpleNamespace(messages=SimpleNamespace(create=create))
+    )
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="anthropic",
+        anthropic_client=anthropic_client,
+        debug_logger=None,
+    )
+
+    payload = {"model": "claude-sonnet-4-6", "messages": []}
+    await session._create_anthropic_response(payload)
+
+    create.assert_awaited_once_with(**payload)
+
+
 def test_computer_use_session_google_client_uses_vertex_project_location(
     mock_client, mock_browser, session_settings, monkeypatch
 ):
@@ -547,7 +870,36 @@ def test_computer_use_session_google_client_uses_vertex_project_location(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        debug_logger=None,
+    )
+    session._ensure_google_client()
+
+    client_factory.assert_called_once_with(
+        vertexai=True,
+        project="demo-project",
+        location="us-east5",
+    )
+
+
+def test_computer_use_session_google_client_ignores_api_key_in_vertex_mode(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google client should ignore API key when Vertex project/location mode is used."""
+    session_settings.cu_provider = "google"
+    session_settings.vertex_project = "demo-project"
+    session_settings.vertex_location = "us-east5"
+    session_settings.vertex_api_key = "vertex-key"
+    client_factory = MagicMock(return_value=object())
+    monkeypatch.setattr(
+        cu_session_module, "genai", SimpleNamespace(Client=client_factory)
+    )
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
         settings=session_settings,
         provider="google",
         debug_logger=None,
@@ -575,7 +927,7 @@ def test_computer_use_session_google_client_uses_api_key_mode(
 
     session = ComputerUseSession(
         client=mock_client,
-        browser=mock_browser,
+        automation_driver=mock_browser,
         settings=session_settings,
         provider="google",
         debug_logger=None,

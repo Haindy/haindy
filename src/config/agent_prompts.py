@@ -109,6 +109,46 @@ Formatting rules:
 - IMPORTANT: Always respond with valid json using exactly the keys shown above.
 """
 
+SITUATIONAL_SYSTEM_PROMPT = """You are the Situational Setup Specialist for HAINDY.
+
+You analyze a plain-text execution context and decide whether the run can start safely.
+
+Return strict JSON with these keys:
+{
+  "target_type": "web|desktop_app",
+  "sufficient": true|false,
+  "missing_items": ["..."],
+  "setup": {
+    "web_url": "<url or empty>",
+    "app_name": "<window/app name or empty>",
+    "launch_command": "<shell command or empty>",
+    "maximize": true|false
+  },
+  "entry_actions": [
+    {
+      "action_type": "navigate|click|type|key_press|assert|skip_navigation",
+      "description": "<human-readable action>",
+      "target": "<target or empty>",
+      "value": "<value or empty>",
+      "expected_outcome": "<observable outcome>",
+      "computer_use_prompt": "<final directive for computer-use model>"
+    }
+  ],
+  "notes": ["..."]
+}
+
+Rules:
+- Prefer practical, minimal assumptions.
+- If target is web, web_url is required.
+- For desktop_app, do NOT require deterministic identifiers such as exact window title, task-switcher label, WM_CLASS, or process name.
+- Do NOT require or suggest programmatic OS/window controls (wmctrl, xdotool, direct maximize/focus APIs).
+- Entrypoint must be represented as visual `entry_actions` that the Action Agent can execute on the visible desktop.
+- Keep `entry_actions` short and goal-oriented (usually 1-3 actions).
+- Treat maximize as true by default unless the context clearly says not to maximize.
+- Keep missing_items specific and actionable.
+- Respond with valid JSON only.
+"""
+
 TEST_PLANNER_EXAMPLES = [
     {
         "requirement": "Test the login functionality for a web application",
@@ -117,7 +157,7 @@ TEST_PLANNER_EXAMPLES = [
             "description": "Verify that users can successfully log in to the application with valid credentials",
             "prerequisites": [
                 "Test user account exists with known credentials",
-                "Application is accessible at the login page"
+                "Application is accessible at the login page",
             ],
             "steps": [
                 {
@@ -125,48 +165,48 @@ TEST_PLANNER_EXAMPLES = [
                     "action": "Navigate to the login page",
                     "expected_result": "Login page loads with username and password fields visible",
                     "depends_on": [],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 2,
                     "action": "Enter valid username in the username field",
                     "expected_result": "Username is entered and visible in the field",
                     "depends_on": [1],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 3,
                     "action": "Enter valid password in the password field",
                     "expected_result": "Password is entered (masked) in the field",
                     "depends_on": [1],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 4,
                     "action": "Click the 'Login' button",
                     "expected_result": "Login process initiates, loading indicator may appear",
                     "depends_on": [2, 3],
-                    "is_critical": True
+                    "is_critical": True,
                 },
                 {
                     "step_number": 5,
                     "action": "Wait for login to complete",
                     "expected_result": "User is redirected to dashboard/home page with user info displayed",
                     "depends_on": [4],
-                    "is_critical": True
-                }
+                    "is_critical": True,
+                },
             ],
             "success_criteria": [
                 "User successfully logs in with valid credentials",
                 "User is redirected to the appropriate landing page",
-                "User session is established"
+                "User session is established",
             ],
             "edge_cases": [
                 "Invalid username/password combination",
                 "Empty username or password fields",
-                "Account locked after multiple failed attempts"
-            ]
-        }
+                "Account locked after multiple failed attempts",
+            ],
+        },
     }
 ]
 
@@ -206,27 +246,27 @@ When executing steps:
 4. Don't just execute literally - adapt intelligently to achieve the test's purpose"""
 
 # Action Agent Prompts
-ACTION_AGENT_SYSTEM_PROMPT = """You are a Visual Interaction Specialist AI agent responsible for converting visual screenshots and instructions into precise grid coordinates.
+ACTION_AGENT_SYSTEM_PROMPT = """You are a Visual Interaction Specialist AI agent for desktop computer-use execution.
 
 Your role is to:
-1. Analyze screenshots with grid overlay
+1. Analyze raw screenshots directly (no synthetic overlays)
 2. Identify UI elements mentioned in instructions
-3. Determine precise grid coordinates for interactions
+3. Determine precise interaction targets and actions
 4. Assess confidence in element identification
-5. Suggest refinement when confidence is low
+5. Suggest alternate interaction strategies when confidence is low
 
 Guidelines:
-- Use the 60x60 grid system (A1 to BH60)
-- Provide offset within cells when precision is needed (0.0-1.0)
+- Use provider-neutral target descriptions
+- Include pixel coordinates only when visually inferable
 - Consider element boundaries and click targets
-- Request refinement for ambiguous cases
+- Prefer reliable interactions over brittle assumptions
 - Prioritize accuracy over speed"""
 
 
 # Prompt Templates
 class PromptTemplates:
     """Reusable prompt templates for agents."""
-    
+
     @staticmethod
     def test_plan_refinement(current_plan: str, feedback: str) -> str:
         """Template for refining an existing test plan."""
@@ -237,20 +277,22 @@ Feedback/Additional Requirements:
 {feedback}
 
 Please provide an updated test plan that addresses the feedback while maintaining the same JSON format."""
-    
+
     @staticmethod
-    def action_identification(instruction: str, confidence_threshold: float = 0.8) -> str:
+    def action_identification(
+        instruction: str, confidence_threshold: float = 0.8
+    ) -> str:
         """Template for action identification from screenshot."""
         return f"""Instruction: {instruction}
 
-Analyze the screenshot with grid overlay and identify:
-1. The target element location (grid cell)
-2. Precise offset within the cell if needed (0.0-1.0 for x,y)
+Analyze the screenshot and identify:
+1. The target element description and intended action target
+2. Approximate pixel coordinates if inferable (x, y)
 3. Confidence score (0.0-1.0)
-4. Whether refinement is recommended (if confidence < {confidence_threshold})
+4. Whether an alternate strategy is recommended (if confidence < {confidence_threshold})
 
 Provide response in JSON format."""
-    
+
     @staticmethod
     def result_evaluation(expected_outcome: str) -> str:
         """Template for evaluating test results."""

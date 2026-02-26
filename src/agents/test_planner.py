@@ -4,14 +4,19 @@ Analyzes requirements/PRDs and creates structured test plans.
 """
 
 import inspect
+import re
 from pathlib import Path
-from typing import Dict, List, Optional
-from uuid import UUID
 
 from src.agents.base_agent import BaseAgent
 from src.agents.formatters import TestPlanFormatter
 from src.config.agent_prompts import TEST_PLANNER_SYSTEM_PROMPT
-from src.core.types import ActionInstruction, ActionType, TestCase, TestCasePriority, TestPlan, TestStep, StepIntent
+from src.core.types import (
+    StepIntent,
+    TestCase,
+    TestCasePriority,
+    TestPlan,
+    TestStep,
+)
 from src.models.openai_client import ResponseStreamObserver
 from src.monitoring.logger import get_logger
 
@@ -21,22 +26,24 @@ logger = get_logger(__name__)
 class TestPlannerAgent(BaseAgent):
     """
     AI agent that analyzes requirements and creates structured test plans.
-    
+
     This agent takes high-level requirements or PRDs and transforms them
     into detailed, executable test plans with clear steps and expected outcomes.
     """
-    
+
+    __test__ = False
+
     def __init__(self, name: str = "TestPlanner", **kwargs):
         """Initialize the Test Planner Agent."""
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_PLANNER_SYSTEM_PROMPT
-    
+
     async def _get_completion(
         self,
-        messages: List[Dict[str, str]],
-        stream_observer: Optional[ResponseStreamObserver] = None,
+        messages: list[dict[str, str]],
+        stream_observer: ResponseStreamObserver | None = None,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """Get completion from OpenAI."""
         response = await self.call_openai(
             messages=messages,
@@ -63,10 +70,10 @@ class TestPlannerAgent(BaseAgent):
     async def create_test_plan(
         self,
         requirements: str,
-        context: Optional[Dict] = None,
-        curated_scope: Optional[str] = None,
-        ambiguous_points: Optional[List[str]] = None,
-        stream_observer: Optional[ResponseStreamObserver] = None,
+        context: dict | None = None,
+        curated_scope: str | None = None,
+        ambiguous_points: list[str] | None = None,
+        stream_observer: ResponseStreamObserver | None = None,
     ) -> TestPlan:
         """
         Create a structured test plan from requirements.
@@ -75,15 +82,18 @@ class TestPlannerAgent(BaseAgent):
             requirements: High-level requirements, user story, or PRD
             context: Optional context about the application or domain
             stream_observer: Optional observer for streaming updates
-            
+
         Returns:
             TestPlan: Structured test plan with steps and expected outcomes
         """
-        logger.info("Creating test plan from requirements", extra={
-            "requirements_length": len(requirements),
-            "has_context": context is not None
-        })
-        
+        logger.info(
+            "Creating test plan from requirements",
+            extra={
+                "requirements_length": len(requirements),
+                "has_context": context is not None,
+            },
+        )
+
         # Build the user message
         user_message = self._build_requirements_message(
             requirements=requirements,
@@ -91,13 +101,13 @@ class TestPlannerAgent(BaseAgent):
             curated_scope=curated_scope,
             ambiguous_points=ambiguous_points,
         )
-        
+
         # Build messages with system prompt
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": user_message},
         ]
-        
+
         # Get test plan from AI
         response = await self._get_completion(
             messages=messages,
@@ -120,27 +130,30 @@ class TestPlannerAgent(BaseAgent):
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", 0)
 
-        logger.info("Test plan created successfully", extra={
-            "plan_name": test_plan.name,
-            "num_test_cases": len(test_plan.test_cases),
-            "total_steps": total_steps,
-            "has_tags": bool(test_plan.tags),
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-        })
+        logger.info(
+            "Test plan created successfully",
+            extra={
+                "plan_name": test_plan.name,
+                "num_test_cases": len(test_plan.test_cases),
+                "total_steps": total_steps,
+                "has_tags": bool(test_plan.tags),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+        )
 
         return test_plan
-    
+
     def _build_requirements_message(
         self,
         requirements: str,
-        context: Optional[Dict] = None,
-        curated_scope: Optional[str] = None,
-        ambiguous_points: Optional[List[str]] = None,
+        context: dict | None = None,
+        curated_scope: str | None = None,
+        ambiguous_points: list[str] | None = None,
     ) -> str:
         """Build the user message with requirements, curated scope, and context."""
-        message_parts: List[str] = []
+        message_parts: list[str] = []
 
         if curated_scope:
             message_parts.append(
@@ -212,7 +225,7 @@ class TestPlannerAgent(BaseAgent):
     "estimated_duration_seconds": 300
 }
 
-IMPORTANT: 
+IMPORTANT:
 - Create multiple test cases to cover different scenarios
 - Each test case should test ONE specific flow or scenario
 - Ignore non-functional or infrastructure rules that are not user-facing functionality
@@ -224,20 +237,20 @@ IMPORTANT:
         )
 
         return "\n".join(message_parts)
-    
-    def _parse_test_plan_response(self, response: Dict) -> TestPlan:
+
+    def _parse_test_plan_response(self, response: dict) -> TestPlan:
         """Parse the AI response into a TestPlan object."""
         try:
             # Extract the content - it's already a dict when using JSON response format
             content = response.get("content", {})
             import json
-            
+
             # If content is a string, parse it. If it's already a dict, use it directly
             if isinstance(content, str):
                 plan_data = json.loads(content)
             else:
                 plan_data = content
-            
+
             # Parse test cases
             test_cases = []
             for case_data in plan_data.get("test_cases", []):
@@ -246,47 +259,70 @@ IMPORTANT:
                     "critical": TestCasePriority.CRITICAL,
                     "high": TestCasePriority.HIGH,
                     "medium": TestCasePriority.MEDIUM,
-                    "low": TestCasePriority.LOW
+                    "low": TestCasePriority.LOW,
                 }
                 priority = priority_map.get(
-                    case_data.get("priority", "medium").lower(),
-                    TestCasePriority.MEDIUM
+                    str(case_data.get("priority", "medium")).lower(),
+                    TestCasePriority.MEDIUM,
                 )
-                
+
                 # Parse steps for this test case
                 steps = []
-                for step_data in case_data.get("steps", []):
+                for default_step_number, step_data in enumerate(
+                    case_data.get("steps", []),
+                    start=1,
+                ):
                     intent_value = step_data.get("intent")
                     try:
-                        intent = StepIntent(intent_value) if intent_value else StepIntent.VALIDATION
+                        intent = (
+                            StepIntent(intent_value)
+                            if intent_value
+                            else StepIntent.VALIDATION
+                        )
                     except ValueError:
                         intent = StepIntent.VALIDATION
-                    
+
+                    step_number = self._parse_step_number(
+                        step_data.get("step_number"),
+                        default=default_step_number,
+                    )
+                    dependencies = self._parse_step_dependencies(
+                        step_data.get("dependencies")
+                    )
+                    # Prevent impossible self-dependencies from malformed model output.
+                    dependencies = [
+                        dep_step_number
+                        for dep_step_number in dependencies
+                        if dep_step_number != step_number
+                    ]
+
                     step = TestStep(
-                        step_number=step_data["step_number"],
-                        description=step_data.get("description", step_data.get("action", "")),
+                        step_number=step_number,
+                        description=step_data.get(
+                            "description", step_data.get("action", "")
+                        ),
                         action=step_data.get("action", ""),
                         expected_result=step_data.get("expected_result", ""),
-                        dependencies=step_data.get("dependencies", []),
+                        dependencies=dependencies,
                         optional=step_data.get("optional", False),
                         intent=intent,
-                        max_retries=step_data.get("max_retries", 3)
+                        max_retries=step_data.get("max_retries", 3),
                     )
                     steps.append(step)
-                
+
                 # Create test case
                 test_case = TestCase(
-                    test_id=case_data.get("test_id", f"TC{len(test_cases)+1:03d}"),
+                    test_id=case_data.get("test_id", f"TC{len(test_cases) + 1:03d}"),
                     name=case_data.get("name", "Unnamed Test Case"),
                     description=case_data.get("description", ""),
                     priority=priority,
                     prerequisites=case_data.get("prerequisites", []),
                     steps=steps,
                     postconditions=case_data.get("postconditions", []),
-                    tags=case_data.get("tags", [])
+                    tags=case_data.get("tags", []),
                 )
                 test_cases.append(test_case)
-            
+
             # Create test plan
             test_plan = TestPlan(
                 name=plan_data.get("name", "Unnamed Test Plan"),
@@ -294,64 +330,115 @@ IMPORTANT:
                 requirements_source=plan_data.get("requirements_source", "Unknown"),
                 test_cases=test_cases,
                 tags=plan_data.get("tags", []),
-                estimated_duration_seconds=plan_data.get("estimated_duration_seconds")
+                estimated_duration_seconds=plan_data.get("estimated_duration_seconds"),
             )
-            
+
             return test_plan
-            
+
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error("Failed to parse test plan response", extra={
-                "error": str(e),
-                "response": response
-            })
-            raise ValueError(f"Failed to parse test plan response: {e}")
-    
+            logger.error(
+                "Failed to parse test plan response",
+                extra={"error": str(e), "response": response},
+            )
+            raise ValueError(f"Failed to parse test plan response: {e}") from e
+
+    @staticmethod
+    def _parse_step_number(value: object, default: int) -> int:
+        """Normalize LLM-provided step number values to a positive integer."""
+        parsed_numbers = TestPlannerAgent._extract_step_numbers(value)
+        return parsed_numbers[0] if parsed_numbers else default
+
+    @staticmethod
+    def _parse_step_dependencies(value: object) -> list[int]:
+        """Normalize LLM-provided dependency values to ordered, unique step numbers."""
+        if value is None:
+            return []
+        return TestPlannerAgent._extract_step_numbers(value)
+
+    @staticmethod
+    def _extract_step_numbers(value: object) -> list[int]:
+        """Extract positive step numbers from loose values like 'Step 1' or [1, 'step 2']."""
+        parsed_numbers: list[int] = []
+        raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+
+        for raw_value in raw_values:
+            if isinstance(raw_value, bool):
+                continue
+
+            if isinstance(raw_value, int):
+                if raw_value > 0:
+                    parsed_numbers.append(raw_value)
+                continue
+
+            if isinstance(raw_value, float):
+                if raw_value.is_integer() and raw_value > 0:
+                    parsed_numbers.append(int(raw_value))
+                continue
+
+            if isinstance(raw_value, str):
+                parsed_numbers.extend(
+                    int(match) for match in re.findall(r"\d+", raw_value)
+                )
+
+        unique_numbers: list[int] = []
+        seen_numbers: set[int] = set()
+        for number in parsed_numbers:
+            if number <= 0 or number in seen_numbers:
+                continue
+            seen_numbers.add(number)
+            unique_numbers.append(number)
+
+        return unique_numbers
+
     def _save_test_plan(self, test_plan: TestPlan) -> None:
         """Save test plan to permanent storage."""
         # Create base directory for all generated test plans
         base_dir = Path("generated_test_plans")
         base_dir.mkdir(exist_ok=True)
-        
+
         # Create directory for this specific test plan
         plan_dir = base_dir / str(test_plan.plan_id)
         plan_dir.mkdir(exist_ok=True)
-        
+
         # Use formatter to generate both formats
         formatter = TestPlanFormatter()
-        
+
         # Save as JSON
         json_path = plan_dir / f"test_plan_{test_plan.plan_id}.json"
         with open(json_path, "w") as f:
             f.write(formatter.to_json(test_plan))
-        
+
         # Save as Markdown
         md_path = plan_dir / f"test_plan_{test_plan.plan_id}.md"
         with open(md_path, "w") as f:
             f.write(formatter.to_markdown(test_plan))
-        
-        logger.info("Test plan saved permanently", extra={
-            "plan_id": str(test_plan.plan_id),
-            "plan_dir": str(plan_dir),
-            "json_path": str(json_path),
-            "md_path": str(md_path)
-        })
-    
+
+        logger.info(
+            "Test plan saved permanently",
+            extra={
+                "plan_id": str(test_plan.plan_id),
+                "plan_dir": str(plan_dir),
+                "json_path": str(json_path),
+                "md_path": str(md_path),
+            },
+        )
+
     async def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
         """
         Refine an existing test plan based on feedback.
-        
+
         Args:
             test_plan: Existing test plan to refine
             feedback: Feedback or additional requirements
-            
+
         Returns:
             TestPlan: Refined test plan
         """
-        logger.info("Refining test plan based on feedback", extra={
-            "plan_name": test_plan.name,
-            "feedback_length": len(feedback)
-        })
-        
+        logger.info(
+            "Refining test plan based on feedback",
+            extra={"plan_name": test_plan.name, "feedback_length": len(feedback)},
+        )
+
         # Build refinement message
         current_plan = self._serialize_test_plan(test_plan)
         user_message = f"""Current test plan:
@@ -361,51 +448,52 @@ Feedback/Additional Requirements:
 {feedback}
 
 Please provide an updated test plan that addresses the feedback while maintaining the same JSON format."""
-        
+
         # Build messages
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": user_message},
         ]
-        
+
         # Get refined plan from AI
         response = await self._get_completion(
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.3
+            messages=messages, response_format={"type": "json_object"}, temperature=0.3
         )
-        
+
         # Parse the refined plan
         refined_plan = self._parse_test_plan_response(response)
-        
+
         # Calculate total steps for new structure
         total_steps = sum(len(tc.steps) for tc in refined_plan.test_cases)
-        
-        logger.info("Test plan refined successfully", extra={
-            "plan_name": refined_plan.name,
-            "num_test_cases": len(refined_plan.test_cases),
-            "total_steps": total_steps
-        })
-        
+
+        logger.info(
+            "Test plan refined successfully",
+            extra={
+                "plan_name": refined_plan.name,
+                "num_test_cases": len(refined_plan.test_cases),
+                "total_steps": total_steps,
+            },
+        )
+
         return refined_plan
-    
+
     def _serialize_test_plan(self, test_plan: TestPlan) -> str:
         """Serialize a test plan to a readable string format."""
         formatter = TestPlanFormatter()
         return formatter.to_markdown(test_plan)
-    
-    async def extract_test_scenarios(self, requirements: str) -> List[Dict[str, str]]:
+
+    async def extract_test_scenarios(self, requirements: str) -> list[dict[str, str]]:
         """
         Extract multiple test scenarios from complex requirements.
-        
+
         Args:
             requirements: Complex requirements potentially containing multiple scenarios
-            
+
         Returns:
             List of test scenarios with names and descriptions
         """
         logger.info("Extracting test scenarios from requirements")
-        
+
         prompt = """Given the following requirements, identify and list all distinct test scenarios that should be tested separately.
 
 For each scenario, provide:
@@ -415,27 +503,26 @@ For each scenario, provide:
 4. Type (functional/edge_case/error_handling)
 
 Output as JSON object with a "scenarios" array."""
-        
+
         messages = [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": requirements}
+            {"role": "user", "content": requirements},
         ]
-        
+
         response = await self._get_completion(
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.3
+            messages=messages, response_format={"type": "json_object"}, temperature=0.3
         )
-        
+
         try:
             import json
+
             content = response.get("content", "{}")
             scenarios_data = json.loads(content)
             scenarios = scenarios_data.get("scenarios", [])
-            
+
             logger.info(f"Extracted {len(scenarios)} test scenarios")
             return scenarios
-            
+
         except (json.JSONDecodeError, KeyError) as e:
             logger.error("Failed to extract test scenarios", extra={"error": str(e)})
             return []

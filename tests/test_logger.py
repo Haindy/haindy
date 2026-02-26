@@ -15,14 +15,16 @@ def formatter() -> HumanReadableFormatter:
     return HumanReadableFormatter()
 
 
-def test_human_readable_formatter_orders_known_fields(formatter: HumanReadableFormatter) -> None:
+def test_human_readable_formatter_orders_known_fields(
+    formatter: HumanReadableFormatter,
+) -> None:
     """Formatter should surface high-signal extras in the expected order."""
     record = logging.LogRecord(
         name="src.agents.test_runner",
         level=logging.INFO,
         pathname=__file__,
         lineno=42,
-        msg='Interpreting step with AI',
+        msg="Interpreting step with AI",
         args=(),
         exc_info=None,
     )
@@ -30,21 +32,31 @@ def test_human_readable_formatter_orders_known_fields(formatter: HumanReadableFo
     record.taskName = "Task-7"
     record.step_number = 2
     record.action = 'Type "artificial intelligence" in the search field.'
-    record.expected_result = 'The text "artificial intelligence" appears in the search field.'
+    record.expected_result = (
+        'The text "artificial intelligence" appears in the search field.'
+    )
 
     output = formatter.format(record)
 
-    assert output.startswith("[INFO] | 1970-01-01T00:00:00+00:00 | Test Runner | Interpreting step with AI")
+    assert output.startswith(
+        "[INFO] | 1970-01-01T00:00:00+00:00 | Test Runner | Interpreting step with AI"
+    )
     assert "Task:" not in output
 
     step_index = output.index("Step: 2")
-    action_index = output.index('Action: Type "artificial intelligence" in the search field.')
-    expected_index = output.index('Expected Result: The text "artificial intelligence" appears in the search field.')
+    action_index = output.index(
+        'Action: Type "artificial intelligence" in the search field.'
+    )
+    expected_index = output.index(
+        'Expected Result: The text "artificial intelligence" appears in the search field.'
+    )
 
     assert step_index < action_index < expected_index
 
 
-def test_human_readable_formatter_handles_additional_fields(formatter: HumanReadableFormatter) -> None:
+def test_human_readable_formatter_handles_additional_fields(
+    formatter: HumanReadableFormatter,
+) -> None:
     """Formatter should humanize unknown extras and logger names."""
     record = logging.LogRecord(
         name="haindy.performance",
@@ -64,7 +76,9 @@ def test_human_readable_formatter_handles_additional_fields(formatter: HumanRead
     assert "Custom Field: value" in output
 
 
-def test_human_readable_formatter_prefers_agent_name(formatter: HumanReadableFormatter) -> None:
+def test_human_readable_formatter_prefers_agent_name(
+    formatter: HumanReadableFormatter,
+) -> None:
     """Formatter should use agent_name for the component label."""
     record = logging.LogRecord(
         name="src.monitoring.debug_logger",

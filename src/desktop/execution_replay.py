@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
-from src.core.interfaces import BrowserDriver
+from src.core.interfaces import AutomationDriver
 
 
 class DriverActionError(ValueError):
@@ -38,7 +39,7 @@ def _normalize_key_sequence(value: object) -> str:
     return normalized_single
 
 
-def _scroll_xy(direction: str, magnitude: int) -> Tuple[int, int]:
+def _scroll_xy(direction: str, magnitude: int) -> tuple[int, int]:
     direction_norm = str(direction or "").strip().lower()
     amount = abs(int(magnitude))
     if direction_norm == "down":
@@ -52,7 +53,7 @@ def _scroll_xy(direction: str, magnitude: int) -> Tuple[int, int]:
     raise DriverActionError(f"Invalid scroll direction: {direction!r}")
 
 
-def normalize_driver_action(raw: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_driver_action(raw: dict[str, Any]) -> dict[str, Any]:
     """Return a canonical driver action dict (v1 schema)."""
     if not isinstance(raw, dict):
         raise DriverActionError("Driver action must be a dict")
@@ -64,7 +65,9 @@ def normalize_driver_action(raw: Dict[str, Any]) -> Dict[str, Any]:
         x = _require_int(raw.get("x"), field="x")
         y = _require_int(raw.get("y"), field="y")
         button = _normalize_button(raw.get("button"))
-        click_count = max(_require_int(raw.get("click_count", 1), field="click_count"), 1)
+        click_count = max(
+            _require_int(raw.get("click_count", 1), field="click_count"), 1
+        )
         return {
             "type": "click",
             "x": x,
@@ -116,21 +119,23 @@ def normalize_driver_action(raw: Dict[str, Any]) -> Dict[str, Any]:
     raise DriverActionError(f"Unsupported driver action type: {action_type}")
 
 
-def normalize_driver_actions(actions: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def normalize_driver_actions(actions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [normalize_driver_action(action) for action in actions]
 
 
 async def replay_driver_actions(
-    driver: BrowserDriver,
-    actions: List[Dict[str, Any]],
+    driver: AutomationDriver,
+    actions: list[dict[str, Any]],
     *,
     stabilization_wait_ms: int,
-    action_timeout_seconds: Optional[float] = None,
+    action_timeout_seconds: float | None = None,
 ) -> None:
     """Replay recorded driver actions using the browser driver."""
     stabilization = max(int(stabilization_wait_ms), 0)
     timeout = (
-        max(float(action_timeout_seconds), 0.5) if action_timeout_seconds is not None else None
+        max(float(action_timeout_seconds), 0.5)
+        if action_timeout_seconds is not None
+        else None
     )
     normalized = normalize_driver_actions(actions)
     for action in normalized:

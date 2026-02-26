@@ -17,6 +17,7 @@ python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
+pip install -r requirements.lock
 pip install -e .[dev]
 
 # Install Playwright browsers
@@ -29,6 +30,10 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=your-api-key-here
 CU_PROVIDER=google
 GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
+ANTHROPIC_API_KEY=your-anthropic-api-key
+ANTHROPIC_CU_MODEL=claude-sonnet-4-6
+ANTHROPIC_CU_BETA=computer-use-2025-11-24
+ANTHROPIC_CU_MAX_TOKENS=16384
 VERTEX_API_KEY=your-vertex-api-key
 VERTEX_PROJECT=your-vertex-project
 VERTEX_LOCATION=us-central1
@@ -104,9 +109,6 @@ python -m pytest --cov=src --cov-report=term-missing
 # Phase 1: Core Foundation
 python -m pytest tests/test_base_agent.py tests/test_types.py tests/test_interfaces.py -v
 
-# Phase 2: Browser & Grid
-python -m pytest tests/test_grid_overlay.py tests/test_grid_coordinator.py tests/test_browser_driver.py -v
-
 # Phase 3: Test Planner Agent
 python -m pytest tests/test_planner_agent.py -v
 
@@ -145,9 +147,6 @@ python -m pytest -m "unit" -v
 ```bash
 # Activate virtual environment first
 source venv/bin/activate
-
-# Phase 2: Grid System Demo
-python examples/grid_demo.py
 
 # Phase 3: Test Planner Demo
 python examples/planner_demo.py
@@ -197,9 +196,16 @@ python -m src.main --plan requirements.md --timeout 3600
 # Custom output directory
 python -m src.main --plan requirements.md --output custom_reports/
 
-# Enable Computer Use and desktop driver (Gemini default)
+# Enable Computer Use and desktop driver (provider via CU_PROVIDER)
 export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=google
+export HAINDY_DRIVER_BACKEND=desktop
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
+
+# Anthropic Computer Use example
+export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+export CU_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=your-anthropic-api-key
 export HAINDY_DRIVER_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```

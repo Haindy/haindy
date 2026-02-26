@@ -18,7 +18,7 @@
 |-------|------------|-----|--------|
 | Orchestrator | **Python 3.10+** | Best ecosystem for AI & agent coordination. | ✅ |
 | Browser driver | **Playwright-Python (Chromium)** | WebSocket/CDP, native screenshots & absolute mouse clicks. | ✅ |
-| AI Agents | **GPT-5 family** | All agents run on GPT-5 with role-specific reasoning levels and modalities. | ✅ Modern model mix |
+| AI Agents | **GPT-5.2 family** | All agents run on GPT-5.2 with role-specific reasoning levels and modalities. | ✅ Modern model mix |
 | Agent coordination | **Custom multi-agent framework** | Manages agent communication, state, and workflow orchestration. | ✅ |
 | Grid system | **Adaptive grid overlay + coordinate mapping** | DOM-free visual interaction with adaptive refinement (60×60 grid). | ✅ |
 | Test scenarios | **Natural language requirements** | PRDs, user stories, test case descriptions as input. | ✅ |
@@ -31,12 +31,12 @@
 
 | Agent | Model | Reasoning Level | Temperature |
 |-------|-------|-----------------|-------------|
-| Test Planner | `gpt-5` | High | 0.35 |
-| Test Runner | `gpt-5` | Medium | 0.55 |
-| Action Agent | `gpt-5` | Low (vision-enabled, escalates as needed) | 0.25 |
+| Test Planner | `gpt-5.2` | High | 0.35 |
+| Test Runner | `gpt-5.2` | Medium | 0.55 |
+| Action Agent | `gpt-5.2` | Low (vision-enabled, escalates as needed) | 0.25 |
 
 Per-agent overrides live in `.env` (`HAINDY_TEST_*` variables) and fall back to
-global `OPENAI_MODEL`/`OPENAI_TEMPERATURE` for compatibility.
+`OPENAI_MODEL` only.
 
 ## 3  Folder Structure
 
@@ -263,7 +263,7 @@ Additional completed work:
 ## 10  Immediate Next Steps
 
 1. ~~Complete Phase 16 Evaluator Agent Reassessment~~ ✅ DONE
-2. ~~Adopt GPT-5 / GPT-4.1 model configuration for all agents~~ ✅ DONE
+2. ~~Adopt GPT-5.2 / GPT-4.1 model configuration for all agents~~ ✅ DONE
 3. Complete Phase 17 Usability & Persistence Improvements
 4. Complete Phase 12 test scenarios (4 remaining)
 5. Resume Phase 18 Additional Action Types

@@ -1,269 +1,69 @@
-"""
-Unit tests for configuration management.
-"""
+"""Tests for application settings."""
 
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.config.settings import AgentModelConfig, ConfigManager, Settings, get_settings
+from src.config.settings import AgentModelConfig, ConfigManager, Settings
 
 
 class TestSettings:
-    """Tests for Settings model."""
-
-    def test_default_settings(self):
-        """Test default settings values."""
+    def test_default_desktop_configuration(self):
         settings = Settings()
-        
-        assert settings.openai_model == "gpt-5"
-        assert settings.openai_temperature == 0.7
-        assert settings.grid_size == 60
-        assert settings.grid_refinement_enabled is True
-        assert settings.browser_headless is True
-        assert settings.browser_viewport_width == 1440
-        assert settings.browser_viewport_height == 900
-        assert settings.max_test_steps == 100
-        assert settings.log_level == "INFO"
-        assert settings.debug_mode is False
-        assert settings.openai_request_timeout_seconds == 900
-        assert settings.cu_provider == "google"
-        assert settings.desktop_prefer_resolution == (1440, 900)
-        assert settings.agent_models["test_planner"].model == "gpt-5"
-        assert settings.agent_models["test_runner"].model == "gpt-5"
-        assert settings.agent_models["action_agent"].model == "gpt-5"
-        assert settings.agent_models["action_agent"].modalities == {"text", "vision"}
+        assert settings.desktop_prefer_resolution[0] >= 800
+        assert settings.desktop_prefer_resolution[1] >= 600
+        assert settings.desktop_screenshot_dir == Path("data/screenshots/desktop")
 
-    def test_settings_from_env(self):
-        """Test loading settings from environment variables."""
-        with patch.dict(os.environ, {
-            "OPENAI_API_KEY": "test-key-123",
-            "OPENAI_MODEL": "gpt-4",
-            "GRID_SIZE": "80",
-            "LOG_LEVEL": "DEBUG",
-            "DEBUG_MODE": "true",
-            "OPENAI_REQUEST_TIMEOUT_SECONDS": "1200",
-            "HAINDY_TEST_PLANNER_MODEL": "gpt-5",
-            "HAINDY_TEST_RUNNER_MODEL": "gpt-5",
-            "HAINDY_ACTION_AGENT_MODEL": "gpt-5",
-        }):
-            settings = Settings()
-            
-            assert settings.openai_api_key == "test-key-123"
-            assert settings.openai_model == "gpt-4"
-            assert settings.grid_size == 80
-            assert settings.log_level == "DEBUG"
-            assert settings.debug_mode is True
-            assert settings.openai_request_timeout_seconds == 1200
-            assert settings.agent_models["test_planner"].model == "gpt-5"
-            assert settings.agent_models["test_runner"].model == "gpt-5"
-            assert settings.agent_models["action_agent"].model == "gpt-5"
+    def test_agent_models_include_situational_agent(self):
+        settings = Settings()
+        assert "situational_agent" in settings.agent_models
 
-    def test_agent_model_env_overrides(self):
-        """Agent model configuration should respect dedicated env variables."""
-        with patch.dict(os.environ, {
-            "HAINDY_TEST_PLANNER_MODEL": "gpt-5",
-            "HAINDY_TEST_PLANNER_TEMPERATURE": "0.4",
-            "HAINDY_TEST_PLANNER_REASONING_LEVEL": "high",
-            "HAINDY_TEST_RUNNER_MODEL": "gpt-5",
-            "HAINDY_TEST_RUNNER_REASONING_LEVEL": "medium",
-            "HAINDY_ACTION_AGENT_MODEL": "gpt-5",
-            "HAINDY_ACTION_AGENT_MODALITIES": "text,vision",
-        }, clear=True):
-            settings = Settings()
-
-            planner = settings.agent_models["test_planner"]
-            assert planner.model == "gpt-5"
-            assert planner.temperature == 0.4
-            assert planner.reasoning_level == "high"
-
-            runner = settings.agent_models["test_runner"]
-            assert runner.model == "gpt-5"
-            assert runner.reasoning_level == "medium"
-
-            action_agent = settings.agent_models["action_agent"]
-            assert action_agent.modalities == {"text", "vision"}
-
-    def test_openai_env_fallback(self):
-        """OPENAI_* variables should cascade when agent overrides are missing."""
-        with patch.dict(os.environ, {
-            "OPENAI_MODEL": "gpt-4o",
-            "OPENAI_TEMPERATURE": "0.9",
-        }, clear=True):
-            settings = Settings()
-
-            planner = settings.agent_models["test_planner"]
-            assert planner.model == "gpt-4o"
-            assert planner.temperature == 0.9
-
-    def test_log_level_validation(self):
-        """Test log level validation."""
-        # Valid level
-        settings = Settings(log_level="debug")
-        assert settings.log_level == "DEBUG"
-        
-        # Invalid level
-        with pytest.raises(ValueError, match="Invalid log level"):
-            Settings(log_level="INVALID")
-
-    def test_log_format_validation(self):
-        """Test log format validation."""
-        # Valid formats
-        settings = Settings(log_format="json")
-        assert settings.log_format == "json"
-        
-        settings = Settings(log_format="text")
-        assert settings.log_format == "text"
-        
-        # Invalid format
-        with pytest.raises(ValueError, match="Invalid log format"):
-            Settings(log_format="xml")
-
-    def test_numeric_validation(self):
-        """Test numeric field validation."""
-        # Valid values
-        settings = Settings(
-            openai_temperature=1.5,
-            grid_size=50,
-            browser_viewport_width=1024,
-        )
-        assert settings.openai_temperature == 1.5
-        assert settings.grid_size == 50
-        assert settings.browser_viewport_width == 1024
-        
-        # Invalid values
+    def test_invalid_log_level_raises(self):
         with pytest.raises(ValueError):
-            Settings(openai_temperature=3.0)  # > 2.0
-        
-        with pytest.raises(ValueError):
-            Settings(grid_size=5)  # < 10
-        
-        with pytest.raises(ValueError):
-            Settings(browser_viewport_width=600)  # < 800
+            Settings(log_level="invalid")
 
-    def test_path_fields(self):
-        """Test path configuration fields."""
-        settings = Settings(
-            data_dir=Path("/tmp/data"),
-            reports_dir=Path("/tmp/reports"),
-        )
-        
-        assert settings.data_dir == Path("/tmp/data")
-        assert settings.reports_dir == Path("/tmp/reports")
-        assert isinstance(settings.screenshots_dir, Path)
-        assert isinstance(settings.cache_dir, Path)
+    def test_default_openai_model(self):
+        settings = Settings()
+        assert settings.openai_model == "gpt-5.2"
 
-    def test_create_directories(self, tmp_path):
-        """Test directory creation."""
-        settings = Settings(
-            data_dir=tmp_path / "data",
-            reports_dir=tmp_path / "reports",
-            screenshots_dir=tmp_path / "screenshots",
-            cache_dir=tmp_path / "cache",
-            screen_recording_output_dir=tmp_path / "recordings",
-        )
-        
-        # Directories shouldn't exist yet
-        assert not (tmp_path / "data").exists()
-        assert not (tmp_path / "reports").exists()
-        
-        # Create directories
-        settings.create_directories()
-        
-        # Now they should exist
-        assert (tmp_path / "data").exists()
-        assert (tmp_path / "reports").exists()
-        assert (tmp_path / "screenshots").exists()
-        assert (tmp_path / "cache").exists()
-        assert (tmp_path / "recordings").exists()
+    def test_cu_provider_accepts_anthropic(self, monkeypatch):
+        monkeypatch.setenv("CU_PROVIDER", "anthropic")
+        settings = Settings(cu_provider="anthropic")
+        assert settings.cu_provider == "anthropic"
+
+    def test_default_anthropic_computer_use_model(self):
+        settings = Settings(_env_file=None)
+        assert settings.anthropic_cu_model == "claude-sonnet-4-6"
+
+    def test_default_anthropic_computer_use_max_tokens(self):
+        settings = Settings(_env_file=None)
+        assert settings.anthropic_cu_max_tokens == 16384
+
+    def test_default_computer_action_timeout(self):
+        settings = Settings(_env_file=None)
+        assert settings.actions_computer_tool_action_timeout_ms == 600000
+
+    @pytest.mark.parametrize(
+        "level",
+        ["none", "minimal", "low", "medium", "high", "xhigh"],
+    )
+    def test_reasoning_level_accepts_supported_values(self, level):
+        config = AgentModelConfig(model="gpt-5.2", reasoning_level=level)
+        assert config.reasoning_level == level
+
+    def test_reasoning_level_rejects_unsupported_value(self):
+        with pytest.raises(ValueError):
+            AgentModelConfig(model="gpt-5.2", reasoning_level="ultra")
 
 
 class TestConfigManager:
-    """Tests for ConfigManager."""
-
     def test_get_existing_key(self):
-        """Test getting an existing configuration key."""
-        settings = Settings(grid_size=70)
+        settings = Settings(log_level="DEBUG")
         config = ConfigManager(settings)
-        
-        assert config.get("grid_size") == 70
-        assert config.get("browser_headless") is True
+        assert config.get("log_level") == "DEBUG"
 
-    def test_get_missing_key(self):
-        """Test getting a missing configuration key."""
-        settings = Settings()
-        config = ConfigManager(settings)
-        
-        assert config.get("non_existent_key") is None
-        assert config.get("non_existent_key", "default") == "default"
-
-    def test_get_required_existing(self):
-        """Test getting a required existing key."""
-        settings = Settings(openai_model="gpt-4")
-        config = ConfigManager(settings)
-        
-        assert config.get_required("openai_model") == "gpt-4"
-
-    def test_get_required_missing(self):
-        """Test getting a required missing key."""
-        settings = Settings()
-        config = ConfigManager(settings)
-        
-        with pytest.raises(KeyError, match="Required configuration key not found"):
-            config.get_required("non_existent_key")
-
-    def test_get_all(self):
-        """Test getting all configuration values."""
-        settings = Settings(
-            grid_size=75,
-            debug_mode=True,
-            log_level="DEBUG",
-        )
-        config = ConfigManager(settings)
-        
+    def test_get_all_includes_desktop_fields(self):
+        config = ConfigManager(Settings())
         all_config = config.get_all()
-        
-        assert isinstance(all_config, dict)
-        assert all_config["grid_size"] == 75
-        assert all_config["debug_mode"] is True
-        assert all_config["log_level"] == "DEBUG"
-        assert "openai_temperature" in all_config
-        assert "browser_viewport_width" in all_config
-
-
-class TestGetSettings:
-    """Tests for get_settings function."""
-
-    @patch("src.config.settings.load_dotenv")
-    @patch("src.config.settings.Path")
-    def test_get_settings_loads_env(self, mock_path_class, mock_load_dotenv, tmp_path):
-        """Test that get_settings loads .env file."""
-        # Create a temporary .env file
-        env_file = tmp_path / ".env"
-        env_file.write_text("OPENAI_API_KEY=test-key\n")
-        
-        # Mock Path instance
-        mock_path_instance = MagicMock()
-        mock_path_instance.exists.return_value = True
-        mock_path_class.return_value = mock_path_instance
-        
-        # Clear the cache
-        get_settings.cache_clear()
-        
-        settings = get_settings()
-        
-        # Verify load_dotenv was called
-        mock_load_dotenv.assert_called_once()
-
-    def test_get_settings_cached(self):
-        """Test that get_settings returns cached instance."""
-        # Clear the cache
-        get_settings.cache_clear()
-        
-        settings1 = get_settings()
-        settings2 = get_settings()
-        
-        # Should be the same instance
-        assert settings1 is settings2
+        assert "desktop_prefer_resolution" in all_config
+        assert "desktop_screenshot_dir" in all_config

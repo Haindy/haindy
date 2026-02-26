@@ -5,7 +5,6 @@ and blocking questions from mixed requirement bundles.
 """
 
 import re
-from typing import Dict, List, Optional
 
 from src.agents.base_agent import BaseAgent
 from src.config.agent_prompts import SCOPE_TRIAGE_SYSTEM_PROMPT
@@ -27,7 +26,7 @@ class ScopeTriageAgent(BaseAgent):
     async def triage_scope(
         self,
         requirements: str,
-        context: Optional[Dict[str, str]] = None,
+        context: dict[str, str] | None = None,
     ) -> ScopeTriageResult:
         """
         Analyze the requirements bundle and extract a curated testing scope.
@@ -41,12 +40,18 @@ class ScopeTriageAgent(BaseAgent):
         """
         logger.info(
             "Running scope triage",
-            extra={"requirements_length": len(requirements), "has_context": context is not None},
+            extra={
+                "requirements_length": len(requirements),
+                "has_context": context is not None,
+            },
         )
 
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": self._build_triage_message(requirements, context)},
+            {
+                "role": "user",
+                "content": self._build_triage_message(requirements, context),
+            },
         ]
 
         response = await self.call_openai(
@@ -72,10 +77,10 @@ class ScopeTriageAgent(BaseAgent):
     def _build_triage_message(
         self,
         requirements: str,
-        context: Optional[Dict[str, str]] = None,
+        context: dict[str, str] | None = None,
     ) -> str:
         """Construct the user message for the triage pass."""
-        message_lines: List[str] = [
+        message_lines: list[str] = [
             "Review the following requirements bundle and extract the testing scope.",
             "",
             "Return a JSON object that matches the keys requested.",
@@ -95,7 +100,7 @@ class ScopeTriageAgent(BaseAgent):
 
         return "\n".join(message_lines)
 
-    def _parse_triage_response(self, response: Dict) -> ScopeTriageResult:
+    def _parse_triage_response(self, response: dict) -> ScopeTriageResult:
         """Parse the JSON response into a ScopeTriageResult."""
         import json
 
@@ -104,13 +109,15 @@ class ScopeTriageAgent(BaseAgent):
             try:
                 payload = json.loads(content)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Scope triage response was not valid JSON: {exc}") from exc
+                raise ValueError(
+                    f"Scope triage response was not valid JSON: {exc}"
+                ) from exc
         elif isinstance(content, dict):
             payload = content
         else:
             raise ValueError("Scope triage response missing JSON payload.")
 
-        def _ensure_list(value: Optional[object]) -> List[str]:
+        def _ensure_list(value: object | None) -> list[str]:
             if not value:
                 return []
             if isinstance(value, list):
@@ -119,7 +126,9 @@ class ScopeTriageAgent(BaseAgent):
 
         in_scope_value = payload.get("in_scope")
         if isinstance(in_scope_value, list):
-            in_scope = "\n".join(str(item).strip() for item in in_scope_value if str(item).strip())
+            in_scope = "\n".join(
+                str(item).strip() for item in in_scope_value if str(item).strip()
+            )
         else:
             in_scope = str(in_scope_value) if in_scope_value is not None else ""
         explicit_exclusions = _ensure_list(payload.get("explicit_exclusions"))
@@ -150,7 +159,7 @@ class ScopeTriageAgent(BaseAgent):
             ]
 
         # Drop ambiguity notes that simply speculate about seeded data.
-        cleaned_ambiguities: List[str] = []
+        cleaned_ambiguities: list[str] = []
         for point in result.ambiguous_points:
             lowered = point.lower()
             if "seed" in lowered:

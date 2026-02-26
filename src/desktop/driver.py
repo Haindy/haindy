@@ -7,10 +7,10 @@ import contextlib
 import logging
 import shutil
 from asyncio import subprocess as aio_subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
 
-from src.core.interfaces import BrowserDriver
+from src.core.interfaces import AutomationDriver
 from src.desktop.cache import CoordinateCache
 from src.desktop.resolution_manager import ResolutionManager
 from src.desktop.screen_capture import ScreenCapture
@@ -19,22 +19,22 @@ from src.desktop.virtual_input import VirtualInput
 logger = logging.getLogger(__name__)
 
 
-class DesktopDriver(BrowserDriver):
+class DesktopDriver(AutomationDriver):
     """OS-level driver that controls an existing desktop session."""
 
     def __init__(
         self,
         screenshot_dir: Path,
         cache_path: Path,
-        prefer_resolution: Tuple[int, int] = (1920, 1080),
+        prefer_resolution: tuple[int, int] = (1920, 1080),
         enable_resolution_switch: bool = False,
-        display: Optional[str] = None,
+        display: str | None = None,
         keyboard_layout: str = "us",
         keyboard_emit_scancodes: bool = True,
         keyboard_key_delay_ms: int = 12,
         clipboard_timeout_seconds: float = 3.0,
         clipboard_hold_seconds: float = 15.0,
-        max_screenshots: Optional[int] = None,
+        max_screenshots: int | None = None,
     ) -> None:
         self.resolution_manager = ResolutionManager(
             preferred_width=prefer_resolution[0],
@@ -51,26 +51,37 @@ class DesktopDriver(BrowserDriver):
         self.keyboard_emit_scancodes = keyboard_emit_scancodes
         self.keyboard_key_delay_ms = keyboard_key_delay_ms
         self.coordinate_cache = CoordinateCache(cache_path)
-        self.virtual_input: Optional[VirtualInput] = None
+        self.virtual_input: VirtualInput | None = None
         self._started = False
         self._clipboard_timeout_seconds = max(float(clipboard_timeout_seconds), 0.5)
         self._clipboard_hold_seconds = max(float(clipboard_hold_seconds), 0.5)
         self._clipboard_owner: aio_subprocess.Process | None = None
         self._clipboard_owner_reaper: asyncio.Task[None] | None = None
+        self._capturing = False
+        self._captured_calls: list[dict[str, object]] = []
 
     async def start(self) -> None:
         """Initialize resolution and virtual input device."""
         if self._started and self.virtual_input is not None:
             return
         self.resolution_manager.maybe_downshift()
-        if self.virtual_input is None:
-            viewport = self.resolution_manager.viewport_size()
-            self.virtual_input = VirtualInput(
-                viewport=viewport,
-                keyboard_layout=self.keyboard_layout,
-                emit_scancodes=self.keyboard_emit_scancodes,
-                key_delay_ms=self.keyboard_key_delay_ms,
-            )
+        try:
+            if self.virtual_input is None:
+                viewport = self.resolution_manager.viewport_size()
+                self.virtual_input = VirtualInput(
+                    viewport=viewport,
+                    keyboard_layout=self.keyboard_layout,
+                    emit_scancodes=self.keyboard_emit_scancodes,
+                    key_delay_ms=self.keyboard_key_delay_ms,
+                )
+        except Exception:
+            # If startup fails after a resolution switch, restore immediately so the
+            # host display is not left in the downshifted mode.
+            with contextlib.suppress(Exception):
+                self.resolution_manager.restore()
+            self.virtual_input = None
+            self._started = False
+            raise
         self._started = True
 
     async def stop(self) -> None:
@@ -82,7 +93,7 @@ class DesktopDriver(BrowserDriver):
         self.virtual_input = None
         self._started = False
 
-    async def __aenter__(self) -> "DesktopDriver":
+    async def __aenter__(self) -> DesktopDriver:
         await self.start()
         return self
 
@@ -96,13 +107,19 @@ class DesktopDriver(BrowserDriver):
         await self.type_text(url)
         await self.press_key("enter")
 
-    async def click(self, x: int, y: int, button: str = "left", click_count: int = 1) -> None:
+    async def click(
+        self, x: int, y: int, button: str = "left", click_count: int = 1
+    ) -> None:
         await self._ensure_ready()
         await self.virtual_input.click(x, y, button=button, click_count=click_count)
+        self._capture_call(
+            "click", {"x": x, "y": y, "button": button, "click_count": click_count}
+        )
 
     async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
         await self._ensure_ready()
         await self.virtual_input.move(x, y, steps=steps)
+        self._capture_call("move_mouse", {"x": x, "y": y, "steps": steps})
 
     async def drag_mouse(
         self,
@@ -114,14 +131,29 @@ class DesktopDriver(BrowserDriver):
     ) -> None:
         await self._ensure_ready()
         await self.virtual_input.drag((start_x, start_y), (end_x, end_y), steps=steps)
+        self._capture_call(
+            "drag_mouse",
+            {
+                "start_x": start_x,
+                "start_y": start_y,
+                "end_x": end_x,
+                "end_y": end_y,
+                "steps": steps,
+            },
+        )
 
     async def type_text(self, text: str) -> None:
         await self._ensure_ready()
         await self.virtual_input.type_text(text)
+        self._capture_call("type_text", {"length": len(text)})
 
     async def press_key(self, key: str | Iterable[str]) -> None:
         await self._ensure_ready()
         await self.virtual_input.press_key(key)
+        self._capture_call(
+            "press_key",
+            {"key": list(key) if isinstance(key, (list, tuple, set)) else key},
+        )
 
     async def scroll(self, direction: str, amount: int) -> None:
         normalized_direction = str(direction or "").strip().lower()
@@ -134,18 +166,23 @@ class DesktopDriver(BrowserDriver):
             x=delta if normalized_direction in {"left", "right"} else 0,
         )
 
-    async def scroll_by_pixels(self, x: int = 0, y: int = 0, smooth: bool = True) -> None:
+    async def scroll_by_pixels(
+        self, x: int = 0, y: int = 0, smooth: bool = True
+    ) -> None:
         await self._ensure_ready()
         await self.virtual_input.scroll(x=x, y=y)
+        self._capture_call("scroll_by_pixels", {"x": x, "y": y, "smooth": smooth})
 
     async def screenshot(self) -> bytes:
         bytes_, _ = await self._capture("desktop")
+        self._capture_call("screenshot", {"label": "desktop"})
         return bytes_
 
     async def wait(self, milliseconds: int) -> None:
         await asyncio.sleep(milliseconds / 1000.0)
+        self._capture_call("wait", {"milliseconds": milliseconds})
 
-    async def get_viewport_size(self) -> Tuple[int, int]:
+    async def get_viewport_size(self) -> tuple[int, int]:
         return self.resolution_manager.viewport_size()
 
     async def get_page_url(self) -> str:
@@ -157,13 +194,28 @@ class DesktopDriver(BrowserDriver):
     async def save_screenshot(self, path: Path) -> None:
         bytes_, _ = await self._capture("save")
         path.write_bytes(bytes_)
+        self._capture_call("save_screenshot", {"path": str(path)})
 
     async def wait_for_load_state(self, state: str = "networkidle") -> None:
         return
 
-    async def capture(self, label: str) -> Tuple[bytes, str]:
+    async def capture(self, label: str) -> tuple[bytes, str]:
         """Capture a screenshot with the given label."""
-        return await self._capture(label)
+        bytes_, path = await self._capture(label)
+        self._capture_call("capture", {"label": label, "path": path})
+        return bytes_, path
+
+    def start_capture(self) -> None:
+        """Begin collecting automation call traces."""
+        self._capturing = True
+        self._captured_calls = []
+
+    def stop_capture(self) -> list[dict[str, object]]:
+        """Stop trace collection and return captured calls."""
+        calls = self._captured_calls.copy()
+        self._capturing = False
+        self._captured_calls = []
+        return calls
 
     async def read_clipboard(self) -> str:
         """Return the current clipboard contents (requires xclip)."""
@@ -179,10 +231,10 @@ class DesktopDriver(BrowserDriver):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self._clipboard_timeout_seconds
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.communicate()
-            raise RuntimeError("Clipboard read timed out.")
+            raise RuntimeError("Clipboard read timed out.") from exc
         if proc.returncode != 0:
             stderr_text = (stderr or b"").decode("utf-8", errors="ignore")
             raise RuntimeError(f"Clipboard read failed: {stderr_text.strip()}")
@@ -225,9 +277,14 @@ class DesktopDriver(BrowserDriver):
             stderr_text = (stderr or b"").decode("utf-8", errors="ignore")
             raise RuntimeError(f"Clipboard write failed: {stderr_text.strip()}")
 
-    async def _capture(self, label: str) -> Tuple[bytes, str]:
+    async def _capture(self, label: str) -> tuple[bytes, str]:
         await self._ensure_ready()
         return self.screen_capture.capture(label)
+
+    def _capture_call(self, method: str, params: dict[str, object]) -> None:
+        if not self._capturing:
+            return
+        self._captured_calls.append({"method": method, "params": params})
 
     async def _ensure_ready(self) -> None:
         if not self._started:
@@ -242,13 +299,13 @@ class DesktopDriver(BrowserDriver):
             )
 
     @staticmethod
-    def _clipboard_read_command() -> Optional[list[str]]:
+    def _clipboard_read_command() -> list[str] | None:
         if shutil.which("xclip"):
             return ["xclip", "-selection", "clipboard", "-o"]
         return None
 
     @staticmethod
-    def _clipboard_write_command() -> Optional[list[str]]:
+    def _clipboard_write_command() -> list[str] | None:
         if shutil.which("xclip"):
             # xclip defaults to backgrounding itself; force foreground so the agent can
             # manage its lifetime and avoid orphaned clipboard owner processes.

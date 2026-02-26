@@ -7,7 +7,7 @@ import logging
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,32 +25,34 @@ class ExecutionReplayCacheKey:
     scenario: str
     step: str
     environment: str
-    resolution: Tuple[int, int]
+    resolution: tuple[int, int]
     keyboard_layout: str = "us"
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "ExecutionReplayCacheKey":
+    def from_dict(cls, payload: dict) -> ExecutionReplayCacheKey:
         resolution_raw = (
             payload.get("resolution")
             or payload.get("viewport_resolution")
             or payload.get("viewport")
             or (0, 0)
         )
-        resolution: Tuple[int, int] = (0, 0)
+        resolution: tuple[int, int] = (0, 0)
         if isinstance(resolution_raw, (list, tuple)) and len(resolution_raw) == 2:
             try:
                 resolution = (int(resolution_raw[0]), int(resolution_raw[1]))
             except Exception:
                 resolution = (0, 0)
         return cls(
-            scenario=str(payload.get("scenario") or payload.get("scenario_name") or "").strip(),
+            scenario=str(
+                payload.get("scenario") or payload.get("scenario_name") or ""
+            ).strip(),
             step=str(payload.get("step") or payload.get("step_name") or "").strip(),
             environment=str(payload.get("environment") or "desktop").strip(),
             resolution=resolution,
             keyboard_layout=str(payload.get("keyboard_layout") or "us").strip(),
         )
 
-    def matches(self, other: "ExecutionReplayCacheKey") -> bool:
+    def matches(self, other: ExecutionReplayCacheKey) -> bool:
         return (
             _norm(self.scenario) == _norm(other.scenario)
             and _norm(self.step) == _norm(other.step)
@@ -67,20 +69,24 @@ class ExecutionReplayEntry:
     cache_version: int
     key: ExecutionReplayCacheKey
     recorded_at_epoch_seconds: int
-    actions: List[dict]
+    actions: list[dict]
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "ExecutionReplayEntry":
+    def from_dict(cls, payload: dict) -> ExecutionReplayEntry:
         key_payload = payload.get("key") or {}
         actions = payload.get("actions") or []
         if not isinstance(actions, list):
             actions = []
         return cls(
-            cache_version=int(payload.get("cache_version", EXECUTION_REPLAY_CACHE_VERSION)),
+            cache_version=int(
+                payload.get("cache_version", EXECUTION_REPLAY_CACHE_VERSION)
+            ),
             key=ExecutionReplayCacheKey.from_dict(
                 key_payload if isinstance(key_payload, dict) else {}
             ),
-            recorded_at_epoch_seconds=int(payload.get("recorded_at_epoch_seconds") or 0),
+            recorded_at_epoch_seconds=int(
+                payload.get("recorded_at_epoch_seconds") or 0
+            ),
             actions=[item for item in actions if isinstance(item, dict)],
         )
 
@@ -96,7 +102,7 @@ class ExecutionReplayCache:
     def path(self) -> Path:
         return self._path
 
-    def lookup(self, key: ExecutionReplayCacheKey) -> Optional[ExecutionReplayEntry]:
+    def lookup(self, key: ExecutionReplayCacheKey) -> ExecutionReplayEntry | None:
         candidates = [
             entry
             for entry in self._load()
@@ -107,7 +113,9 @@ class ExecutionReplayCache:
             return None
         return candidates[-1]
 
-    def store(self, key: ExecutionReplayCacheKey, actions: List[dict]) -> ExecutionReplayEntry:
+    def store(
+        self, key: ExecutionReplayCacheKey, actions: list[dict]
+    ) -> ExecutionReplayEntry:
         entries = self._load()
         entry = ExecutionReplayEntry(
             cache_version=EXECUTION_REPLAY_CACHE_VERSION,
@@ -133,7 +141,7 @@ class ExecutionReplayCache:
             return
         self._save(new_entries)
 
-    def _load(self) -> List[ExecutionReplayEntry]:
+    def _load(self) -> list[ExecutionReplayEntry]:
         if not self._path.exists():
             return []
         try:
@@ -146,7 +154,7 @@ class ExecutionReplayCache:
             return []
         if not isinstance(raw, list):
             return []
-        entries: List[ExecutionReplayEntry] = []
+        entries: list[ExecutionReplayEntry] = []
         for item in raw:
             if not isinstance(item, dict):
                 continue
@@ -159,7 +167,7 @@ class ExecutionReplayCache:
                 )
         return entries
 
-    def _save(self, entries: List[ExecutionReplayEntry]) -> None:
+    def _save(self, entries: list[ExecutionReplayEntry]) -> None:
         serializable = [asdict(entry) for entry in entries]
         self._path.write_text(
             json.dumps(serializable, ensure_ascii=False, indent=2),

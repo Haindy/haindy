@@ -52,6 +52,7 @@ async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
         scroll_default_magnitude=450,
         scroll_max_magnitude=600,
         cu_provider="google",
+        computer_use_model="computer-use-preview",
         google_cu_model="gemini-2.5-computer-use-preview-10-2025",
         vertex_api_key="",
         vertex_project="",
@@ -71,7 +72,7 @@ async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
 
     session = ComputerUseSession(
         client=None,  # type: ignore[arg-type]
-        browser=browser,
+        automation_driver=browser,
         settings=settings,
         google_client=object(),
         provider="google",
@@ -109,6 +110,7 @@ async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> N
         scroll_default_magnitude=450,
         scroll_max_magnitude=600,
         cu_provider="google",
+        computer_use_model="computer-use-preview",
         google_cu_model="gemini-2.5-computer-use-preview-10-2025",
         vertex_api_key="",
         vertex_project="",
@@ -135,7 +137,7 @@ async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> N
 
     session = ComputerUseSession(
         client=None,  # type: ignore[arg-type]
-        browser=browser,
+        automation_driver=browser,
         settings=settings,
         google_client=object(),
         provider="google",
