@@ -167,25 +167,7 @@ async def test_computer_use_session_blocks_actions_in_observe_mode(
             ],
         }
     )
-    final_response = DummyResponse(
-        {
-            "id": "resp_obs_2",
-            "output": [
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": "Policy rejection acknowledged.",
-                        }
-                    ],
-                }
-            ],
-        }
-    )
-
-    mock_client.responses.create.side_effect = [initial_response, final_response]
+    mock_client.responses.create.side_effect = [initial_response]
 
     session = ComputerUseSession(
         client=mock_client,
@@ -213,7 +195,10 @@ async def test_computer_use_session_blocks_actions_in_observe_mode(
     assert turn.status == "failed"
     assert "observe-only" in (turn.error_message or "")
     assert turn.metadata.get("policy") == "observe_only"
+    assert result.terminal_status == "failed"
+    assert result.terminal_failure_code == "observe_only_policy_violation"
     mock_browser.click.assert_not_called()
+    mock_client.responses.create.assert_awaited_once()
 
 
 @pytest.mark.asyncio

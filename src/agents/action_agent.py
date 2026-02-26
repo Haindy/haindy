@@ -798,6 +798,9 @@ class ActionAgent(BaseAgent):
                 {"role": "assistant", "content": session_result.final_output}
             )
 
+        failed_action_count = sum(
+            1 for action in session_result.actions if action.status != "executed"
+        )
         if debug_logger:
             debug_logger.log_ai_interaction(
                 agent_name=self.name,
@@ -810,6 +813,8 @@ class ActionAgent(BaseAgent):
                     "response_ids": session_result.response_ids,
                     "terminal_status": session_result.terminal_status,
                     "terminal_failure_code": session_result.terminal_failure_code,
+                    "overall_success": success,
+                    "failed_action_count": failed_action_count,
                 },
             )
 
