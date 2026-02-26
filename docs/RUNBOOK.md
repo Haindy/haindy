@@ -74,6 +74,7 @@ HAINDY_DESKTOP_COORDINATE_CACHE_PATH=data/desktop_cache/coordinates.json
 ### Caching and Trace Artifacts
 Backported caches and logs are stored under `data/` by default:
 - `data/task_plan_cache.json`
+- `data/planning_cache.json`
 - `data/execution_replay_cache.json`
 - `data/desktop_cache/coordinates.json`
 - `data/model_logs/model_calls.jsonl`
@@ -81,8 +82,10 @@ Backported caches and logs are stored under `data/` by default:
 
 Control replay caching with:
 ```
+HAINDY_ENABLE_PLANNING_CACHE=true
 HAINDY_ENABLE_EXECUTION_REPLAY_CACHE=true
 HAINDY_TASK_PLAN_CACHE_PATH=data/task_plan_cache.json
+HAINDY_PLANNING_CACHE_PATH=data/planning_cache.json
 HAINDY_EXECUTION_REPLAY_CACHE_PATH=data/execution_replay_cache.json
 MODEL_LOG_PATH=data/model_logs/model_calls.jsonl
 ```

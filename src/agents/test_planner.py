@@ -423,6 +423,10 @@ IMPORTANT:
             },
         )
 
+    def persist_test_plan(self, test_plan: TestPlan) -> None:
+        """Persist a test plan artifact to disk."""
+        self._save_test_plan(test_plan)
+
     async def refine_test_plan(self, test_plan: TestPlan, feedback: str) -> TestPlan:
         """
         Refine an existing test plan based on feedback.
