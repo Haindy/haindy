@@ -682,7 +682,9 @@ class ComputerUseSession:
 
             executed_turns: list[ComputerToolTurn] = []
             for call in calls:
-                raw_action_type = str(getattr(call, "name", "") or "unknown")
+                raw_action_type = str(getattr(call, "name", "") or "unknown").strip()
+                if not raw_action_type:
+                    raw_action_type = "unknown"
                 raw_parameters = getattr(call, "args", {}) or {}
                 if not isinstance(raw_parameters, dict):
                     raw_parameters = {}
@@ -698,6 +700,7 @@ class ComputerUseSession:
                     pending_safety_checks=pending_safety_checks,
                 )
                 _inject_context_metadata(turn, metadata)
+                turn.metadata["google_function_call_name"] = raw_action_type
                 if google_call_id:
                     turn.metadata["google_function_call_id"] = google_call_id
                 if pending_safety_checks:
@@ -2196,6 +2199,11 @@ class ComputerUseSession:
             google_call_id = str(
                 turn.metadata.get("google_function_call_id") or ""
             ).strip()
+            response_name = str(
+                turn.metadata.get("google_function_call_name") or ""
+            ).strip()
+            if not response_name:
+                response_name = str(turn.action_type or "action").strip() or "action"
             response_payload = {
                 "status": turn.status,
                 "call_id": turn.call_id,
@@ -2217,7 +2225,7 @@ class ComputerUseSession:
                 types.Part(
                     function_response=types.FunctionResponse(
                         id=google_call_id or None,
-                        name=turn.action_type or "action",
+                        name=response_name,
                         response=response_payload,
                         parts=[
                             types.FunctionResponsePart(

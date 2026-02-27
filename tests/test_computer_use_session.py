@@ -1010,3 +1010,41 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
     function_response = payload["contents"][0].parts[0].function_response
     assert function_response is not None
     assert function_response.id is None
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_uses_original_google_function_call_name(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=object(),
+        debug_logger=None,
+    )
+    # Internal execution canonicalizes key_press -> keypress. Follow-up responses
+    # must still use the original Google function name to satisfy name matching.
+    turn = ComputerToolTurn(
+        call_id="key_press",
+        action_type="keypress",
+        parameters={"key": "enter"},
+        status="executed",
+        pending_safety_checks=[],
+        metadata={"google_function_call_name": "key_press"},
+    )
+
+    payload, _, _ = await session._build_google_follow_up_request(
+        goal="Press enter.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.name == "key_press"
