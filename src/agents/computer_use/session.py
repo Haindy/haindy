@@ -147,6 +147,16 @@ class ComputerUseSessionResult:
     terminal_failure_code: str | None = None
 
 
+@dataclass(frozen=True)
+class GoogleFunctionCallEnvelope:
+    """Function call plus deterministic ordering metadata for a single turn."""
+
+    function_call: Any
+    sequence: int
+    candidate_index: int
+    part_index: int
+
+
 class ComputerUseSession:
     """Wraps computer-use providers and orchestrates action execution."""
 
@@ -665,11 +675,13 @@ class ComputerUseSession:
         max_turn_code: str | None = None
         last_assistant_text: str | None = None
         last_response_dict: dict[str, Any] | None = None
+        google_turn_index = 0
+        ambiguous_reask_attempts = 0
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
         loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
-            calls = extract_google_function_calls(response)
+            call_envelopes = extract_google_function_call_envelopes(response)
             assistant_text = extract_assistant_text(response_dict)
             if assistant_text:
                 result.final_output = assistant_text
@@ -677,11 +689,82 @@ class ComputerUseSession:
             result.last_response = response_dict
             last_response_dict = response_dict
 
-            if not calls:
+            if not call_envelopes:
                 break
 
+            google_turn_index += 1
+            ambiguous_names = self._extract_google_ambiguous_function_names(
+                call_envelopes
+            )
+            if ambiguous_names:
+                if ambiguous_reask_attempts >= 1:
+                    ambiguous_list = ", ".join(ambiguous_names)
+                    self._append_terminal_failure_turn(
+                        result=result,
+                        metadata=metadata,
+                        response_id=response_dict.get("id"),
+                        reason=(
+                            "Google FunctionCall batch is ambiguous: duplicate "
+                            "function names without call IDs "
+                            f"({ambiguous_list}) remained after controlled re-ask."
+                        ),
+                        code="google_ambiguous_function_call_batch",
+                        parameters={
+                            "ambiguous_function_names": ambiguous_names,
+                            "reask_attempts": ambiguous_reask_attempts,
+                        },
+                        metadata_updates={
+                            "ambiguous_function_names": ambiguous_names,
+                            "reask_attempts": ambiguous_reask_attempts,
+                        },
+                    )
+                    break
+
+                ambiguous_reask_attempts += 1
+                (
+                    reask_payload,
+                    reask_content,
+                ) = self._build_google_single_call_reask_request(
+                    history=history,
+                    environment=environment,
+                    model=model,
+                )
+                history.append(reask_content)
+                response = await self._create_google_response(reask_payload)
+                await self._model_logger.log_call(
+                    agent="computer_use.google.reask",
+                    model=model,
+                    prompt=f"{goal} (ambiguous-batch-reask)",
+                    request_payload={
+                        "provider": "google",
+                        "environment": environment,
+                        "payload": "ambiguous_reask",
+                    },
+                    response=response,
+                    screenshots=None,
+                    metadata={
+                        "environment": environment,
+                        "ambiguous_function_names": ambiguous_names,
+                        "reask_attempt": ambiguous_reask_attempts,
+                        **metadata,
+                    },
+                )
+                response_dict = normalize_response(response)
+                result.response_ids.append(response_dict.get("id", ""))
+                if hasattr(response, "candidates"):
+                    try:
+                        history.append(response.candidates[0].content)
+                    except Exception:
+                        logger.debug(
+                            "Unable to append Google re-ask response content to history",
+                            exc_info=True,
+                        )
+                continue
+
+            ambiguous_reask_attempts = 0
             executed_turns: list[ComputerToolTurn] = []
-            for call in calls:
+            for envelope in call_envelopes:
+                call = envelope.function_call
                 raw_action_type = str(getattr(call, "name", "") or "unknown").strip()
                 if not raw_action_type:
                     raw_action_type = "unknown"
@@ -689,11 +772,20 @@ class ComputerUseSession:
                 if not isinstance(raw_parameters, dict):
                     raw_parameters = {}
                 google_call_id = str(getattr(call, "id", None) or "").strip()
+                if google_call_id:
+                    local_call_id = google_call_id
+                    correlation_mode = "provider_id"
+                else:
+                    local_call_id = self._build_google_fallback_call_id(
+                        turn_index=google_turn_index,
+                        sequence=envelope.sequence,
+                    )
+                    correlation_mode = "sequence_fallback"
                 pending_safety_checks = self._extract_google_pending_safety_checks(
                     raw_parameters
                 )
                 turn = ComputerToolTurn(
-                    call_id=google_call_id or raw_action_type,
+                    call_id=local_call_id,
                     action_type=raw_action_type,
                     parameters=raw_parameters,
                     response_id=response_dict.get("id"),
@@ -701,12 +793,32 @@ class ComputerUseSession:
                 )
                 _inject_context_metadata(turn, metadata)
                 turn.metadata["google_function_call_name"] = raw_action_type
+                turn.metadata["google_function_call_sequence"] = envelope.sequence
+                turn.metadata["google_correlation_mode"] = correlation_mode
                 if google_call_id:
                     turn.metadata["google_function_call_id"] = google_call_id
+                else:
+                    turn.metadata["google_function_call_fallback_id"] = local_call_id
                 if pending_safety_checks:
                     turn.metadata["google_safety_decision"] = pending_safety_checks[0]
 
                 if self._should_abort_on_safety(turn, result):
+                    if any(
+                        executed_turn.status == "executed"
+                        for executed_turn in executed_turns
+                    ):
+                        (
+                            response,
+                            response_dict,
+                        ) = await self._flush_google_batch_follow_up(
+                            goal=goal,
+                            history=history,
+                            turns=executed_turns,
+                            metadata=metadata,
+                            environment=environment,
+                            model=model,
+                        )
+                        result.response_ids.append(response_dict.get("id", ""))
                     return result
 
                 try:
@@ -749,6 +861,22 @@ class ComputerUseSession:
                             "call_id": turn.call_id,
                         },
                     )
+                    if any(
+                        executed_turn.status == "executed"
+                        for executed_turn in executed_turns
+                    ):
+                        (
+                            response,
+                            response_dict,
+                        ) = await self._flush_google_batch_follow_up(
+                            goal=goal,
+                            history=history,
+                            turns=executed_turns,
+                            metadata=metadata,
+                            environment=environment,
+                            model=model,
+                        )
+                        result.response_ids.append(response_dict.get("id", ""))
                     return result
 
                 loop_detection = self._update_loop_history(
@@ -795,80 +923,53 @@ class ComputerUseSession:
 
                 if self._is_scroll_action(turn.action_type):
                     scroll_turns += 1
-                    if scroll_turns >= self._scroll_turn_limit:
-                        logger.warning(
-                            "Computer Use scroll turn limit reached (google)",
-                            extra={
-                                "scroll_turns": scroll_turns,
-                                "scroll_turn_limit": self._scroll_turn_limit,
-                                "max_turns": self._settings.actions_computer_tool_max_turns,
-                            },
-                        )
-                        max_turn_code = "scroll_turn_limit_reached"
-                        max_turn_reason = (
-                            "Computer Use max turns exceeded: "
-                            f"scroll turn limit reached after {scroll_turns} scroll actions."
-                        )
-                        max_turn_hit = True
-                        break
                 else:
                     turn_counter += 1
-                    if turn_counter >= self._settings.actions_computer_tool_max_turns:
-                        logger.warning(
-                            "Computer Use max turns reached (google)",
-                            extra={
-                                "max_turns": self._settings.actions_computer_tool_max_turns
-                            },
-                        )
-                        max_turn_code = "max_turns_exceeded"
-                        max_turn_reason = (
-                            "Computer Use max turns exceeded after "
-                            f"{turn_counter} turns (limit: "
-                            f"{self._settings.actions_computer_tool_max_turns})."
-                        )
-                        max_turn_hit = True
-                        break
+
+            if executed_turns:
+                response, response_dict = await self._flush_google_batch_follow_up(
+                    goal=goal,
+                    history=history,
+                    turns=executed_turns,
+                    metadata=metadata,
+                    environment=environment,
+                    model=model,
+                )
+                result.response_ids.append(response_dict.get("id", ""))
 
             if max_turn_hit:
                 break
 
-            (
-                follow_up_payload,
-                func_response_content,
-                follow_up_screenshot,
-            ) = await self._build_google_follow_up_request(
-                goal=goal,
-                history=history,
-                turns=executed_turns,
-                metadata=metadata,
-                environment=environment,
-                model=model,
-            )
-            history.append(func_response_content)
-            response = await self._create_google_response(follow_up_payload)
-            await self._model_logger.log_call(
-                agent="computer_use.google.follow_up",
-                model=model,
-                prompt=f"{goal} (follow-up)",
-                request_payload={
-                    "provider": "google",
-                    "environment": environment,
-                    "payload": "follow_up",
-                },
-                response=response,
-                screenshots=[("computer_use_follow_up", follow_up_screenshot)],
-                metadata={"environment": environment, **metadata},
-            )
-            response_dict = normalize_response(response)
-            result.response_ids.append(response_dict.get("id", ""))
-            if hasattr(response, "candidates"):
-                try:
-                    history.append(response.candidates[0].content)
-                except Exception:
-                    logger.debug(
-                        "Unable to append Google response content to history",
-                        exc_info=True,
-                    )
+            if scroll_turns >= self._scroll_turn_limit:
+                logger.warning(
+                    "Computer Use scroll turn limit reached (google)",
+                    extra={
+                        "scroll_turns": scroll_turns,
+                        "scroll_turn_limit": self._scroll_turn_limit,
+                        "max_turns": self._settings.actions_computer_tool_max_turns,
+                    },
+                )
+                max_turn_code = "scroll_turn_limit_reached"
+                max_turn_reason = (
+                    "Computer Use max turns exceeded: "
+                    f"scroll turn limit reached after {scroll_turns} scroll actions."
+                )
+                max_turn_hit = True
+                break
+
+            if turn_counter >= self._settings.actions_computer_tool_max_turns:
+                logger.warning(
+                    "Computer Use max turns reached (google)",
+                    extra={"max_turns": self._settings.actions_computer_tool_max_turns},
+                )
+                max_turn_code = "max_turns_exceeded"
+                max_turn_reason = (
+                    "Computer Use max turns exceeded after "
+                    f"{turn_counter} turns (limit: "
+                    f"{self._settings.actions_computer_tool_max_turns})."
+                )
+                max_turn_hit = True
+                break
 
         if max_turn_hit:
             if result.terminal_status != "failed":
@@ -897,6 +998,106 @@ class ComputerUseSession:
             )
 
         return result
+
+    @staticmethod
+    def _build_google_fallback_call_id(turn_index: int, sequence: int) -> str:
+        """Create a deterministic local call identifier for id-less Google calls."""
+        return f"google_turn_{turn_index}_call_{sequence}"
+
+    @staticmethod
+    def _extract_google_ambiguous_function_names(
+        call_envelopes: list[GoogleFunctionCallEnvelope],
+    ) -> list[str]:
+        """Return duplicate function names that lack provider call IDs."""
+        name_counts: dict[str, int] = {}
+        for envelope in call_envelopes:
+            function_call = envelope.function_call
+            call_id = str(getattr(function_call, "id", None) or "").strip()
+            if call_id:
+                continue
+            call_name = str(getattr(function_call, "name", "") or "unknown").strip()
+            if not call_name:
+                call_name = "unknown"
+            name_counts[call_name] = name_counts.get(call_name, 0) + 1
+        return sorted(name for name, count in name_counts.items() if count > 1)
+
+    def _build_google_single_call_reask_request(
+        self,
+        *,
+        history: list[Any],
+        environment: str,
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], Any]:
+        """Request a single function call when the previous batch was ambiguous."""
+        from google.genai import types  # type: ignore
+
+        reask_text = (
+            "Your previous response returned multiple function calls with duplicate "
+            "names and missing call IDs, which is ambiguous. "
+            "Return exactly one function call in this turn. "
+            "If additional steps are required, emit one function call per turn."
+        )
+        reask_content = types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=reask_text)],
+        )
+        return (
+            {
+                "model": model or self._google_model,
+                "contents": list(history) + [reask_content],
+                "config": self._build_google_generate_config(environment),
+            },
+            reask_content,
+        )
+
+    async def _flush_google_batch_follow_up(
+        self,
+        *,
+        goal: str,
+        history: list[Any],
+        turns: list[ComputerToolTurn],
+        metadata: dict[str, Any],
+        environment: str,
+        model: str,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Send a Google follow-up for all executed turns in a batch."""
+        (
+            follow_up_payload,
+            func_response_content,
+            follow_up_screenshot,
+        ) = await self._build_google_follow_up_request(
+            goal=goal,
+            history=history,
+            turns=turns,
+            metadata=metadata,
+            environment=environment,
+            model=model,
+        )
+        history.append(func_response_content)
+        response = await self._create_google_response(follow_up_payload)
+        await self._model_logger.log_call(
+            agent="computer_use.google.follow_up",
+            model=model,
+            prompt=f"{goal} (follow-up)",
+            request_payload={
+                "provider": "google",
+                "environment": environment,
+                "payload": "follow_up",
+            },
+            response=response,
+            screenshots=[("computer_use_follow_up", follow_up_screenshot)],
+            metadata={"environment": environment, **metadata},
+        )
+        response_dict = normalize_response(response)
+        if hasattr(response, "candidates"):
+            try:
+                history.append(response.candidates[0].content)
+            except Exception:
+                logger.debug(
+                    "Unable to append Google response content to history",
+                    exc_info=True,
+                )
+        return response, response_dict
 
     async def _run_anthropic(
         self,
@@ -1543,15 +1744,18 @@ class ComputerUseSession:
                             viewport_height,
                             normalized=normalized_coords,
                         )
+                    tap_count = (
+                        3 if (clear_before and environment == "mobile_adb") else 1
+                    )
                     await self._automation_driver.click(
-                        x, y, button="left", click_count=1
+                        x, y, button="left", click_count=tap_count
                     )
                     if clear_before:
                         if environment == "mobile_adb":
-                            await self._automation_driver.press_key("backspace")
+                            pass  # triple-tap selected all; type_text replaces the selection
                         else:
                             await self._automation_driver.press_key("ctrl+a")
-                        await self._automation_driver.press_key("backspace")
+                            await self._automation_driver.press_key("backspace")
                     await self._automation_driver.type_text(str(text_payload))
                     if press_enter:
                         await self._automation_driver.press_key("enter")
@@ -2192,6 +2396,13 @@ class ComputerUseSession:
             response_payload = {
                 "status": turn.status,
                 "call_id": turn.call_id,
+                "google_function_call_sequence": turn.metadata.get(
+                    "google_function_call_sequence"
+                ),
+                "google_correlation_mode": turn.metadata.get("google_correlation_mode"),
+                "google_function_call_fallback_id": turn.metadata.get(
+                    "google_function_call_fallback_id"
+                ),
                 "url": page_url,
                 "x": turn.metadata.get("x"),
                 "y": turn.metadata.get("y"),
@@ -3219,6 +3430,9 @@ class ComputerUseSession:
                 "- key_combination: Use Android-compatible key events only when needed\n"
                 "- scroll_at / scroll_document: Scroll app content\n"
                 "- drag_and_drop: Swipe/drag gestures when necessary\n\n"
+                "TEXT INPUT ON ANDROID:\n"
+                "- To replace existing text in a field: use type_text_at directly — it automatically selects all existing content before typing.\n"
+                "- Do NOT use key_combination with ctrl+a or any other desktop shortcut to select or clear text; these do not work on Android.\n\n"
                 + completion_instruction
                 + "YOUR TASK: "
             )
@@ -3494,18 +3708,48 @@ def extract_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]
 
 def extract_google_function_calls(response_obj: Any) -> list[Any]:
     """Extract function_call parts from a Google response object."""
-    calls: list[Any] = []
+    return [
+        envelope.function_call
+        for envelope in extract_google_function_call_envelopes(response_obj)
+    ]
+
+
+def extract_google_function_call_envelopes(
+    response_obj: Any,
+    *,
+    candidate_index: int = 0,
+) -> list[GoogleFunctionCallEnvelope]:
+    """Extract ordered function_call parts from a selected Google candidate."""
+    envelopes: list[GoogleFunctionCallEnvelope] = []
     candidates = getattr(response_obj, "candidates", []) or []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        if not content:
+    if not candidates:
+        return envelopes
+
+    selected_index = candidate_index
+    if selected_index < 0 or selected_index >= len(candidates):
+        selected_index = 0
+
+    candidate = candidates[selected_index]
+    content = getattr(candidate, "content", None)
+    if not content:
+        return envelopes
+
+    sequence = 0
+    parts = getattr(content, "parts", []) or []
+    for part_index, part in enumerate(parts):
+        func_call = getattr(part, "function_call", None)
+        if not func_call:
             continue
-        parts = getattr(content, "parts", []) or []
-        for part in parts:
-            func_call = getattr(part, "function_call", None)
-            if func_call:
-                calls.append(func_call)
-    return calls
+        sequence += 1
+        envelopes.append(
+            GoogleFunctionCallEnvelope(
+                function_call=func_call,
+                sequence=sequence,
+                candidate_index=selected_index,
+                part_index=part_index,
+            )
+        )
+    return envelopes
 
 
 def extract_google_computer_calls(
