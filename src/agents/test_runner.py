@@ -62,7 +62,7 @@ Prompt construction rules:
 3. Provide any text to enter or keys to press when relevant.
 4. Restate the expected outcome so the executor can verify completion on its own.
 5. Instruct the executor to act directly without seeking confirmation from the user.
-6. Require a strategy shift after three identical failures and ask for an explanation if blocked.
+6. Require a strategy shift after three identical failures where the UI shows no visible response to the action (button appears to do nothing, screen does not change at all). If any visible response is observed — including an error message, a loading indicator, navigation away, or any UI change — do not retry; report the observed outcome immediately and stop. Retries are only for when the tap or click appears to have had no effect whatsoever.
 7. Tell it to rely on the provided screenshot for context and to scroll or refocus if elements are off-screen.
 8. For observation-only (`assert`) actions, explicitly forbid interactions and request a visual verification summary instead.
 9. Avoid backend assumptions, hidden DOM references, or multi-step checklists—each prompt should cover one cohesive action.
