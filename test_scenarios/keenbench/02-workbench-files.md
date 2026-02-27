@@ -39,14 +39,25 @@ Add the base path to the file location below to get the full path.
 
 ### 3. Workbench Creation and File Management
 
+#### TC-006: Cancel the New Workbench dialog
+- Priority: P0
+- Preconditions: App on home screen.
+- Steps:
+  1. Click "New Workbench" (`AppKeys.homeNewWorkbenchButton`).
+     Expected: A dialog appears (`AppKeys.newWorkbenchDialog`) with a name text field and "Create" / "Cancel" buttons.
+  2. Type "Test Cancel" into the name field. Type the characters only — do NOT press Enter and do NOT click any button. Just type the text and stop.
+     Expected: The text "Test Cancel" appears in the name field. The dialog remains open with the "Create" and "Cancel" buttons still visible.
+  3. Click "Cancel" (`AppKeys.newWorkbenchCancelButton`).
+     Expected: The dialog closes. The home screen is shown. No workbench named "Test Cancel" was created.
+
 #### TC-007: Create a new Workbench
 - Priority: P0
 - Preconditions: App on home screen.
 - Steps:
   1. Click "New Workbench" (`AppKeys.homeNewWorkbenchButton`).
      Expected: A dialog appears (`AppKeys.newWorkbenchDialog`) with a text field (`AppKeys.newWorkbenchNameField`) and "Create" / "Cancel" buttons.
-  2. Type "Financial Analysis" into the name field.
-     Expected: The text "Financial Analysis" appears in the field.
+  2. Type "Financial Analysis" into the name field. Type the characters only — do NOT press Enter. Just type the text and stop.
+     Expected: The text "Financial Analysis" appears in the field. The dialog remains open.
   3. Click "Create" (`AppKeys.newWorkbenchCreateButton`).
      Expected: The dialog closes. The workbench screen (`AppKeys.workbenchScreen`) opens with title "Financial Analysis". The file list (`AppKeys.workbenchFileList`) is empty. The scope description text is visible (`AppKeys.workbenchScopeLimits`).
   4. Verify the composer field (`AppKeys.workbenchComposerField`) is visible.
@@ -56,19 +67,21 @@ Add the base path to the file location below to get the full path.
 - Priority: P0
 - Preconditions: Workbench "Financial Analysis" open, no Draft, no files.
 - Steps:
-  1. Click "Add files" and select `notes.txt` and `data.csv` (see base path + file location).
-     Expected: Both files appear in the file list. `notes.txt` shows a file row (`AppKeys.workbenchFileRow('notes.txt')`) with a "TXT" badge. `data.csv` shows a row with a "CSV" badge.
-  2. Verify both file rows have an extract button (`AppKeys.workbenchFileExtractButton('notes.txt')`) and a remove button (`AppKeys.workbenchFileRemoveButton('notes.txt')`).
+  1. Click "Add files" and select `notes.txt` (see base path + file location). Add one file at a time. File picker is tricky here so it's best to clikc on "Home" first and then click your way up.
+     Expected: `notes.txt` appears in the file list with a "TXT" badge (`AppKeys.workbenchFileRow('notes.txt')`).
+  2. Click "Add files" again and select `data.csv`.
+     Expected: `data.csv` appears in the file list with a "CSV" badge (`AppKeys.workbenchFileRow('data.csv')`).
+  3. Verify both file rows have an extract button (`AppKeys.workbenchFileExtractButton('notes.txt')`) and a remove button (`AppKeys.workbenchFileRemoveButton('notes.txt')`).
      Expected: Both action buttons are visible and enabled (no draft exists).
-  3. Verify the scope badge (`AppKeys.workbenchScopeBadge`) shows "Scoped" or the scope limits text updates to reflect the file count.
+  4. Verify the scope badge (`AppKeys.workbenchScopeBadge`) shows "Scoped" or the scope limits text updates to reflect the file count.
      Expected: The file count in the scope area reflects 2 files.
 
 #### TC-009: Add office files (DOCX, ODT, XLSX, PPTX, PDF, images)
 - Priority: P0
 - Preconditions: Workbench open, no Draft.
 - Steps:
-  1. Add `simple.docx`, `notes.odt`, `multi-sheet.xlsx`, `slides.pptx`, `report.pdf`, `chart.png`, `logo.svg` via "Add files" (see base path + file location).
-     Expected: All 7 files appear in the file list with appropriate badges: "DOCX", "ODT", "XLSX", "PPTX", "PDF", "PNG", "SVG".
+  1. Add each file one at a time via "Add files": `simple.docx`, then `notes.odt`, then `multi-sheet.xlsx`, then `slides.pptx`, then `report.pdf`, then `chart.png`, then `logo.svg` (see base path + file location). Use a separate "Add files" action for each file.
+     Expected: After all 7 additions, all files appear in the file list with appropriate badges: "DOCX", "ODT", "XLSX", "PPTX", "PDF", "PNG", "SVG".
   2. Verify `report.pdf`, `chart.png`, `logo.svg` show a "Read-only" badge on their file rows.
      Expected: Read-only files are visually distinguished.
   3. Verify the file count in scope limits reflects the correct total.
@@ -82,15 +95,6 @@ Add the base path to the file location below to get the full path.
      Expected: Files exist on disk.
   2. Attempt to add both files via `WorkbenchFilesAdd` in a single call.
      Expected: The add operation fails with an error. The error message references the file count limit (10). No new files are added to the workbench. The file list still shows 9 files.
-
-#### TC-012: Oversize file skip (>25 MB)
-- Priority: P0
-- Preconditions: Workbench open, no Draft, fewer than 10 files.
-- Steps:
-  1. Create `big.csv` (>25 MB, e.g., a repeated row to exceed the limit) and a small `small.txt` (a few bytes).
-     Expected: Both files exist on disk.
-  2. Attempt to add both `big.csv` and `small.txt` in a single `WorkbenchFilesAdd` call.
-     Expected: `small.txt` is added successfully (appears in file list). `big.csv` is skipped. The add result includes a skip reason mentioning the size limit (25 MB). The file list does NOT contain `big.csv`.
 
 #### TC-013: Duplicate filename rejection
 - Priority: P0

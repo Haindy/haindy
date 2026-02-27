@@ -122,6 +122,17 @@ class InteractionConstraints:
         return InteractionConstraints(disallow_scroll=not allows_scroll)
 
 
+def _strip_bytes(obj: Any) -> Any:
+    """Recursively replace bytes values with a placeholder string for logging."""
+    if isinstance(obj, bytes):
+        return f"<bytes len={len(obj)}>"
+    if isinstance(obj, dict):
+        return {k: _strip_bytes(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_strip_bytes(v) for v in obj]
+    return obj
+
+
 @dataclass
 class ComputerUseSessionResult:
     """Result of executing a Computer Use session."""
@@ -292,33 +303,15 @@ class ComputerUseSession:
         )
         try:
             if self._provider == "google":
-                try:
-                    return await self._run_google(
-                        goal=goal,
-                        metadata=metadata,
-                        environment=env_mode,
-                        cache_label=cache_label,
-                        cache_action=cache_action,
-                        use_cache=use_cache,
-                        model=self._google_model,
-                    )
-                except Exception as exc:
-                    if not self._can_fallback_to_openai():
-                        raise
-                    logger.warning(
-                        "Google CU provider failed; falling back to OpenAI for this action",
-                        extra={"error": str(exc)},
-                    )
-                    return await self._run_openai(
-                        goal=goal,
-                        initial_screenshot=initial_screenshot,
-                        metadata=metadata,
-                        environment=env_mode,
-                        cache_label=cache_label,
-                        cache_action=cache_action,
-                        use_cache=use_cache,
-                        model=self._openai_model,
-                    )
+                return await self._run_google(
+                    goal=goal,
+                    metadata=metadata,
+                    environment=env_mode,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                    use_cache=use_cache,
+                    model=self._google_model,
+                )
             if self._provider == "openai":
                 return await self._run_openai(
                     goal=goal,
@@ -597,10 +590,6 @@ class ComputerUseSession:
 
         return result
 
-    def _can_fallback_to_openai(self) -> bool:
-        """Return True when an OpenAI client is available for fallback execution."""
-        return self._client is not None
-
     async def _run_google(
         self,
         *,
@@ -683,7 +672,7 @@ class ComputerUseSession:
             executed_turns: list[ComputerToolTurn] = []
             for call in calls:
                 turn = ComputerToolTurn(
-                    call_id=str(getattr(call, "name", "") or ""),
+                    call_id=str(getattr(call, "id", None) or getattr(call, "name", "") or ""),
                     action_type=str(getattr(call, "name", "") or "unknown"),
                     parameters=getattr(call, "args", {}) or {},
                     response_id=response_dict.get("id"),
@@ -877,7 +866,7 @@ class ComputerUseSession:
                     "reason": max_turn_reason,
                     "code": max_turn_code,
                     "last_assistant_text": last_assistant_text,
-                    "last_response": last_response_dict,
+                    "last_response": _strip_bytes(last_response_dict),
                 },
             )
 
@@ -1141,7 +1130,7 @@ class ComputerUseSession:
                     "reason": max_turn_reason,
                     "code": max_turn_code,
                     "last_assistant_text": last_assistant_text,
-                    "last_response": last_response_dict,
+                    "last_response": _strip_bytes(last_response_dict),
                 },
             )
 
@@ -1207,6 +1196,15 @@ class ComputerUseSession:
                 turn.error_message = disallowed_reason
                 turn.metadata["ignored"] = True
             else:
+                # Normalize custom modifier-click actions before all policy checks.
+                implicit_modifier: str | None = None
+                if action_type == "ctrl_click":
+                    action_type = "click_at"
+                    implicit_modifier = "ctrl"
+                elif action_type == "shift_click":
+                    action_type = "click_at"
+                    implicit_modifier = "shift"
+
                 await self._enforce_domain_policy(action_type)
 
                 if (
@@ -1237,13 +1235,22 @@ class ComputerUseSession:
                         )
                     button = (action.get("button", "left") or "left").lower()
                     click_count = int(action.get("click_count", 1))
+                    raw_modifiers = action.get("modifiers") or []
+                    if isinstance(raw_modifiers, str):
+                        raw_modifiers = [raw_modifiers]
+                    modifiers = [str(m).lower() for m in raw_modifiers if m]
+                    if implicit_modifier and implicit_modifier not in modifiers:
+                        modifiers = [implicit_modifier] + modifiers
                     await asyncio.wait_for(
                         self._automation_driver.click(
-                            x, y, button=button, click_count=click_count
+                            x, y, button=button, click_count=click_count,
+                            modifiers=modifiers or None,
                         ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
+                    if modifiers:
+                        turn.metadata["modifiers"] = modifiers
                     turn.status = "executed"
                     if button == "right":
                         self._pending_context_menu_selection = True
@@ -1887,6 +1894,22 @@ class ComputerUseSession:
                 "screenshot_hash": screenshot_hash,
                 "loop_window": window,
             }
+
+        # Secondary check: screen unchanged across the full window regardless of action.
+        # Catches cases where the model varies coordinates slightly but nothing changes.
+        if all(hash_ == screenshot_hash for _, hash_ in history):
+            action_label = signature[0] if signature else "unknown"
+            message = (
+                f"Computer Use loop detected: screen unchanged after "
+                f"{window} consecutive '{action_label}' actions."
+            )
+            return {
+                "message": message,
+                "signature": signature,
+                "screenshot_hash": screenshot_hash,
+                "loop_window": window,
+            }
+
         return None
 
     def _compute_turn_signature(self, turn: ComputerToolTurn) -> tuple[str, ...] | None:
@@ -1906,7 +1929,12 @@ class ComputerUseSession:
             if coord:
                 signature.append(f"{label}:{coord}")
 
-        append_coord("xy", params.get("x"), params.get("y"))
+        # Handle both flat {"x": x, "y": y} and Google CU {"coordinate": [x, y]} formats.
+        raw_coord = params.get("coordinate") or params.get("coordinates")
+        if isinstance(raw_coord, (list, tuple)) and len(raw_coord) == 2:
+            append_coord("xy", raw_coord[0], raw_coord[1])
+        else:
+            append_coord("xy", params.get("x"), params.get("y"))
         append_coord(
             "start",
             params.get("start_x") or params.get("from_x"),
@@ -2069,6 +2097,7 @@ class ComputerUseSession:
                     environment=self._map_google_environment(environment),
                 )
             ),
+            self._google_modifier_click_tools(),
         ]
         return contents, types.GenerateContentConfig(tools=tools)
 
@@ -2108,16 +2137,19 @@ class ComputerUseSession:
                 k: v for k, v in response_payload.items() if v is not None
             }
             parts.append(
-                types.Part.from_function_response(
-                    name=turn.action_type or "action",
-                    response=response_payload,
-                    parts=[
-                        types.FunctionResponsePart(
-                            inline_data=types.FunctionResponseBlob(
-                                mime_type="image/png", data=screenshot_bytes
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id=turn.call_id or None,
+                        name=turn.action_type or "action",
+                        response=response_payload,
+                        parts=[
+                            types.FunctionResponsePart(
+                                inline_data=types.FunctionResponseBlob(
+                                    mime_type="image/png", data=screenshot_bytes
+                                )
                             )
-                        )
-                    ],
+                        ],
+                    )
                 )
             )
 
@@ -2144,6 +2176,7 @@ class ComputerUseSession:
                     environment=self._map_google_environment(environment),
                 )
             ),
+            self._google_modifier_click_tools(),
         ]
         return (
             {
@@ -3155,6 +3188,51 @@ class ComputerUseSession:
                 types.Environment.ENVIRONMENT_UNSPECIFIED,
             )
         return types.Environment.ENVIRONMENT_UNSPECIFIED
+
+    @staticmethod
+    def _google_modifier_click_tools() -> Any:
+        """Return a Tool with custom modifier-click function declarations.
+
+        Google's built-in click_at has no modifier support, so the model cannot
+        perform Ctrl+click or Shift+click natively. These custom functions fill
+        that gap and are handled by _execute_tool_action.
+        """
+        from google.genai import types  # type: ignore
+
+        coord_props = {
+            "x": types.Schema(type="NUMBER", description="X coordinate (0-999 scale)"),
+            "y": types.Schema(type="NUMBER", description="Y coordinate (0-999 scale)"),
+        }
+        return types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name="ctrl_click",
+                    description=(
+                        "Performs a Ctrl+Click at the given coordinates. "
+                        "Use this to add items to an existing selection, e.g. "
+                        "selecting multiple files in a file picker."
+                    ),
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties=coord_props,
+                        required=["x", "y"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="shift_click",
+                    description=(
+                        "Performs a Shift+Click at the given coordinates. "
+                        "Use this to extend a contiguous selection, e.g. "
+                        "selecting a range of files in a file picker."
+                    ),
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties=coord_props,
+                        required=["x", "y"],
+                    ),
+                ),
+            ]
+        )
 
     @staticmethod
     def _parse_betas(raw: str) -> list[str]:
