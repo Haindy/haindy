@@ -1348,39 +1348,53 @@ class ComputerUseSession:
                         except (TypeError, ValueError):
                             return None
 
-                    start_x_raw = _coerce_float(
-                        action.get("start_x") or action.get("from_x") or action.get("x")
+                    def _first_numeric(*keys: str) -> float | None:
+                        for key in keys:
+                            if key not in action:
+                                continue
+                            numeric = _coerce_float(action.get(key))
+                            if numeric is not None:
+                                return numeric
+                        return None
+
+                    start_x_raw = _first_numeric("start_x", "from_x", "x")
+                    start_y_raw = _first_numeric("start_y", "from_y", "y")
+                    # Accept legacy drag-and-drop destination aliases from provider payloads.
+                    end_x_raw = _first_numeric(
+                        "end_x",
+                        "to_x",
+                        "destination_x",
+                        "target_x",
                     )
-                    start_y_raw = _coerce_float(
-                        action.get("start_y") or action.get("from_y") or action.get("y")
+                    end_y_raw = _first_numeric(
+                        "end_y",
+                        "to_y",
+                        "destination_y",
+                        "target_y",
                     )
-                    end_x_raw = _coerce_float(action.get("end_x") or action.get("to_x"))
-                    end_y_raw = _coerce_float(action.get("end_y") or action.get("to_y"))
 
                     path_points = action.get("path") or action.get("points")
                     if isinstance(path_points, list) and len(path_points) >= 2:
                         first_point = path_points[0]
                         last_point = path_points[-1]
-                        if start_x_raw is None:
-                            start_x_raw = _coerce_float(first_point.get("x"))
-                        if start_y_raw is None:
-                            start_y_raw = _coerce_float(first_point.get("y"))
-                        if end_x_raw is None:
-                            end_x_raw = _coerce_float(last_point.get("x"))
-                        if end_y_raw is None:
-                            end_y_raw = _coerce_float(last_point.get("y"))
+                        if isinstance(first_point, dict):
+                            if start_x_raw is None:
+                                start_x_raw = _coerce_float(first_point.get("x"))
+                            if start_y_raw is None:
+                                start_y_raw = _coerce_float(first_point.get("y"))
+                        if isinstance(last_point, dict):
+                            if end_x_raw is None:
+                                end_x_raw = _coerce_float(last_point.get("x"))
+                            if end_y_raw is None:
+                                end_y_raw = _coerce_float(last_point.get("y"))
 
                     if start_x_raw is None or start_y_raw is None:
                         raise ComputerUseExecutionError(
                             "Drag action missing start coordinates."
                         )
 
-                    delta_x_raw = _coerce_float(
-                        action.get("dx") or action.get("delta_x")
-                    )
-                    delta_y_raw = _coerce_float(
-                        action.get("dy") or action.get("delta_y")
-                    )
+                    delta_x_raw = _first_numeric("dx", "delta_x")
+                    delta_y_raw = _first_numeric("dy", "delta_y")
                     if end_x_raw is None and delta_x_raw is not None:
                         end_x_raw = start_x_raw + delta_x_raw
                     if end_y_raw is None and delta_y_raw is not None:
@@ -1420,35 +1434,6 @@ class ComputerUseSession:
                     await asyncio.wait_for(
                         self._automation_driver.drag_mouse(
                             start_x, start_y, end_x, end_y, steps=steps
-                        ),
-                        timeout=self._action_timeout_seconds,
-                    )
-                    turn.metadata.update(
-                        {
-                            "start_x": start_x,
-                            "start_y": start_y,
-                            "end_x": end_x,
-                            "end_y": end_y,
-                        }
-                    )
-                    turn.status = "executed"
-                elif action_type == "drag_and_drop":
-                    start_x, start_y = self._resolve_coordinates(
-                        action,
-                        viewport_width,
-                        viewport_height,
-                        normalized=normalized_coords,
-                    )
-                    end_x, end_y = self._resolve_coordinates(
-                        action,
-                        viewport_width,
-                        viewport_height,
-                        prefix="destination_",
-                        normalized=normalized_coords,
-                    )
-                    await asyncio.wait_for(
-                        self._automation_driver.drag_mouse(
-                            start_x, start_y, end_x, end_y, steps=1
                         ),
                         timeout=self._action_timeout_seconds,
                     )
@@ -1666,6 +1651,8 @@ class ComputerUseSession:
                 extra={
                     "call_id": turn.call_id,
                     "action_type": action_type,
+                    "raw_action_type": raw_action_type,
+                    "action_keys": sorted(action.keys()),
                     "reason": turn.error_message,
                 },
             )
@@ -2016,8 +2003,14 @@ class ComputerUseSession:
         )
         append_coord(
             "end",
-            params.get("end_x") or params.get("to_x"),
-            params.get("end_y") or params.get("to_y"),
+            params.get("end_x")
+            or params.get("to_x")
+            or params.get("destination_x")
+            or params.get("target_x"),
+            params.get("end_y")
+            or params.get("to_y")
+            or params.get("destination_y")
+            or params.get("target_y"),
         )
 
         if action_type == "type":

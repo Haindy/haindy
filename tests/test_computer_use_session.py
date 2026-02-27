@@ -149,6 +149,145 @@ async def test_computer_use_session_executes_actions_successfully(
 
 
 @pytest.mark.asyncio
+async def test_computer_use_session_executes_drag_and_drop_with_destination_aliases(
+    mock_client, mock_browser, session_settings
+):
+    """Legacy drag_and_drop payloads should execute via canonical drag parsing."""
+    initial_response = DummyResponse(
+        {
+            "id": "resp_drag_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "drag_and_drop",
+                    "action": {
+                        "type": "drag_and_drop",
+                        "x": 0,
+                        "y": 0,
+                        "destination_x": 300,
+                        "destination_y": 200,
+                    },
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_drag_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Dragged successfully.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Drag the item to the target.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 3},
+    )
+
+    assert len(result.actions) == 1
+    turn = result.actions[0]
+    assert turn.status == "executed"
+    assert turn.action_type == "drag"
+    assert turn.metadata.get("normalized_action_type") == "drag"
+    mock_browser.drag_mouse.assert_awaited_once_with(0, 0, 300, 200, steps=1)
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_logs_rejected_drag_with_raw_action_metadata(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Rejected drag actions should include raw action type and payload keys in logs."""
+    initial_response = DummyResponse(
+        {
+            "id": "resp_drag_fail_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "drag_and_drop",
+                    "action": {
+                        "type": "drag_and_drop",
+                        "x": 10,
+                        "y": 20,
+                    },
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_drag_fail_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Could not drag the item.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+    warning_mock = MagicMock()
+    monkeypatch.setattr(cu_session_module.logger, "warning", warning_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Drag the item.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 4},
+    )
+
+    assert len(result.actions) == 1
+    turn = result.actions[0]
+    assert turn.status == "failed"
+    assert turn.error_message == "Drag action missing destination coordinates."
+
+    rejection_logs = [
+        call
+        for call in warning_mock.call_args_list
+        if call.args and call.args[0] == "Computer Use action rejected"
+    ]
+    assert rejection_logs
+    extra = rejection_logs[0].kwargs["extra"]
+    assert extra["action_type"] == "drag"
+    assert extra["raw_action_type"] == "drag_and_drop"
+    assert extra["action_keys"] == ["type", "x", "y"]
+
+
+@pytest.mark.asyncio
 async def test_computer_use_session_blocks_actions_in_observe_mode(
     mock_client, mock_browser, session_settings
 ):
