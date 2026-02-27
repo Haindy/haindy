@@ -910,3 +910,103 @@ def test_computer_use_session_google_client_uses_api_key_mode(
     session._ensure_google_client()
 
     client_factory.assert_called_once_with(api_key="vertex-key")
+
+
+def test_extract_google_pending_safety_checks() -> None:
+    checks = ComputerUseSession._extract_google_pending_safety_checks(
+        {
+            "x": 500,
+            "y": 538,
+            "safety_decision": {
+                "decision": "require_confirmation",
+                "explanation": "Please confirm sign out.",
+            },
+        }
+    )
+
+    assert checks == [
+        {
+            "decision": "require_confirmation",
+            "code": "require_confirmation",
+            "message": "Please confirm sign out.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_adds_safety_acknowledgement_and_call_id(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=object(),
+        debug_logger=None,
+    )
+    turn = ComputerToolTurn(
+        call_id="click_at",
+        action_type="click_at",
+        parameters={"x": 500, "y": 538},
+        status="executed",
+        pending_safety_checks=[
+            {
+                "decision": "require_confirmation",
+                "code": "require_confirmation",
+                "message": "Please confirm sign out.",
+            }
+        ],
+        metadata={"google_function_call_id": "call_google_1"},
+    )
+
+    payload, _, _ = await session._build_google_follow_up_request(
+        goal="Confirm sign out.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.id == "call_google_1"
+    assert function_response.response["safety_acknowledgement"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_omits_function_response_id_without_google_call_id(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=object(),
+        debug_logger=None,
+    )
+    turn = ComputerToolTurn(
+        call_id="click_at",
+        action_type="click_at",
+        parameters={"x": 500, "y": 538},
+        status="executed",
+        pending_safety_checks=[],
+        metadata={},
+    )
+
+    payload, _, _ = await session._build_google_follow_up_request(
+        goal="Tap settings.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.id is None

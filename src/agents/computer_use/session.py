@@ -682,16 +682,26 @@ class ComputerUseSession:
 
             executed_turns: list[ComputerToolTurn] = []
             for call in calls:
+                raw_action_type = str(getattr(call, "name", "") or "unknown")
+                raw_parameters = getattr(call, "args", {}) or {}
+                if not isinstance(raw_parameters, dict):
+                    raw_parameters = {}
+                google_call_id = str(getattr(call, "id", None) or "").strip()
+                pending_safety_checks = self._extract_google_pending_safety_checks(
+                    raw_parameters
+                )
                 turn = ComputerToolTurn(
-                    call_id=str(
-                        getattr(call, "id", None) or getattr(call, "name", "") or ""
-                    ),
-                    action_type=str(getattr(call, "name", "") or "unknown"),
-                    parameters=getattr(call, "args", {}) or {},
+                    call_id=google_call_id or raw_action_type,
+                    action_type=raw_action_type,
+                    parameters=raw_parameters,
                     response_id=response_dict.get("id"),
-                    pending_safety_checks=[],
+                    pending_safety_checks=pending_safety_checks,
                 )
                 _inject_context_metadata(turn, metadata)
+                if google_call_id:
+                    turn.metadata["google_function_call_id"] = google_call_id
+                if pending_safety_checks:
+                    turn.metadata["google_safety_decision"] = pending_safety_checks[0]
 
                 if self._should_abort_on_safety(turn, result):
                     return result
@@ -1881,6 +1891,45 @@ class ComputerUseSession:
 
         return acknowledged
 
+    @staticmethod
+    def _extract_google_pending_safety_checks(
+        action_args: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Extract Google Computer Use safety decision metadata from call arguments."""
+        if not isinstance(action_args, dict):
+            return []
+
+        safety_decision = action_args.get("safety_decision")
+        if not isinstance(safety_decision, dict):
+            return []
+
+        decision = str(safety_decision.get("decision") or "").strip()
+        if not decision:
+            return []
+
+        explanation = str(safety_decision.get("explanation") or "").strip()
+        payload: dict[str, Any] = {
+            "decision": decision,
+            "code": decision,
+            "message": explanation,
+        }
+        safety_id = str(safety_decision.get("id") or "").strip()
+        if safety_id:
+            payload["id"] = safety_id
+
+        return [payload]
+
+    @staticmethod
+    def _google_safety_acknowledgement(turn: ComputerToolTurn) -> str | None:
+        """Return the acknowledgement marker required for confirm-gated actions."""
+        for check in turn.pending_safety_checks:
+            if not isinstance(check, dict):
+                continue
+            decision = str(check.get("decision") or check.get("code") or "").strip()
+            if decision.lower() == "require_confirmation":
+                return "true"
+        return None
+
     def _update_loop_history(
         self,
         turn: ComputerToolTurn,
@@ -2144,6 +2193,9 @@ class ComputerUseSession:
             page_url = "desktop://"
         parts: list[Any] = []
         for turn in turns:
+            google_call_id = str(
+                turn.metadata.get("google_function_call_id") or ""
+            ).strip()
             response_payload = {
                 "status": turn.status,
                 "call_id": turn.call_id,
@@ -2155,13 +2207,16 @@ class ComputerUseSession:
                 "clipboard_error": turn.metadata.get("clipboard_error"),
                 "error": turn.error_message,
             }
+            safety_acknowledgement = self._google_safety_acknowledgement(turn)
+            if safety_acknowledgement:
+                response_payload["safety_acknowledgement"] = safety_acknowledgement
             response_payload = {
                 k: v for k, v in response_payload.items() if v is not None
             }
             parts.append(
                 types.Part(
                     function_response=types.FunctionResponse(
-                        id=turn.call_id or None,
+                        id=google_call_id or None,
                         name=turn.action_type or "action",
                         response=response_payload,
                         parts=[

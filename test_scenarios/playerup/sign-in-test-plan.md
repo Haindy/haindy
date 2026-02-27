@@ -9,7 +9,7 @@
 **Test Type:** Manual Black Box Testing  
 **Test Environment Requirements:**
 - Test and Production environments
-- iOS and Android devices/simulators
+- An iOS or Android device/simulator
 - Network connectivity (WiFi and Cellular)
 - Valid TeamSnap user accounts for testing
 - Email accounts with inbox access for password reset
