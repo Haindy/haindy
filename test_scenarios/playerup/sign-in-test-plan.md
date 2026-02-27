@@ -13,7 +13,6 @@
 - Network connectivity (WiFi and Cellular)
 - Valid TeamSnap user accounts for testing
 - Email accounts with inbox access for password reset
-- Phone number with SMS capability
 
 ## Test Objectives
 
@@ -101,39 +100,7 @@
 
 ---
 
-## 2. Phone Number Sign-In
-
-### Test Case: TC-SI-006 - Successful Phone Number Sign-In
-**Priority:** High  
-**Type:** Functional  
-**Preconditions:** Account with phone: 555-123-4567
-
-| Executed | Test Steps | Expected Results | Pass/Fail |
-|----------|------------|------------------|-----------|  
-| [ ] | 1. Navigate to Sign-In | Sign-In screen displayed | [ ] |
-| [ ] | 2. Toggle to phone input | Input changes to phone format | [ ] |
-| [ ] | 3. Enter phone number (555-123-4567) | Phone number formatted correctly | [ ] |
-| [ ] | 4. Enter password | Password accepted | [ ] |
-| [ ] | 5. Click "Sign In" | • Authentication successful<br>• Navigation to appropriate home screen | [ ] |
-
----
-
-### Test Case: TC-SI-007 - Invalid Phone Format
-**Priority:** Medium  
-**Type:** Negative  
-**Preconditions:** None
-
-| Executed | Test Steps | Expected Results | Pass/Fail |
-|----------|------------|------------------|-----------|  
-| [ ] | 1. Navigate to Sign-In | Sign-In screen displayed | [ ] |
-| [ ] | 2. Toggle to phone input | Input changes to phone format | [ ] |
-| [ ] | 3. Enter invalid phone (123) | Validation error shown | [ ] |
-| [ ] | 4. Enter letters (abcdefgh) | Input rejected or filtered | [ ] |
-| [ ] | 5. Try to sign in | • Cannot proceed with invalid format<br>• Clear error message about phone format | [ ] |
-
----
-
-## 3. TeamSnap OAuth Sign-In
+## 2. TeamSnap OAuth Sign-In
 
 ### Test Case: TC-SI-008 - TeamSnap OAuth Sign-In for Existing User
 **Priority:** High  
@@ -163,7 +130,7 @@
 
 ---
 
-## 4. Password Reset
+## 3. Password Reset
 
 ### Test Case: TC-SI-010 - Forgot Password Flow
 **Priority:** Critical  
@@ -196,7 +163,7 @@
 
 ---
 
-## 5. Session Management
+## 4. Session Management
 
 ### Test Case: TC-SI-012 - Session Persistence
 **Priority:** High  
@@ -237,7 +204,7 @@
 
 ---
 
-## 6. Edge Cases
+## 5. Edge Cases
 
 ### Test Case: TC-SI-015 - Sign-In with No Network
 **Priority:** High  
@@ -277,8 +244,6 @@
 | TC-SI-003 | Critical | [ ] Not Run | [ ] |
 | TC-SI-004 | High | [ ] Not Run | [ ] |
 | TC-SI-005 | High | [ ] Not Run | [ ] |
-| TC-SI-006 | High | [ ] Not Run | [ ] |
-| TC-SI-007 | Medium | [ ] Not Run | [ ] |
 | TC-SI-008 | High | [ ] Not Run | [ ] |
 | TC-SI-009 | High | [ ] Not Run | [ ] |
 | TC-SI-010 | Critical | [ ] Not Run | [ ] |
@@ -294,7 +259,6 @@
 ### Test Execution Guidelines
 - Check each step as completed ([ ] → [x])
 - Mark Pass/Fail for each expected result
-- Test both email and phone variations where applicable
 - Verify on multiple devices when possible
 
 ### Known Limitations

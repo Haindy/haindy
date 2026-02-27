@@ -1199,6 +1199,15 @@ class TestRunner(BaseAgent):
             if runtime_environment == "mobile_adb"
             else "desktop/web UI in screenshot-space coordinates"
         )
+        environment_specific_guidance = ""
+        if runtime_environment == "mobile_adb":
+            environment_specific_guidance = """
+Mobile-specific constraints:
+- This run targets Android mobile UI. Do not use desktop/browser navigation assumptions.
+- Do NOT propose keyboard/browser shortcuts like Alt+Left, Alt+Right, Ctrl+L, Ctrl+Tab, or "browser back".
+- Prefer tap/swipe interactions and Android-safe navigation.
+- If back navigation is required, use `key_press` with value "back" or tap a visible in-app/system back control.
+""".strip()
 
         prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
 
@@ -1237,6 +1246,8 @@ Guidelines:
 4. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
 5. Use the previous/next step context to stay aligned with the intended flow.
 6. Every non-skip action must include a `computer_use_prompt` that is ready to send directly to the Computer Use model—no additional wrapping will be added later.
+
+{environment_specific_guidance}
 
 Action schema for each entry (JSON object):
 - type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
@@ -1449,6 +1460,33 @@ Respond with a JSON object containing an "actions" array where every item follow
                 expected_outcome=action.get("expected_outcome", step.expected_result),
                 computer_use_prompt=action.get("computer_use_prompt"),
             )
+            resolved_environment = (
+                str(step.environment or self._environment or "desktop").strip().lower()
+            )
+            if resolved_environment not in {"desktop", "browser", "mobile_adb"}:
+                resolved_environment = (
+                    str(self._environment or "desktop").strip().lower() or "desktop"
+                )
+            resolved_target_type = (
+                "mobile_adb"
+                if resolved_environment == "mobile_adb"
+                else "web"
+                if resolved_environment == "browser"
+                else "desktop_app"
+            )
+            state_context = (
+                self._test_state.context
+                if self._test_state and isinstance(self._test_state.context, dict)
+                else {}
+            )
+            context_backend = (
+                str(state_context.get("automation_backend") or "").strip().lower()
+            )
+            context_target_type = (
+                str(state_context.get("target_type") or "").strip().lower()
+            )
+            automation_backend = context_backend or resolved_environment
+            target_type = context_target_type or resolved_target_type
 
             # Create a temporary TestStep for the action
             action_step = TestStep(
@@ -1459,6 +1497,7 @@ Respond with a JSON object containing an "actions" array where every item follow
                 action_instruction=instruction,
                 optional=not action.get("critical", True),
                 intent=step.intent,
+                environment=resolved_environment,
             )
 
             # Build context
@@ -1469,6 +1508,9 @@ Respond with a JSON object containing an "actions" array where every item follow
                 "action_description": action.get("description", ""),
                 "recent_actions": self._execution_history[-3:],
                 "step_intent": step.intent.value,
+                "automation_backend": automation_backend,
+                "target_type": target_type,
+                "environment": resolved_environment,
             }
             test_context["cache_label"] = (
                 step.cache_label or action.get("target") or action.get("description")

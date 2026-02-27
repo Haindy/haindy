@@ -92,6 +92,7 @@ class StateManager:
                 end_time=None,
                 error_count=0,
                 warning_count=0,
+                context=dict(initial_context or {}),
             )
 
             # Store state and plan

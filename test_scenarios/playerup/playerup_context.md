@@ -13,5 +13,7 @@ adb_commands:
   - adb -s emulator-5554 shell am start -n com.playerup.mobile/.MainActivity
 
 # Notes
+- We are only running in the test environment
+- Assume the user data provided is valid
 - Android emulator is already running before test execution starts.
 - Keep the app in portrait mode.

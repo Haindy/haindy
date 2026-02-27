@@ -436,7 +436,14 @@ class MobileDriver(AutomationDriver):
 
     @staticmethod
     def _normalize_key_token(token: str) -> str:
-        return token.strip().lower().replace("-", "_")
+        normalized = token.strip().lower().replace("-", "_")
+        alias_map = {
+            "arrowleft": "left",
+            "arrowright": "right",
+            "arrowup": "up",
+            "arrowdown": "down",
+        }
+        return alias_map.get(normalized, normalized)
 
     def _capture_call(self, method: str, params: dict[str, object]) -> None:
         if not self._capturing:

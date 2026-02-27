@@ -2165,15 +2165,7 @@ class ComputerUseSession:
                 ],
             )
         ]
-        tools = [
-            types.Tool(
-                computer_use=types.ComputerUse(
-                    environment=self._map_google_environment(environment),
-                )
-            ),
-            self._google_modifier_click_tools(),
-        ]
-        return contents, types.GenerateContentConfig(tools=tools)
+        return contents, self._build_google_generate_config(environment)
 
     async def _build_google_follow_up_request(
         self,
@@ -2255,23 +2247,39 @@ class ComputerUseSession:
                     parts=[types.Part.from_text(text=reminder)],
                 )
             )
-        tools = [
-            types.Tool(
-                computer_use=types.ComputerUse(
-                    environment=self._map_google_environment(environment),
-                )
-            ),
-            self._google_modifier_click_tools(),
-        ]
         return (
             {
                 "model": model or self._google_model,
                 "contents": contents,
-                "config": types.GenerateContentConfig(tools=tools),
+                "config": self._build_google_generate_config(environment),
             },
             function_response_content,
             screenshot_bytes,
         )
+
+    def _build_google_generate_config(self, environment: str) -> Any:
+        from google.genai import types  # type: ignore
+
+        return types.GenerateContentConfig(
+            tools=self._build_google_tools(environment),
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+        )
+
+    def _build_google_tools(self, environment: str) -> list[Any]:
+        from google.genai import types  # type: ignore
+
+        tools: list[Any] = [
+            types.Tool(
+                computer_use=types.ComputerUse(
+                    environment=self._map_google_environment(environment),
+                )
+            )
+        ]
+        if self._normalize_environment_name(environment) != "mobile_adb":
+            tools.append(self._google_modifier_click_tools())
+        return tools
 
     def _build_anthropic_initial_request(
         self,
@@ -2546,7 +2554,7 @@ class ComputerUseSession:
                 "Google CU provider requires either VERTEX_PROJECT+VERTEX_LOCATION or VERTEX_API_KEY."
             )
         self._google_client = genai.Client(api_key=vertex_api_key)
-        logger.info("Initialized Google CU client in API key mode")
+        logger.debug("Initialized Google CU client in API key mode")
         return self._google_client
 
     async def _ensure_automation_driver_ready(self) -> None:
