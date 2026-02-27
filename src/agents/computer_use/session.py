@@ -217,8 +217,13 @@ class ComputerUseSession:
             getattr(self._settings, "anthropic_cu_max_tokens", 16384)
         )
         self._default_environment = self._normalize_environment_name(environment)
+        coordinate_cache_path = (
+            self._settings.mobile_coordinate_cache_path
+            if self._default_environment == "mobile_adb"
+            else self._settings.desktop_coordinate_cache_path
+        )
         self._coordinate_cache = coordinate_cache or CoordinateCache(
-            self._settings.desktop_coordinate_cache_path
+            coordinate_cache_path
         )
         self._model_logger = model_logger or get_model_logger(
             self._settings.model_log_path,
@@ -361,6 +366,9 @@ class ComputerUseSession:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, viewport_width, viewport_height
+        )
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
         screenshot_b64 = encode_png_base64(screenshot)
         tool_environment = self._map_openai_environment(environment)
@@ -609,6 +617,9 @@ class ComputerUseSession:
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
         initial_screenshot = await self._automation_driver.screenshot()
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, viewport_width, viewport_height
+        )
         goal = self._apply_interaction_mode_guidance(goal, metadata)
         wrapped_goal = self._wrap_goal_for_google(goal, environment)
         contents, config = self._build_google_initial_request(
@@ -672,7 +683,9 @@ class ComputerUseSession:
             executed_turns: list[ComputerToolTurn] = []
             for call in calls:
                 turn = ComputerToolTurn(
-                    call_id=str(getattr(call, "id", None) or getattr(call, "name", "") or ""),
+                    call_id=str(
+                        getattr(call, "id", None) or getattr(call, "name", "") or ""
+                    ),
                     action_type=str(getattr(call, "name", "") or "unknown"),
                     parameters=getattr(call, "args", {}) or {},
                     response_id=response_dict.get("id"),
@@ -891,6 +904,9 @@ class ComputerUseSession:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, viewport_width, viewport_height
+        )
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
 
         request_payload = self._build_anthropic_initial_request(
@@ -1243,14 +1259,17 @@ class ComputerUseSession:
                         modifiers = [implicit_modifier] + modifiers
                     await asyncio.wait_for(
                         self._automation_driver.click(
-                            x, y, button=button, click_count=click_count,
-                            modifiers=modifiers or None,
+                            x,
+                            y,
+                            button=button,
+                            click_count=click_count,
                         ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
                     if modifiers:
                         turn.metadata["modifiers"] = modifiers
+                        turn.metadata["modifiers_applied"] = False
                     turn.status = "executed"
                     if button == "right":
                         self._pending_context_menu_selection = True
@@ -1530,7 +1549,10 @@ class ComputerUseSession:
                         x, y, button="left", click_count=1
                     )
                     if clear_before:
-                        await self._automation_driver.press_key("ctrl+a")
+                        if environment == "mobile_adb":
+                            await self._automation_driver.press_key("backspace")
+                        else:
+                            await self._automation_driver.press_key("ctrl+a")
                         await self._automation_driver.press_key("backspace")
                     await self._automation_driver.type_text(str(text_payload))
                     if press_enter:
@@ -3119,6 +3141,25 @@ class ComputerUseSession:
             )
             return browser_context + goal
 
+        if env_mode == "mobile_adb":
+            mobile_context = (
+                "IMPORTANT: You are controlling an Android mobile app through ADB-backed screenshots. "
+                "Treat coordinates as mobile screen positions. Avoid desktop assumptions (dock, alt-tab, windows).\n\n"
+                "SCREEN DETAILS:\n"
+                "- Screenshot orientation and resolution may vary per device; always rely on the provided screenshot.\n"
+                "- Prefer tap and type interactions; use scroll_document/scroll_at for vertical movement.\n"
+                "- Do not use open_web_browser/search/go_back/go_forward desktop-browser actions unless explicitly required.\n\n"
+                "AVAILABLE ACTIONS:\n"
+                "- click_at: Tap at screen coordinates\n"
+                "- type_text_at: Tap and type text into focused field\n"
+                "- key_combination: Use Android-compatible key events only when needed\n"
+                "- scroll_at / scroll_document: Scroll app content\n"
+                "- drag_and_drop: Swipe/drag gestures when necessary\n\n"
+                + completion_instruction
+                + "YOUR TASK: "
+            )
+            return mobile_context + goal
+
         desktop_context = (
             "IMPORTANT: You are controlling an UBUNTU LINUX desktop with GNOME shell. "
             "The screenshot shows native applications (Slack, Firefox, terminals, etc.). "
@@ -3167,6 +3208,8 @@ class ComputerUseSession:
         value = (environment or "desktop").strip().lower()
         if value in {"unspecified", "env_unspecified", "default"}:
             return "unspecified"
+        if value in {"mobile", "mobile_adb", "android", "phone", "tablet"}:
+            return "mobile_adb"
         if value in {"browser", "web"}:
             return "browser"
         if value in {"linux", "desktop", "os", "system"}:
@@ -3188,6 +3231,27 @@ class ComputerUseSession:
                 types.Environment.ENVIRONMENT_UNSPECIFIED,
             )
         return types.Environment.ENVIRONMENT_UNSPECIFIED
+
+    @staticmethod
+    def _wrap_goal_for_mobile(
+        goal: str,
+        env_mode: str,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> str:
+        if env_mode != "mobile_adb":
+            return goal
+        orientation = "portrait" if viewport_height >= viewport_width else "landscape"
+        mobile_context = (
+            "MOBILE EXECUTION CONTEXT:\n"
+            f"- Runtime: Android app via ADB screenshot loop\n"
+            f"- Resolution: {viewport_width}x{viewport_height}\n"
+            f"- Orientation: {orientation}\n"
+            "- Use mobile UI assumptions (tap, type, swipe/scroll) and avoid desktop/window-management instructions.\n"
+            "- Coordinates must be interpreted against the provided mobile screenshot.\n\n"
+            "TASK:\n"
+        )
+        return f"{mobile_context}{goal}"
 
     @staticmethod
     def _google_modifier_click_tools() -> Any:

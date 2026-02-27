@@ -31,6 +31,10 @@ class SetupInstructions:
     app_name: str = ""
     launch_command: str = ""
     maximize: bool = True
+    adb_serial: str = ""
+    app_package: str = ""
+    app_activity: str = ""
+    adb_commands: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,6 +103,18 @@ class SituationalAgent(BaseAgent):
         assessment: SituationalAssessment,
         action_agent: ActionAgent | None = None,
     ) -> None:
+        if assessment.target_type == "mobile_adb":
+            configure_target = getattr(automation_driver, "configure_target", None)
+            if callable(configure_target):
+                await configure_target(
+                    adb_serial=assessment.setup.adb_serial or None,
+                    app_package=assessment.setup.app_package or None,
+                    app_activity=assessment.setup.app_activity or None,
+                )
+            await automation_driver.start()
+            await self._prepare_mobile_entrypoint(automation_driver, assessment.setup)
+            return
+
         await automation_driver.start()
 
         if action_agent is None:
@@ -160,6 +176,24 @@ class SituationalAgent(BaseAgent):
                     },
                 )
                 continue
+
+    async def _prepare_mobile_entrypoint(
+        self,
+        automation_driver: AutomationDriver,
+        setup: SetupInstructions,
+    ) -> None:
+        run_adb_commands = getattr(automation_driver, "run_adb_commands", None)
+        if setup.adb_commands and callable(run_adb_commands):
+            await run_adb_commands(setup.adb_commands)
+
+        launch_app = getattr(automation_driver, "launch_app", None)
+        if callable(launch_app) and setup.app_package and not setup.adb_commands:
+            await launch_app(
+                app_package=setup.app_package,
+                app_activity=setup.app_activity or None,
+            )
+
+        await automation_driver.screenshot()
 
     async def _call_model_assessment(
         self,
@@ -309,8 +343,13 @@ class SituationalAgent(BaseAgent):
             return self._heuristic_assessment(source_text)
 
         target_type = str(payload.get("target_type") or "").strip().lower()
-        if target_type not in {"web", "desktop_app"}:
-            target_type = "web" if self._extract_url(source_text) else "desktop_app"
+        if target_type not in {"web", "desktop_app", "mobile_adb"}:
+            if self._extract_url(source_text):
+                target_type = "web"
+            elif self._looks_like_mobile_context(source_text):
+                target_type = "mobile_adb"
+            else:
+                target_type = "desktop_app"
 
         setup_payload = (
             payload.get("setup", {}) if isinstance(payload.get("setup"), dict) else {}
@@ -320,6 +359,10 @@ class SituationalAgent(BaseAgent):
             app_name=str(setup_payload.get("app_name") or "").strip(),
             launch_command=str(setup_payload.get("launch_command") or "").strip(),
             maximize=self._normalize_bool(setup_payload.get("maximize"), default=True),
+            adb_serial=str(setup_payload.get("adb_serial") or "").strip(),
+            app_package=str(setup_payload.get("app_package") or "").strip(),
+            app_activity=str(setup_payload.get("app_activity") or "").strip(),
+            adb_commands=self._ensure_command_list(setup_payload.get("adb_commands")),
         )
         missing_items = self._filter_non_visual_missing_items(
             self._ensure_string_list(payload.get("missing_items"))
@@ -339,6 +382,27 @@ class SituationalAgent(BaseAgent):
                 setup.web_url = extracted_url
             else:
                 missing_items.append("web_url")
+
+        if target_type == "mobile_adb":
+            if not setup.adb_serial:
+                setup.adb_serial = self._extract_adb_serial(source_text) or ""
+            if not setup.app_package:
+                setup.app_package = self._extract_app_package(source_text) or ""
+            if not setup.app_activity:
+                setup.app_activity = self._extract_app_activity(source_text) or ""
+            if not setup.adb_commands:
+                setup.adb_commands = self._extract_adb_commands(source_text)
+
+            has_structured_mobile_setup = bool(setup.adb_serial and setup.app_package)
+            has_mobile_command_path = bool(setup.adb_commands)
+            if not has_structured_mobile_setup and not has_mobile_command_path:
+                missing_items.append(
+                    "Provide adb_serial + app_package or adb_commands that discover the device and open the app"
+                )
+            elif not has_structured_mobile_setup:
+                notes.append(
+                    "Using adb_commands path for mobile entrypoint discovery/setup."
+                )
 
         if target_type == "desktop_app" and not entry_actions:
             notes.append(
@@ -363,12 +427,21 @@ class SituationalAgent(BaseAgent):
         )
 
     def _heuristic_assessment(self, source_text: str) -> SituationalAssessment:
-        target_type = "web" if self._extract_url(source_text) else "desktop_app"
+        if self._extract_url(source_text):
+            target_type = "web"
+        elif self._looks_like_mobile_context(source_text):
+            target_type = "mobile_adb"
+        else:
+            target_type = "desktop_app"
         setup = SetupInstructions(
             web_url=self._extract_url(source_text) or "",
             app_name=self._extract_app_name(source_text) or "",
             launch_command=self._extract_launch_command(source_text) or "",
             maximize=not self._contains_no_maximize_instruction(source_text),
+            adb_serial=self._extract_adb_serial(source_text) or "",
+            app_package=self._extract_app_package(source_text) or "",
+            app_activity=self._extract_app_activity(source_text) or "",
+            adb_commands=self._extract_adb_commands(source_text),
         )
         entry_actions = self._derive_default_entry_actions(
             target_type=target_type,
@@ -378,6 +451,13 @@ class SituationalAgent(BaseAgent):
         missing_items: list[str] = []
         if target_type == "web" and not setup.web_url:
             missing_items.append("web_url")
+        if target_type == "mobile_adb":
+            has_structured_mobile_setup = bool(setup.adb_serial and setup.app_package)
+            has_mobile_command_path = bool(setup.adb_commands)
+            if not has_structured_mobile_setup and not has_mobile_command_path:
+                missing_items.append(
+                    "Provide adb_serial + app_package or adb_commands that discover the device and open the app"
+                )
         return SituationalAssessment(
             target_type=target_type,
             sufficient=not missing_items,
@@ -407,6 +487,9 @@ class SituationalAgent(BaseAgent):
                     ),
                 )
             ]
+
+        if target_type == "mobile_adb":
+            return []
 
         if target_type != "desktop_app":
             return []
@@ -519,6 +602,19 @@ class SituationalAgent(BaseAgent):
         return [str(raw).strip()] if str(raw).strip() else []
 
     @staticmethod
+    def _ensure_command_list(raw: Any) -> list[str]:
+        if not raw:
+            return []
+        if isinstance(raw, list):
+            commands = [str(item).strip() for item in raw if str(item).strip()]
+            return [cmd for cmd in commands if cmd.startswith("adb")]
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text.startswith("adb"):
+                return [text]
+        return []
+
+    @staticmethod
     def _normalize_bool(value: Any, default: bool = True) -> bool:
         if isinstance(value, bool):
             return value
@@ -577,3 +673,62 @@ class SituationalAgent(BaseAgent):
                 "leave window size",
             )
         )
+
+    @staticmethod
+    def _looks_like_mobile_context(text: str) -> bool:
+        lowered = (text or "").lower()
+        markers = (
+            "android",
+            "adb",
+            "emulator",
+            "mobile app",
+            "physical device",
+            "package:",
+            "app_package",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _extract_adb_serial(text: str) -> str | None:
+        patterns = [
+            r"(?:adb[_\s-]*serial|device[_\s-]*serial)\s*[:=]\s*([^\s]+)",
+            r"\b(emulator-\d{4,5})\b",
+            r"\b([A-Za-z0-9._:-]+)\s+device\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text or "", flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _extract_app_package(text: str) -> str | None:
+        patterns = [
+            r"(?:app[_\s-]*package|package[_\s-]*name)\s*[:=]\s*([A-Za-z0-9_.]+)",
+            r"\bpackage\s*[:=]\s*([A-Za-z0-9_.]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text or "", flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _extract_app_activity(text: str) -> str | None:
+        patterns = [
+            r"(?:app[_\s-]*activity|activity)\s*[:=]\s*([A-Za-z0-9_.$/]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text or "", flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _extract_adb_commands(text: str) -> list[str]:
+        commands: list[str] = []
+        for line in (text or "").splitlines():
+            candidate = line.strip()
+            if candidate.startswith("adb "):
+                commands.append(candidate)
+        return commands

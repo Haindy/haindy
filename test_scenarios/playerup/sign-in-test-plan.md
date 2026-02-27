@@ -31,14 +31,14 @@
 ### Test Case: TC-SI-001 - Successful Email Sign-In
 **Priority:** Critical  
 **Type:** Functional  
-**Preconditions:** Existing account with email: user@example.com, Password: Test1234!
+**Preconditions:** Existing account with email: qaagent@playerup.co, Password: Test1234!!
 
 | Executed | Test Steps | Expected Results | Pass/Fail |
 |----------|------------|------------------|-----------|  
 | [ ] | 1. Launch application | App opens | [ ] |
 | [ ] | 2. Navigate to Sign-In screen | Sign-In screen displayed | [ ] |
-| [ ] | 3. Enter email (user@example.com) | Email accepted | [ ] |
-| [ ] | 4. Enter password (Test1234!) | Password field populated | [ ] |
+| [ ] | 3. Enter email (qaagent@playerup.co) | Email accepted | [ ] |
+| [ ] | 4. Enter password (Test1234!!) | Password field populated | [ ] |
 | [ ] | 5. Click "Sign In" | • Loading indicator displayed<br>• Authentication successful<br>• User profile information loaded<br>• Navigation based on user role:<br>&nbsp;&nbsp;- Player → Player home screen<br>&nbsp;&nbsp;- Coach → Coach home screen<br>&nbsp;&nbsp;- Admin → Admin organization home screen | [ ] |
 
 ---
@@ -46,12 +46,12 @@
 ### Test Case: TC-SI-002 - Case-Insensitive Email Sign-In
 **Priority:** Medium  
 **Type:** Functional  
-**Preconditions:** Account exists with email: user@example.com
+**Preconditions:** Account exists with email: qaagent@playerup.co
 
 | Executed | Test Steps | Expected Results | Pass/Fail |
 |----------|------------|------------------|-----------|  
 | [ ] | 1. Navigate to Sign-In screen | Sign-In screen displayed | [ ] |
-| [ ] | 2. Enter email in different case (USER@EXAMPLE.COM) | Email accepted | [ ] |
+| [ ] | 2. Enter email in different case (qaagent@playerup.co) | Email accepted | [ ] |
 | [ ] | 3. Enter correct password | Password accepted | [ ] |
 | [ ] | 4. Click "Sign In" | • Sign-in successful regardless of email case<br>• Correct user account accessed | [ ] |
 

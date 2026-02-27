@@ -116,11 +116,17 @@ class DesktopDriver(AutomationDriver):
         modifiers: list[str] | None = None,
     ) -> None:
         await self._ensure_ready()
-        await self.virtual_input.click(
-            x, y, button=button, click_count=click_count, modifiers=modifiers
-        )
+        if modifiers:
+            await self.virtual_input.click(
+                x, y, button=button, click_count=click_count, modifiers=modifiers
+            )
+        else:
+            await self.virtual_input.click(x, y, button=button, click_count=click_count)
         call_info: dict[str, object] = {
-            "x": x, "y": y, "button": button, "click_count": click_count,
+            "x": x,
+            "y": y,
+            "button": button,
+            "click_count": click_count,
         }
         if modifiers:
             call_info["modifiers"] = modifiers

@@ -50,6 +50,7 @@ def session_settings(tmp_path):
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
         desktop_coordinate_cache_path=tmp_path / "coords.json",
+        mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
 

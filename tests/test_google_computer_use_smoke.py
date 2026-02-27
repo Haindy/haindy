@@ -60,6 +60,7 @@ async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
         desktop_coordinate_cache_path=tmp_path / "coords.json",
+        mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
     browser = AsyncMock()
@@ -120,6 +121,7 @@ async def test_google_observe_only_policy_violation_fails_immediately(
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
         desktop_coordinate_cache_path=tmp_path / "coords.json",
+        mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
     browser = AsyncMock()
@@ -187,6 +189,7 @@ async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> N
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
         desktop_coordinate_cache_path=tmp_path / "coords.json",
+        mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
     browser = AsyncMock()

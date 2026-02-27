@@ -272,6 +272,11 @@ class OpenAIClient:
         instructions, input_items = self._prepare_responses_input(
             final_messages, system_prompt
         )
+        instructions = self._ensure_json_keyword_for_response_format(
+            instructions=instructions,
+            input_items=input_items,
+            response_format=response_format,
+        )
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -344,6 +349,11 @@ class OpenAIClient:
     ) -> dict[str, Any]:
         instructions, input_items = self._prepare_responses_input(
             final_messages, system_prompt
+        )
+        instructions = self._ensure_json_keyword_for_response_format(
+            instructions=instructions,
+            input_items=input_items,
+            response_format=response_format,
         )
 
         kwargs: dict[str, Any] = {
@@ -643,6 +653,42 @@ class OpenAIClient:
             return {"format": {"type": "text"}}
 
         return None
+
+    def _ensure_json_keyword_for_response_format(
+        self,
+        *,
+        instructions: str | None,
+        input_items: list[dict[str, Any]],
+        response_format: dict[str, Any] | None,
+    ) -> str | None:
+        """Ensure `input` includes 'json' when JSON text formats are requested.
+
+        The Responses API rejects `text.format=json_object` payloads when none of the
+        input messages include the word `json`.
+        """
+        format_type = response_format.get("type") if response_format else None
+        if format_type not in {"json_object", "json_schema"}:
+            return instructions
+
+        input_text_fragments: list[str] = []
+        for item in input_items:
+            for content_item in item.get("content", []) or []:
+                if not isinstance(content_item, dict):
+                    continue
+                text = content_item.get("text")
+                if isinstance(text, str) and text:
+                    input_text_fragments.append(text)
+
+        if any("json" in fragment.lower() for fragment in input_text_fragments):
+            return instructions
+
+        suffix = "Respond with valid json."
+        input_items.append(
+            {"role": "user", "content": [{"type": "input_text", "text": suffix}]}
+        )
+        if instructions and instructions.strip():
+            return instructions
+        return suffix
 
     async def _dispatch_observer(
         self,

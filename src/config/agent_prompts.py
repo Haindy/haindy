@@ -115,14 +115,18 @@ You analyze a plain-text execution context and decide whether the run can start 
 
 Return strict JSON with these keys:
 {
-  "target_type": "web|desktop_app",
+  "target_type": "web|desktop_app|mobile_adb",
   "sufficient": true|false,
   "missing_items": ["..."],
   "setup": {
     "web_url": "<url or empty>",
     "app_name": "<window/app name or empty>",
     "launch_command": "<shell command or empty>",
-    "maximize": true|false
+    "maximize": true|false,
+    "adb_serial": "<adb serial or empty>",
+    "app_package": "<android package name or empty>",
+    "app_activity": "<android activity or empty>",
+    "adb_commands": ["<optional adb command>", "..."]
   },
   "entry_actions": [
     {
@@ -140,9 +144,14 @@ Return strict JSON with these keys:
 Rules:
 - Prefer practical, minimal assumptions.
 - If target is web, web_url is required.
+- If target is mobile_adb, provide either:
+  - structured launch data (adb_serial + app_package, with optional app_activity), OR
+  - a practical adb_commands sequence that can discover/select the device and launch/open the app.
+- Mobile adb_commands must be explicit shell commands beginning with `adb`.
 - For desktop_app, do NOT require deterministic identifiers such as exact window title, task-switcher label, WM_CLASS, or process name.
 - Do NOT require or suggest programmatic OS/window controls (wmctrl, xdotool, direct maximize/focus APIs).
-- Entrypoint must be represented as visual `entry_actions` that the Action Agent can execute on the visible desktop.
+- For desktop_app/web, represent entrypoint as visual `entry_actions` that the Action Agent can execute.
+- For mobile_adb, prefer structured mobile setup fields and/or adb_commands; `entry_actions` may be empty.
 - Keep `entry_actions` short and goal-oriented (usually 1-3 actions).
 - Treat maximize as true by default unless the context clearly says not to maximize.
 - Keep missing_items specific and actionable.
@@ -246,7 +255,7 @@ When executing steps:
 4. Don't just execute literally - adapt intelligently to achieve the test's purpose"""
 
 # Action Agent Prompts
-ACTION_AGENT_SYSTEM_PROMPT = """You are a Visual Interaction Specialist AI agent for desktop computer-use execution.
+ACTION_AGENT_SYSTEM_PROMPT = """You are a Visual Interaction Specialist AI agent for computer-use execution across desktop and mobile screenshots.
 
 Your role is to:
 1. Analyze raw screenshots directly (no synthetic overlays)

@@ -53,7 +53,7 @@ LOOP_ERROR_PREFIX = "Computer Use loop detected"
 
 COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
 - Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
-- Environment: Chromium browser with full mouse, keyboard, scrolling, and screenshot control.
+- Environment: Existing runtime UI session (desktop browser/app or Android mobile screenshot) with screenshot-driven interaction.
 - Inputs: Each prompt is delivered with the latest screenshot and scenario metadata; do not capture screenshots yourself.
 
 Prompt construction rules:
@@ -154,6 +154,11 @@ class TestRunner(BaseAgent):
         }
         self._current_test_case_actions: dict[str, Any] | None = None
         self._current_step_actions: list[dict[str, Any]] | None = None
+
+    def _coordinate_cache_path_for_environment(self, environment: str) -> Path:
+        if str(environment or "").strip().lower() == "mobile_adb":
+            return self._settings.mobile_coordinate_cache_path
+        return self._settings.desktop_coordinate_cache_path
 
     @staticmethod
     def _severity_rank(severity: BugSeverity) -> int:
@@ -276,6 +281,23 @@ class TestRunner(BaseAgent):
         self._current_test_plan = test_plan
         self._initial_url = initial_url
         self._test_state = test_state
+        backend = (
+            str(test_state.context.get("automation_backend") or "").strip().lower()
+        )
+        target_type = str(test_state.context.get("target_type") or "").strip().lower()
+        if backend == "mobile_adb":
+            self._environment = "mobile_adb"
+        elif target_type in {"web", "browser"}:
+            self._environment = "browser"
+        else:
+            self._environment = "desktop"
+        if not (
+            self.automation_driver
+            and hasattr(self.automation_driver, "coordinate_cache")
+        ):
+            self._coordinate_cache = CoordinateCache(
+                self._coordinate_cache_path_for_environment(self._environment)
+            )
         self._initial_screenshot_bytes = None
         self._initial_screenshot_path = None
         self._latest_screenshot_bytes = None
@@ -297,7 +319,7 @@ class TestRunner(BaseAgent):
             status=TestStatus.IN_PROGRESS,
             environment={
                 "initial_url": initial_url,
-                "runtime": "desktop",
+                "runtime": self._environment,
                 "execution_mode": "enhanced",
             },
         )
@@ -308,14 +330,14 @@ class TestRunner(BaseAgent):
                     "test_plan_id": str(test_plan.plan_id),
                     "test_plan_name": test_plan.name,
                     "initial_url": initial_url,
-                    "automation_backend": "desktop",
+                    "automation_backend": self._environment,
                     "model_log_path": str(self._settings.model_log_path),
                     "task_plan_cache_path": str(self._settings.task_plan_cache_path),
                     "execution_replay_cache_path": str(
                         self._settings.execution_replay_cache_path
                     ),
                     "coordinate_cache_path": str(
-                        self._settings.desktop_coordinate_cache_path
+                        self._coordinate_cache_path_for_environment(self._environment)
                     ),
                 }
             )
@@ -338,7 +360,7 @@ class TestRunner(BaseAgent):
                         self._settings.execution_replay_cache_path
                     ),
                     "coordinate_cache_path": str(
-                        self._settings.desktop_coordinate_cache_path
+                        self._coordinate_cache_path_for_environment(self._environment)
                     ),
                     "screenshots_dir": screenshots_dir,
                 }
@@ -1164,12 +1186,29 @@ class TestRunner(BaseAgent):
         if screenshot_bytes:
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
 
-        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal browser actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
+        runtime_environment = self._environment or "desktop"
+        viewport_hint = "unknown"
+        if self.automation_driver:
+            try:
+                width, height = await self.automation_driver.get_viewport_size()
+                viewport_hint = f"{width}x{height}"
+            except Exception:
+                viewport_hint = "unknown"
+        interaction_hint = (
+            "Android mobile application in screenshot-space coordinates"
+            if runtime_environment == "mobile_adb"
+            else "desktop/web UI in screenshot-space coordinates"
+        )
+
+        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
 
 Run & Screenshot Context:
 - Test case: {test_case.test_id} – {test_case.name}
 - Test case description: {test_case.description}
 - Step position: {step.step_number} of {total_steps} (intent: {step.intent.value})
+- Runtime backend: {runtime_environment}
+- Interaction mode: {interaction_hint}
+- Viewport hint: {viewport_hint}
 - Screenshot path: {screenshot_path or "unavailable"}
 - Screenshot source: {screenshot_source or "unknown"}
 
@@ -2318,9 +2357,10 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             )
             return None
         environment = (step.environment or self._environment or "desktop").strip()
-        keyboard_layout = (
-            getattr(self.automation_driver, "keyboard_layout", None)
-            or self._settings.desktop_keyboard_layout
+        keyboard_layout = getattr(self.automation_driver, "keyboard_layout", None) or (
+            "android"
+            if environment.lower() == "mobile_adb"
+            else self._settings.desktop_keyboard_layout
         )
         return ExecutionReplayCacheKey(
             scenario=self._current_test_plan.name if self._current_test_plan else "",

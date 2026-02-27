@@ -53,6 +53,15 @@ Plan and context files are both required:
 .venv/bin/python -m src.main --plan test_scenarios/wikipedia_search_simple.txt --context test_scenarios/wikipedia_search_simple.txt
 ```
 
+Mobile ADB backend (hard override):
+```bash
+.venv/bin/python -m src.main --mobile --plan <plan_file> --context <mobile_context_file>
+```
+
+For `--mobile` runs, context should provide either:
+- `adb_serial` + `app_package` (optional `app_activity`), or
+- explicit `adb_commands` that discover/select device and open the target app.
+
 Optional debug logging:
 ```bash
 .venv/bin/python -m src.main --plan <plan_file> --context <context_file> --debug

@@ -13,6 +13,8 @@ class TestSettings:
         assert settings.desktop_prefer_resolution[0] >= 800
         assert settings.desktop_prefer_resolution[1] >= 600
         assert settings.desktop_screenshot_dir == Path("data/screenshots/desktop")
+        assert settings.mobile_screenshot_dir == Path("data/screenshots/mobile")
+        assert settings.automation_backend == "desktop"
 
     def test_agent_models_include_situational_agent(self):
         settings = Settings()
@@ -82,3 +84,5 @@ class TestConfigManager:
         all_config = config.get_all()
         assert "desktop_prefer_resolution" in all_config
         assert "desktop_screenshot_dir" in all_config
+        assert "mobile_screenshot_dir" in all_config
+        assert "automation_backend" in all_config

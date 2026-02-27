@@ -222,7 +222,10 @@ class VirtualInput:
         x_clamped, y_clamped = self._clamp(x, y)
         if self._ui is None:
             await self._xdotool_click(
-                x_clamped, y_clamped, button=button, click_count=click_count,
+                x_clamped,
+                y_clamped,
+                button=button,
+                click_count=click_count,
                 modifiers=modifiers,
             )
             return
