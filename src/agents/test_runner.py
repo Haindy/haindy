@@ -60,12 +60,13 @@ Prompt construction rules:
 1. Begin with a concise imperative goal that states the desired outcome.
 2. Identify the UI target(s) using the exact labels a human sees (no CSS/XPath speculation).
 3. Provide any text to enter or keys to press when relevant.
-4. Restate the expected outcome so the executor can verify completion on its own.
+4. Restate the expected outcome based only on what should be *immediately visible* after the action completes — for example, a screen transition, a success message, or a new UI state. Never ask the executor to navigate to a different screen, open a profile, or take any additional step to confirm results; all deeper verification is handled by a separate evaluation pass.
 5. Instruct the executor to act directly without seeking confirmation from the user.
 6. Require a strategy shift after three identical failures where the UI shows no visible response to the action (button appears to do nothing, screen does not change at all). If any visible response is observed — including an error message, a loading indicator, navigation away, or any UI change — do not retry; report the observed outcome immediately and stop. Retries are only for when the tap or click appears to have had no effect whatsoever.
 7. Tell it to rely on the provided screenshot for context and to scroll or refocus if elements are off-screen.
 8. For observation-only (`assert`) actions, explicitly forbid interactions and request a visual verification summary instead.
 9. Avoid backend assumptions, hidden DOM references, or multi-step checklists—each prompt should cover one cohesive action.
+10. After the primary action completes (or fails), stop. Do not take additional navigation steps to verify account details, confirm identity, or validate data that is not immediately visible on screen.
 
 If no interaction is required (`skip_navigation`), leave the computer_use_prompt empty.""".strip()
 
@@ -1127,7 +1128,9 @@ class TestRunner(BaseAgent):
             f"(intent: {case_step.intent.value}, expected: {case_step.expected_result})"
             for case_step in test_case.steps
         ]
-        case_outline_text = "\n".join(f"- {line}" for line in case_outline_lines)
+        prereq_lines = [f"  - {p}" for p in test_case.prerequisites] if test_case.prerequisites else []
+        prereq_prefix = "Preconditions:\n" + "\n".join(prereq_lines) + "\n\n" if prereq_lines else ""
+        case_outline_text = prereq_prefix + "\n".join(f"- {line}" for line in case_outline_lines)
 
         cache_context = {
             "test_case_id": test_case.test_id,

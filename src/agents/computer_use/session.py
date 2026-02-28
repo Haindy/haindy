@@ -3432,7 +3432,9 @@ class ComputerUseSession:
                 "- drag_and_drop: Swipe/drag gestures when necessary\n\n"
                 "TEXT INPUT ON ANDROID:\n"
                 "- To replace existing text in a field: use type_text_at directly — it automatically selects all existing content before typing.\n"
-                "- Do NOT use key_combination with ctrl+a or any other desktop shortcut to select or clear text; these do not work on Android.\n\n"
+                "- Do NOT use key_combination with ctrl+a or any other desktop shortcut to select or clear text; these do not work on Android.\n"
+                "- For type_text_at, set press_enter=true ONLY when the task explicitly says to submit the form or press Enter. Do NOT set press_enter=true just because you are typing into a field — doing so submits the form prematurely.\n"
+                "- For password fields that mask input with dots or asterisks: a single type_text_at call is sufficient. Do NOT retry just because you cannot read the entered text. Seeing masked characters (dots) after typing confirms the field is populated — stop immediately.\n\n"
                 + completion_instruction
                 + "YOUR TASK: "
             )

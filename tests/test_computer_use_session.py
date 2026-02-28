@@ -1129,12 +1129,16 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
         debug_logger=None,
     )
     turn = ComputerToolTurn(
-        call_id="click_at",
+        call_id="google_turn_1_call_2",
         action_type="click_at",
         parameters={"x": 500, "y": 538},
         status="executed",
         pending_safety_checks=[],
-        metadata={},
+        metadata={
+            "google_function_call_sequence": 2,
+            "google_correlation_mode": "sequence_fallback",
+            "google_function_call_fallback_id": "google_turn_1_call_2",
+        },
     )
 
     payload, _, _ = await session._build_google_follow_up_request(
@@ -1149,6 +1153,13 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
     function_response = payload["contents"][0].parts[0].function_response
     assert function_response is not None
     assert function_response.id is None
+    assert function_response.response["call_id"] == "google_turn_1_call_2"
+    assert function_response.response["google_function_call_sequence"] == 2
+    assert function_response.response["google_correlation_mode"] == "sequence_fallback"
+    assert (
+        function_response.response["google_function_call_fallback_id"]
+        == "google_turn_1_call_2"
+    )
 
 
 @pytest.mark.asyncio
