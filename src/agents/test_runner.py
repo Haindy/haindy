@@ -1676,13 +1676,19 @@ Respond with a JSON object containing an "actions" array where every item follow
             validation = result.get("validation", {})
             ai_analysis = result.get("ai_analysis", {})
             execution = result.get("execution", {})
+            # CU agent's real-time narrative observation (may contain transient UI
+            # feedback such as toast text that disappears before the evaluator screenshot)
+            cu_outcome = result.get("outcome", "")
 
             action_detail = f"""Action {idx}: {action.get("description", "Unknown action")}
   Type: {action.get("type", "unknown")}
   Target: {action.get("target", "N/A")}
-  Success: {result.get("success", False)}
+  Success: {result.get("success", False)}"""
 
-  Validation Results:"""
+            if cu_outcome and cu_outcome != "Action completed":
+                action_detail += f"\n  CU agent observation: {cu_outcome}"
+
+            action_detail += "\n\n  Validation Results:"
 
             # Add validation fields if present
             if validation:
@@ -1734,6 +1740,8 @@ Actions performed:
 {chr(10).join(actions_context)}
 
 Based on all this information:
+
+IMPORTANT: The "CU agent observation" fields above are real-time descriptions captured by the executor during the action, before the final screenshot was taken. Transient UI feedback such as toast messages, snackbars, and brief success banners may have auto-dismissed by the time the screenshot was captured. If the CU agent observation describes a success message or toast, treat that as strong evidence the action succeeded even if the message is no longer visible in the screenshot.
 
 1. Did this step achieve its intended purpose? Consider the validation results and reasoning from the action execution, not just literal text matching. Look at the overall intent of the step and whether it was accomplished.
 
