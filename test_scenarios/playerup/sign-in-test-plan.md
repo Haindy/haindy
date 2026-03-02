@@ -166,24 +166,6 @@
 
 ---
 
-## 5. Edge Cases
-
-### Test Case: TC-SI-010 - Remember Me Functionality
-**Priority:** Low
-**Type:** Functional
-**Preconditions:** Remember Me option exists
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Navigate to Sign-In | Sign-in screen displayed |
-| 2 | Enter credentials | Credentials entered |
-| 3 | Check "Remember Me" (if available) | Option selected |
-| 4 | Sign in successfully | User authenticated |
-| 5 | Sign out | User signed out |
-| 6 | Return to sign-in screen | Email pre-filled; only password required; Remember Me still checked |
-
----
-
 ## Test Execution Summary
 
 | Test Case | Priority | Status |
@@ -197,7 +179,6 @@
 | TC-SI-007 | Medium | Not Run |
 | TC-SI-008 | High | Not Run |
 | TC-SI-009 | High | Not Run |
-| TC-SI-010 | Low | Not Run |
 
 ## Notes
 
