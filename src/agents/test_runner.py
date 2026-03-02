@@ -2719,76 +2719,71 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         replay_wait_cycles = 0
         replay_wait_budget_ms = REPLAY_VALIDATION_MODEL_WAIT_BUDGET_MS
 
-        if step.intent == StepIntent.SETUP:
-            verification = self._evaluate_setup_step(True, [replay_action])
-            self._current_step_data["verification_mode"] = "runner_short_circuit"
-        else:
-            while True:
-                verification = await self._verify_expected_outcome(
-                    test_case=test_case,
-                    step=step,
-                    action_results=[replay_action],
-                    screenshot_before=screenshot_before,
-                    screenshot_after=screenshot_after,
-                    execution_history=execution_history,
-                    next_test_case=next_test_case,
-                    replay_wait_budget_ms=replay_wait_budget_ms,
+        while True:
+            verification = await self._verify_expected_outcome(
+                test_case=test_case,
+                step=step,
+                action_results=[replay_action],
+                screenshot_before=screenshot_before,
+                screenshot_after=screenshot_after,
+                execution_history=execution_history,
+                next_test_case=next_test_case,
+                replay_wait_budget_ms=replay_wait_budget_ms,
+            )
+            if verification.get("verdict") == "PASS":
+                break
+
+            request_additional_wait = self._coerce_model_bool(
+                verification.get("request_additional_wait", False)
+            )
+            if not request_additional_wait or replay_wait_budget_ms <= 0:
+                break
+
+            recommended_wait_raw = verification.get("recommended_wait_ms", 0)
+            try:
+                recommended_wait_ms = int(recommended_wait_raw)
+            except (TypeError, ValueError):
+                recommended_wait_ms = 0
+            wait_ms = recommended_wait_ms
+            if wait_ms <= 0:
+                wait_ms = min(
+                    REPLAY_VALIDATION_MODEL_WAIT_FALLBACK_MS,
+                    replay_wait_budget_ms,
                 )
-                if verification.get("verdict") == "PASS":
-                    break
+            wait_ms = max(0, min(wait_ms, replay_wait_budget_ms))
+            if wait_ms <= 0:
+                break
 
-                request_additional_wait = self._coerce_model_bool(
-                    verification.get("request_additional_wait", False)
+            logger.info(
+                "Execution replay validation requested additional wait",
+                extra={
+                    "step": key.step,
+                    "wait_ms": wait_ms,
+                    "remaining_budget_before_wait_ms": replay_wait_budget_ms,
+                    "wait_reasoning": verification.get("wait_reasoning", ""),
+                },
+            )
+            await asyncio.sleep(wait_ms / 1000.0)
+            replay_wait_budget_ms -= wait_ms
+            replay_wait_spent_ms += wait_ms
+            replay_wait_cycles += 1
+
+            if self.automation_driver:
+                screenshot_after = await self.automation_driver.screenshot()
+                screenshot_path = self._save_screenshot(
+                    screenshot_after,
+                    (
+                        f"tc{test_case.test_id}_step{step.step_number}"
+                        f"_replay_wait_{replay_wait_cycles}_after"
+                    ),
                 )
-                if not request_additional_wait or replay_wait_budget_ms <= 0:
-                    break
-
-                recommended_wait_raw = verification.get("recommended_wait_ms", 0)
-                try:
-                    recommended_wait_ms = int(recommended_wait_raw)
-                except (TypeError, ValueError):
-                    recommended_wait_ms = 0
-                wait_ms = recommended_wait_ms
-                if wait_ms <= 0:
-                    wait_ms = min(
-                        REPLAY_VALIDATION_MODEL_WAIT_FALLBACK_MS,
-                        replay_wait_budget_ms,
-                    )
-                wait_ms = max(0, min(wait_ms, replay_wait_budget_ms))
-                if wait_ms <= 0:
-                    break
-
-                logger.info(
-                    "Execution replay validation requested additional wait",
-                    extra={
-                        "step": key.step,
-                        "wait_ms": wait_ms,
-                        "remaining_budget_before_wait_ms": replay_wait_budget_ms,
-                        "wait_reasoning": verification.get("wait_reasoning", ""),
-                    },
+                step_result.screenshot_after = str(screenshot_path)
+                self._latest_screenshot_bytes = screenshot_after
+                self._latest_screenshot_path = str(screenshot_path)
+                self._latest_screenshot_origin = (
+                    f"step_{step.step_number}_replay_wait_{replay_wait_cycles}_after"
                 )
-                await asyncio.sleep(wait_ms / 1000.0)
-                replay_wait_budget_ms -= wait_ms
-                replay_wait_spent_ms += wait_ms
-                replay_wait_cycles += 1
-
-                if self.automation_driver:
-                    screenshot_after = await self.automation_driver.screenshot()
-                    screenshot_path = self._save_screenshot(
-                        screenshot_after,
-                        (
-                            f"tc{test_case.test_id}_step{step.step_number}"
-                            f"_replay_wait_{replay_wait_cycles}_after"
-                        ),
-                    )
-                    step_result.screenshot_after = str(screenshot_path)
-                    self._latest_screenshot_bytes = screenshot_after
-                    self._latest_screenshot_path = str(screenshot_path)
-                    self._latest_screenshot_origin = (
-                        f"step_{step.step_number}_replay_wait_"
-                        f"{replay_wait_cycles}_after"
-                    )
-            self._current_step_data["verification_mode"] = "ai"
+        self._current_step_data["verification_mode"] = "ai"
 
         self._current_step_data["replay_validation_wait_spent_ms"] = (
             replay_wait_spent_ms
