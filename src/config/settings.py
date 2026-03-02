@@ -346,7 +346,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS"),
     )
     actions_computer_tool_loop_detection_window: int = Field(
-        default=3,
+        default=4,
         ge=2,
         description="Repeated identical turns (with identical screenshots) before flagging a loop",
         validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW"),

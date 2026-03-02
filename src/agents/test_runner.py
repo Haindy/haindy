@@ -67,6 +67,7 @@ Prompt construction rules:
 8. For observation-only (`assert`) actions, explicitly forbid interactions and request a visual verification summary instead.
 9. Avoid backend assumptions, hidden DOM references, or multi-step checklists—each prompt should cover one cohesive action.
 10. After the primary action completes (or fails), stop. Do not take additional navigation steps to verify account details, confirm identity, or validate data that is not immediately visible on screen.
+11. When a step is about entering text into one specific field (e.g. typing a verification/OTP code, entering an email, filling a single input), do NOT instruct the executor to also tap a submit/confirm/send/reset button. Just fill the field and stop. Only include button-tap instructions when the step's explicit purpose is to submit the form or the step action text says to tap that button.
 
 If no interaction is required (`skip_navigation`), leave the computer_use_prompt empty.""".strip()
 
@@ -2166,6 +2167,9 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
                         else f"Plan-level blocker reasoning: {reasoning}"
                     )
                 else:
+                    # Plan assessment explicitly says non-blocking — override any
+                    # forced_blocker_reason that was set by max-turns or loop detection.
+                    self._current_step_data["is_blocker"] = False
                     non_block_reason = plan_assessment.get("blocker_reason")
                     if non_block_reason:
                         bug_report.plan_blocker_reason = non_block_reason

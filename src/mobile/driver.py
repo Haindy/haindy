@@ -33,6 +33,7 @@ class MobileDriver(AutomationDriver):
         "menu": 82,
         "recent": 187,
         "app_switch": 187,
+        "recent_apps": 187,
         "up": 19,
         "down": 20,
         "left": 21,
