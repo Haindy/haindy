@@ -10,6 +10,7 @@ import base64
 import json
 import traceback
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -50,6 +51,15 @@ from src.utils.model_logging import get_model_logger
 logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 LOOP_ERROR_PREFIX = "Computer Use loop detected"
+REPLAY_CACHED_ACTION_MIN_STABILIZATION_WAIT_MS = 2000
+REPLAY_VALIDATION_ONLY_ACTION_TYPES: frozenset[str] = frozenset(
+    {
+        ActionType.ASSERT.value,
+        ActionType.SKIP_NAVIGATION.value,
+        ActionType.WAIT.value,
+        ActionType.SCREENSHOT.value,
+    }
+)
 
 COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
 - Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
@@ -2399,15 +2409,93 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
     def _plan_cache_key(step: TestStep, test_case: TestCase) -> str:
         return f"{test_case.test_id}:{step.step_number}:{step.action}".strip()
 
+    @staticmethod
+    def _strip_plan_fingerprint_volatile_fields(payload: Any) -> Any:
+        """Remove unstable fields from plan payloads before hashing."""
+        if isinstance(payload, dict):
+            stripped: dict[str, Any] = {}
+            for key, value in payload.items():
+                if key in {"plan_id", "created_at", "case_id", "step_id"}:
+                    continue
+                stripped[key] = TestRunner._strip_plan_fingerprint_volatile_fields(
+                    value
+                )
+            return stripped
+        if isinstance(payload, list):
+            return [
+                TestRunner._strip_plan_fingerprint_volatile_fields(item)
+                for item in payload
+            ]
+        return payload
+
+    def _plan_fingerprint(self) -> str:
+        if not self._current_test_plan:
+            return ""
+        payload = self._current_test_plan.model_dump(mode="json")
+        stable_payload = self._strip_plan_fingerprint_volatile_fields(payload)
+        serialized = json.dumps(
+            stable_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        )
+        return sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _is_validation_only_action_result(result: dict[str, Any]) -> bool:
+        action_payload = result.get("action")
+        if not isinstance(action_payload, dict):
+            return False
+        action_type = str(action_payload.get("type") or "").strip().lower()
+        if not action_type:
+            return False
+        return action_type in REPLAY_VALIDATION_ONLY_ACTION_TYPES
+
+    @classmethod
+    def _is_validation_only_step_result_set(
+        cls, action_results: list[dict[str, Any]]
+    ) -> bool:
+        seen_action_type = False
+        for result in action_results:
+            action_payload = result.get("action")
+            if not isinstance(action_payload, dict):
+                continue
+            action_type = str(action_payload.get("type") or "").strip().lower()
+            if not action_type:
+                continue
+            seen_action_type = True
+            if not cls._is_validation_only_action_result(result):
+                return False
+        return seen_action_type
+
+    @staticmethod
+    def _driver_actions_for_replay(result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Accept both wrapped and direct action-result payload shapes."""
+        driver_actions = result.get("driver_actions")
+        if not isinstance(driver_actions, list):
+            nested = result.get("result")
+            if isinstance(nested, dict):
+                nested_driver_actions = nested.get("driver_actions")
+                if isinstance(nested_driver_actions, list):
+                    driver_actions = nested_driver_actions
+        if not isinstance(driver_actions, list):
+            return []
+        return [item for item in driver_actions if isinstance(item, dict)]
+
     def _replay_enabled(self, step: TestStep) -> bool:
         if not self._settings.enable_execution_replay_cache:
             return False
         if getattr(step, "loop", False):
             return False
-        can_replay = getattr(step, "can_be_replayed", None)
-        if can_replay is False:
-            return False
         return self.automation_driver is not None
+
+    def _replay_stabilization_wait_ms(self) -> int:
+        """Return stabilization wait used only for replayed macro actions."""
+        configured = int(
+            getattr(self._settings, "actions_computer_tool_stabilization_wait_ms", 0)
+        )
+        return max(configured, REPLAY_CACHED_ACTION_MIN_STABILIZATION_WAIT_MS)
 
     async def _execution_replay_key(
         self, step: TestStep, test_case: TestCase
@@ -2437,6 +2525,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             environment=environment,
             resolution=(int(viewport_width), int(viewport_height)),
             keyboard_layout=str(keyboard_layout),
+            plan_fingerprint=self._plan_fingerprint(),
         )
 
     async def _try_execution_replay(
@@ -2473,9 +2562,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             await replay_driver_actions(
                 self.automation_driver,
                 entry.actions,
-                stabilization_wait_ms=int(
-                    self._settings.actions_computer_tool_stabilization_wait_ms
-                ),
+                stabilization_wait_ms=self._replay_stabilization_wait_ms(),
                 action_timeout_seconds=max(
                     self._settings.actions_computer_tool_action_timeout_ms / 1000.0,
                     0.5,
@@ -2604,7 +2691,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                 "Execution replay validation failed; invalidating cache",
                 extra={
                     "step": key.step,
-                    "message": verification.get("reasoning"),
+                    "validation_reasoning": verification.get("reasoning"),
                 },
             )
             try:
@@ -2655,9 +2742,11 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
     ) -> None:
         if not self._replay_enabled(step) or not action_results:
             return
+        if self._is_validation_only_step_result_set(action_results):
+            return
         recorded: list[dict] = []
         for result in action_results:
-            recorded.extend(result.get("driver_actions") or [])
+            recorded.extend(self._driver_actions_for_replay(result))
         if not recorded:
             return
         key = await self._execution_replay_key(step, test_case)

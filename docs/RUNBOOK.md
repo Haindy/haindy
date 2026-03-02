@@ -95,6 +95,14 @@ Backported caches and logs are stored under `data/` by default:
 - `data/model_logs/model_calls.jsonl`
 - `data/traces/<run_id>.json`
 
+Execution replay behavior:
+- Replay is attempted for non-loop steps when `HAINDY_ENABLE_EXECUTION_REPLAY_CACHE=true`.
+- Replay entries are recorded from successful execution actions (driver actions only; validation is always live).
+- Validation-only step decompositions (`assert`, `skip_navigation`, `wait`, `screenshot`) are not persisted in replay cache.
+- Replayed macro actions enforce a minimum 2-second stabilization wait between actions.
+- Replay keys include a plan fingerprint; when plan content changes, old replay entries are ignored automatically.
+- Legacy `can_be_replayed` step flags are accepted in payloads but ignored by runtime replay gating.
+
 Control replay caching with:
 ```
 HAINDY_ENABLE_PLANNING_CACHE=true
