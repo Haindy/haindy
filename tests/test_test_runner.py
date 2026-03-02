@@ -17,6 +17,7 @@ from src.core.enhanced_types import (
 )
 from src.core.types import (
     StepIntent,
+    StepResult,
     TestCase,
     TestCaseResult,
     TestPlan,
@@ -81,6 +82,9 @@ class _StubTraceWriter:
 
     def record_cache_event(self, event: dict[str, object]) -> None:
         del event
+
+    def record_step(self, **kwargs: object) -> None:
+        del kwargs
 
 
 def _patch_runner_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -376,3 +380,204 @@ async def test_store_execution_replay_skips_validation_only_and_stores_actionabl
             },
         ],
     )
+
+
+@pytest.mark.asyncio
+async def test_replay_verification_waits_when_model_requests_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    driver = _StubAutomationDriver()
+    runner = TestRunner(automation_driver=driver)
+    plan, case, step = _build_test_case()
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint=runner._plan_fingerprint(),
+    )
+    monkeypatch.setattr(
+        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("src.agents.test_runner.asyncio.sleep", sleep_mock)
+
+    verify_mock = AsyncMock(
+        side_effect=[
+            {
+                "verdict": "FAIL",
+                "reasoning": "Still loading",
+                "actual_result": "Loading indicator visible",
+                "confidence": 0.62,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+                "request_additional_wait": True,
+                "recommended_wait_ms": 2500,
+                "wait_reasoning": "Spinner still present",
+            },
+            {
+                "verdict": "PASS",
+                "reasoning": "Navigation completed",
+                "actual_result": "Home screen is visible",
+                "confidence": 0.88,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+                "request_additional_wait": False,
+                "recommended_wait_ms": 0,
+                "wait_reasoning": "",
+            },
+        ]
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = StepResult(
+        step_id=step.step_id,
+        step_number=step.step_number,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        action=step.action,
+        expected_result=step.expected_result,
+        actual_result="",
+    )
+
+    result = await runner._try_execution_replay(
+        step=step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is not None
+    assert result.status == TestStatus.PASSED
+    assert verify_mock.await_count == 2
+    first_call = verify_mock.await_args_list[0]
+    second_call = verify_mock.await_args_list[1]
+    assert first_call.kwargs["replay_wait_budget_ms"] == 30000
+    assert second_call.kwargs["replay_wait_budget_ms"] == 27500
+    sleep_mock.assert_awaited_once_with(2.5)
+    assert runner._current_step_data["replay_validation_wait_spent_ms"] == 2500
+    assert runner._current_step_data["replay_validation_wait_cycles"] == 1
+    assert (
+        runner._current_step_data["replay_validation_wait_budget_remaining_ms"] == 27500
+    )
+    assert result.screenshot_after is not None
+    assert "_replay_wait_1_after" in result.screenshot_after
+
+
+@pytest.mark.asyncio
+async def test_replay_verification_uses_budget_cap_and_falls_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    driver = _StubAutomationDriver()
+    runner = TestRunner(automation_driver=driver)
+    plan, case, step = _build_test_case()
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint=runner._plan_fingerprint(),
+    )
+    monkeypatch.setattr(
+        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    invalidate_mock = Mock()
+    monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
+    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("src.agents.test_runner.asyncio.sleep", sleep_mock)
+
+    verify_mock = AsyncMock(
+        side_effect=[
+            {
+                "verdict": "FAIL",
+                "reasoning": "Potential in-flight transition",
+                "actual_result": "Ambiguous",
+                "confidence": 0.45,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+                "request_additional_wait": True,
+                "recommended_wait_ms": 60000,
+                "wait_reasoning": "May still be settling",
+            },
+            {
+                "verdict": "FAIL",
+                "reasoning": "Still not complete",
+                "actual_result": "No successful navigation observed",
+                "confidence": 0.55,
+                "is_blocker": True,
+                "blocker_reasoning": "Cannot proceed",
+                "request_additional_wait": True,
+                "recommended_wait_ms": 5000,
+                "wait_reasoning": "Requested but no budget remains",
+            },
+        ]
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = StepResult(
+        step_id=step.step_id,
+        step_number=step.step_number,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        action=step.action,
+        expected_result=step.expected_result,
+        actual_result="",
+    )
+
+    result = await runner._try_execution_replay(
+        step=step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is None
+    assert step_result.status == TestStatus.FAILED
+    assert verify_mock.await_count == 2
+    assert verify_mock.await_args_list[0].kwargs["replay_wait_budget_ms"] == 30000
+    assert verify_mock.await_args_list[1].kwargs["replay_wait_budget_ms"] == 0
+    sleep_mock.assert_awaited_once_with(30.0)
+    invalidate_mock.assert_called_once_with(replay_key)
+    assert runner._current_step_data["replay_validation_wait_spent_ms"] == 30000
+    assert runner._current_step_data["replay_validation_wait_cycles"] == 1
+    assert runner._current_step_data["replay_validation_wait_budget_remaining_ms"] == 0

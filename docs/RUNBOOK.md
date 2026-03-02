@@ -100,6 +100,7 @@ Execution replay behavior:
 - Replay entries are recorded from successful execution actions (driver actions only; validation is always live).
 - Validation-only step decompositions (`assert`, `skip_navigation`, `wait`, `screenshot`) are not persisted in replay cache.
 - Replayed macro actions enforce a minimum 2-second stabilization wait between actions.
+- Replay validation can request additional model-directed settling waits (replay-only) with a per-step cap of 30 seconds before cache invalidation/fallback.
 - Replay keys include a plan fingerprint; when plan content changes, old replay entries are ignored automatically.
 - Legacy `can_be_replayed` step flags are accepted in payloads but ignored by runtime replay gating.
 
