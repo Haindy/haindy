@@ -168,7 +168,7 @@
 
 ## 5. Edge Cases
 
-### Test Case: TC-SI-011 - Remember Me Functionality
+### Test Case: TC-SI-010 - Remember Me Functionality
 **Priority:** Low
 **Type:** Functional
 **Preconditions:** Remember Me option exists
@@ -197,7 +197,7 @@
 | TC-SI-007 | Medium | Not Run |
 | TC-SI-008 | High | Not Run |
 | TC-SI-009 | High | Not Run |
-| TC-SI-011 | Low | Not Run |
+| TC-SI-010 | Low | Not Run |
 
 ## Notes
 
