@@ -283,6 +283,8 @@ class ActionAgent(BaseAgent):
                 cache = self.automation_driver.coordinate_cache
             except Exception:
                 cache = self._coordinate_cache
+        elif environment == "mobile_adb":
+            cache = CoordinateCache(self.settings.mobile_coordinate_cache_path)
 
         return ComputerUseSession(
             client=self.client.client,
@@ -293,6 +295,18 @@ class ActionAgent(BaseAgent):
             environment=environment,
             coordinate_cache=cache,
         )
+
+    @staticmethod
+    def _resolve_environment(test_context: dict[str, Any]) -> str:
+        if not isinstance(test_context, dict):
+            return "desktop"
+        backend = str(test_context.get("automation_backend") or "").strip().lower()
+        target_type = str(test_context.get("target_type") or "").strip().lower()
+        if backend == "mobile_adb" or target_type == "mobile_adb":
+            return "mobile_adb"
+        if backend in {"web", "browser"} or target_type in {"web", "browser"}:
+            return "browser"
+        return "desktop"
 
     @staticmethod
     def _extract_cache_metadata(
@@ -666,6 +680,7 @@ class ActionAgent(BaseAgent):
         context_for_result = (
             dict(test_context) if isinstance(test_context, dict) else {}
         )
+        environment = self._resolve_environment(context_lookup)
 
         session_metadata = {
             "step_number": test_step.step_number,
@@ -677,7 +692,7 @@ class ActionAgent(BaseAgent):
             "value": instruction.value,
             "interaction_mode": interaction_mode,
             "step_goal": test_step.description,
-            "environment": "desktop",
+            "environment": environment,
             # Allow auto-approve safety policy to continue execution when enabled.
             "allow_safety_auto_approve": True,
         }
@@ -692,7 +707,7 @@ class ActionAgent(BaseAgent):
 
         session = self._new_computer_use_session(
             debug_logger,
-            environment="desktop",
+            environment=environment,
         )
 
         self.conversation_history.append({"role": "user", "content": goal})
@@ -718,7 +733,7 @@ class ActionAgent(BaseAgent):
                 initial_screenshot,
                 session_metadata,
                 allowed_actions=allowed_actions,
-                environment="desktop",
+                environment=environment,
                 cache_label=cache_label,
                 cache_action=cache_action,
             )

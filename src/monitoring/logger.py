@@ -142,6 +142,32 @@ class SanitizingHandler(logging.Handler):
             self.handleError(record)
 
 
+_ANSI_RESET = "\033[0m"
+_ANSI_BOLD = "\033[1m"
+_ANSI_RED = "\033[31m"
+_ANSI_YELLOW = "\033[33m"
+_ANSI_GREEN = "\033[32m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_MAGENTA = "\033[35m"
+
+_LEVEL_COLORS: dict[str, str] = {
+    "ERROR": _ANSI_BOLD + _ANSI_RED,
+    "CRITICAL": _ANSI_BOLD + _ANSI_RED,
+    "WARNING": _ANSI_YELLOW,
+}
+
+# Message substrings that warrant special highlighting, checked in order.
+_MESSAGE_HIGHLIGHTS: list[tuple[str, str]] = [
+    ("Starting enhanced test plan execution", _ANSI_BOLD + _ANSI_MAGENTA),
+    ("Starting test case execution", _ANSI_BOLD + _ANSI_CYAN),
+    ("Executing test step", _ANSI_CYAN),
+    ("Bug report created", _ANSI_BOLD + _ANSI_YELLOW),
+    ("Blocker failure detected", _ANSI_BOLD + _ANSI_RED),
+    ("Test case failure blocks further execution", _ANSI_BOLD + _ANSI_RED),
+    ("Run trace written", _ANSI_GREEN),
+]
+
+
 class HumanReadableFormatter(logging.Formatter):
     """Render log lines in a compact human-friendly layout."""
 
@@ -172,6 +198,18 @@ class HumanReadableFormatter(logging.Formatter):
 
         if record.stack_info:
             formatted = f"{formatted}\n{self.formatStack(record.stack_info)}"
+
+        if sys.stdout.isatty():
+            color = None
+            msg = record.getMessage()
+            for fragment, highlight in _MESSAGE_HIGHLIGHTS:
+                if fragment in msg:
+                    color = highlight
+                    break
+            if color is None:
+                color = _LEVEL_COLORS.get(record.levelname)
+            if color:
+                formatted = f"{color}{formatted}{_ANSI_RESET}"
 
         return formatted
 

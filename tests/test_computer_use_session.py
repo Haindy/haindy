@@ -50,6 +50,7 @@ def session_settings(tmp_path):
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
         desktop_coordinate_cache_path=tmp_path / "coords.json",
+        mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
 
@@ -145,6 +146,145 @@ async def test_computer_use_session_executes_actions_successfully(
     assert not result.safety_events
     assert result.terminal_status == "success"
     assert mock_client.responses.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_executes_drag_and_drop_with_destination_aliases(
+    mock_client, mock_browser, session_settings
+):
+    """Legacy drag_and_drop payloads should execute via canonical drag parsing."""
+    initial_response = DummyResponse(
+        {
+            "id": "resp_drag_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "drag_and_drop",
+                    "action": {
+                        "type": "drag_and_drop",
+                        "x": 0,
+                        "y": 0,
+                        "destination_x": 300,
+                        "destination_y": 200,
+                    },
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_drag_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Dragged successfully.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Drag the item to the target.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 3},
+    )
+
+    assert len(result.actions) == 1
+    turn = result.actions[0]
+    assert turn.status == "executed"
+    assert turn.action_type == "drag"
+    assert turn.metadata.get("normalized_action_type") == "drag"
+    mock_browser.drag_mouse.assert_awaited_once_with(0, 0, 300, 200, steps=1)
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_logs_rejected_drag_with_raw_action_metadata(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Rejected drag actions should include raw action type and payload keys in logs."""
+    initial_response = DummyResponse(
+        {
+            "id": "resp_drag_fail_1",
+            "output": [
+                {
+                    "type": "computer_call",
+                    "call_id": "drag_and_drop",
+                    "action": {
+                        "type": "drag_and_drop",
+                        "x": 10,
+                        "y": 20,
+                    },
+                    "pending_safety_checks": [],
+                    "status": "completed",
+                }
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {
+            "id": "resp_drag_fail_2",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Could not drag the item.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    mock_client.responses.create.side_effect = [initial_response, final_response]
+    warning_mock = MagicMock()
+    monkeypatch.setattr(cu_session_module.logger, "warning", warning_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        debug_logger=None,
+    )
+
+    result = await session.run(
+        goal="Drag the item.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 4},
+    )
+
+    assert len(result.actions) == 1
+    turn = result.actions[0]
+    assert turn.status == "failed"
+    assert turn.error_message == "Drag action missing destination coordinates."
+
+    rejection_logs = [
+        call
+        for call in warning_mock.call_args_list
+        if call.args and call.args[0] == "Computer Use action rejected"
+    ]
+    assert rejection_logs
+    extra = rejection_logs[0].kwargs["extra"]
+    assert extra["action_type"] == "drag"
+    assert extra["raw_action_type"] == "drag_and_drop"
+    assert extra["action_keys"] == ["type", "x", "y"]
 
 
 @pytest.mark.asyncio
@@ -909,3 +1049,152 @@ def test_computer_use_session_google_client_uses_api_key_mode(
     session._ensure_google_client()
 
     client_factory.assert_called_once_with(api_key="vertex-key")
+
+
+def test_extract_google_pending_safety_checks() -> None:
+    checks = ComputerUseSession._extract_google_pending_safety_checks(
+        {
+            "x": 500,
+            "y": 538,
+            "safety_decision": {
+                "decision": "require_confirmation",
+                "explanation": "Please confirm sign out.",
+            },
+        }
+    )
+
+    assert checks == [
+        {
+            "decision": "require_confirmation",
+            "code": "require_confirmation",
+            "message": "Please confirm sign out.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_adds_safety_acknowledgement_and_call_id(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=object(),
+        debug_logger=None,
+    )
+    turn = ComputerToolTurn(
+        call_id="click_at",
+        action_type="click_at",
+        parameters={"x": 500, "y": 538},
+        status="executed",
+        pending_safety_checks=[
+            {
+                "decision": "require_confirmation",
+                "code": "require_confirmation",
+                "message": "Please confirm sign out.",
+            }
+        ],
+        metadata={"google_function_call_id": "call_google_1"},
+    )
+
+    payload, _, _ = await session._build_google_follow_up_request(
+        goal="Confirm sign out.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.id == "call_google_1"
+    assert function_response.response["safety_acknowledgement"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_omits_function_response_id_without_google_call_id(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=object(),
+        debug_logger=None,
+    )
+    turn = ComputerToolTurn(
+        call_id="google_turn_1_call_2",
+        action_type="click_at",
+        parameters={"x": 500, "y": 538},
+        status="executed",
+        pending_safety_checks=[],
+        metadata={
+            "google_function_call_sequence": 2,
+            "google_correlation_mode": "sequence_fallback",
+            "google_function_call_fallback_id": "google_turn_1_call_2",
+        },
+    )
+
+    payload, _, _ = await session._build_google_follow_up_request(
+        goal="Tap settings.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.id is None
+    assert function_response.response["call_id"] == "google_turn_1_call_2"
+    assert function_response.response["google_function_call_sequence"] == 2
+    assert function_response.response["google_correlation_mode"] == "sequence_fallback"
+    assert (
+        function_response.response["google_function_call_fallback_id"]
+        == "google_turn_1_call_2"
+    )
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_uses_original_google_function_call_name(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=object(),
+        debug_logger=None,
+    )
+    # Internal execution canonicalizes key_press -> keypress. Follow-up responses
+    # must still use the original Google function name to satisfy name matching.
+    turn = ComputerToolTurn(
+        call_id="key_press",
+        action_type="keypress",
+        parameters={"key": "enter"},
+        status="executed",
+        pending_safety_checks=[],
+        metadata={"google_function_call_name": "key_press"},
+    )
+
+    payload, _, _ = await session._build_google_follow_up_request(
+        goal="Press enter.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.name == "key_press"

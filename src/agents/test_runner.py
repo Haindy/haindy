@@ -53,19 +53,21 @@ LOOP_ERROR_PREFIX = "Computer Use loop detected"
 
 COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
 - Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
-- Environment: Chromium browser with full mouse, keyboard, scrolling, and screenshot control.
+- Environment: Existing runtime UI session (desktop browser/app or Android mobile screenshot) with screenshot-driven interaction.
 - Inputs: Each prompt is delivered with the latest screenshot and scenario metadata; do not capture screenshots yourself.
 
 Prompt construction rules:
 1. Begin with a concise imperative goal that states the desired outcome.
 2. Identify the UI target(s) using the exact labels a human sees (no CSS/XPath speculation).
 3. Provide any text to enter or keys to press when relevant.
-4. Restate the expected outcome so the executor can verify completion on its own.
+4. Restate the expected outcome based only on what should be *immediately visible* after the action completes — for example, a screen transition, a success message, or a new UI state. Never ask the executor to navigate to a different screen, open a profile, or take any additional step to confirm results; all deeper verification is handled by a separate evaluation pass.
 5. Instruct the executor to act directly without seeking confirmation from the user.
-6. Require a strategy shift after three identical failures and ask for an explanation if blocked.
+6. Require a strategy shift after three identical failures where the UI shows no visible response to the action (button appears to do nothing, screen does not change at all). If any visible response is observed — including an error message, a loading indicator, navigation away, or any UI change — do not retry; report the observed outcome immediately and stop. Retries are only for when the tap or click appears to have had no effect whatsoever.
 7. Tell it to rely on the provided screenshot for context and to scroll or refocus if elements are off-screen.
 8. For observation-only (`assert`) actions, explicitly forbid interactions and request a visual verification summary instead.
 9. Avoid backend assumptions, hidden DOM references, or multi-step checklists—each prompt should cover one cohesive action.
+10. After the primary action completes (or fails), stop. Do not take additional navigation steps to verify account details, confirm identity, or validate data that is not immediately visible on screen.
+11. When a step is about entering text into one specific field (e.g. typing a verification/OTP code, entering an email, filling a single input), do NOT instruct the executor to also tap a submit/confirm/send/reset button. Just fill the field and stop. Only include button-tap instructions when the step's explicit purpose is to submit the form or the step action text says to tap that button.
 
 If no interaction is required (`skip_navigation`), leave the computer_use_prompt empty.""".strip()
 
@@ -154,6 +156,11 @@ class TestRunner(BaseAgent):
         }
         self._current_test_case_actions: dict[str, Any] | None = None
         self._current_step_actions: list[dict[str, Any]] | None = None
+
+    def _coordinate_cache_path_for_environment(self, environment: str) -> Path:
+        if str(environment or "").strip().lower() == "mobile_adb":
+            return self._settings.mobile_coordinate_cache_path
+        return self._settings.desktop_coordinate_cache_path
 
     @staticmethod
     def _severity_rank(severity: BugSeverity) -> int:
@@ -276,6 +283,23 @@ class TestRunner(BaseAgent):
         self._current_test_plan = test_plan
         self._initial_url = initial_url
         self._test_state = test_state
+        backend = (
+            str(test_state.context.get("automation_backend") or "").strip().lower()
+        )
+        target_type = str(test_state.context.get("target_type") or "").strip().lower()
+        if backend == "mobile_adb":
+            self._environment = "mobile_adb"
+        elif target_type in {"web", "browser"}:
+            self._environment = "browser"
+        else:
+            self._environment = "desktop"
+        if not (
+            self.automation_driver
+            and hasattr(self.automation_driver, "coordinate_cache")
+        ):
+            self._coordinate_cache = CoordinateCache(
+                self._coordinate_cache_path_for_environment(self._environment)
+            )
         self._initial_screenshot_bytes = None
         self._initial_screenshot_path = None
         self._latest_screenshot_bytes = None
@@ -297,7 +321,7 @@ class TestRunner(BaseAgent):
             status=TestStatus.IN_PROGRESS,
             environment={
                 "initial_url": initial_url,
-                "runtime": "desktop",
+                "runtime": self._environment,
                 "execution_mode": "enhanced",
             },
         )
@@ -308,14 +332,14 @@ class TestRunner(BaseAgent):
                     "test_plan_id": str(test_plan.plan_id),
                     "test_plan_name": test_plan.name,
                     "initial_url": initial_url,
-                    "automation_backend": "desktop",
+                    "automation_backend": self._environment,
                     "model_log_path": str(self._settings.model_log_path),
                     "task_plan_cache_path": str(self._settings.task_plan_cache_path),
                     "execution_replay_cache_path": str(
                         self._settings.execution_replay_cache_path
                     ),
                     "coordinate_cache_path": str(
-                        self._settings.desktop_coordinate_cache_path
+                        self._coordinate_cache_path_for_environment(self._environment)
                     ),
                 }
             )
@@ -338,7 +362,7 @@ class TestRunner(BaseAgent):
                         self._settings.execution_replay_cache_path
                     ),
                     "coordinate_cache_path": str(
-                        self._settings.desktop_coordinate_cache_path
+                        self._coordinate_cache_path_for_environment(self._environment)
                     ),
                     "screenshots_dir": screenshots_dir,
                 }
@@ -1103,9 +1127,12 @@ class TestRunner(BaseAgent):
         case_outline_lines = [
             f"Step {case_step.step_number}: {case_step.action} "
             f"(intent: {case_step.intent.value}, expected: {case_step.expected_result})"
+            + (" [CURRENT STEP]" if case_step.step_number == step.step_number else "")
             for case_step in test_case.steps
         ]
-        case_outline_text = "\n".join(f"- {line}" for line in case_outline_lines)
+        prereq_lines = [f"  - {p}" for p in test_case.prerequisites] if test_case.prerequisites else []
+        prereq_prefix = "Preconditions:\n" + "\n".join(prereq_lines) + "\n\n" if prereq_lines else ""
+        case_outline_text = prereq_prefix + "\n".join(f"- {line}" for line in case_outline_lines)
 
         cache_context = {
             "test_case_id": test_case.test_id,
@@ -1164,12 +1191,38 @@ class TestRunner(BaseAgent):
         if screenshot_bytes:
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
 
-        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal browser actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
+        runtime_environment = self._environment or "desktop"
+        viewport_hint = "unknown"
+        if self.automation_driver:
+            try:
+                width, height = await self.automation_driver.get_viewport_size()
+                viewport_hint = f"{width}x{height}"
+            except Exception:
+                viewport_hint = "unknown"
+        interaction_hint = (
+            "Android mobile application in screenshot-space coordinates"
+            if runtime_environment == "mobile_adb"
+            else "desktop/web UI in screenshot-space coordinates"
+        )
+        environment_specific_guidance = ""
+        if runtime_environment == "mobile_adb":
+            environment_specific_guidance = """
+Mobile-specific constraints:
+- This run targets Android mobile UI. Do not use desktop/browser navigation assumptions.
+- Do NOT propose keyboard/browser shortcuts like Alt+Left, Alt+Right, Ctrl+L, Ctrl+Tab, or "browser back".
+- Prefer tap/swipe interactions and Android-safe navigation.
+- If back navigation is required, use `key_press` with value "back" or tap a visible in-app/system back control.
+""".strip()
+
+        prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
 
 Run & Screenshot Context:
 - Test case: {test_case.test_id} – {test_case.name}
 - Test case description: {test_case.description}
 - Step position: {step.step_number} of {total_steps} (intent: {step.intent.value})
+- Runtime backend: {runtime_environment}
+- Interaction mode: {interaction_hint}
+- Viewport hint: {viewport_hint}
 - Screenshot path: {screenshot_path or "unavailable"}
 - Screenshot source: {screenshot_source or "unknown"}
 
@@ -1198,6 +1251,9 @@ Guidelines:
 4. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
 5. Use the previous/next step context to stay aligned with the intended flow.
 6. Every non-skip action must include a `computer_use_prompt` that is ready to send directly to the Computer Use model—no additional wrapping will be added later.
+7. You are planning actions for the step marked [CURRENT STEP] ONLY. Do not plan actions for any other step. Even if the screenshot appears to show a later step's target already populated or completed, still execute the current step's action on the correct target — the visual state may reflect autofill, prior test state, or an incorrect field.
+
+{environment_specific_guidance}
 
 Action schema for each entry (JSON object):
 - type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
@@ -1410,6 +1466,33 @@ Respond with a JSON object containing an "actions" array where every item follow
                 expected_outcome=action.get("expected_outcome", step.expected_result),
                 computer_use_prompt=action.get("computer_use_prompt"),
             )
+            resolved_environment = (
+                str(step.environment or self._environment or "desktop").strip().lower()
+            )
+            if resolved_environment not in {"desktop", "browser", "mobile_adb"}:
+                resolved_environment = (
+                    str(self._environment or "desktop").strip().lower() or "desktop"
+                )
+            resolved_target_type = (
+                "mobile_adb"
+                if resolved_environment == "mobile_adb"
+                else "web"
+                if resolved_environment == "browser"
+                else "desktop_app"
+            )
+            state_context = (
+                self._test_state.context
+                if self._test_state and isinstance(self._test_state.context, dict)
+                else {}
+            )
+            context_backend = (
+                str(state_context.get("automation_backend") or "").strip().lower()
+            )
+            context_target_type = (
+                str(state_context.get("target_type") or "").strip().lower()
+            )
+            automation_backend = context_backend or resolved_environment
+            target_type = context_target_type or resolved_target_type
 
             # Create a temporary TestStep for the action
             action_step = TestStep(
@@ -1420,6 +1503,7 @@ Respond with a JSON object containing an "actions" array where every item follow
                 action_instruction=instruction,
                 optional=not action.get("critical", True),
                 intent=step.intent,
+                environment=resolved_environment,
             )
 
             # Build context
@@ -1430,6 +1514,9 @@ Respond with a JSON object containing an "actions" array where every item follow
                 "action_description": action.get("description", ""),
                 "recent_actions": self._execution_history[-3:],
                 "step_intent": step.intent.value,
+                "automation_backend": automation_backend,
+                "target_type": target_type,
+                "environment": resolved_environment,
             }
             test_context["cache_label"] = (
                 step.cache_label or action.get("target") or action.get("description")
@@ -1589,13 +1676,19 @@ Respond with a JSON object containing an "actions" array where every item follow
             validation = result.get("validation", {})
             ai_analysis = result.get("ai_analysis", {})
             execution = result.get("execution", {})
+            # CU agent's real-time narrative observation (may contain transient UI
+            # feedback such as toast text that disappears before the evaluator screenshot)
+            cu_outcome = result.get("outcome", "")
 
             action_detail = f"""Action {idx}: {action.get("description", "Unknown action")}
   Type: {action.get("type", "unknown")}
   Target: {action.get("target", "N/A")}
-  Success: {result.get("success", False)}
+  Success: {result.get("success", False)}"""
 
-  Validation Results:"""
+            if cu_outcome and cu_outcome != "Action completed":
+                action_detail += f"\n  CU agent observation: {cu_outcome}"
+
+            action_detail += "\n\n  Validation Results:"
 
             # Add validation fields if present
             if validation:
@@ -1647,6 +1740,8 @@ Actions performed:
 {chr(10).join(actions_context)}
 
 Based on all this information:
+
+IMPORTANT: The "CU agent observation" fields above are real-time descriptions captured by the executor during the action, before the final screenshot was taken. Transient UI feedback such as toast messages, snackbars, and brief success banners may have auto-dismissed by the time the screenshot was captured. If the CU agent observation describes a success message or toast, treat that as strong evidence the action succeeded even if the message is no longer visible in the screenshot.
 
 1. Did this step achieve its intended purpose? Consider the validation results and reasoning from the action execution, not just literal text matching. Look at the overall intent of the step and whether it was accomplished.
 
@@ -2082,6 +2177,9 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
                         else f"Plan-level blocker reasoning: {reasoning}"
                     )
                 else:
+                    # Plan assessment explicitly says non-blocking — override any
+                    # forced_blocker_reason that was set by max-turns or loop detection.
+                    self._current_step_data["is_blocker"] = False
                     non_block_reason = plan_assessment.get("blocker_reason")
                     if non_block_reason:
                         bug_report.plan_blocker_reason = non_block_reason
@@ -2318,9 +2416,10 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             )
             return None
         environment = (step.environment or self._environment or "desktop").strip()
-        keyboard_layout = (
-            getattr(self.automation_driver, "keyboard_layout", None)
-            or self._settings.desktop_keyboard_layout
+        keyboard_layout = getattr(self.automation_driver, "keyboard_layout", None) or (
+            "android"
+            if environment.lower() == "mobile_adb"
+            else self._settings.desktop_keyboard_layout
         )
         return ExecutionReplayCacheKey(
             scenario=self._current_test_plan.name if self._current_test_plan else "",

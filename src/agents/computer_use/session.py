@@ -147,6 +147,16 @@ class ComputerUseSessionResult:
     terminal_failure_code: str | None = None
 
 
+@dataclass(frozen=True)
+class GoogleFunctionCallEnvelope:
+    """Function call plus deterministic ordering metadata for a single turn."""
+
+    function_call: Any
+    sequence: int
+    candidate_index: int
+    part_index: int
+
+
 class ComputerUseSession:
     """Wraps computer-use providers and orchestrates action execution."""
 
@@ -217,8 +227,13 @@ class ComputerUseSession:
             getattr(self._settings, "anthropic_cu_max_tokens", 16384)
         )
         self._default_environment = self._normalize_environment_name(environment)
+        coordinate_cache_path = (
+            self._settings.mobile_coordinate_cache_path
+            if self._default_environment == "mobile_adb"
+            else self._settings.desktop_coordinate_cache_path
+        )
         self._coordinate_cache = coordinate_cache or CoordinateCache(
-            self._settings.desktop_coordinate_cache_path
+            coordinate_cache_path
         )
         self._model_logger = model_logger or get_model_logger(
             self._settings.model_log_path,
@@ -361,6 +376,9 @@ class ComputerUseSession:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, viewport_width, viewport_height
+        )
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
         screenshot_b64 = encode_png_base64(screenshot)
         tool_environment = self._map_openai_environment(environment)
@@ -609,6 +627,9 @@ class ComputerUseSession:
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
         initial_screenshot = await self._automation_driver.screenshot()
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, viewport_width, viewport_height
+        )
         goal = self._apply_interaction_mode_guidance(goal, metadata)
         wrapped_goal = self._wrap_goal_for_google(goal, environment)
         contents, config = self._build_google_initial_request(
@@ -654,11 +675,13 @@ class ComputerUseSession:
         max_turn_code: str | None = None
         last_assistant_text: str | None = None
         last_response_dict: dict[str, Any] | None = None
+        google_turn_index = 0
+        ambiguous_reask_attempts = 0
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
         loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
         while True:
-            calls = extract_google_function_calls(response)
+            call_envelopes = extract_google_function_call_envelopes(response)
             assistant_text = extract_assistant_text(response_dict)
             if assistant_text:
                 result.final_output = assistant_text
@@ -666,21 +689,136 @@ class ComputerUseSession:
             result.last_response = response_dict
             last_response_dict = response_dict
 
-            if not calls:
+            if not call_envelopes:
                 break
 
+            google_turn_index += 1
+            ambiguous_names = self._extract_google_ambiguous_function_names(
+                call_envelopes
+            )
+            if ambiguous_names:
+                if ambiguous_reask_attempts >= 1:
+                    ambiguous_list = ", ".join(ambiguous_names)
+                    self._append_terminal_failure_turn(
+                        result=result,
+                        metadata=metadata,
+                        response_id=response_dict.get("id"),
+                        reason=(
+                            "Google FunctionCall batch is ambiguous: duplicate "
+                            "function names without call IDs "
+                            f"({ambiguous_list}) remained after controlled re-ask."
+                        ),
+                        code="google_ambiguous_function_call_batch",
+                        parameters={
+                            "ambiguous_function_names": ambiguous_names,
+                            "reask_attempts": ambiguous_reask_attempts,
+                        },
+                        metadata_updates={
+                            "ambiguous_function_names": ambiguous_names,
+                            "reask_attempts": ambiguous_reask_attempts,
+                        },
+                    )
+                    break
+
+                ambiguous_reask_attempts += 1
+                (
+                    reask_payload,
+                    reask_content,
+                ) = self._build_google_single_call_reask_request(
+                    history=history,
+                    environment=environment,
+                    model=model,
+                )
+                history.append(reask_content)
+                response = await self._create_google_response(reask_payload)
+                await self._model_logger.log_call(
+                    agent="computer_use.google.reask",
+                    model=model,
+                    prompt=f"{goal} (ambiguous-batch-reask)",
+                    request_payload={
+                        "provider": "google",
+                        "environment": environment,
+                        "payload": "ambiguous_reask",
+                    },
+                    response=response,
+                    screenshots=None,
+                    metadata={
+                        "environment": environment,
+                        "ambiguous_function_names": ambiguous_names,
+                        "reask_attempt": ambiguous_reask_attempts,
+                        **metadata,
+                    },
+                )
+                response_dict = normalize_response(response)
+                result.response_ids.append(response_dict.get("id", ""))
+                if hasattr(response, "candidates"):
+                    try:
+                        history.append(response.candidates[0].content)
+                    except Exception:
+                        logger.debug(
+                            "Unable to append Google re-ask response content to history",
+                            exc_info=True,
+                        )
+                continue
+
+            ambiguous_reask_attempts = 0
             executed_turns: list[ComputerToolTurn] = []
-            for call in calls:
+            for envelope in call_envelopes:
+                call = envelope.function_call
+                raw_action_type = str(getattr(call, "name", "") or "unknown").strip()
+                if not raw_action_type:
+                    raw_action_type = "unknown"
+                raw_parameters = getattr(call, "args", {}) or {}
+                if not isinstance(raw_parameters, dict):
+                    raw_parameters = {}
+                google_call_id = str(getattr(call, "id", None) or "").strip()
+                if google_call_id:
+                    local_call_id = google_call_id
+                    correlation_mode = "provider_id"
+                else:
+                    local_call_id = self._build_google_fallback_call_id(
+                        turn_index=google_turn_index,
+                        sequence=envelope.sequence,
+                    )
+                    correlation_mode = "sequence_fallback"
+                pending_safety_checks = self._extract_google_pending_safety_checks(
+                    raw_parameters
+                )
                 turn = ComputerToolTurn(
-                    call_id=str(getattr(call, "id", None) or getattr(call, "name", "") or ""),
-                    action_type=str(getattr(call, "name", "") or "unknown"),
-                    parameters=getattr(call, "args", {}) or {},
+                    call_id=local_call_id,
+                    action_type=raw_action_type,
+                    parameters=raw_parameters,
                     response_id=response_dict.get("id"),
-                    pending_safety_checks=[],
+                    pending_safety_checks=pending_safety_checks,
                 )
                 _inject_context_metadata(turn, metadata)
+                turn.metadata["google_function_call_name"] = raw_action_type
+                turn.metadata["google_function_call_sequence"] = envelope.sequence
+                turn.metadata["google_correlation_mode"] = correlation_mode
+                if google_call_id:
+                    turn.metadata["google_function_call_id"] = google_call_id
+                else:
+                    turn.metadata["google_function_call_fallback_id"] = local_call_id
+                if pending_safety_checks:
+                    turn.metadata["google_safety_decision"] = pending_safety_checks[0]
 
                 if self._should_abort_on_safety(turn, result):
+                    if any(
+                        executed_turn.status == "executed"
+                        for executed_turn in executed_turns
+                    ):
+                        (
+                            response,
+                            response_dict,
+                        ) = await self._flush_google_batch_follow_up(
+                            goal=goal,
+                            history=history,
+                            turns=executed_turns,
+                            metadata=metadata,
+                            environment=environment,
+                            model=model,
+                        )
+                        result.response_ids.append(response_dict.get("id", ""))
                     return result
 
                 try:
@@ -723,6 +861,22 @@ class ComputerUseSession:
                             "call_id": turn.call_id,
                         },
                     )
+                    if any(
+                        executed_turn.status == "executed"
+                        for executed_turn in executed_turns
+                    ):
+                        (
+                            response,
+                            response_dict,
+                        ) = await self._flush_google_batch_follow_up(
+                            goal=goal,
+                            history=history,
+                            turns=executed_turns,
+                            metadata=metadata,
+                            environment=environment,
+                            model=model,
+                        )
+                        result.response_ids.append(response_dict.get("id", ""))
                     return result
 
                 loop_detection = self._update_loop_history(
@@ -769,80 +923,53 @@ class ComputerUseSession:
 
                 if self._is_scroll_action(turn.action_type):
                     scroll_turns += 1
-                    if scroll_turns >= self._scroll_turn_limit:
-                        logger.warning(
-                            "Computer Use scroll turn limit reached (google)",
-                            extra={
-                                "scroll_turns": scroll_turns,
-                                "scroll_turn_limit": self._scroll_turn_limit,
-                                "max_turns": self._settings.actions_computer_tool_max_turns,
-                            },
-                        )
-                        max_turn_code = "scroll_turn_limit_reached"
-                        max_turn_reason = (
-                            "Computer Use max turns exceeded: "
-                            f"scroll turn limit reached after {scroll_turns} scroll actions."
-                        )
-                        max_turn_hit = True
-                        break
                 else:
                     turn_counter += 1
-                    if turn_counter >= self._settings.actions_computer_tool_max_turns:
-                        logger.warning(
-                            "Computer Use max turns reached (google)",
-                            extra={
-                                "max_turns": self._settings.actions_computer_tool_max_turns
-                            },
-                        )
-                        max_turn_code = "max_turns_exceeded"
-                        max_turn_reason = (
-                            "Computer Use max turns exceeded after "
-                            f"{turn_counter} turns (limit: "
-                            f"{self._settings.actions_computer_tool_max_turns})."
-                        )
-                        max_turn_hit = True
-                        break
+
+            if executed_turns:
+                response, response_dict = await self._flush_google_batch_follow_up(
+                    goal=goal,
+                    history=history,
+                    turns=executed_turns,
+                    metadata=metadata,
+                    environment=environment,
+                    model=model,
+                )
+                result.response_ids.append(response_dict.get("id", ""))
 
             if max_turn_hit:
                 break
 
-            (
-                follow_up_payload,
-                func_response_content,
-                follow_up_screenshot,
-            ) = await self._build_google_follow_up_request(
-                goal=goal,
-                history=history,
-                turns=executed_turns,
-                metadata=metadata,
-                environment=environment,
-                model=model,
-            )
-            history.append(func_response_content)
-            response = await self._create_google_response(follow_up_payload)
-            await self._model_logger.log_call(
-                agent="computer_use.google.follow_up",
-                model=model,
-                prompt=f"{goal} (follow-up)",
-                request_payload={
-                    "provider": "google",
-                    "environment": environment,
-                    "payload": "follow_up",
-                },
-                response=response,
-                screenshots=[("computer_use_follow_up", follow_up_screenshot)],
-                metadata={"environment": environment, **metadata},
-            )
-            response_dict = normalize_response(response)
-            result.response_ids.append(response_dict.get("id", ""))
-            if hasattr(response, "candidates"):
-                try:
-                    history.append(response.candidates[0].content)
-                except Exception:
-                    logger.debug(
-                        "Unable to append Google response content to history",
-                        exc_info=True,
-                    )
+            if scroll_turns >= self._scroll_turn_limit:
+                logger.warning(
+                    "Computer Use scroll turn limit reached (google)",
+                    extra={
+                        "scroll_turns": scroll_turns,
+                        "scroll_turn_limit": self._scroll_turn_limit,
+                        "max_turns": self._settings.actions_computer_tool_max_turns,
+                    },
+                )
+                max_turn_code = "scroll_turn_limit_reached"
+                max_turn_reason = (
+                    "Computer Use max turns exceeded: "
+                    f"scroll turn limit reached after {scroll_turns} scroll actions."
+                )
+                max_turn_hit = True
+                break
+
+            if turn_counter >= self._settings.actions_computer_tool_max_turns:
+                logger.warning(
+                    "Computer Use max turns reached (google)",
+                    extra={"max_turns": self._settings.actions_computer_tool_max_turns},
+                )
+                max_turn_code = "max_turns_exceeded"
+                max_turn_reason = (
+                    "Computer Use max turns exceeded after "
+                    f"{turn_counter} turns (limit: "
+                    f"{self._settings.actions_computer_tool_max_turns})."
+                )
+                max_turn_hit = True
+                break
 
         if max_turn_hit:
             if result.terminal_status != "failed":
@@ -872,6 +999,106 @@ class ComputerUseSession:
 
         return result
 
+    @staticmethod
+    def _build_google_fallback_call_id(turn_index: int, sequence: int) -> str:
+        """Create a deterministic local call identifier for id-less Google calls."""
+        return f"google_turn_{turn_index}_call_{sequence}"
+
+    @staticmethod
+    def _extract_google_ambiguous_function_names(
+        call_envelopes: list[GoogleFunctionCallEnvelope],
+    ) -> list[str]:
+        """Return duplicate function names that lack provider call IDs."""
+        name_counts: dict[str, int] = {}
+        for envelope in call_envelopes:
+            function_call = envelope.function_call
+            call_id = str(getattr(function_call, "id", None) or "").strip()
+            if call_id:
+                continue
+            call_name = str(getattr(function_call, "name", "") or "unknown").strip()
+            if not call_name:
+                call_name = "unknown"
+            name_counts[call_name] = name_counts.get(call_name, 0) + 1
+        return sorted(name for name, count in name_counts.items() if count > 1)
+
+    def _build_google_single_call_reask_request(
+        self,
+        *,
+        history: list[Any],
+        environment: str,
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], Any]:
+        """Request a single function call when the previous batch was ambiguous."""
+        from google.genai import types  # type: ignore
+
+        reask_text = (
+            "Your previous response returned multiple function calls with duplicate "
+            "names and missing call IDs, which is ambiguous. "
+            "Return exactly one function call in this turn. "
+            "If additional steps are required, emit one function call per turn."
+        )
+        reask_content = types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=reask_text)],
+        )
+        return (
+            {
+                "model": model or self._google_model,
+                "contents": list(history) + [reask_content],
+                "config": self._build_google_generate_config(environment),
+            },
+            reask_content,
+        )
+
+    async def _flush_google_batch_follow_up(
+        self,
+        *,
+        goal: str,
+        history: list[Any],
+        turns: list[ComputerToolTurn],
+        metadata: dict[str, Any],
+        environment: str,
+        model: str,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Send a Google follow-up for all executed turns in a batch."""
+        (
+            follow_up_payload,
+            func_response_content,
+            follow_up_screenshot,
+        ) = await self._build_google_follow_up_request(
+            goal=goal,
+            history=history,
+            turns=turns,
+            metadata=metadata,
+            environment=environment,
+            model=model,
+        )
+        history.append(func_response_content)
+        response = await self._create_google_response(follow_up_payload)
+        await self._model_logger.log_call(
+            agent="computer_use.google.follow_up",
+            model=model,
+            prompt=f"{goal} (follow-up)",
+            request_payload={
+                "provider": "google",
+                "environment": environment,
+                "payload": "follow_up",
+            },
+            response=response,
+            screenshots=[("computer_use_follow_up", follow_up_screenshot)],
+            metadata={"environment": environment, **metadata},
+        )
+        response_dict = normalize_response(response)
+        if hasattr(response, "candidates"):
+            try:
+                history.append(response.candidates[0].content)
+            except Exception:
+                logger.debug(
+                    "Unable to append Google response content to history",
+                    exc_info=True,
+                )
+        return response, response_dict
+
     async def _run_anthropic(
         self,
         *,
@@ -891,6 +1118,9 @@ class ComputerUseSession:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, viewport_width, viewport_height
+        )
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
 
         request_payload = self._build_anthropic_initial_request(
@@ -1243,14 +1473,17 @@ class ComputerUseSession:
                         modifiers = [implicit_modifier] + modifiers
                     await asyncio.wait_for(
                         self._automation_driver.click(
-                            x, y, button=button, click_count=click_count,
-                            modifiers=modifiers or None,
+                            x,
+                            y,
+                            button=button,
+                            click_count=click_count,
                         ),
                         timeout=self._action_timeout_seconds,
                     )
                     turn.metadata.update({"x": x, "y": y})
                     if modifiers:
                         turn.metadata["modifiers"] = modifiers
+                        turn.metadata["modifiers_applied"] = False
                     turn.status = "executed"
                     if button == "right":
                         self._pending_context_menu_selection = True
@@ -1316,39 +1549,53 @@ class ComputerUseSession:
                         except (TypeError, ValueError):
                             return None
 
-                    start_x_raw = _coerce_float(
-                        action.get("start_x") or action.get("from_x") or action.get("x")
+                    def _first_numeric(*keys: str) -> float | None:
+                        for key in keys:
+                            if key not in action:
+                                continue
+                            numeric = _coerce_float(action.get(key))
+                            if numeric is not None:
+                                return numeric
+                        return None
+
+                    start_x_raw = _first_numeric("start_x", "from_x", "x")
+                    start_y_raw = _first_numeric("start_y", "from_y", "y")
+                    # Accept legacy drag-and-drop destination aliases from provider payloads.
+                    end_x_raw = _first_numeric(
+                        "end_x",
+                        "to_x",
+                        "destination_x",
+                        "target_x",
                     )
-                    start_y_raw = _coerce_float(
-                        action.get("start_y") or action.get("from_y") or action.get("y")
+                    end_y_raw = _first_numeric(
+                        "end_y",
+                        "to_y",
+                        "destination_y",
+                        "target_y",
                     )
-                    end_x_raw = _coerce_float(action.get("end_x") or action.get("to_x"))
-                    end_y_raw = _coerce_float(action.get("end_y") or action.get("to_y"))
 
                     path_points = action.get("path") or action.get("points")
                     if isinstance(path_points, list) and len(path_points) >= 2:
                         first_point = path_points[0]
                         last_point = path_points[-1]
-                        if start_x_raw is None:
-                            start_x_raw = _coerce_float(first_point.get("x"))
-                        if start_y_raw is None:
-                            start_y_raw = _coerce_float(first_point.get("y"))
-                        if end_x_raw is None:
-                            end_x_raw = _coerce_float(last_point.get("x"))
-                        if end_y_raw is None:
-                            end_y_raw = _coerce_float(last_point.get("y"))
+                        if isinstance(first_point, dict):
+                            if start_x_raw is None:
+                                start_x_raw = _coerce_float(first_point.get("x"))
+                            if start_y_raw is None:
+                                start_y_raw = _coerce_float(first_point.get("y"))
+                        if isinstance(last_point, dict):
+                            if end_x_raw is None:
+                                end_x_raw = _coerce_float(last_point.get("x"))
+                            if end_y_raw is None:
+                                end_y_raw = _coerce_float(last_point.get("y"))
 
                     if start_x_raw is None or start_y_raw is None:
                         raise ComputerUseExecutionError(
                             "Drag action missing start coordinates."
                         )
 
-                    delta_x_raw = _coerce_float(
-                        action.get("dx") or action.get("delta_x")
-                    )
-                    delta_y_raw = _coerce_float(
-                        action.get("dy") or action.get("delta_y")
-                    )
+                    delta_x_raw = _first_numeric("dx", "delta_x")
+                    delta_y_raw = _first_numeric("dy", "delta_y")
                     if end_x_raw is None and delta_x_raw is not None:
                         end_x_raw = start_x_raw + delta_x_raw
                     if end_y_raw is None and delta_y_raw is not None:
@@ -1388,35 +1635,6 @@ class ComputerUseSession:
                     await asyncio.wait_for(
                         self._automation_driver.drag_mouse(
                             start_x, start_y, end_x, end_y, steps=steps
-                        ),
-                        timeout=self._action_timeout_seconds,
-                    )
-                    turn.metadata.update(
-                        {
-                            "start_x": start_x,
-                            "start_y": start_y,
-                            "end_x": end_x,
-                            "end_y": end_y,
-                        }
-                    )
-                    turn.status = "executed"
-                elif action_type == "drag_and_drop":
-                    start_x, start_y = self._resolve_coordinates(
-                        action,
-                        viewport_width,
-                        viewport_height,
-                        normalized=normalized_coords,
-                    )
-                    end_x, end_y = self._resolve_coordinates(
-                        action,
-                        viewport_width,
-                        viewport_height,
-                        prefix="destination_",
-                        normalized=normalized_coords,
-                    )
-                    await asyncio.wait_for(
-                        self._automation_driver.drag_mouse(
-                            start_x, start_y, end_x, end_y, steps=1
                         ),
                         timeout=self._action_timeout_seconds,
                     )
@@ -1526,12 +1744,18 @@ class ComputerUseSession:
                             viewport_height,
                             normalized=normalized_coords,
                         )
+                    tap_count = (
+                        3 if (clear_before and environment == "mobile_adb") else 1
+                    )
                     await self._automation_driver.click(
-                        x, y, button="left", click_count=1
+                        x, y, button="left", click_count=tap_count
                     )
                     if clear_before:
-                        await self._automation_driver.press_key("ctrl+a")
-                        await self._automation_driver.press_key("backspace")
+                        if environment == "mobile_adb":
+                            pass  # triple-tap selected all; type_text replaces the selection
+                        else:
+                            await self._automation_driver.press_key("ctrl+a")
+                            await self._automation_driver.press_key("backspace")
                     await self._automation_driver.type_text(str(text_payload))
                     if press_enter:
                         await self._automation_driver.press_key("enter")
@@ -1631,6 +1855,8 @@ class ComputerUseSession:
                 extra={
                     "call_id": turn.call_id,
                     "action_type": action_type,
+                    "raw_action_type": raw_action_type,
+                    "action_keys": sorted(action.keys()),
                     "reason": turn.error_message,
                 },
             )
@@ -1859,6 +2085,45 @@ class ComputerUseSession:
 
         return acknowledged
 
+    @staticmethod
+    def _extract_google_pending_safety_checks(
+        action_args: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Extract Google Computer Use safety decision metadata from call arguments."""
+        if not isinstance(action_args, dict):
+            return []
+
+        safety_decision = action_args.get("safety_decision")
+        if not isinstance(safety_decision, dict):
+            return []
+
+        decision = str(safety_decision.get("decision") or "").strip()
+        if not decision:
+            return []
+
+        explanation = str(safety_decision.get("explanation") or "").strip()
+        payload: dict[str, Any] = {
+            "decision": decision,
+            "code": decision,
+            "message": explanation,
+        }
+        safety_id = str(safety_decision.get("id") or "").strip()
+        if safety_id:
+            payload["id"] = safety_id
+
+        return [payload]
+
+    @staticmethod
+    def _google_safety_acknowledgement(turn: ComputerToolTurn) -> str | None:
+        """Return the acknowledgement marker required for confirm-gated actions."""
+        for check in turn.pending_safety_checks:
+            if not isinstance(check, dict):
+                continue
+            decision = str(check.get("decision") or check.get("code") or "").strip()
+            if decision.lower() == "require_confirmation":
+                return "true"
+        return None
+
     def _update_loop_history(
         self,
         turn: ComputerToolTurn,
@@ -1942,8 +2207,14 @@ class ComputerUseSession:
         )
         append_coord(
             "end",
-            params.get("end_x") or params.get("to_x"),
-            params.get("end_y") or params.get("to_y"),
+            params.get("end_x")
+            or params.get("to_x")
+            or params.get("destination_x")
+            or params.get("target_x"),
+            params.get("end_y")
+            or params.get("to_y")
+            or params.get("destination_y")
+            or params.get("target_y"),
         )
 
         if action_type == "type":
@@ -2091,15 +2362,7 @@ class ComputerUseSession:
                 ],
             )
         ]
-        tools = [
-            types.Tool(
-                computer_use=types.ComputerUse(
-                    environment=self._map_google_environment(environment),
-                )
-            ),
-            self._google_modifier_click_tools(),
-        ]
-        return contents, types.GenerateContentConfig(tools=tools)
+        return contents, self._build_google_generate_config(environment)
 
     async def _build_google_follow_up_request(
         self,
@@ -2122,9 +2385,24 @@ class ComputerUseSession:
             page_url = "desktop://"
         parts: list[Any] = []
         for turn in turns:
+            google_call_id = str(
+                turn.metadata.get("google_function_call_id") or ""
+            ).strip()
+            response_name = str(
+                turn.metadata.get("google_function_call_name") or ""
+            ).strip()
+            if not response_name:
+                response_name = str(turn.action_type or "action").strip() or "action"
             response_payload = {
                 "status": turn.status,
                 "call_id": turn.call_id,
+                "google_function_call_sequence": turn.metadata.get(
+                    "google_function_call_sequence"
+                ),
+                "google_correlation_mode": turn.metadata.get("google_correlation_mode"),
+                "google_function_call_fallback_id": turn.metadata.get(
+                    "google_function_call_fallback_id"
+                ),
                 "url": page_url,
                 "x": turn.metadata.get("x"),
                 "y": turn.metadata.get("y"),
@@ -2133,14 +2411,17 @@ class ComputerUseSession:
                 "clipboard_error": turn.metadata.get("clipboard_error"),
                 "error": turn.error_message,
             }
+            safety_acknowledgement = self._google_safety_acknowledgement(turn)
+            if safety_acknowledgement:
+                response_payload["safety_acknowledgement"] = safety_acknowledgement
             response_payload = {
                 k: v for k, v in response_payload.items() if v is not None
             }
             parts.append(
                 types.Part(
                     function_response=types.FunctionResponse(
-                        id=turn.call_id or None,
-                        name=turn.action_type or "action",
+                        id=google_call_id or None,
+                        name=response_name,
                         response=response_payload,
                         parts=[
                             types.FunctionResponsePart(
@@ -2170,23 +2451,39 @@ class ComputerUseSession:
                     parts=[types.Part.from_text(text=reminder)],
                 )
             )
-        tools = [
-            types.Tool(
-                computer_use=types.ComputerUse(
-                    environment=self._map_google_environment(environment),
-                )
-            ),
-            self._google_modifier_click_tools(),
-        ]
         return (
             {
                 "model": model or self._google_model,
                 "contents": contents,
-                "config": types.GenerateContentConfig(tools=tools),
+                "config": self._build_google_generate_config(environment),
             },
             function_response_content,
             screenshot_bytes,
         )
+
+    def _build_google_generate_config(self, environment: str) -> Any:
+        from google.genai import types  # type: ignore
+
+        return types.GenerateContentConfig(
+            tools=self._build_google_tools(environment),
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+        )
+
+    def _build_google_tools(self, environment: str) -> list[Any]:
+        from google.genai import types  # type: ignore
+
+        tools: list[Any] = [
+            types.Tool(
+                computer_use=types.ComputerUse(
+                    environment=self._map_google_environment(environment),
+                )
+            )
+        ]
+        if self._normalize_environment_name(environment) != "mobile_adb":
+            tools.append(self._google_modifier_click_tools())
+        return tools
 
     def _build_anthropic_initial_request(
         self,
@@ -2461,7 +2758,7 @@ class ComputerUseSession:
                 "Google CU provider requires either VERTEX_PROJECT+VERTEX_LOCATION or VERTEX_API_KEY."
             )
         self._google_client = genai.Client(api_key=vertex_api_key)
-        logger.info("Initialized Google CU client in API key mode")
+        logger.debug("Initialized Google CU client in API key mode")
         return self._google_client
 
     async def _ensure_automation_driver_ready(self) -> None:
@@ -3119,6 +3416,35 @@ class ComputerUseSession:
             )
             return browser_context + goal
 
+        if env_mode == "mobile_adb":
+            mobile_context = (
+                "IMPORTANT: You are controlling an Android mobile app through ADB-backed screenshots. "
+                "Treat coordinates as mobile screen positions. Avoid desktop assumptions (dock, alt-tab, windows).\n\n"
+                "SCREEN DETAILS:\n"
+                "- Screenshot orientation and resolution may vary per device; always rely on the provided screenshot.\n"
+                "- Prefer tap and type interactions; use scroll_document/scroll_at for vertical movement.\n"
+                "- Do not use open_web_browser/search/go_back/go_forward desktop-browser actions unless explicitly required.\n\n"
+                "AVAILABLE ACTIONS:\n"
+                "- click_at: Tap at screen coordinates\n"
+                "- type_text_at: Tap and type text into focused field\n"
+                "- key_combination: Android key events — valid values include: 'home' (go to home screen), 'back' (navigate back), 'app_switch' (open recent apps switcher), 'enter', 'delete'\n"
+                "- scroll_at / scroll_document: Scroll app content\n"
+                "- drag_and_drop: Swipe/drag gestures when necessary\n\n"
+                "APP SWITCHING ON ANDROID:\n"
+                "- To switch to a recently used app: use key_combination: 'app_switch' to open the recents overlay, then tap the app card you want.\n"
+                "- Do NOT use swipe/drag gestures from the bottom edge to open recents — use key_combination: 'app_switch' instead.\n"
+                "- To go to the home screen: use key_combination: 'home'.\n\n"
+                "TEXT INPUT ON ANDROID:\n"
+                "- To replace existing text in a field: use type_text_at directly — it automatically selects all existing content before typing.\n"
+                "- Do NOT use key_combination with ctrl+a or any other desktop shortcut to select or clear text; these do not work on Android.\n"
+                "- For type_text_at, set press_enter=true ONLY when the task explicitly says to submit the form or press Enter. Do NOT set press_enter=true just because you are typing into a field — doing so submits the form prematurely.\n"
+                "- Do NOT use key_combination or press_key with 'enter' or 'return' after typing into a field unless the task explicitly says to submit the form. Pressing Enter submits the whole form — if there are more fields to fill, use tap/type_text_at for the next field instead. Only tap the on-screen submit button (e.g. 'Reset Password', 'Sign In') when all fields are filled.\n"
+                "- For password fields that mask input with dots or asterisks: a single type_text_at call is sufficient. Do NOT retry just because you cannot read the entered text. Seeing masked characters (dots) after typing confirms the field is populated — stop immediately.\n\n"
+                + completion_instruction
+                + "YOUR TASK: "
+            )
+            return mobile_context + goal
+
         desktop_context = (
             "IMPORTANT: You are controlling an UBUNTU LINUX desktop with GNOME shell. "
             "The screenshot shows native applications (Slack, Firefox, terminals, etc.). "
@@ -3167,6 +3493,8 @@ class ComputerUseSession:
         value = (environment or "desktop").strip().lower()
         if value in {"unspecified", "env_unspecified", "default"}:
             return "unspecified"
+        if value in {"mobile", "mobile_adb", "android", "phone", "tablet"}:
+            return "mobile_adb"
         if value in {"browser", "web"}:
             return "browser"
         if value in {"linux", "desktop", "os", "system"}:
@@ -3188,6 +3516,27 @@ class ComputerUseSession:
                 types.Environment.ENVIRONMENT_UNSPECIFIED,
             )
         return types.Environment.ENVIRONMENT_UNSPECIFIED
+
+    @staticmethod
+    def _wrap_goal_for_mobile(
+        goal: str,
+        env_mode: str,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> str:
+        if env_mode != "mobile_adb":
+            return goal
+        orientation = "portrait" if viewport_height >= viewport_width else "landscape"
+        mobile_context = (
+            "MOBILE EXECUTION CONTEXT:\n"
+            f"- Runtime: Android app via ADB screenshot loop\n"
+            f"- Resolution: {viewport_width}x{viewport_height}\n"
+            f"- Orientation: {orientation}\n"
+            "- Use mobile UI assumptions (tap, type, swipe/scroll) and avoid desktop/window-management instructions.\n"
+            "- Coordinates must be interpreted against the provided mobile screenshot.\n\n"
+            "TASK:\n"
+        )
+        return f"{mobile_context}{goal}"
 
     @staticmethod
     def _google_modifier_click_tools() -> Any:
@@ -3366,18 +3715,48 @@ def extract_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]
 
 def extract_google_function_calls(response_obj: Any) -> list[Any]:
     """Extract function_call parts from a Google response object."""
-    calls: list[Any] = []
+    return [
+        envelope.function_call
+        for envelope in extract_google_function_call_envelopes(response_obj)
+    ]
+
+
+def extract_google_function_call_envelopes(
+    response_obj: Any,
+    *,
+    candidate_index: int = 0,
+) -> list[GoogleFunctionCallEnvelope]:
+    """Extract ordered function_call parts from a selected Google candidate."""
+    envelopes: list[GoogleFunctionCallEnvelope] = []
     candidates = getattr(response_obj, "candidates", []) or []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        if not content:
+    if not candidates:
+        return envelopes
+
+    selected_index = candidate_index
+    if selected_index < 0 or selected_index >= len(candidates):
+        selected_index = 0
+
+    candidate = candidates[selected_index]
+    content = getattr(candidate, "content", None)
+    if not content:
+        return envelopes
+
+    sequence = 0
+    parts = getattr(content, "parts", []) or []
+    for part_index, part in enumerate(parts):
+        func_call = getattr(part, "function_call", None)
+        if not func_call:
             continue
-        parts = getattr(content, "parts", []) or []
-        for part in parts:
-            func_call = getattr(part, "function_call", None)
-            if func_call:
-                calls.append(func_call)
-    return calls
+        sequence += 1
+        envelopes.append(
+            GoogleFunctionCallEnvelope(
+                function_call=func_call,
+                sequence=sequence,
+                candidate_index=selected_index,
+                part_index=part_index,
+            )
+        )
+    return envelopes
 
 
 def extract_google_computer_calls(

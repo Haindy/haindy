@@ -38,7 +38,7 @@ VERTEX_API_KEY=your-vertex-api-key
 VERTEX_PROJECT=your-vertex-project
 VERTEX_LOCATION=us-central1
 CU_SAFETY_POLICY=auto_approve
-HAINDY_DRIVER_BACKEND=playwright
+HAINDY_AUTOMATION_BACKEND=desktop
 ```
 
 ### Desktop Automation Dependencies (Linux/X11)
@@ -59,10 +59,10 @@ sudo usermod -aG input $USER
 Log out/in after updating group membership.
 
 ### Desktop Driver Configuration
-Use `HAINDY_DRIVER_BACKEND=desktop` to enable OS-level control.
+Use `HAINDY_AUTOMATION_BACKEND=desktop` to enable OS-level control.
 Common overrides:
 ```
-HAINDY_DRIVER_BACKEND=desktop
+HAINDY_AUTOMATION_BACKEND=desktop
 HAINDY_DESKTOP_RESOLUTION=1440,900
 HAINDY_DESKTOP_KEYBOARD_LAYOUT=us
 HAINDY_DESKTOP_KEYBOARD_SCANCODES=true
@@ -70,6 +70,20 @@ HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH=true
 HAINDY_DESKTOP_SCREENSHOT_DIR=data/screenshots/desktop
 HAINDY_DESKTOP_COORDINATE_CACHE_PATH=data/desktop_cache/coordinates.json
 ```
+
+### Mobile ADB Backend
+Use CLI `--mobile` for a hard mobile override per run. Optional defaults:
+```
+HAINDY_AUTOMATION_BACKEND=desktop
+HAINDY_MOBILE_DEFAULT_ADB_SERIAL=
+HAINDY_MOBILE_SCREENSHOT_DIR=data/screenshots/mobile
+HAINDY_MOBILE_COORDINATE_CACHE_PATH=data/mobile_cache/coordinates.json
+HAINDY_MOBILE_ADB_TIMEOUT_SECONDS=15.0
+```
+
+For mobile context, provide either:
+- `adb_serial` + `app_package` (optional `app_activity`), or
+- `adb_commands` that discover/select the device and open the app.
 
 ### Caching and Trace Artifacts
 Backported caches and logs are stored under `data/` by default:
@@ -202,14 +216,14 @@ python -m src.main --plan requirements.md --output custom_reports/
 # Enable Computer Use and desktop driver (provider via CU_PROVIDER)
 export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=google
-export HAINDY_DRIVER_BACKEND=desktop
+export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 
 # Anthropic Computer Use example
 export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=your-anthropic-api-key
-export HAINDY_DRIVER_BACKEND=desktop
+export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```
 

@@ -78,6 +78,25 @@ class TestStateManager:
         assert stored_state == test_state
 
     @pytest.mark.asyncio
+    async def test_create_test_state_preserves_initial_context(
+        self, state_manager, sample_test_plan
+    ):
+        """Test that initial context is persisted into the test state."""
+        initial_context = {
+            "automation_backend": "mobile_adb",
+            "target_type": "mobile_adb",
+            "adb_serial": "emulator-5554",
+        }
+
+        test_state = await state_manager.create_test_state(
+            sample_test_plan,
+            initial_context=initial_context,
+        )
+
+        assert test_state.context == initial_context
+        assert test_state.context is not initial_context
+
+    @pytest.mark.asyncio
     async def test_update_test_state_start(self, state_manager, sample_test_plan):
         """Test starting a test."""
         await state_manager.create_test_state(sample_test_plan)

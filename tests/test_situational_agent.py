@@ -42,6 +42,66 @@ def test_heuristic_desktop_context_with_app_name() -> None:
     assert "Calculator" in assessment.entry_actions[0].description
 
 
+def test_heuristic_mobile_context_requires_setup_path() -> None:
+    agent = SituationalAgent()
+    assessment = agent._heuristic_assessment(
+        "target_type: mobile_adb\nadb_serial: emulator-5554\napp_package: com.example.app"
+    )
+    assert assessment.target_type == "mobile_adb"
+    assert assessment.sufficient is True
+    assert assessment.setup.adb_serial == "emulator-5554"
+    assert assessment.setup.app_package == "com.example.app"
+
+
+def test_parse_assessment_mobile_blocks_without_structured_or_commands() -> None:
+    agent = SituationalAgent()
+    payload = {
+        "target_type": "mobile_adb",
+        "sufficient": False,
+        "missing_items": [],
+        "setup": {"adb_serial": "", "app_package": "", "adb_commands": []},
+        "entry_actions": [],
+        "notes": [],
+    }
+
+    assessment = agent._parse_assessment(
+        payload,
+        "Test mobile login",
+        "Target is android mobile app",
+    )
+
+    assert assessment.sufficient is False
+    assert assessment.missing_items
+
+
+def test_parse_assessment_mobile_allows_command_path_without_structured_fields() -> (
+    None
+):
+    agent = SituationalAgent()
+    payload = {
+        "target_type": "mobile_adb",
+        "sufficient": True,
+        "missing_items": [],
+        "setup": {
+            "adb_serial": "",
+            "app_package": "",
+            "adb_commands": ["adb devices", "adb shell monkey -p com.example.app 1"],
+        },
+        "entry_actions": [],
+        "notes": [],
+    }
+
+    assessment = agent._parse_assessment(
+        payload,
+        "Test mobile login",
+        "Target is android mobile app",
+    )
+
+    assert assessment.sufficient is True
+    assert not assessment.missing_items
+    assert assessment.setup.adb_commands
+
+
 def test_parse_assessment_filters_deterministic_identifier_blockers() -> None:
     agent = SituationalAgent()
     payload = {
@@ -163,3 +223,44 @@ async def test_assess_context_logs_fallback_when_model_call_fails(monkeypatch) -
     debug_logger.log_ai_interaction.assert_called_once()
     debug_response = debug_logger.log_ai_interaction.call_args.kwargs["response"]
     assert "Fallback note" in debug_response
+
+
+@pytest.mark.asyncio
+async def test_prepare_entrypoint_mobile_uses_mobile_hooks() -> None:
+    agent = SituationalAgent()
+
+    class DriverStub:
+        def __init__(self) -> None:
+            self.start = AsyncMock()
+            self.configure_target = AsyncMock()
+            self.run_adb_commands = AsyncMock()
+            self.launch_app = AsyncMock()
+            self.screenshot = AsyncMock(return_value=b"png")
+
+    driver = DriverStub()
+    setup = type(
+        "Setup",
+        (),
+        {
+            "web_url": "",
+            "app_name": "",
+            "launch_command": "",
+            "maximize": True,
+            "adb_serial": "emulator-5554",
+            "app_package": "com.example.app",
+            "app_activity": "com.example.app.MainActivity",
+            "adb_commands": ["adb devices"],
+        },
+    )()
+    assessment = type(
+        "Assessment",
+        (),
+        {"target_type": "mobile_adb", "setup": setup, "entry_actions": []},
+    )()
+
+    await agent.prepare_entrypoint(driver, assessment, action_agent=AsyncMock())
+
+    driver.configure_target.assert_awaited_once()
+    driver.start.assert_awaited_once()
+    driver.run_adb_commands.assert_awaited_once()
+    driver.screenshot.assert_awaited_once()

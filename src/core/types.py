@@ -170,7 +170,7 @@ class TestStep(BaseModel):
         "click", description="Cache action type for coordinate caching"
     )
     environment: str | None = Field(
-        None, description="Execution environment override (desktop or web)"
+        None, description="Execution environment override (desktop, web, or mobile_adb)"
     )
     can_be_replayed: bool | None = Field(
         None, description="Allow execution replay cache for this step"

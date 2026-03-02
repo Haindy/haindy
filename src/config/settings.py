@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     )
 
     # Desktop Configuration
+    automation_backend: str = Field(
+        default="desktop",
+        description="Automation backend to use (desktop or mobile_adb)",
+        validation_alias=AliasChoices("HAINDY_AUTOMATION_BACKEND"),
+    )
     desktop_prefer_resolution: tuple[int, int] = Field(
         default=(1920, 1080),
         description="Preferred resolution for desktop sessions",
@@ -200,6 +205,27 @@ class Settings(BaseSettings):
         ge=0.5,
         description="Max time to hold clipboard owner process",
         validation_alias=AliasChoices("HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS"),
+    )
+    mobile_screenshot_dir: Path = Field(
+        default=Path("data/screenshots/mobile"),
+        description="Directory for mobile screenshots",
+        validation_alias=AliasChoices("HAINDY_MOBILE_SCREENSHOT_DIR"),
+    )
+    mobile_coordinate_cache_path: Path = Field(
+        default=Path("data/mobile_cache/coordinates.json"),
+        description="Coordinate cache path for mobile actions",
+        validation_alias=AliasChoices("HAINDY_MOBILE_COORDINATE_CACHE_PATH"),
+    )
+    mobile_default_adb_serial: str = Field(
+        default="",
+        description="Default Android device serial for mobile ADB runs",
+        validation_alias=AliasChoices("HAINDY_MOBILE_DEFAULT_ADB_SERIAL"),
+    )
+    mobile_adb_timeout_seconds: float = Field(
+        default=15.0,
+        ge=0.5,
+        description="Timeout in seconds for individual ADB commands",
+        validation_alias=AliasChoices("HAINDY_MOBILE_ADB_TIMEOUT_SECONDS"),
     )
     enable_screen_recording: bool = Field(
         default=False,
@@ -320,7 +346,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS"),
     )
     actions_computer_tool_loop_detection_window: int = Field(
-        default=3,
+        default=4,
         ge=2,
         description="Repeated identical turns (with identical screenshots) before flagging a loop",
         validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW"),
@@ -459,6 +485,14 @@ class Settings(BaseSettings):
             return normalized
         return "us"
 
+    @field_validator("automation_backend")
+    @classmethod
+    def normalize_automation_backend(cls, value: str) -> str:
+        normalized = (value or "desktop").strip().lower()
+        if normalized not in {"desktop", "mobile_adb"}:
+            return "desktop"
+        return normalized
+
     @field_validator("cu_provider")
     @classmethod
     def normalize_cu_provider(cls, value: str) -> str:
@@ -525,8 +559,10 @@ class Settings(BaseSettings):
             self.reports_dir,
             self.screenshots_dir,
             self.desktop_screenshot_dir,
+            self.mobile_screenshot_dir,
             self.cache_dir,
             self.desktop_coordinate_cache_path.parent,
+            self.mobile_coordinate_cache_path.parent,
             self.task_plan_cache_path.parent,
             self.planning_cache_path.parent,
             self.execution_replay_cache_path.parent,

@@ -1,4 +1,4 @@
-"""HAINDY desktop-first CLI entrypoint."""
+"""HAINDY CLI entrypoint."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.desktop.controller import DesktopController
 from src.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
 from src.error_handling import ScopeTriageBlockedError
+from src.mobile.controller import MobileController
 from src.monitoring.debug_logger import initialize_debug_logger
 from src.monitoring.logger import get_logger, get_run_id, setup_logging
 from src.monitoring.reporter import TestReporter
@@ -76,6 +77,11 @@ Examples:
         "--context",
         type=Path,
         help="Path to plain-text execution context file (required for execution)",
+    )
+    parser.add_argument(
+        "--mobile",
+        action="store_true",
+        help="Use mobile ADB backend (hard override for this run)",
     )
     parser.add_argument(
         "--berserk",
@@ -177,9 +183,10 @@ async def run_test(
     max_steps: int = 50,
     berserk: bool = False,
     record_override: bool | None = None,
+    automation_backend: str = "desktop",
 ) -> int:
     """Run a test with mandatory requirements and context inputs."""
-    desktop_controller: DesktopController | None = None
+    automation_controller: DesktopController | MobileController | None = None
     coordinator: WorkflowCoordinator | None = None
     screen_recorder: ScreenRecorder | None = None
     recording_artifact_path: Path | None = None
@@ -195,7 +202,7 @@ async def run_test(
 
         console.print(
             Panel.fit(
-                "[bold cyan]HAINDY - Desktop-First Autonomous Testing Agent[/bold cyan]",
+                "[bold cyan]HAINDY - Autonomous Testing Agent[/bold cyan]",
                 border_style="cyan",
             )
         )
@@ -209,6 +216,34 @@ async def run_test(
             requirements=requirements,
             context_text=context_text,
         )
+        if (
+            automation_backend == "mobile_adb"
+            and assessment.target_type != "mobile_adb"
+        ):
+            raise ScopeTriageBlockedError(
+                triage_result=ScopeTriageResult(
+                    in_scope="",
+                    explicit_exclusions=[],
+                    ambiguous_points=assessment.notes,
+                    blocking_questions=[
+                        "--mobile requires mobile_adb context (provide Android adb setup details)."
+                    ],
+                )
+            )
+        if (
+            assessment.target_type == "mobile_adb"
+            and automation_backend != "mobile_adb"
+        ):
+            raise ScopeTriageBlockedError(
+                triage_result=ScopeTriageResult(
+                    in_scope="",
+                    explicit_exclusions=[],
+                    ambiguous_points=assessment.notes,
+                    blocking_questions=[
+                        "Context requires mobile_adb execution. Re-run with --mobile."
+                    ],
+                )
+            )
         if not assessment.sufficient:
             raise ScopeTriageBlockedError(
                 triage_result=ScopeTriageResult(
@@ -222,10 +257,15 @@ async def run_test(
         planning_context = {
             "execution_context": context_text,
             "target_type": assessment.target_type,
+            "automation_backend": automation_backend,
             "web_url": assessment.setup.web_url,
             "app_name": assessment.setup.app_name,
             "launch_command": assessment.setup.launch_command,
             "maximize": str(assessment.setup.maximize),
+            "adb_serial": assessment.setup.adb_serial,
+            "app_package": assessment.setup.app_package,
+            "app_activity": assessment.setup.app_activity,
+            "adb_commands": assessment.setup.adb_commands,
         }
 
         console.print("[yellow]Generating test plan...[/yellow]")
@@ -237,16 +277,17 @@ async def run_test(
             cache_key_context={"execution_context": context_text},
         )
 
-        console.print("[cyan]Initializing desktop runtime...[/cyan]")
-        desktop_controller, coordinator = await _create_coordinator_stack(
-            max_steps=max_steps
+        console.print(f"[cyan]Initializing {automation_backend} runtime...[/cyan]")
+        automation_controller, coordinator = await _create_coordinator_stack(
+            max_steps=max_steps,
+            backend=automation_backend,
         )
         action_agent = coordinator.get_action_agent()
 
         should_record = bool(settings.enable_screen_recording)
         if record_override is not None:
             should_record = bool(record_override)
-        if should_record:
+        if should_record and automation_backend == "desktop":
             screen_recorder = ScreenRecorder(
                 output_dir=settings.screen_recording_output_dir,
                 framerate=settings.screen_recording_framerate,
@@ -265,12 +306,17 @@ async def run_test(
                     extra={"error": str(exc)},
                 )
                 screen_recorder = None
+        elif should_record:
+            logger.info(
+                "Screen recording requested but disabled for non-desktop backend",
+                extra={"automation_backend": automation_backend},
+            )
 
         console.print(
             "[cyan]Preparing entrypoint state with Situational Agent...[/cyan]"
         )
         await situational_agent.prepare_entrypoint(
-            desktop_controller.driver,
+            automation_controller.driver,
             assessment,
             action_agent=action_agent,
         )
@@ -278,11 +324,16 @@ async def run_test(
         test_context = {
             "execution_context": context_text,
             "target_type": assessment.target_type,
+            "automation_backend": automation_backend,
             "entry_setup": {
                 "web_url": assessment.setup.web_url,
                 "app_name": assessment.setup.app_name,
                 "launch_command": assessment.setup.launch_command,
                 "maximize": assessment.setup.maximize,
+                "adb_serial": assessment.setup.adb_serial,
+                "app_package": assessment.setup.app_package,
+                "app_activity": assessment.setup.app_activity,
+                "adb_commands": assessment.setup.adb_commands,
             },
             "setup_notes": assessment.notes,
         }
@@ -387,23 +438,28 @@ async def run_test(
                 await coordinator.cleanup()
             except Exception:
                 logger.warning("Coordinator cleanup failed", exc_info=True)
-        if desktop_controller:
+        if automation_controller:
             try:
-                await desktop_controller.stop()
+                await automation_controller.stop()
             except Exception:
-                logger.warning("Desktop controller stop failed", exc_info=True)
+                logger.warning("Automation controller stop failed", exc_info=True)
 
 
 async def _create_coordinator_stack(
     max_steps: int,
-) -> tuple[DesktopController, WorkflowCoordinator]:
-    """Build and initialize the desktop/coordinator stack."""
-    desktop_controller = DesktopController()
+    backend: str = "desktop",
+) -> tuple[DesktopController | MobileController, WorkflowCoordinator]:
+    """Build and initialize the automation backend/coordinator stack."""
+    normalized_backend = (backend or "desktop").strip().lower()
+    if normalized_backend == "mobile_adb":
+        automation_controller: DesktopController | MobileController = MobileController()
+    else:
+        automation_controller = DesktopController()
     try:
-        await desktop_controller.start()
+        await automation_controller.start()
     except Exception:
         with contextlib.suppress(Exception):
-            await desktop_controller.stop()
+            await automation_controller.stop()
         raise
 
     coordinator: WorkflowCoordinator | None = None
@@ -411,17 +467,17 @@ async def _create_coordinator_stack(
         coordinator = WorkflowCoordinator(
             message_bus=MessageBus(),
             state_manager=StateManager(),
-            automation_driver=desktop_controller.driver,
+            automation_driver=automation_controller.driver,
             max_steps=max_steps,
         )
         await coordinator.initialize()
-        return desktop_controller, coordinator
+        return automation_controller, coordinator
     except Exception:
         if coordinator is not None:
             with contextlib.suppress(Exception):
                 await coordinator.cleanup()
         with contextlib.suppress(Exception):
-            await desktop_controller.stop()
+            await automation_controller.stop()
         raise
 
 
@@ -618,6 +674,11 @@ async def async_main(args: list[str] | None = None) -> int:
 
     requirements = await read_plan_file(parsed_args.plan)
     context_text = await read_context_file(parsed_args.context)
+    automation_backend = (
+        "mobile_adb"
+        if parsed_args.mobile
+        else str(getattr(settings, "automation_backend", "desktop") or "desktop")
+    )
 
     return await run_test(
         requirements=requirements,
@@ -628,6 +689,7 @@ async def async_main(args: list[str] | None = None) -> int:
         max_steps=parsed_args.max_steps,
         berserk=parsed_args.berserk,
         record_override=parsed_args.record,
+        automation_backend=automation_backend,
     )
 
 
