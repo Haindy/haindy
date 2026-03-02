@@ -1,5 +1,6 @@
 """Unit tests for SituationalAgent."""
 
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,6 +8,11 @@ import pytest
 
 from src.agents.situational_agent import SituationalAgent
 from src.core.types import ActionType
+from src.runtime.situational_cache import (
+    SituationalCache,
+    build_situational_cache_key_payload,
+    hash_situational_cache_key,
+)
 
 
 def test_heuristic_web_context_is_sufficient() -> None:
@@ -156,14 +162,17 @@ def test_parse_assessment_treats_desktop_missing_items_as_non_blocking() -> None
 
 
 @pytest.mark.asyncio
-async def test_assess_context_persists_model_and_debug_logs(monkeypatch) -> None:
+async def test_assess_context_persists_model_and_debug_logs(
+    monkeypatch, tmp_path
+) -> None:
     model_logger = SimpleNamespace(log_call=AsyncMock())
     debug_logger = MagicMock()
     monkeypatch.setattr(
         "src.agents.situational_agent.get_debug_logger", lambda: debug_logger
     )
 
-    agent = SituationalAgent(model_logger=model_logger)
+    cache = SituationalCache(tmp_path / "situational_cache.json")
+    agent = SituationalAgent(model_logger=model_logger, situational_cache=cache)
     agent.call_openai = AsyncMock(
         return_value={
             "content": {
@@ -197,14 +206,17 @@ async def test_assess_context_persists_model_and_debug_logs(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_assess_context_logs_fallback_when_model_call_fails(monkeypatch) -> None:
+async def test_assess_context_logs_fallback_when_model_call_fails(
+    monkeypatch, tmp_path
+) -> None:
     model_logger = SimpleNamespace(log_call=AsyncMock())
     debug_logger = MagicMock()
     monkeypatch.setattr(
         "src.agents.situational_agent.get_debug_logger", lambda: debug_logger
     )
 
-    agent = SituationalAgent(model_logger=model_logger)
+    cache = SituationalCache(tmp_path / "situational_cache.json")
+    agent = SituationalAgent(model_logger=model_logger, situational_cache=cache)
     agent.call_openai = AsyncMock(side_effect=RuntimeError("simulated API failure"))
 
     assessment = await agent.assess_context(
@@ -223,6 +235,149 @@ async def test_assess_context_logs_fallback_when_model_call_fails(monkeypatch) -
     debug_logger.log_ai_interaction.assert_called_once()
     debug_response = debug_logger.log_ai_interaction.call_args.kwargs["response"]
     assert "Fallback note" in debug_response
+
+
+@pytest.mark.asyncio
+async def test_assess_context_cache_hit_skips_model_call(tmp_path) -> None:
+    cache = SituationalCache(tmp_path / "situational_cache.json")
+    agent = SituationalAgent(situational_cache=cache)
+    agent.call_openai = AsyncMock(
+        return_value={
+            "content": {
+                "target_type": "desktop_app",
+                "sufficient": True,
+                "missing_items": [],
+                "setup": {"app_name": "KeenBench"},
+                "entry_actions": [],
+                "notes": [],
+            }
+        }
+    )
+
+    requirements = "Validate KeenBench desktop workflow."
+    context_text = "KeenBench is open in GNOME."
+
+    first = await agent.assess_context(
+        requirements=requirements, context_text=context_text
+    )
+    second = await agent.assess_context(
+        requirements=requirements,
+        context_text=context_text,
+    )
+
+    assert first.sufficient is True
+    assert second.sufficient is True
+    assert agent.call_openai.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_assess_context_cache_replays_insufficient_assessment(tmp_path) -> None:
+    cache = SituationalCache(tmp_path / "situational_cache.json")
+    agent = SituationalAgent(situational_cache=cache)
+    agent.call_openai = AsyncMock(
+        return_value={
+            "content": {
+                "target_type": "web",
+                "sufficient": False,
+                "missing_items": ["web_url"],
+                "setup": {"web_url": ""},
+                "entry_actions": [],
+                "notes": ["Need a URL"],
+            }
+        }
+    )
+
+    requirements = "Validate the web login flow."
+    context_text = "Target type: web"
+
+    first = await agent.assess_context(
+        requirements=requirements, context_text=context_text
+    )
+    second = await agent.assess_context(
+        requirements=requirements,
+        context_text=context_text,
+    )
+
+    assert first.sufficient is False
+    assert second.sufficient is False
+    assert second.missing_items == ["web_url"]
+    assert agent.call_openai.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_assess_context_does_not_cache_fallback_only_results(tmp_path) -> None:
+    cache = SituationalCache(tmp_path / "situational_cache.json")
+    agent = SituationalAgent(situational_cache=cache)
+    agent.call_openai = AsyncMock(side_effect=RuntimeError("simulated API failure"))
+
+    requirements = "Target desktop app flow."
+    context_text = "app_name: Calculator"
+
+    first = await agent.assess_context(
+        requirements=requirements, context_text=context_text
+    )
+    second = await agent.assess_context(
+        requirements=requirements,
+        context_text=context_text,
+    )
+
+    assert first.target_type == "desktop_app"
+    assert second.target_type == "desktop_app"
+    assert agent.call_openai.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_assess_context_invalid_cached_payload_falls_back_to_model(
+    tmp_path,
+) -> None:
+    cache = SituationalCache(tmp_path / "situational_cache.json")
+    agent = SituationalAgent(situational_cache=cache)
+    agent.call_openai = AsyncMock(
+        return_value={
+            "content": {
+                "target_type": "desktop_app",
+                "sufficient": True,
+                "missing_items": [],
+                "setup": {"app_name": "Calculator"},
+                "entry_actions": [],
+                "notes": [],
+            }
+        }
+    )
+
+    requirements = "Target desktop app flow."
+    context_text = "app_name: Calculator"
+
+    cache_key_payload = {
+        "requirements": requirements,
+        "context_text": context_text,
+        "situational_signature": {
+            "name": agent.name,
+            "model": agent.model,
+            "temperature": agent.temperature,
+            "reasoning_level": agent.reasoning_level,
+            "modalities": sorted(str(item) for item in agent.modalities),
+            "system_prompt_sha256": sha256(
+                (agent.system_prompt or "").encode("utf-8")
+            ).hexdigest(),
+        },
+    }
+
+    key_hash = hash_situational_cache_key(
+        build_situational_cache_key_payload(**cache_key_payload)
+    )
+    cache.store(
+        key_hash=key_hash,
+        assessment_payload={"target_type": "invalid"},
+    )
+
+    assessment = await agent.assess_context(
+        requirements=requirements,
+        context_text=context_text,
+    )
+
+    assert assessment.sufficient is True
+    assert agent.call_openai.await_count == 1
 
 
 @pytest.mark.asyncio
