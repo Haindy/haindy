@@ -1130,9 +1130,19 @@ class TestRunner(BaseAgent):
             + (" [CURRENT STEP]" if case_step.step_number == step.step_number else "")
             for case_step in test_case.steps
         ]
-        prereq_lines = [f"  - {p}" for p in test_case.prerequisites] if test_case.prerequisites else []
-        prereq_prefix = "Preconditions:\n" + "\n".join(prereq_lines) + "\n\n" if prereq_lines else ""
-        case_outline_text = prereq_prefix + "\n".join(f"- {line}" for line in case_outline_lines)
+        prereq_lines = (
+            [f"  - {p}" for p in test_case.prerequisites]
+            if test_case.prerequisites
+            else []
+        )
+        prereq_prefix = (
+            "Preconditions:\n" + "\n".join(prereq_lines) + "\n\n"
+            if prereq_lines
+            else ""
+        )
+        case_outline_text = prereq_prefix + "\n".join(
+            f"- {line}" for line in case_outline_lines
+        )
 
         cache_context = {
             "test_case_id": test_case.test_id,
