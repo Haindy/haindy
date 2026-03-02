@@ -736,3 +736,196 @@ async def test_replay_setup_step_fail_invalidates_cache(
     assert step_result.status == TestStatus.FAILED
     assert verify_mock.await_count == 1
     invalidate_mock.assert_called_once_with(replay_key)
+
+
+@pytest.mark.asyncio
+async def test_execute_setup_step_uses_ai_verification_in_normal_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan, case, step = _build_test_case()
+    setup_step = step.model_copy(update={"intent": StepIntent.SETUP})
+    case = case.model_copy(update={"steps": [setup_step]})
+    plan = plan.model_copy(update={"test_cases": [case]})
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+    runner._execution_history = []
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+    monkeypatch.setattr(
+        runner,
+        "_try_execution_replay",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_interpret_step",
+        AsyncMock(
+            return_value=(
+                [
+                    {
+                        "type": "click",
+                        "target": "Login button",
+                        "description": "Tap Login",
+                        "critical": True,
+                    }
+                ],
+                False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_action",
+        AsyncMock(
+            return_value={
+                "success": True,
+                "action_type": "click",
+                "target": "Login button",
+                "outcome": "Tapped Login",
+                "confidence": 0.9,
+                "error": None,
+                "driver_actions": [{"type": "click", "x": 10, "y": 10}],
+            }
+        ),
+    )
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "PASS",
+            "reasoning": "Setup reached expected screen",
+            "actual_result": "Sign-in screen is visible.",
+            "confidence": 0.93,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+    store_mock = AsyncMock()
+    persist_mock = AsyncMock()
+    invalidate_coord_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_store_execution_replay", store_mock)
+    monkeypatch.setattr(runner, "_persist_coordinate_cache", persist_mock)
+    monkeypatch.setattr(runner, "_invalidate_coordinate_cache", invalidate_coord_mock)
+
+    case_result = TestCaseResult(
+        case_id=case.case_id,
+        test_id=case.test_id,
+        name=case.name,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        steps_total=len(case.steps),
+        steps_completed=0,
+        steps_failed=0,
+        step_results=[],
+    )
+
+    result = await runner._execute_test_step(setup_step, case, case_result)
+
+    assert result.status == TestStatus.PASSED
+    assert verify_mock.await_count == 1
+    assert runner._current_step_data["verification_mode"] == "ai"
+    store_mock.assert_awaited_once()
+    persist_mock.assert_awaited_once()
+    invalidate_coord_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan, case, step = _build_test_case()
+    setup_step = step.model_copy(update={"intent": StepIntent.SETUP})
+    case = case.model_copy(update={"steps": [setup_step]})
+    plan = plan.model_copy(update={"test_cases": [case]})
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+    runner._execution_history = []
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+    monkeypatch.setattr(
+        runner,
+        "_try_execution_replay",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_interpret_step",
+        AsyncMock(
+            return_value=(
+                [
+                    {
+                        "type": "click",
+                        "target": "Login button",
+                        "description": "Tap Login",
+                        "critical": True,
+                    }
+                ],
+                False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_action",
+        AsyncMock(
+            return_value={
+                "success": True,
+                "action_type": "click",
+                "target": "Login button",
+                "outcome": "Tapped Login",
+                "confidence": 0.9,
+                "error": None,
+                "driver_actions": [{"type": "click", "x": 10, "y": 10}],
+            }
+        ),
+    )
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "FAIL",
+            "reasoning": "Login form is not visible after action",
+            "actual_result": "Still on welcome screen.",
+            "confidence": 0.86,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+    store_mock = AsyncMock()
+    persist_mock = AsyncMock()
+    invalidate_coord_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_store_execution_replay", store_mock)
+    monkeypatch.setattr(runner, "_persist_coordinate_cache", persist_mock)
+    monkeypatch.setattr(runner, "_invalidate_coordinate_cache", invalidate_coord_mock)
+
+    case_result = TestCaseResult(
+        case_id=case.case_id,
+        test_id=case.test_id,
+        name=case.name,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        steps_total=len(case.steps),
+        steps_completed=0,
+        steps_failed=0,
+        step_results=[],
+    )
+
+    result = await runner._execute_test_step(setup_step, case, case_result)
+
+    assert result.status == TestStatus.FAILED
+    assert result.error_message == "Login form is not visible after action"
+    assert verify_mock.await_count == 1
+    assert runner._current_step_data["verification_mode"] == "ai"
+    store_mock.assert_not_awaited()
+    persist_mock.assert_not_awaited()
+    invalidate_coord_mock.assert_awaited_once()

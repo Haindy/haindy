@@ -25,7 +25,6 @@ from src.core.types import (
     ActionType,
     BugReport,
     BugSeverity,
-    StepIntent,
     StepResult,
     TestCase,
     TestCaseResult,
@@ -721,7 +720,6 @@ class TestRunner(BaseAgent):
                 )
 
                 # Execute each action
-                success = True
                 action_results: list[dict[str, Any]] = []
                 forced_blocker_reason = None
                 step_result.actions_performed = []
@@ -771,7 +769,6 @@ class TestRunner(BaseAgent):
                             )
                         ):
                             forced_blocker_reason = error_text
-                            success = False
                             logger.error(
                                 "Action aborted due to Computer Use limit or loop",
                                 extra={
@@ -786,8 +783,6 @@ class TestRunner(BaseAgent):
                             )
 
                     if not action_result.get("success", False):
-                        success = False
-
                         # Determine if we should continue with remaining actions
                         if action.get("critical", True):
                             break
@@ -819,13 +814,6 @@ class TestRunner(BaseAgent):
                             "is_blocker": True,
                             "blocker_reasoning": forced_blocker_reason,
                         }
-                        self._current_step_data["verification_mode"] = (
-                            "runner_short_circuit"
-                        )
-                    elif step.intent == StepIntent.SETUP:
-                        verification = self._evaluate_setup_step(
-                            success, action_results
-                        )
                         self._current_step_data["verification_mode"] = (
                             "runner_short_circuit"
                         )
@@ -988,42 +976,6 @@ class TestRunner(BaseAgent):
                 )
 
         return step_result
-
-    @staticmethod
-    def _evaluate_setup_step(
-        success: bool,
-        action_results: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Derive a verification verdict for setup-intent steps without AI calls."""
-        if success:
-            return {
-                "verdict": "PASS",
-                "reasoning": "Setup-only step completed without additional verification.",
-                "actual_result": "Setup actions executed successfully.",
-                "confidence": 1.0,
-                "is_blocker": False,
-                "blocker_reasoning": "",
-            }
-
-        failure_reason = "Critical setup action failed."
-        for action_payload in action_results:
-            result_payload = action_payload.get("result", {})
-            if not result_payload.get("success", True):
-                failure_reason = (
-                    result_payload.get("error")
-                    or result_payload.get("outcome")
-                    or failure_reason
-                )
-                break
-
-        return {
-            "verdict": "FAIL",
-            "reasoning": failure_reason,
-            "actual_result": failure_reason,
-            "confidence": 0.4,
-            "is_blocker": False,
-            "blocker_reasoning": "",
-        }
 
     async def _interpret_step(
         self,
