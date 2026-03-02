@@ -1127,6 +1127,7 @@ class TestRunner(BaseAgent):
         case_outline_lines = [
             f"Step {case_step.step_number}: {case_step.action} "
             f"(intent: {case_step.intent.value}, expected: {case_step.expected_result})"
+            + (" [CURRENT STEP]" if case_step.step_number == step.step_number else "")
             for case_step in test_case.steps
         ]
         prereq_lines = [f"  - {p}" for p in test_case.prerequisites] if test_case.prerequisites else []
@@ -1250,6 +1251,7 @@ Guidelines:
 4. Keep targets human-readable (no selectors) and ensure each action advances toward the expected result: {step.expected_result}.
 5. Use the previous/next step context to stay aligned with the intended flow.
 6. Every non-skip action must include a `computer_use_prompt` that is ready to send directly to the Computer Use model—no additional wrapping will be added later.
+7. You are planning actions for the step marked [CURRENT STEP] ONLY. Do not plan actions for any other step. Even if the screenshot appears to show a later step's target already populated or completed, still execute the current step's action on the correct target — the visual state may reflect autofill, prior test state, or an incorrect field.
 
 {environment_specific_guidance}
 
