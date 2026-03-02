@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -15,12 +16,35 @@ from src.core.interfaces import AutomationDriver
 from src.core.types import ActionInstruction, ActionType, StepIntent, TestStep
 from src.monitoring.debug_logger import get_debug_logger
 from src.monitoring.logger import get_logger
+from src.runtime.situational_cache import (
+    SituationalCache,
+    build_situational_cache_key_payload,
+    hash_situational_cache_key,
+)
 from src.utils.model_logging import ModelCallLogger, get_model_logger
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from src.agents.action_agent import ActionAgent
+
+
+def _prompt_fingerprint(prompt: str | None) -> str:
+    return sha256((prompt or "").encode("utf-8")).hexdigest()
+
+
+def _agent_signature(agent: Any) -> dict[str, Any]:
+    modalities = getattr(agent, "modalities", None) or []
+    return {
+        "name": str(getattr(agent, "name", "")),
+        "model": str(getattr(agent, "model", "")),
+        "temperature": getattr(agent, "temperature", None),
+        "reasoning_level": str(getattr(agent, "reasoning_level", "")),
+        "modalities": sorted(str(item) for item in modalities),
+        "system_prompt_sha256": _prompt_fingerprint(
+            getattr(agent, "system_prompt", None)
+        ),
+    }
 
 
 @dataclass
@@ -73,6 +97,7 @@ class SituationalAgent(BaseAgent):
         self,
         name: str = "SituationalAgent",
         model_logger: ModelCallLogger | None = None,
+        situational_cache: SituationalCache | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(name=name, **kwargs)
@@ -82,14 +107,71 @@ class SituationalAgent(BaseAgent):
             settings.model_log_path,
             max_screenshots=getattr(settings, "max_screenshots", None),
         )
+        self._situational_cache = self._resolve_situational_cache(
+            settings,
+            situational_cache=situational_cache,
+        )
+
+    @staticmethod
+    def _resolve_situational_cache(
+        settings: Any,
+        situational_cache: SituationalCache | None = None,
+    ) -> SituationalCache | None:
+        if situational_cache is not None:
+            return situational_cache
+        if not settings.enable_situational_cache:
+            return None
+        return SituationalCache(settings.situational_cache_path)
 
     async def assess_context(
         self,
         requirements: str,
         context_text: str,
     ) -> SituationalAssessment:
+        cache = self._situational_cache
+        cache_key_hash: str | None = None
+
+        if cache is not None:
+            cache_payload = build_situational_cache_key_payload(
+                requirements=requirements,
+                context_text=context_text,
+                situational_signature=_agent_signature(self),
+            )
+            cache_key_hash = hash_situational_cache_key(cache_payload)
+            cached_entry = cache.lookup(cache_key_hash)
+            if cached_entry is not None:
+                try:
+                    assessment = self._assessment_from_cache_payload(
+                        cached_entry.assessment_payload
+                    )
+                    logger.info(
+                        "Situational cache hit for execution context validation",
+                        extra={
+                            "cache_key_hash": cache_key_hash,
+                            "sufficient": assessment.sufficient,
+                        },
+                    )
+                    return assessment
+                except Exception:
+                    cache.invalidate(cache_key_hash)
+                    logger.warning(
+                        "Situational cache entry invalid; falling back to model execution",
+                        exc_info=True,
+                        extra={"cache_key_hash": cache_key_hash},
+                    )
+
         payload = await self._call_model_assessment(requirements, context_text)
         assessment = self._parse_assessment(payload, requirements, context_text)
+
+        if cache is not None and cache_key_hash is not None and payload:
+            try:
+                cache.store(
+                    key_hash=cache_key_hash,
+                    assessment_payload=self._assessment_to_cache_payload(assessment),
+                )
+            except Exception:
+                logger.debug("Failed to store situational cache entry", exc_info=True)
+
         if not assessment.sufficient:
             logger.warning(
                 "Situational assessment rejected context",
@@ -194,6 +276,71 @@ class SituationalAgent(BaseAgent):
             )
 
         await automation_driver.screenshot()
+
+    @staticmethod
+    def _assessment_to_cache_payload(
+        assessment: SituationalAssessment,
+    ) -> dict[str, Any]:
+        return {
+            "target_type": assessment.target_type,
+            "sufficient": assessment.sufficient,
+            "missing_items": list(assessment.missing_items),
+            "setup": {
+                "web_url": assessment.setup.web_url,
+                "app_name": assessment.setup.app_name,
+                "launch_command": assessment.setup.launch_command,
+                "maximize": assessment.setup.maximize,
+                "adb_serial": assessment.setup.adb_serial,
+                "app_package": assessment.setup.app_package,
+                "app_activity": assessment.setup.app_activity,
+                "adb_commands": list(assessment.setup.adb_commands),
+            },
+            "entry_actions": [
+                {
+                    "action_type": action.action_type.value,
+                    "description": action.description,
+                    "target": action.target,
+                    "value": action.value,
+                    "expected_outcome": action.expected_outcome,
+                    "computer_use_prompt": action.computer_use_prompt,
+                }
+                for action in assessment.entry_actions
+            ],
+            "notes": list(assessment.notes),
+        }
+
+    def _assessment_from_cache_payload(
+        self, payload: dict[str, Any]
+    ) -> SituationalAssessment:
+        if not isinstance(payload, dict):
+            raise ValueError("Assessment payload must be a dictionary.")
+
+        target_type = str(payload.get("target_type") or "").strip().lower()
+        if target_type not in {"web", "desktop_app", "mobile_adb"}:
+            raise ValueError(f"Unsupported cached target_type: {target_type!r}")
+
+        setup_payload = (
+            payload.get("setup", {}) if isinstance(payload.get("setup"), dict) else {}
+        )
+        setup = SetupInstructions(
+            web_url=str(setup_payload.get("web_url") or "").strip(),
+            app_name=str(setup_payload.get("app_name") or "").strip(),
+            launch_command=str(setup_payload.get("launch_command") or "").strip(),
+            maximize=self._normalize_bool(setup_payload.get("maximize"), default=True),
+            adb_serial=str(setup_payload.get("adb_serial") or "").strip(),
+            app_package=str(setup_payload.get("app_package") or "").strip(),
+            app_activity=str(setup_payload.get("app_activity") or "").strip(),
+            adb_commands=self._ensure_command_list(setup_payload.get("adb_commands")),
+        )
+
+        return SituationalAssessment(
+            target_type=target_type,
+            sufficient=self._normalize_bool(payload.get("sufficient"), default=False),
+            missing_items=self._ensure_string_list(payload.get("missing_items")),
+            setup=setup,
+            entry_actions=self._parse_entry_actions(payload.get("entry_actions")),
+            notes=self._ensure_string_list(payload.get("notes")),
+        )
 
     async def _call_model_assessment(
         self,

@@ -60,6 +60,23 @@ class TestSettings:
         assert settings.enable_planning_cache is False
         assert settings.planning_cache_path == Path("tmp/planning_cache_override.json")
 
+    def test_situational_cache_defaults(self):
+        settings = Settings(_env_file=None)
+        assert settings.enable_situational_cache is True
+        assert settings.situational_cache_path == Path("data/situational_cache.json")
+
+    def test_situational_cache_env_alias(self, monkeypatch):
+        monkeypatch.setenv("HAINDY_ENABLE_SITUATIONAL_CACHE", "false")
+        monkeypatch.setenv(
+            "HAINDY_SITUATIONAL_CACHE_PATH",
+            "tmp/situational_cache_override.json",
+        )
+        settings = Settings(_env_file=None)
+        assert settings.enable_situational_cache is False
+        assert settings.situational_cache_path == Path(
+            "tmp/situational_cache_override.json"
+        )
+
     @pytest.mark.parametrize(
         "level",
         ["none", "minimal", "low", "medium", "high", "xhigh"],

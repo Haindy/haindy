@@ -11,6 +11,11 @@ from src.runtime.planning_cache import (
     build_planning_cache_key_payload,
     hash_planning_cache_key,
 )
+from src.runtime.situational_cache import (
+    SituationalCache,
+    build_situational_cache_key_payload,
+    hash_situational_cache_key,
+)
 from src.runtime.task_cache import TaskPlanCache
 from src.runtime.trace import RunTraceWriter, load_model_calls_for_run
 
@@ -22,6 +27,9 @@ __all__ = [
     "PlanningCache",
     "build_planning_cache_key_payload",
     "hash_planning_cache_key",
+    "SituationalCache",
+    "build_situational_cache_key_payload",
+    "hash_situational_cache_key",
     "TaskPlanCache",
     "RunTraceWriter",
     "load_model_calls_for_run",

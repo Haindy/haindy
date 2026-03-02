@@ -179,6 +179,16 @@ class Settings(BaseSettings):
         description="Scope triage and test planning cache path",
         validation_alias=AliasChoices("HAINDY_PLANNING_CACHE_PATH"),
     )
+    enable_situational_cache: bool = Field(
+        default=True,
+        description="Enable caching for situational execution-context validation",
+        validation_alias=AliasChoices("HAINDY_ENABLE_SITUATIONAL_CACHE"),
+    )
+    situational_cache_path: Path = Field(
+        default=Path("data/situational_cache.json"),
+        description="Situational execution-context cache path",
+        validation_alias=AliasChoices("HAINDY_SITUATIONAL_CACHE_PATH"),
+    )
     enable_execution_replay_cache: bool = Field(
         default=True,
         description="Enable execution replay cache (record/replay driver actions per step)",
@@ -565,6 +575,7 @@ class Settings(BaseSettings):
             self.mobile_coordinate_cache_path.parent,
             self.task_plan_cache_path.parent,
             self.planning_cache_path.parent,
+            self.situational_cache_path.parent,
             self.execution_replay_cache_path.parent,
             self.model_log_path.parent,
             self.screen_recording_output_dir,
