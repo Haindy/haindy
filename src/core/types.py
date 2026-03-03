@@ -173,7 +173,7 @@ class TestStep(BaseModel):
         None, description="Execution environment override (desktop, web, or mobile_adb)"
     )
     can_be_replayed: bool | None = Field(
-        None, description="Allow execution replay cache for this step"
+        None, description="Deprecated: replay eligibility is inferred at runtime"
     )
     loop: bool = Field(False, description="Repeat the step until validated")
     scroll_policy: str = Field(

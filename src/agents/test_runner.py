@@ -10,6 +10,7 @@ import base64
 import json
 import traceback
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -24,7 +25,6 @@ from src.core.types import (
     ActionType,
     BugReport,
     BugSeverity,
-    StepIntent,
     StepResult,
     TestCase,
     TestCaseResult,
@@ -50,6 +50,17 @@ from src.utils.model_logging import get_model_logger
 logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 LOOP_ERROR_PREFIX = "Computer Use loop detected"
+REPLAY_CACHED_ACTION_MIN_STABILIZATION_WAIT_MS = 2000
+REPLAY_VALIDATION_MODEL_WAIT_BUDGET_MS = 30000
+REPLAY_VALIDATION_MODEL_WAIT_FALLBACK_MS = 1000
+REPLAY_VALIDATION_ONLY_ACTION_TYPES: frozenset[str] = frozenset(
+    {
+        ActionType.ASSERT.value,
+        ActionType.SKIP_NAVIGATION.value,
+        ActionType.WAIT.value,
+        ActionType.SCREENSHOT.value,
+    }
+)
 
 COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
 - Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
@@ -709,7 +720,6 @@ class TestRunner(BaseAgent):
                 )
 
                 # Execute each action
-                success = True
                 action_results: list[dict[str, Any]] = []
                 forced_blocker_reason = None
                 step_result.actions_performed = []
@@ -759,7 +769,6 @@ class TestRunner(BaseAgent):
                             )
                         ):
                             forced_blocker_reason = error_text
-                            success = False
                             logger.error(
                                 "Action aborted due to Computer Use limit or loop",
                                 extra={
@@ -774,8 +783,6 @@ class TestRunner(BaseAgent):
                             )
 
                     if not action_result.get("success", False):
-                        success = False
-
                         # Determine if we should continue with remaining actions
                         if action.get("critical", True):
                             break
@@ -807,13 +814,6 @@ class TestRunner(BaseAgent):
                             "is_blocker": True,
                             "blocker_reasoning": forced_blocker_reason,
                         }
-                        self._current_step_data["verification_mode"] = (
-                            "runner_short_circuit"
-                        )
-                    elif step.intent == StepIntent.SETUP:
-                        verification = self._evaluate_setup_step(
-                            success, action_results
-                        )
                         self._current_step_data["verification_mode"] = (
                             "runner_short_circuit"
                         )
@@ -976,42 +976,6 @@ class TestRunner(BaseAgent):
                 )
 
         return step_result
-
-    @staticmethod
-    def _evaluate_setup_step(
-        success: bool,
-        action_results: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Derive a verification verdict for setup-intent steps without AI calls."""
-        if success:
-            return {
-                "verdict": "PASS",
-                "reasoning": "Setup-only step completed without additional verification.",
-                "actual_result": "Setup actions executed successfully.",
-                "confidence": 1.0,
-                "is_blocker": False,
-                "blocker_reasoning": "",
-            }
-
-        failure_reason = "Critical setup action failed."
-        for action_payload in action_results:
-            result_payload = action_payload.get("result", {})
-            if not result_payload.get("success", True):
-                failure_reason = (
-                    result_payload.get("error")
-                    or result_payload.get("outcome")
-                    or failure_reason
-                )
-                break
-
-        return {
-            "verdict": "FAIL",
-            "reasoning": failure_reason,
-            "actual_result": failure_reason,
-            "confidence": 0.4,
-            "is_blocker": False,
-            "blocker_reasoning": "",
-        }
 
     async def _interpret_step(
         self,
@@ -1664,6 +1628,7 @@ Respond with a JSON object containing an "actions" array where every item follow
         screenshot_after: bytes | None,
         execution_history: list[dict[str, Any]],
         next_test_case: TestCase | None,
+        replay_wait_budget_ms: int | None = None,
     ) -> dict[str, Any]:
         """Use AI to verify if expected outcome was achieved with full context."""
 
@@ -1735,6 +1700,22 @@ Respond with a JSON object containing an "actions" array where every item follow
 
             actions_context.append(action_detail)
 
+        replay_wait_section = ""
+        replay_wait_response_fields = ""
+        if replay_wait_budget_ms is not None:
+            remaining_budget_ms = max(int(replay_wait_budget_ms), 0)
+            replay_wait_section = f"""
+3. This validation is for a replayed cached action. Decide whether this step should wait longer before final failure.
+   - Request additional wait ONLY when there is clear evidence the UI is still settling (for example loading indicators, transition overlays, in-flight navigation, or a partially updated state).
+   - If evidence already supports a final PASS or final FAIL, do not request more wait.
+   - Remaining wait budget for this step: {remaining_budget_ms} ms.
+"""
+            replay_wait_response_fields = """
+  "request_additional_wait": true/false,
+  "recommended_wait_ms": integer (0 when no wait requested; must be <= remaining budget),
+  "wait_reasoning": "Why additional wait is or is not needed",
+"""
+
         # Build the prompt with screenshots
         prompt_text = f"""I'm executing a test case: "{test_case.name}"
 Test case description: {test_case.description or "N/A"}
@@ -1758,6 +1739,7 @@ IMPORTANT: The "CU agent observation" fields above are real-time descriptions ca
 2. Is this failure (if failed) a blocker that would prevent the next test case from running successfully?
    Next test case: {next_test_case.name if next_test_case else "None (last test case)"}
    (Consider: Does this failure leave the system in a state where the next test case cannot execute meaningfully?)
+{replay_wait_section}
 
 Respond with JSON:
 {{
@@ -1765,7 +1747,7 @@ Respond with JSON:
   "reasoning": "Your analysis of why the step passed or failed",
   "actual_result": "Concise description of what actually happened",
   "confidence": 0.0-1.0,
-  "is_blocker": true/false,
+{replay_wait_response_fields}  "is_blocker": true/false,
   "blocker_reasoning": "Why this would/wouldn't block the next test case"
 }}"""
         messages = [
@@ -1854,6 +1836,9 @@ Respond with JSON:
             # Ensure required fields and proper types
             if "verdict" not in result:
                 result["verdict"] = "FAIL"
+            result["verdict"] = str(result.get("verdict", "FAIL")).strip().upper()
+            if result["verdict"] not in {"PASS", "FAIL"}:
+                result["verdict"] = "FAIL"
             if "reasoning" not in result:
                 result["reasoning"] = "Verification failed - no reasoning provided"
             if "actual_result" not in result:
@@ -1864,6 +1849,29 @@ Respond with JSON:
                 result["is_blocker"] = False
             if "blocker_reasoning" not in result:
                 result["blocker_reasoning"] = ""
+            if replay_wait_budget_ms is not None:
+                request_additional_wait = self._coerce_model_bool(
+                    result.get("request_additional_wait", False)
+                )
+                recommended_wait_raw = result.get("recommended_wait_ms", 0)
+                try:
+                    recommended_wait_ms = int(recommended_wait_raw)
+                except (TypeError, ValueError):
+                    recommended_wait_ms = 0
+                remaining_budget_ms = max(int(replay_wait_budget_ms), 0)
+                if remaining_budget_ms <= 0:
+                    request_additional_wait = False
+                    recommended_wait_ms = 0
+                else:
+                    recommended_wait_ms = max(
+                        0, min(recommended_wait_ms, remaining_budget_ms)
+                    )
+                    if not request_additional_wait:
+                        recommended_wait_ms = 0
+                result["request_additional_wait"] = request_additional_wait
+                result["recommended_wait_ms"] = recommended_wait_ms
+                if "wait_reasoning" not in result:
+                    result["wait_reasoning"] = ""
 
             # Log the verification
             logger.info(
@@ -2399,15 +2407,104 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
     def _plan_cache_key(step: TestStep, test_case: TestCase) -> str:
         return f"{test_case.test_id}:{step.step_number}:{step.action}".strip()
 
+    @staticmethod
+    def _strip_plan_fingerprint_volatile_fields(payload: Any) -> Any:
+        """Remove unstable fields from plan payloads before hashing."""
+        if isinstance(payload, dict):
+            stripped: dict[str, Any] = {}
+            for key, value in payload.items():
+                if key in {"plan_id", "created_at", "case_id", "step_id"}:
+                    continue
+                stripped[key] = TestRunner._strip_plan_fingerprint_volatile_fields(
+                    value
+                )
+            return stripped
+        if isinstance(payload, list):
+            return [
+                TestRunner._strip_plan_fingerprint_volatile_fields(item)
+                for item in payload
+            ]
+        return payload
+
+    def _plan_fingerprint(self) -> str:
+        if not self._current_test_plan:
+            return ""
+        payload = self._current_test_plan.model_dump(mode="json")
+        stable_payload = self._strip_plan_fingerprint_volatile_fields(payload)
+        serialized = json.dumps(
+            stable_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        )
+        return sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _is_validation_only_action_result(result: dict[str, Any]) -> bool:
+        action_payload = result.get("action")
+        if not isinstance(action_payload, dict):
+            return False
+        action_type = str(action_payload.get("type") or "").strip().lower()
+        if not action_type:
+            return False
+        return action_type in REPLAY_VALIDATION_ONLY_ACTION_TYPES
+
+    @classmethod
+    def _is_validation_only_step_result_set(
+        cls, action_results: list[dict[str, Any]]
+    ) -> bool:
+        seen_action_type = False
+        for result in action_results:
+            action_payload = result.get("action")
+            if not isinstance(action_payload, dict):
+                continue
+            action_type = str(action_payload.get("type") or "").strip().lower()
+            if not action_type:
+                continue
+            seen_action_type = True
+            if not cls._is_validation_only_action_result(result):
+                return False
+        return seen_action_type
+
+    @staticmethod
+    def _driver_actions_for_replay(result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Accept both wrapped and direct action-result payload shapes."""
+        driver_actions = result.get("driver_actions")
+        if not isinstance(driver_actions, list):
+            nested = result.get("result")
+            if isinstance(nested, dict):
+                nested_driver_actions = nested.get("driver_actions")
+                if isinstance(nested_driver_actions, list):
+                    driver_actions = nested_driver_actions
+        if not isinstance(driver_actions, list):
+            return []
+        return [item for item in driver_actions if isinstance(item, dict)]
+
     def _replay_enabled(self, step: TestStep) -> bool:
         if not self._settings.enable_execution_replay_cache:
             return False
         if getattr(step, "loop", False):
             return False
-        can_replay = getattr(step, "can_be_replayed", None)
-        if can_replay is False:
-            return False
         return self.automation_driver is not None
+
+    def _replay_stabilization_wait_ms(self) -> int:
+        """Return stabilization wait used only for replayed macro actions."""
+        configured = int(
+            getattr(self._settings, "actions_computer_tool_stabilization_wait_ms", 0)
+        )
+        return max(configured, REPLAY_CACHED_ACTION_MIN_STABILIZATION_WAIT_MS)
+
+    @staticmethod
+    def _coerce_model_bool(value: Any) -> bool:
+        """Normalize model-provided boolean-like values."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y"}
+        return False
 
     async def _execution_replay_key(
         self, step: TestStep, test_case: TestCase
@@ -2437,6 +2534,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             environment=environment,
             resolution=(int(viewport_width), int(viewport_height)),
             keyboard_layout=str(keyboard_layout),
+            plan_fingerprint=self._plan_fingerprint(),
         )
 
     async def _try_execution_replay(
@@ -2473,9 +2571,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             await replay_driver_actions(
                 self.automation_driver,
                 entry.actions,
-                stabilization_wait_ms=int(
-                    self._settings.actions_computer_tool_stabilization_wait_ms
-                ),
+                stabilization_wait_ms=self._replay_stabilization_wait_ms(),
                 action_timeout_seconds=max(
                     self._settings.actions_computer_tool_action_timeout_ms / 1000.0,
                     0.5,
@@ -2571,10 +2667,11 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             self._latest_screenshot_path = str(screenshot_path)
             self._latest_screenshot_origin = f"step_{step.step_number}_after"
 
-        if step.intent == StepIntent.SETUP:
-            verification = self._evaluate_setup_step(True, [replay_action])
-            self._current_step_data["verification_mode"] = "runner_short_circuit"
-        else:
+        replay_wait_spent_ms = 0
+        replay_wait_cycles = 0
+        replay_wait_budget_ms = REPLAY_VALIDATION_MODEL_WAIT_BUDGET_MS
+
+        while True:
             verification = await self._verify_expected_outcome(
                 test_case=test_case,
                 step=step,
@@ -2583,9 +2680,70 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                 screenshot_after=screenshot_after,
                 execution_history=execution_history,
                 next_test_case=next_test_case,
+                replay_wait_budget_ms=replay_wait_budget_ms,
             )
-            self._current_step_data["verification_mode"] = "ai"
+            if verification.get("verdict") == "PASS":
+                break
 
+            request_additional_wait = self._coerce_model_bool(
+                verification.get("request_additional_wait", False)
+            )
+            if not request_additional_wait or replay_wait_budget_ms <= 0:
+                break
+
+            recommended_wait_raw = verification.get("recommended_wait_ms", 0)
+            try:
+                recommended_wait_ms = int(recommended_wait_raw)
+            except (TypeError, ValueError):
+                recommended_wait_ms = 0
+            wait_ms = recommended_wait_ms
+            if wait_ms <= 0:
+                wait_ms = min(
+                    REPLAY_VALIDATION_MODEL_WAIT_FALLBACK_MS,
+                    replay_wait_budget_ms,
+                )
+            wait_ms = max(0, min(wait_ms, replay_wait_budget_ms))
+            if wait_ms <= 0:
+                break
+
+            logger.info(
+                "Execution replay validation requested additional wait",
+                extra={
+                    "step": key.step,
+                    "wait_ms": wait_ms,
+                    "remaining_budget_before_wait_ms": replay_wait_budget_ms,
+                    "wait_reasoning": verification.get("wait_reasoning", ""),
+                },
+            )
+            await asyncio.sleep(wait_ms / 1000.0)
+            replay_wait_budget_ms -= wait_ms
+            replay_wait_spent_ms += wait_ms
+            replay_wait_cycles += 1
+
+            if self.automation_driver:
+                screenshot_after = await self.automation_driver.screenshot()
+                screenshot_path = self._save_screenshot(
+                    screenshot_after,
+                    (
+                        f"tc{test_case.test_id}_step{step.step_number}"
+                        f"_replay_wait_{replay_wait_cycles}_after"
+                    ),
+                )
+                step_result.screenshot_after = str(screenshot_path)
+                self._latest_screenshot_bytes = screenshot_after
+                self._latest_screenshot_path = str(screenshot_path)
+                self._latest_screenshot_origin = (
+                    f"step_{step.step_number}_replay_wait_{replay_wait_cycles}_after"
+                )
+        self._current_step_data["verification_mode"] = "ai"
+
+        self._current_step_data["replay_validation_wait_spent_ms"] = (
+            replay_wait_spent_ms
+        )
+        self._current_step_data["replay_validation_wait_cycles"] = replay_wait_cycles
+        self._current_step_data["replay_validation_wait_budget_remaining_ms"] = (
+            replay_wait_budget_ms
+        )
         self._current_step_data["verification_result"] = verification
 
         if verification["verdict"] == "PASS":
@@ -2604,7 +2762,9 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                 "Execution replay validation failed; invalidating cache",
                 extra={
                     "step": key.step,
-                    "message": verification.get("reasoning"),
+                    "validation_reasoning": verification.get("reasoning"),
+                    "replay_wait_spent_ms": replay_wait_spent_ms,
+                    "replay_wait_cycles": replay_wait_cycles,
                 },
             )
             try:
@@ -2620,6 +2780,8 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
                             "keyboard_layout": key.keyboard_layout,
                             "reason": "validation_failed",
                             "message": verification.get("reasoning"),
+                            "replay_wait_spent_ms": replay_wait_spent_ms,
+                            "replay_wait_cycles": replay_wait_cycles,
                         }
                     )
             except Exception:
@@ -2655,9 +2817,11 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
     ) -> None:
         if not self._replay_enabled(step) or not action_results:
             return
+        if self._is_validation_only_step_result_set(action_results):
+            return
         recorded: list[dict] = []
         for result in action_results:
-            recorded.extend(result.get("driver_actions") or [])
+            recorded.extend(self._driver_actions_for_replay(result))
         if not recorded:
             return
         key = await self._execution_replay_key(step, test_case)

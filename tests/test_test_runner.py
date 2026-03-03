@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -17,6 +17,7 @@ from src.core.enhanced_types import (
 )
 from src.core.types import (
     StepIntent,
+    StepResult,
     TestCase,
     TestCaseResult,
     TestPlan,
@@ -24,6 +25,7 @@ from src.core.types import (
     TestStatus,
     TestStep,
 )
+from src.runtime.execution_replay_cache import ExecutionReplayCacheKey
 
 
 class _StubAutomationDriver:
@@ -81,12 +83,18 @@ class _StubTraceWriter:
     def record_cache_event(self, event: dict[str, object]) -> None:
         del event
 
+    def record_step(self, **kwargs: object) -> None:
+        del kwargs
+
 
 def _patch_runner_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     settings = SimpleNamespace(
         task_plan_cache_path=tmp_path / "task_plan_cache.json",
         execution_replay_cache_path=tmp_path / "execution_replay_cache.json",
+        enable_execution_replay_cache=True,
         model_log_path=tmp_path / "model_calls.jsonl",
+        actions_computer_tool_stabilization_wait_ms=500,
+        actions_computer_tool_action_timeout_ms=7000,
         desktop_coordinate_cache_path=tmp_path / "desktop_coordinates.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coordinates.json",
         desktop_keyboard_layout="us",
@@ -236,3 +244,688 @@ async def test_interpret_step_adds_mobile_specific_guidance(
     assert "Runtime backend: mobile_adb" in prompt
     assert "Do NOT propose keyboard/browser shortcuts like Alt+Left" in prompt
     assert 'use `key_press` with value "back"' in prompt
+
+
+def test_replay_enabled_ignores_can_be_replayed_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    _, _, step = _build_test_case()
+    replay_disabled_hint_step = step.model_copy(update={"can_be_replayed": False})
+
+    assert runner._replay_enabled(replay_disabled_hint_step) is True
+
+
+def test_replay_stabilization_wait_has_two_second_floor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+
+    runner._settings.actions_computer_tool_stabilization_wait_ms = 500
+    assert runner._replay_stabilization_wait_ms() == 2000
+
+    runner._settings.actions_computer_tool_stabilization_wait_ms = 2500
+    assert runner._replay_stabilization_wait_ms() == 2500
+
+
+@pytest.mark.asyncio
+async def test_execution_replay_key_includes_plan_fingerprint_and_changes_with_plan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+
+    plan_a, case_a, step_a = _build_test_case()
+    runner._current_test_plan = plan_a
+    key_a = await runner._execution_replay_key(step_a, case_a)
+
+    assert key_a is not None
+    assert key_a.plan_fingerprint == runner._plan_fingerprint()
+    assert key_a.plan_fingerprint != ""
+
+    plan_b = plan_a.model_copy(deep=True)
+    plan_b.test_cases[0].steps[0].expected_result = "Different expected outcome text"
+    case_b = plan_b.test_cases[0]
+    step_b = case_b.steps[0]
+    runner._current_test_plan = plan_b
+    key_b = await runner._execution_replay_key(step_b, case_b)
+
+    assert key_b is not None
+    assert key_b.plan_fingerprint == runner._plan_fingerprint()
+    assert key_b.scenario == key_a.scenario
+    assert key_b.step == key_a.step
+    assert key_b.environment == key_a.environment
+    assert key_b.resolution == key_a.resolution
+    assert key_b.keyboard_layout == key_a.keyboard_layout
+    assert key_b.plan_fingerprint != key_a.plan_fingerprint
+
+
+@pytest.mark.asyncio
+async def test_store_execution_replay_skips_validation_only_and_stores_actionable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan, case, step = _build_test_case()
+    runner._current_test_plan = plan
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint="fingerprint",
+    )
+    key_mock = AsyncMock(return_value=replay_key)
+    monkeypatch.setattr(runner, "_execution_replay_key", key_mock)
+    store_mock = Mock()
+    monkeypatch.setattr(runner._execution_replay_cache, "store", store_mock)
+
+    validation_only_results = [
+        {
+            "action": {"type": "assert"},
+            "result": {"driver_actions": [{"type": "click", "x": 1, "y": 2}]},
+        },
+        {
+            "action": {"type": "skip_navigation"},
+            "result": {"driver_actions": [{"type": "click", "x": 3, "y": 4}]},
+        },
+        {
+            "action": {"type": "wait"},
+            "result": {"driver_actions": [{"type": "wait", "duration_ms": 100}]},
+        },
+        {
+            "action": {"type": "screenshot"},
+            "result": {"driver_actions": [{"type": "move", "x": 5, "y": 6}]},
+        },
+    ]
+
+    await runner._store_execution_replay(step, case, validation_only_results)
+    key_mock.assert_not_awaited()
+    store_mock.assert_not_called()
+
+    actionable_results = [
+        {
+            "action": {"type": "click"},
+            "result": {
+                "driver_actions": [
+                    {"type": "move", "x": 20, "y": 30},
+                    {
+                        "type": "click",
+                        "x": 20,
+                        "y": 30,
+                        "button": "left",
+                        "click_count": 1,
+                    },
+                ]
+            },
+        }
+    ]
+
+    await runner._store_execution_replay(step, case, actionable_results)
+    key_mock.assert_awaited_once_with(step, case)
+    store_mock.assert_called_once_with(
+        replay_key,
+        [
+            {"type": "move", "x": 20, "y": 30},
+            {
+                "type": "click",
+                "x": 20,
+                "y": 30,
+                "button": "left",
+                "click_count": 1,
+            },
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_replay_verification_waits_when_model_requests_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    driver = _StubAutomationDriver()
+    runner = TestRunner(automation_driver=driver)
+    plan, case, step = _build_test_case()
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint=runner._plan_fingerprint(),
+    )
+    monkeypatch.setattr(
+        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("src.agents.test_runner.asyncio.sleep", sleep_mock)
+
+    verify_mock = AsyncMock(
+        side_effect=[
+            {
+                "verdict": "FAIL",
+                "reasoning": "Still loading",
+                "actual_result": "Loading indicator visible",
+                "confidence": 0.62,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+                "request_additional_wait": True,
+                "recommended_wait_ms": 2500,
+                "wait_reasoning": "Spinner still present",
+            },
+            {
+                "verdict": "PASS",
+                "reasoning": "Navigation completed",
+                "actual_result": "Home screen is visible",
+                "confidence": 0.88,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+                "request_additional_wait": False,
+                "recommended_wait_ms": 0,
+                "wait_reasoning": "",
+            },
+        ]
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = StepResult(
+        step_id=step.step_id,
+        step_number=step.step_number,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        action=step.action,
+        expected_result=step.expected_result,
+        actual_result="",
+    )
+
+    result = await runner._try_execution_replay(
+        step=step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is not None
+    assert result.status == TestStatus.PASSED
+    assert verify_mock.await_count == 2
+    first_call = verify_mock.await_args_list[0]
+    second_call = verify_mock.await_args_list[1]
+    assert first_call.kwargs["replay_wait_budget_ms"] == 30000
+    assert second_call.kwargs["replay_wait_budget_ms"] == 27500
+    sleep_mock.assert_awaited_once_with(2.5)
+    assert runner._current_step_data["replay_validation_wait_spent_ms"] == 2500
+    assert runner._current_step_data["replay_validation_wait_cycles"] == 1
+    assert (
+        runner._current_step_data["replay_validation_wait_budget_remaining_ms"] == 27500
+    )
+    assert result.screenshot_after is not None
+    assert "_replay_wait_1_after" in result.screenshot_after
+
+
+@pytest.mark.asyncio
+async def test_replay_verification_uses_budget_cap_and_falls_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    driver = _StubAutomationDriver()
+    runner = TestRunner(automation_driver=driver)
+    plan, case, step = _build_test_case()
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint=runner._plan_fingerprint(),
+    )
+    monkeypatch.setattr(
+        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    invalidate_mock = Mock()
+    monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
+    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("src.agents.test_runner.asyncio.sleep", sleep_mock)
+
+    verify_mock = AsyncMock(
+        side_effect=[
+            {
+                "verdict": "FAIL",
+                "reasoning": "Potential in-flight transition",
+                "actual_result": "Ambiguous",
+                "confidence": 0.45,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+                "request_additional_wait": True,
+                "recommended_wait_ms": 60000,
+                "wait_reasoning": "May still be settling",
+            },
+            {
+                "verdict": "FAIL",
+                "reasoning": "Still not complete",
+                "actual_result": "No successful navigation observed",
+                "confidence": 0.55,
+                "is_blocker": True,
+                "blocker_reasoning": "Cannot proceed",
+                "request_additional_wait": True,
+                "recommended_wait_ms": 5000,
+                "wait_reasoning": "Requested but no budget remains",
+            },
+        ]
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = StepResult(
+        step_id=step.step_id,
+        step_number=step.step_number,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        action=step.action,
+        expected_result=step.expected_result,
+        actual_result="",
+    )
+
+    result = await runner._try_execution_replay(
+        step=step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is None
+    assert step_result.status == TestStatus.FAILED
+    assert verify_mock.await_count == 2
+    assert verify_mock.await_args_list[0].kwargs["replay_wait_budget_ms"] == 30000
+    assert verify_mock.await_args_list[1].kwargs["replay_wait_budget_ms"] == 0
+    sleep_mock.assert_awaited_once_with(30.0)
+    invalidate_mock.assert_called_once_with(replay_key)
+    assert runner._current_step_data["replay_validation_wait_spent_ms"] == 30000
+    assert runner._current_step_data["replay_validation_wait_cycles"] == 1
+    assert runner._current_step_data["replay_validation_wait_budget_remaining_ms"] == 0
+
+
+@pytest.mark.asyncio
+async def test_replay_setup_step_uses_ai_verification(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    driver = _StubAutomationDriver()
+    runner = TestRunner(automation_driver=driver)
+    plan, case, step = _build_test_case()
+    setup_step = step.model_copy(update={"intent": StepIntent.SETUP})
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(setup_step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint=runner._plan_fingerprint(),
+    )
+    monkeypatch.setattr(
+        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "PASS",
+            "reasoning": "Setup completed with visible expected UI",
+            "actual_result": "Expected setup UI is visible",
+            "confidence": 0.9,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+            "request_additional_wait": False,
+            "recommended_wait_ms": 0,
+            "wait_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = StepResult(
+        step_id=setup_step.step_id,
+        step_number=setup_step.step_number,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        action=setup_step.action,
+        expected_result=setup_step.expected_result,
+        actual_result="",
+    )
+
+    result = await runner._try_execution_replay(
+        step=setup_step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is not None
+    assert result.status == TestStatus.PASSED
+    assert verify_mock.await_count == 1
+    assert verify_mock.await_args.kwargs["replay_wait_budget_ms"] == 30000
+    assert runner._current_step_data["verification_mode"] == "ai"
+
+
+@pytest.mark.asyncio
+async def test_replay_setup_step_fail_invalidates_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    driver = _StubAutomationDriver()
+    runner = TestRunner(automation_driver=driver)
+    plan, case, step = _build_test_case()
+    setup_step = step.model_copy(update={"intent": StepIntent.SETUP})
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+
+    replay_key = ExecutionReplayCacheKey(
+        scenario=plan.name,
+        step=runner._plan_cache_key(setup_step, case),
+        environment="desktop",
+        resolution=(1080, 2400),
+        keyboard_layout="us",
+        plan_fingerprint=runner._plan_fingerprint(),
+    )
+    monkeypatch.setattr(
+        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    invalidate_mock = Mock()
+    monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
+    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "FAIL",
+            "reasoning": "Setup target screen not reached",
+            "actual_result": "Still on previous screen",
+            "confidence": 0.8,
+            "is_blocker": True,
+            "blocker_reasoning": "Cannot proceed",
+            "request_additional_wait": False,
+            "recommended_wait_ms": 0,
+            "wait_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = StepResult(
+        step_id=setup_step.step_id,
+        step_number=setup_step.step_number,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        action=setup_step.action,
+        expected_result=setup_step.expected_result,
+        actual_result="",
+    )
+
+    result = await runner._try_execution_replay(
+        step=setup_step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is None
+    assert step_result.status == TestStatus.FAILED
+    assert verify_mock.await_count == 1
+    invalidate_mock.assert_called_once_with(replay_key)
+
+
+@pytest.mark.asyncio
+async def test_execute_setup_step_uses_ai_verification_in_normal_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan, case, step = _build_test_case()
+    setup_step = step.model_copy(update={"intent": StepIntent.SETUP})
+    case = case.model_copy(update={"steps": [setup_step]})
+    plan = plan.model_copy(update={"test_cases": [case]})
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+    runner._execution_history = []
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+    monkeypatch.setattr(
+        runner,
+        "_try_execution_replay",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_interpret_step",
+        AsyncMock(
+            return_value=(
+                [
+                    {
+                        "type": "click",
+                        "target": "Login button",
+                        "description": "Tap Login",
+                        "critical": True,
+                    }
+                ],
+                False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_action",
+        AsyncMock(
+            return_value={
+                "success": True,
+                "action_type": "click",
+                "target": "Login button",
+                "outcome": "Tapped Login",
+                "confidence": 0.9,
+                "error": None,
+                "driver_actions": [{"type": "click", "x": 10, "y": 10}],
+            }
+        ),
+    )
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "PASS",
+            "reasoning": "Setup reached expected screen",
+            "actual_result": "Sign-in screen is visible.",
+            "confidence": 0.93,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+    store_mock = AsyncMock()
+    persist_mock = AsyncMock()
+    invalidate_coord_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_store_execution_replay", store_mock)
+    monkeypatch.setattr(runner, "_persist_coordinate_cache", persist_mock)
+    monkeypatch.setattr(runner, "_invalidate_coordinate_cache", invalidate_coord_mock)
+
+    case_result = TestCaseResult(
+        case_id=case.case_id,
+        test_id=case.test_id,
+        name=case.name,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        steps_total=len(case.steps),
+        steps_completed=0,
+        steps_failed=0,
+        step_results=[],
+    )
+
+    result = await runner._execute_test_step(setup_step, case, case_result)
+
+    assert result.status == TestStatus.PASSED
+    assert verify_mock.await_count == 1
+    assert runner._current_step_data["verification_mode"] == "ai"
+    store_mock.assert_awaited_once()
+    persist_mock.assert_awaited_once()
+    invalidate_coord_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan, case, step = _build_test_case()
+    setup_step = step.model_copy(update={"intent": StepIntent.SETUP})
+    case = case.model_copy(update={"steps": [setup_step]})
+    plan = plan.model_copy(update={"test_cases": [case]})
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+    runner._execution_history = []
+    monkeypatch.setattr(
+        runner,
+        "_save_screenshot",
+        lambda _payload, label: tmp_path / f"{label}.png",
+    )
+    monkeypatch.setattr(
+        runner,
+        "_try_execution_replay",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_interpret_step",
+        AsyncMock(
+            return_value=(
+                [
+                    {
+                        "type": "click",
+                        "target": "Login button",
+                        "description": "Tap Login",
+                        "critical": True,
+                    }
+                ],
+                False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_action",
+        AsyncMock(
+            return_value={
+                "success": True,
+                "action_type": "click",
+                "target": "Login button",
+                "outcome": "Tapped Login",
+                "confidence": 0.9,
+                "error": None,
+                "driver_actions": [{"type": "click", "x": 10, "y": 10}],
+            }
+        ),
+    )
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "FAIL",
+            "reasoning": "Login form is not visible after action",
+            "actual_result": "Still on welcome screen.",
+            "confidence": 0.86,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+    store_mock = AsyncMock()
+    persist_mock = AsyncMock()
+    invalidate_coord_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_store_execution_replay", store_mock)
+    monkeypatch.setattr(runner, "_persist_coordinate_cache", persist_mock)
+    monkeypatch.setattr(runner, "_invalidate_coordinate_cache", invalidate_coord_mock)
+
+    case_result = TestCaseResult(
+        case_id=case.case_id,
+        test_id=case.test_id,
+        name=case.name,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        steps_total=len(case.steps),
+        steps_completed=0,
+        steps_failed=0,
+        step_results=[],
+    )
+
+    result = await runner._execute_test_step(setup_step, case, case_result)
+
+    assert result.status == TestStatus.FAILED
+    assert result.error_message == "Login form is not visible after action"
+    assert verify_mock.await_count == 1
+    assert runner._current_step_data["verification_mode"] == "ai"
+    store_mock.assert_not_awaited()
+    persist_mock.assert_not_awaited()
+    invalidate_coord_mock.assert_awaited_once()

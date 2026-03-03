@@ -27,6 +27,7 @@ class ExecutionReplayCacheKey:
     environment: str
     resolution: tuple[int, int]
     keyboard_layout: str = "us"
+    plan_fingerprint: str = ""
 
     @classmethod
     def from_dict(cls, payload: dict) -> ExecutionReplayCacheKey:
@@ -50,6 +51,7 @@ class ExecutionReplayCacheKey:
             environment=str(payload.get("environment") or "desktop").strip(),
             resolution=resolution,
             keyboard_layout=str(payload.get("keyboard_layout") or "us").strip(),
+            plan_fingerprint=str(payload.get("plan_fingerprint") or "").strip(),
         )
 
     def matches(self, other: ExecutionReplayCacheKey) -> bool:
@@ -59,6 +61,7 @@ class ExecutionReplayCacheKey:
             and _norm(self.environment) == _norm(other.environment)
             and tuple(self.resolution) == tuple(other.resolution)
             and _norm(self.keyboard_layout) == _norm(other.keyboard_layout)
+            and _norm(self.plan_fingerprint) == _norm(other.plan_fingerprint)
         )
 
 
