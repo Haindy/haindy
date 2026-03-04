@@ -630,6 +630,47 @@ async def test_computer_use_session_marks_terminal_failure_on_max_turns(
 
 
 @pytest.mark.asyncio
+async def test_google_prompt_block_marks_terminal_failure(
+    mock_client, mock_browser, session_settings
+):
+    """Prompt-level Google blocks should fail the session immediately."""
+    session_settings.cu_provider = "google"
+    session_settings.vertex_api_key = "dummy-key"
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        debug_logger=None,
+    )
+    session._create_google_response = AsyncMock(  # type: ignore[assignment]
+        return_value={
+            "id": "resp_blocked",
+            "candidates": None,
+            "prompt_feedback": {
+                "block_reason": "SAFETY",
+                "block_reason_message": "Policy check blocked the prompt.",
+            },
+        }
+    )
+
+    result = await session.run(
+        goal='Tap "Sign Up".',
+        initial_screenshot=b"initial",
+        metadata={"step_number": 2},
+    )
+
+    assert result.terminal_status == "failed"
+    assert result.terminal_failure_code == "google_prompt_blocked"
+    assert len(result.actions) == 1
+    assert result.actions[0].action_type == "system_notice"
+    assert result.actions[0].parameters["block_reason"] == "SAFETY"
+    assert "blocked before tool execution" in (result.terminal_failure_reason or "")
+    mock_browser.click.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_computer_use_session_enforces_domain_allowlist(
     mock_client, mock_browser, session_settings
 ):
@@ -1007,6 +1048,113 @@ async def test_google_computer_use_retries_resource_exhausted_then_succeeds(
     assert sleep_mock.await_count == 2
     assert sleep_mock.await_args_list[0].args == (1.0,)
     assert sleep_mock.await_args_list[1].args == (5.0,)
+
+
+@pytest.mark.asyncio
+async def test_google_computer_use_retries_prompt_safety_block_then_succeeds(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google CU should retry short/jittered on prompt-level SAFETY blocks."""
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(
+        side_effect=[
+            {
+                "id": "blocked_1",
+                "candidates": None,
+                "prompt_feedback": {"block_reason": "SAFETY"},
+            },
+            {
+                "id": "blocked_2",
+                "candidates": None,
+                "prompt_feedback": {"block_reason": "SAFETY"},
+            },
+            {
+                "id": "ok",
+                "candidates": [
+                    {"content": {"parts": []}},
+                ],
+                "prompt_feedback": None,
+            },
+        ]
+    )
+    google_client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content)
+    )
+    sleep_mock = AsyncMock()
+    jitter_mock = MagicMock(side_effect=[0.05, 0.1])
+    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
+    monkeypatch.setattr(cu_session_module.random, "uniform", jitter_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=google_client,
+        debug_logger=None,
+    )
+
+    payload = {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+    response = await session._create_google_response(payload)
+
+    assert response["id"] == "ok"
+    assert generate_content.call_count == 3
+    assert sleep_mock.await_count == 2
+    assert sleep_mock.await_args_list[0].args == (0.3,)
+    assert sleep_mock.await_args_list[1].args == (0.85,)
+
+
+@pytest.mark.asyncio
+async def test_google_computer_use_returns_blocked_response_after_safety_retries(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google CU should return blocked response after bounded SAFETY retries."""
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(
+        side_effect=[
+            {
+                "id": "blocked_1",
+                "candidates": None,
+                "prompt_feedback": {"block_reason": "SAFETY"},
+            },
+            {
+                "id": "blocked_2",
+                "candidates": None,
+                "prompt_feedback": {"block_reason": "SAFETY"},
+            },
+            {
+                "id": "blocked_3",
+                "candidates": None,
+                "prompt_feedback": {"block_reason": "SAFETY"},
+            },
+        ]
+    )
+    google_client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content)
+    )
+    sleep_mock = AsyncMock()
+    jitter_mock = MagicMock(side_effect=[0.01, 0.02])
+    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
+    monkeypatch.setattr(cu_session_module.random, "uniform", jitter_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=google_client,
+        debug_logger=None,
+    )
+
+    payload = {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+    response = await session._create_google_response(payload)
+
+    assert response["id"] == "blocked_3"
+    assert response["prompt_feedback"]["block_reason"] == "SAFETY"
+    assert generate_content.call_count == 3
+    assert sleep_mock.await_count == 2
+    assert sleep_mock.await_args_list[0].args == (0.26,)
+    assert sleep_mock.await_args_list[1].args == (0.77,)
 
 
 @pytest.mark.asyncio
