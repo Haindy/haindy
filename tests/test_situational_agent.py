@@ -108,6 +108,60 @@ def test_parse_assessment_mobile_allows_command_path_without_structured_fields()
     assert assessment.setup.adb_commands
 
 
+def test_parse_assessment_mobile_demotes_non_launch_context_questions() -> None:
+    agent = SituationalAgent()
+    payload = {
+        "target_type": "mobile_adb",
+        "sufficient": False,
+        "missing_items": [
+            (
+                "Branch deep link URL containing a team code for Path 9 (TC-09). "
+                "The provided quick link appears to be a shareable invitation link "
+                "for Path 7, not the Branch deep link."
+            ),
+            (
+                "Clarification/approval on execution order: Path 2 (TC-02) requires "
+                "phone/SMS verification but phone-verification tests are marked "
+                "OUT OF SCOPE; confirm that TC-02 should be skipped/omitted so the "
+                "remaining paths can still be executed sequentially."
+            ),
+            (
+                "Confirmation that 'Universal team access' is enabled in the TEST "
+                "environment for Path 8 (TC-08), since the test case precondition "
+                "requires it."
+            ),
+        ],
+        "setup": {
+            "adb_serial": "emulator-5554",
+            "app_package": "com.playerup.mobile",
+            "app_activity": ".MainActivity",
+            "adb_commands": [],
+        },
+        "entry_actions": [],
+        "notes": [],
+    }
+
+    context_text = """
+target_type: mobile_adb
+adb_serial: emulator-5554
+app_package: com.playerup.mobile
+app_activity: .MainActivity
+- Assume the user data provided is valid and use it literally
+- Leave tests that require phone verification OUT OF SCOPE and don't include them
+- Quick link to join team: https://links.playerup.co/7w5Qo0vzd1b
+"""
+
+    assessment = agent._parse_assessment(
+        payload,
+        "PlayerUp onboarding test plan",
+        context_text,
+    )
+
+    assert assessment.sufficient is True
+    assert not assessment.missing_items
+    assert any("Non-blocking context gap:" in note for note in assessment.notes)
+
+
 def test_parse_assessment_filters_deterministic_identifier_blockers() -> None:
     agent = SituationalAgent()
     payload = {

@@ -144,6 +144,8 @@ Return strict JSON with these keys:
 
 Rules:
 - Prefer practical, minimal assumptions.
+- Treat explicit assumptions/rules in EXECUTION CONTEXT as authoritative; do not ask for reconfirmation.
+- If a value/link/code/credential is provided in EXECUTION CONTEXT, take it literally and do not infer it is invalid from naming or pattern.
 - If target is web, web_url is required.
 - If target is mobile_adb, provide either:
   - structured launch data (adb_serial + app_package, with optional app_activity), OR
@@ -153,6 +155,9 @@ Rules:
 - Do NOT require or suggest programmatic OS/window controls (wmctrl, xdotool, direct maximize/focus APIs).
 - For desktop_app/web, represent entrypoint as visual `entry_actions` that the Action Agent can execute.
 - For mobile_adb, prefer structured mobile setup fields and/or adb_commands; `entry_actions` may be empty.
+- Do not ask for clarification/approval to skip items already marked OUT OF SCOPE.
+- Keep `missing_items` limited to launch-critical blockers needed before the first action.
+- Do not put test-case preconditions or policy confirmations in `missing_items`; put those in `notes`.
 - Keep `entry_actions` short and goal-oriented (usually 1-3 actions).
 - Treat maximize as true by default unless the context clearly says not to maximize.
 - Keep missing_items specific and actionable.

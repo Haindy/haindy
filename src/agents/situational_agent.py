@@ -511,10 +511,16 @@ class SituationalAgent(BaseAgent):
             app_activity=str(setup_payload.get("app_activity") or "").strip(),
             adb_commands=self._ensure_command_list(setup_payload.get("adb_commands")),
         )
-        missing_items = self._filter_non_visual_missing_items(
+        model_missing_items = self._filter_non_visual_missing_items(
             self._ensure_string_list(payload.get("missing_items"))
         )
         notes = self._ensure_string_list(payload.get("notes"))
+        missing_items, notes = self._normalize_model_missing_items(
+            target_type=target_type,
+            missing_items=model_missing_items,
+            notes=notes,
+            context_text=context_text,
+        )
         entry_actions = self._parse_entry_actions(payload.get("entry_actions"))
         if not entry_actions:
             entry_actions = self._derive_default_entry_actions(
@@ -739,6 +745,99 @@ class SituationalAgent(BaseAgent):
                 continue
             filtered.append(item)
         return filtered
+
+    def _normalize_model_missing_items(
+        self,
+        *,
+        target_type: str,
+        missing_items: list[str],
+        notes: list[str],
+        context_text: str,
+    ) -> tuple[list[str], list[str]]:
+        context_lower = (context_text or "").lower()
+        has_out_of_scope_directive = "out of scope" in context_lower
+        has_literal_value_directive = any(
+            marker in context_lower
+            for marker in (
+                "use it literally",
+                "take it literally",
+                "take values literally",
+            )
+        )
+
+        retained: list[str] = []
+        augmented_notes = list(notes)
+        for item in missing_items:
+            lowered = item.lower()
+            should_demote = False
+
+            if self._is_speculative_missing_item(lowered):
+                should_demote = True
+            elif has_out_of_scope_directive and "out of scope" in lowered:
+                should_demote = True
+            elif has_literal_value_directive and any(
+                token in lowered
+                for token in (
+                    "appears to be",
+                    "not the",
+                    "invalid",
+                    "wrong",
+                )
+            ):
+                should_demote = True
+            elif not self._is_launch_critical_missing_item(
+                target_type=target_type, item=lowered
+            ):
+                should_demote = True
+
+            if should_demote:
+                augmented_notes.append(f"Non-blocking context gap: {item}")
+            else:
+                retained.append(item)
+
+        return retained, augmented_notes
+
+    @staticmethod
+    def _is_speculative_missing_item(item: str) -> bool:
+        speculative_markers = (
+            "clarification",
+            "confirmation",
+            "confirm ",
+            "approval",
+            "appears to be",
+            "seems",
+            "likely",
+            "probably",
+            "precondition requires",
+        )
+        return any(marker in item for marker in speculative_markers)
+
+    @staticmethod
+    def _is_launch_critical_missing_item(*, target_type: str, item: str) -> bool:
+        if target_type == "mobile_adb":
+            mobile_markers = (
+                "adb_serial",
+                "adb serial",
+                "adb_commands",
+                "adb command",
+                "app_package",
+                "app package",
+                "package name",
+                "device serial",
+                "discover the device and open the app",
+            )
+            return any(marker in item for marker in mobile_markers)
+
+        if target_type == "web":
+            if "web_url" in item:
+                return True
+            if "url" in item and not any(
+                marker in item for marker in ("deep link", "branch", "invitation")
+            ):
+                return True
+            return False
+
+        return False
 
     @staticmethod
     def _ensure_string_list(raw: Any) -> list[str]:

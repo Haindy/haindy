@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -169,6 +170,9 @@ class ComputerUseSession:
             "go_forward",
         }
     )
+    _GOOGLE_RETRY_DELAYS_SECONDS = (1.0, 5.0, 10.0)
+    _GOOGLE_PROMPT_SAFETY_RETRY_DELAYS_SECONDS = (0.25, 0.75)
+    _GOOGLE_PROMPT_SAFETY_RETRY_JITTER_SECONDS = (0.05, 0.2)
 
     def __init__(
         self,
@@ -688,6 +692,41 @@ class ComputerUseSession:
                 last_assistant_text = assistant_text
             result.last_response = response_dict
             last_response_dict = response_dict
+
+            block_reason, block_reason_message = (
+                self._extract_google_prompt_block_feedback(response_dict)
+            )
+            if block_reason:
+                failure_reason = (
+                    "Google prompt was blocked before tool execution "
+                    f"(reason: {block_reason})."
+                )
+                if block_reason_message:
+                    failure_reason = f"{failure_reason} {block_reason_message}"
+                self._append_terminal_failure_turn(
+                    result=result,
+                    metadata=metadata,
+                    response_id=response_dict.get("id"),
+                    reason=failure_reason,
+                    code="google_prompt_blocked",
+                    parameters={
+                        "block_reason": block_reason,
+                        "block_reason_message": block_reason_message,
+                    },
+                    metadata_updates={
+                        "google_block_reason": block_reason,
+                        "google_block_reason_message": block_reason_message,
+                    },
+                )
+                logger.warning(
+                    "Google prompt blocked before tool execution",
+                    extra={
+                        "response_id": response_dict.get("id"),
+                        "block_reason": block_reason,
+                        "block_reason_message": block_reason_message,
+                    },
+                )
+                break
 
             if not call_envelopes:
                 break
@@ -2683,7 +2722,166 @@ class ComputerUseSession:
                 "Google GenAI client does not support responses.generate/create calls."
             )
 
-        return await asyncio.to_thread(_call)
+        retry_delays = self._resolve_google_retry_delays()
+        safety_retry_delays = self._resolve_google_prompt_safety_retry_delays()
+        transport_retry_count = 0
+        safety_retry_count = 0
+
+        while True:
+            attempt_number = transport_retry_count + 1
+            try:
+                response = await asyncio.to_thread(_call)
+            except Exception as exc:
+                if transport_retry_count >= len(
+                    retry_delays
+                ) or not self._is_google_retryable_error(exc):
+                    raise
+
+                delay_seconds = retry_delays[transport_retry_count]
+                transport_retry_count += 1
+                logger.warning(
+                    "Transient Google Computer Use failure; retrying request",
+                    extra={
+                        "attempt": attempt_number,
+                        "max_attempts": 1 + len(retry_delays),
+                        "delay_seconds": delay_seconds,
+                        "error": str(exc),
+                    },
+                )
+                await asyncio.sleep(delay_seconds)
+                continue
+
+            response_dict = normalize_response(response)
+            block_reason, _ = self._extract_google_prompt_block_feedback(response_dict)
+            if block_reason != "SAFETY":
+                return response
+
+            if safety_retry_count >= len(safety_retry_delays):
+                return response
+
+            delay_seconds = self._compute_google_prompt_safety_retry_delay(
+                safety_retry_delays[safety_retry_count]
+            )
+            safety_retry_count += 1
+            logger.warning(
+                "Google prompt blocked by SAFETY; retrying request with jitter",
+                extra={
+                    "retry": safety_retry_count,
+                    "max_retries": len(safety_retry_delays),
+                    "delay_seconds": delay_seconds,
+                },
+            )
+            await asyncio.sleep(delay_seconds)
+
+    @staticmethod
+    def _normalize_google_block_reason(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if "." in text:
+            text = text.split(".")[-1].strip()
+        return text.upper() or None
+
+    @classmethod
+    def _extract_google_prompt_block_feedback(
+        cls, response_dict: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        prompt_feedback = response_dict.get("prompt_feedback")
+        if not isinstance(prompt_feedback, dict):
+            return None, None
+
+        block_reason = cls._normalize_google_block_reason(
+            prompt_feedback.get("block_reason")
+        )
+        if not block_reason:
+            return None, None
+
+        block_reason_message = str(
+            prompt_feedback.get("block_reason_message") or ""
+        ).strip()
+        return block_reason, block_reason_message or None
+
+    @staticmethod
+    def _is_google_retryable_error(exc: Exception) -> bool:
+        """Detect transient Google provider failures that should be retried."""
+        message = str(exc).lower()
+        if "resource_exhausted" in message:
+            return True
+        if "429" in message:
+            return True
+        if "rate limit" in message:
+            return True
+
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int) and status_code == 429:
+            return True
+
+        code = getattr(exc, "code", None)
+        if isinstance(code, int) and code == 429:
+            return True
+        if isinstance(code, str) and code.strip().upper() == "RESOURCE_EXHAUSTED":
+            return True
+
+        return False
+
+    def _resolve_google_retry_delays(self) -> tuple[float, ...]:
+        """Return retry delays for transient Google provider failures."""
+        configured = getattr(self._settings, "google_cu_retry_delays_seconds", None)
+        if isinstance(configured, (list, tuple)):
+            parsed: list[float] = []
+            for raw in configured:
+                try:
+                    delay = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if delay > 0:
+                    parsed.append(delay)
+            if parsed:
+                return tuple(parsed)
+
+        return self._GOOGLE_RETRY_DELAYS_SECONDS
+
+    def _resolve_google_prompt_safety_retry_delays(self) -> tuple[float, ...]:
+        """Return retry delays for prompt-level Google SAFETY blocks."""
+        configured = getattr(
+            self._settings, "google_cu_prompt_safety_retry_delays_seconds", None
+        )
+        if isinstance(configured, (list, tuple)):
+            parsed: list[float] = []
+            for raw in configured:
+                try:
+                    delay = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if delay > 0:
+                    parsed.append(delay)
+            if parsed:
+                return tuple(parsed)
+
+        return self._GOOGLE_PROMPT_SAFETY_RETRY_DELAYS_SECONDS
+
+    def _compute_google_prompt_safety_retry_delay(self, base_delay: float) -> float:
+        """Add short random jitter to SAFETY retry delays."""
+        configured = getattr(
+            self._settings, "google_cu_prompt_safety_retry_jitter_seconds", None
+        )
+        low, high = self._GOOGLE_PROMPT_SAFETY_RETRY_JITTER_SECONDS
+        if isinstance(configured, (list, tuple)) and len(configured) == 2:
+            try:
+                low = float(configured[0])
+                high = float(configured[1])
+            except (TypeError, ValueError):
+                low, high = self._GOOGLE_PROMPT_SAFETY_RETRY_JITTER_SECONDS
+
+        low = max(low, 0.0)
+        high = max(high, 0.0)
+        if high < low:
+            low, high = high, low
+
+        jitter = random.uniform(low, high) if high > 0 else 0.0
+        return max(float(base_delay) + jitter, 0.0)
 
     def _ensure_anthropic_client(self) -> Any | None:
         if self._provider != "anthropic":
