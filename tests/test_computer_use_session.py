@@ -969,6 +969,116 @@ async def test_anthropic_computer_use_calls_do_not_pass_request_timeout(
     create.assert_awaited_once_with(**payload)
 
 
+@pytest.mark.asyncio
+async def test_google_computer_use_retries_resource_exhausted_then_succeeds(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google CU should retry transient 429/RESOURCE_EXHAUSTED failures."""
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(
+        side_effect=[
+            RuntimeError(
+                "429 RESOURCE_EXHAUSTED. {'error': {'status': 'RESOURCE_EXHAUSTED'}}"
+            ),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            {"id": "ok"},
+        ]
+    )
+    google_client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content)
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=google_client,
+        debug_logger=None,
+    )
+
+    payload = {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+    response = await session._create_google_response(payload)
+
+    assert response == {"id": "ok"}
+    assert generate_content.call_count == 3
+    assert sleep_mock.await_count == 2
+    assert sleep_mock.await_args_list[0].args == (1.0,)
+    assert sleep_mock.await_args_list[1].args == (5.0,)
+
+
+@pytest.mark.asyncio
+async def test_google_computer_use_raises_after_retry_budget_exhausted(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Google CU should raise once the retry budget is exhausted."""
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(
+        side_effect=[
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+        ]
+    )
+    google_client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content)
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=google_client,
+        debug_logger=None,
+    )
+
+    payload = {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        await session._create_google_response(payload)
+
+    assert generate_content.call_count == 4
+    assert sleep_mock.await_count == 3
+    assert sleep_mock.await_args_list[0].args == (1.0,)
+    assert sleep_mock.await_args_list[1].args == (5.0,)
+    assert sleep_mock.await_args_list[2].args == (10.0,)
+
+
+@pytest.mark.asyncio
+async def test_google_computer_use_non_retryable_error_does_not_retry(
+    mock_client, mock_browser, session_settings, monkeypatch
+):
+    """Non-retryable Google CU failures should surface immediately."""
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(side_effect=RuntimeError("google failed"))
+    google_client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content)
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
+
+    session = ComputerUseSession(
+        client=mock_client,
+        automation_driver=mock_browser,
+        settings=session_settings,
+        provider="google",
+        google_client=google_client,
+        debug_logger=None,
+    )
+
+    payload = {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+    with pytest.raises(RuntimeError, match="google failed"):
+        await session._create_google_response(payload)
+
+    assert generate_content.call_count == 1
+    sleep_mock.assert_not_awaited()
+
+
 def test_computer_use_session_google_client_uses_vertex_project_location(
     mock_client, mock_browser, session_settings, monkeypatch
 ):
