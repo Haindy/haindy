@@ -1267,6 +1267,7 @@ Mobile-specific constraints:
 - Do NOT propose keyboard/browser shortcuts like Alt+Left, Alt+Right, Ctrl+L, Ctrl+Tab, or "browser back".
 - Prefer tap/swipe interactions and Android-safe navigation.
 - If back navigation is required, use `key_press` with value "back" or tap a visible in-app/system back control.
+- If a setup step requires launching the app in a clean state with no active user session (e.g., "reset app", "clean state", "freshly launched", "no active session"), emit a single `reset_app` action instead of trying to navigate or sign out. Leave computer_use_prompt empty for this action type.
 """.strip()
 
         prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
@@ -1307,12 +1308,14 @@ Guidelines:
 5. Use the previous/next step context to stay aligned with the intended flow.
 6. Every non-skip action must include a `computer_use_prompt` that is ready to send directly to the Computer Use model—no additional wrapping will be added later.
 7. You are planning actions for the step marked [CURRENT STEP] ONLY. Do not plan actions for any other step. Even if the screenshot appears to show a later step's target already populated or completed, still execute the current step's action on the correct target — the visual state may reflect autofill, prior test state, or an incorrect field.
+8. When the step action names a specific UI element, label, option, or role (e.g., "Athlete", "Coach or Team Admin", "Join Team", "Skip for now"), copy that exact text into the computer_use_prompt. Do not substitute synonyms, shorten the label, or infer a different option. If the step says "Athlete", the prompt must say "Athlete", not "role card" or "Coach".
 
 {environment_specific_guidance}
 
 Action schema for each entry (JSON object):
-- type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
+- type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation, reset_app].
   • Use `skip_navigation` only when navigation is already satisfied; do not provide a value.
+  • Use `reset_app` (mobile_adb only) when a setup step requires a completely clean app state — no active session, no cached data. This action force-stops the app, clears all its data, and relaunches it. No computer_use_prompt is needed; leave it empty.
 - target: Human description of the element or high-level goal.
 - value: Required only when the action type needs input (navigate URL, type text, key_press key, scroll_by_pixels amount).
 - description: Outcome-focused explanation so the Action Agent knows what success looks like.
@@ -1512,6 +1515,37 @@ Respond with a JSON object containing an "actions" array where every item follow
                 action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
                 self._current_step_actions.append(action_data)
                 return error_result
+
+            # Handle reset_app directly via driver without going through computer use
+            if action_type == ActionType.RESET_APP:
+                try:
+                    driver = self.automation_driver
+                    if hasattr(driver, "force_stop_app"):
+                        await driver.force_stop_app()
+                    if hasattr(driver, "clear_app_data"):
+                        await driver.clear_app_data()
+                    if hasattr(driver, "launch_app"):
+                        state_ctx = (
+                            self._test_state.context
+                            if self._test_state and isinstance(self._test_state.context, dict)
+                            else {}
+                        )
+                        pkg = state_ctx.get("app_package") or ""
+                        activity = state_ctx.get("app_activity") or ""
+                        if pkg:
+                            await driver.launch_app(pkg, activity or None)
+                    await asyncio.sleep(2)
+                    reset_result = {"success": True, "result": "App reset to clean state"}
+                    action_data["result"] = reset_result
+                    action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                    self._current_step_actions.append(action_data)
+                    return reset_result
+                except Exception as exc:
+                    error_result = {"success": False, "error": str(exc)}
+                    action_data["result"] = error_result
+                    action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                    self._current_step_actions.append(action_data)
+                    return error_result
 
             # If driver supports capture, start capturing calls
             if hasattr(self.automation_driver, "start_capture"):
