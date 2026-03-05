@@ -25,9 +25,11 @@ def enhanced_to_journal_action_result(
     Returns:
         JournalActionResult compatible with journal system
     """
+    instruction = enhanced_result.test_step.action_instruction
+
     # Extract action type from test step if not provided
-    if action_type is None:
-        action_type = enhanced_result.test_step.action_instruction.action_type
+    if action_type is None and instruction is not None:
+        action_type = instruction.action_type
 
     # Determine overall success
     success = enhanced_result.overall_success
@@ -76,11 +78,8 @@ def enhanced_to_journal_action_result(
 
     # Extract input text from test step if it's a type action
     input_text: str | None = None
-    if (
-        action_type == ActionType.TYPE
-        and enhanced_result.test_step.action_instruction.value
-    ):
-        input_text = enhanced_result.test_step.action_instruction.value
+    if action_type == ActionType.TYPE and instruction and instruction.value:
+        input_text = instruction.value
 
     # Extract element text (not available in current enhanced result)
     element_text: str | None = None
@@ -124,7 +123,7 @@ def extract_journal_context(enhanced_result: EnhancedActionResult) -> dict[str, 
     Returns:
         Dictionary with additional context for journal entries
     """
-    context = {}
+    context: dict[str, Any] = {}
 
     # Add browser state information
     if enhanced_result.environment_state_before:

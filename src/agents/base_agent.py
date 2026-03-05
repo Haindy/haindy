@@ -151,7 +151,7 @@ class BaseAgent(Agent):
 
     async def call_openai(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float | None = None,
         response_format: dict[str, Any] | None = None,
         reasoning_level: str | None = None,

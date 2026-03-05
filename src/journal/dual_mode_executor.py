@@ -129,7 +129,7 @@ class DualModeExecutor:
             milliseconds = self._to_int(
                 args.get("ms") or args.get("milliseconds") or "0"
             )
-            if milliseconds <= 0:
+            if milliseconds is None or milliseconds <= 0:
                 return False
             await self.automation_driver.wait(milliseconds)
             return True

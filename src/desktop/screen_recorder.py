@@ -132,7 +132,7 @@ class ScreenRecorder:
 
     @staticmethod
     def _parse_session_path(output: str) -> str | None:
-        matches = re.findall(r"'([^']+)'", output)
+        matches: list[str] = re.findall(r"'([^']+)'", output)
         if len(matches) >= 2:
             return matches[1]
         return None

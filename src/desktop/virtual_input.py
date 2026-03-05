@@ -6,7 +6,8 @@ import asyncio
 import logging
 import shutil
 from asyncio import subprocess as aio_subprocess
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from typing import cast
 
 from evdev import AbsInfo, UInput, ecodes
 from evdev.uinput import UInputError
@@ -155,12 +156,15 @@ class VirtualInput:
         ]
 
         key_codes = self._keyboard_keys()
-        capabilities = {
-            ecodes.EV_KEY: key_codes,
-            ecodes.EV_ABS: abs_caps,
-            ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_HWHEEL],
-            ecodes.EV_MSC: [ecodes.MSC_SCAN],
-        }
+        capabilities = cast(
+            dict[int, Sequence[int]],
+            {
+                ecodes.EV_KEY: key_codes,
+                ecodes.EV_ABS: abs_caps,
+                ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_HWHEEL],
+                ecodes.EV_MSC: [ecodes.MSC_SCAN],
+            },
+        )
 
         self._ui: UInput | None = None
         self._xdotool_binary: str | None = None
@@ -305,8 +309,8 @@ class VirtualInput:
             return
 
         sequence = self._normalize_key_sequence(key)
-        codes = [self._lookup_key_code(item) for item in sequence]
-        codes = [c for c in codes if c is not None]
+        raw_codes = [self._lookup_key_code(item) for item in sequence]
+        codes: list[int] = [code for code in raw_codes if code is not None]
         if not codes:
             logger.debug("No valid keycodes found for press_key", extra={"key": key})
             return
@@ -331,14 +335,17 @@ class VirtualInput:
         if code is None:
             logger.debug("Skipping unsupported character", extra={"char": repr(char)})
             return
+        ui = self._ui
+        if ui is None:
+            raise RuntimeError("Virtual input device is not initialized")
         for mod in modifiers:
             self._write_key_event(mod, 1)
         self._write_key_event(code, 1)
-        self._ui.syn()
+        ui.syn()
         self._write_key_event(code, 0)
         for mod in reversed(modifiers):
             self._write_key_event(mod, 0)
-        self._ui.syn()
+        ui.syn()
 
     @staticmethod
     def _button_code(button: str) -> int:
@@ -901,17 +908,20 @@ class VirtualInput:
         if normalized.startswith("kp") and normalized[2:].isdigit():
             code = getattr(ecodes, f"KEY_KP{normalized[2:]}", None)
             if code:
-                return code
+                return int(code)
 
         if normalized.startswith("f") and normalized[1:].isdigit():
             idx = int(normalized[1:])
             if 1 <= idx <= 24:
-                return getattr(ecodes, f"KEY_F{idx}", None)
+                code = getattr(ecodes, f"KEY_F{idx}", None)
+                return int(code) if code is not None else None
 
         upper = normalized.upper()
         if len(upper) == 1 and upper.isalpha():
-            return getattr(ecodes, f"KEY_{upper}", None)
+            code = getattr(ecodes, f"KEY_{upper}", None)
+            return int(code) if code is not None else None
         if len(upper) == 1 and upper.isdigit():
-            return getattr(ecodes, f"KEY_{upper}", None)
+            code = getattr(ecodes, f"KEY_{upper}", None)
+            return int(code) if code is not None else None
 
         return None

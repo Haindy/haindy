@@ -33,7 +33,7 @@ def _sanitize_for_json(value: Any, *, _seen: set[int] | None = None) -> Any:
         return f"<<bytes:{length}>>"
     if isinstance(value, Path):
         return str(value)
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         try:
             return _sanitize_for_json(asdict(value), _seen=_seen)
         except Exception:

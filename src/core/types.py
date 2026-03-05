@@ -95,14 +95,11 @@ class ActionInstruction(BaseModel):
 
     action_type: ActionType
     description: str = Field(..., description="Human-readable action description")
-    target: str | None = Field(None, description="Target element description")
-    value: str | None = Field(None, description="Value for type actions")
+    target: str | None = None
+    value: str | None = None
     expected_outcome: str = Field(..., description="Expected result of the action")
-    computer_use_prompt: str | None = Field(
-        None,
-        description="Fully prepared prompt for the Computer Use executor",
-    )
-    timeout: int = Field(5000, description="Timeout in milliseconds")
+    computer_use_prompt: str | None = None
+    timeout: int = 5000
 
 
 class ResolvedAction(BaseModel):
@@ -110,12 +107,8 @@ class ResolvedAction(BaseModel):
 
     instruction: ActionInstruction
     coordinates: CoordinateReference | None = None
-    screenshot_before: str | None = Field(
-        None, description="Path to screenshot before action"
-    )
-    fallback_strategy: str | None = Field(
-        None, description="Alternative approach if primary fails"
-    )
+    screenshot_before: str | None = None
+    fallback_strategy: str | None = None
 
 
 class ActionResult(BaseModel):
@@ -152,40 +145,21 @@ class TestStep(BaseModel):
     action: str = Field(..., description="Action to be performed")
     expected_result: str = Field(..., description="Expected outcome of the action")
     # Keep action_instruction for backward compatibility during transition
-    action_instruction: ActionInstruction | None = Field(
-        None, description="Detailed action instruction (deprecated)"
-    )
+    action_instruction: ActionInstruction | None = None
     dependencies: list[int] = Field(
         default_factory=list, description="Step numbers that must complete first"
     )
-    optional: bool = Field(False, description="Whether this step can be skipped")
-    intent: StepIntent = Field(
-        StepIntent.VALIDATION,
-        description="Execution intent that guides runner heuristics",
-    )
-    max_retries: int = Field(3, description="Maximum retry attempts")
-    cache_label: str | None = Field(
-        None, description="Cache label for coordinate caching and replay"
-    )
-    cache_action: str = Field(
-        "click", description="Cache action type for coordinate caching"
-    )
-    environment: str | None = Field(
-        None, description="Execution environment override (desktop, web, or mobile_adb)"
-    )
-    can_be_replayed: bool | None = Field(
-        None, description="Deprecated: replay eligibility is inferred at runtime"
-    )
-    loop: bool = Field(False, description="Repeat the step until validated")
-    scroll_policy: str = Field(
-        "auto", description="Scroll policy override (auto/allow/disallow)"
-    )
-    capture_clipboard: bool = Field(
-        False, description="Capture clipboard output during execution"
-    )
-    clipboard_output_key: str | None = Field(
-        None, description="Key to attach clipboard output to action results"
-    )
+    optional: bool = False
+    intent: StepIntent = StepIntent.VALIDATION
+    max_retries: int = 3
+    cache_label: str | None = None
+    cache_action: str = "click"
+    environment: str | None = None
+    can_be_replayed: bool | None = None
+    loop: bool = False
+    scroll_policy: str = "auto"
+    capture_clipboard: bool = False
+    clipboard_output_key: str | None = None
 
 
 class TestCasePriority(str, Enum):
@@ -250,9 +224,7 @@ class TestPlan(BaseModel):
         description="Flattened list of all steps for legacy consumers",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    created_by: str = Field(
-        "HAINDY Test Planner", description="Who/what created this plan"
-    )
+    created_by: str = "HAINDY Test Planner"
     tags: list[str] = Field(default_factory=list, description="Overall plan tags")
     estimated_duration_seconds: int | None = Field(
         None, description="Total estimated duration"
@@ -301,10 +273,7 @@ class TestPlan(BaseModel):
 class ScopeTriageResult(BaseModel):
     """Structured summary of scope triage analysis."""
 
-    in_scope: str = Field(
-        "",
-        description="Plain-language summary of functionality explicitly in scope",
-    )
+    in_scope: str = ""
     explicit_exclusions: list[str] = Field(
         default_factory=list,
         description="Items explicitly ruled out of scope",
@@ -373,9 +342,7 @@ class TestState(BaseModel):
     error_count: int = 0
     warning_count: int = 0
     context: dict[str, Any] = Field(default_factory=dict)
-    test_report: Optional["TestReport"] = Field(
-        None, description="Comprehensive test execution report"
-    )  # Will be populated by TestRunner
+    test_report: Optional["TestReport"] = None  # Will be populated by TestRunner
 
 
 class EvaluationResult(BaseModel):
@@ -430,9 +397,7 @@ class AgentMessage(BaseModel):
     content: dict[str, Any]
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requires_response: bool = False
-    correlation_id: UUID | None = Field(
-        None, description="ID to correlate related messages"
-    )
+    correlation_id: UUID | None = None
 
 
 # Scroll-specific models
@@ -541,14 +506,10 @@ class StepResult(BaseModel):
     action: str
     expected_result: str
     actual_result: str
-    screenshot_before: str | None = Field(
-        None, description="Path to screenshot before action"
-    )
-    screenshot_after: str | None = Field(
-        None, description="Path to screenshot after action"
-    )
+    screenshot_before: str | None = None
+    screenshot_after: str | None = None
     error_message: str | None = None
-    confidence: float = Field(1.0, ge=0.0, le=1.0)
+    confidence: float = 1.0
     actions_performed: list[dict[str, Any]] = Field(
         default_factory=list, description="List of sub-actions performed"
     )
@@ -573,22 +534,10 @@ class BugReport(BaseModel):
     error_details: str | None = None
     reproduction_steps: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    plan_blocker: bool | None = Field(
-        None,
-        description="Whether plan-level evaluation marked this issue as blocking",
-    )
-    plan_blocker_reason: str | None = Field(
-        None,
-        description="Plan-level rationale for blocking determination",
-    )
-    plan_recommended_severity: BugSeverity | None = Field(
-        None,
-        description="Severity suggested by plan-level analysis",
-    )
-    plan_assessment_notes: str | None = Field(
-        None,
-        description="Additional notes captured during plan-level assessment",
-    )
+    plan_blocker: bool | None = None
+    plan_blocker_reason: str | None = None
+    plan_recommended_severity: BugSeverity | None = None
+    plan_assessment_notes: str | None = None
     plan_recommendations: list[str] = Field(
         default_factory=list,
         description="Suggested follow-up actions from plan-level assessment",
@@ -657,6 +606,4 @@ class TestReport(BaseModel):
     artifacts: dict[str, Any] = Field(
         default_factory=dict, description="Paths to additional run artifacts"
     )
-    created_by: str = Field(
-        "HAINDY Test Runner", description="Who/what executed the tests"
-    )
+    created_by: str = "HAINDY Test Runner"

@@ -17,7 +17,7 @@ from rich.table import Table
 from src.agents.scope_triage import ScopeTriageAgent
 from src.agents.situational_agent import SituationalAgent
 from src.agents.test_planner import TestPlannerAgent
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.desktop.controller import DesktopController
 from src.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
@@ -144,7 +144,7 @@ Examples:
 
 
 def _create_planning_agents(
-    settings,
+    settings: Settings,
 ) -> tuple[ScopeTriageAgent, TestPlannerAgent, SituationalAgent]:
     """Instantiate planning + setup agents from current settings."""
     triage_cfg = settings.get_agent_model_config("scope_triage")

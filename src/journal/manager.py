@@ -268,9 +268,10 @@ class JournalManager:
 
     async def get_pattern_library_stats(self) -> dict[str, Any]:
         """Get statistics about the pattern library."""
-        stats = {
+        patterns_by_type: dict[PatternType, int] = {}
+        stats: dict[str, Any] = {
             "total_patterns": len(self._pattern_library),
-            "patterns_by_type": {},
+            "patterns_by_type": patterns_by_type,
             "most_successful": [],
             "most_used": [],
         }
@@ -278,9 +279,7 @@ class JournalManager:
         # Count by type
         for pattern in self._pattern_library.values():
             pattern_type = pattern.pattern_type
-            if pattern_type not in stats["patterns_by_type"]:
-                stats["patterns_by_type"][pattern_type] = 0
-            stats["patterns_by_type"][pattern_type] += 1
+            patterns_by_type[pattern_type] = patterns_by_type.get(pattern_type, 0) + 1
 
         # Find most successful (highest success rate)
         patterns_with_usage = [

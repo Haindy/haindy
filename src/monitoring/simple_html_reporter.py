@@ -484,7 +484,7 @@ HTML_TEMPLATE = """
 class SimpleHTMLReporter:
     """Generate HTML reports from test execution results."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the reporter."""
         self.logger = logger
 
@@ -522,7 +522,7 @@ class SimpleHTMLReporter:
 
     def _prepare_template_data(
         self, test_state: TestState, execution_history: list[TestStepResult]
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Prepare data for template rendering."""
 
         def _encode_image(image_bytes: bytes | None) -> str | None:
@@ -530,11 +530,12 @@ class SimpleHTMLReporter:
                 return None
             return base64.b64encode(image_bytes).decode()
 
-        def _build_bug_entry(bug: Any | None) -> dict | None:
+        def _build_bug_entry(bug: Any | None) -> dict[str, Any] | None:
             if bug is None:
                 return None
 
-            bug_data = {
+            bug_screenshots: list[dict[str, str]] = []
+            bug_data: dict[str, Any] = {
                 "step_number": getattr(bug, "step_number", None),
                 "error_message": getattr(bug, "error_message", "Unknown error"),
                 "attempted_action": getattr(bug, "attempted_action", "N/A"),
@@ -552,7 +553,7 @@ class SimpleHTMLReporter:
                 "url_after": getattr(bug, "url_after", None),
                 "page_title_before": getattr(bug, "page_title_before", None),
                 "page_title_after": getattr(bug, "page_title_after", None),
-                "screenshots": [],
+                "screenshots": bug_screenshots,
             }
 
             screenshots = [
@@ -562,7 +563,7 @@ class SimpleHTMLReporter:
             for label, image in screenshots:
                 encoded = _encode_image(image)
                 if encoded:
-                    bug_data["screenshots"].append({"label": label, "data": encoded})
+                    bug_screenshots.append({"label": label, "data": encoded})
 
             return bug_data
 
@@ -577,11 +578,14 @@ class SimpleHTMLReporter:
         }
 
         test_report = test_state.test_report
-        duration = 0
+        duration: float = 0.0
         if test_state.start_time and test_state.end_time:
             duration = round(
                 (test_state.end_time - test_state.start_time).total_seconds(), 2
             )
+
+        steps: list[dict[str, Any]] = []
+        bug_reports: list[dict[str, Any]] = []
 
         if test_report:
             total_steps = sum(tc.steps_total for tc in test_report.test_cases)
@@ -591,7 +595,6 @@ class SimpleHTMLReporter:
                 (passed_steps / total_steps * 100) if total_steps > 0 else 0
             )
 
-            steps: list[dict] = []
             for test_case in test_report.test_cases:
                 for step_result in test_case.step_results:
                     status_value = getattr(step_result, "status", "in_progress")
@@ -623,7 +626,6 @@ class SimpleHTMLReporter:
                         }
                     )
 
-            bug_reports = []
             for bug in test_report.bugs:
                 bug_entry = _build_bug_entry(bug)
                 if bug_entry:
@@ -639,7 +641,6 @@ class SimpleHTMLReporter:
                 (passed_steps / total_steps * 100) if total_steps > 0 else 0
             )
 
-            steps: list[dict] = []
             for index, step_result in enumerate(execution_history, start=1):
                 step = getattr(step_result, "step", None)
                 step_number = getattr(step, "step_number", index)

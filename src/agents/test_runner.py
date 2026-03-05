@@ -195,6 +195,7 @@ class TestRunner(BaseAgent):
         }
         self._current_test_case_actions: dict[str, Any] | None = None
         self._current_step_actions: list[dict[str, Any]] | None = None
+        self._current_step_data: dict[str, Any] = {}
 
     def _coordinate_cache_path_for_environment(self, environment: str) -> Path:
         return Path(coordinate_cache_path_for_environment(self._settings, environment))
@@ -1159,20 +1160,20 @@ class TestRunner(BaseAgent):
         actions_context = []
         for idx, action_data in enumerate(action_results, 1):
             action = action_data.get("action", {})
-            result = action_data.get("result", {})
+            action_result = action_data.get("result", {})
 
             # Extract validation details
-            validation = result.get("validation", {})
-            ai_analysis = result.get("ai_analysis", {})
-            execution = result.get("execution", {})
+            validation = action_result.get("validation", {})
+            ai_analysis = action_result.get("ai_analysis", {})
+            execution = action_result.get("execution", {})
             # CU agent's real-time narrative observation (may contain transient UI
             # feedback such as toast text that disappears before the evaluator screenshot)
-            cu_outcome = result.get("outcome", "")
+            cu_outcome = action_result.get("outcome", "")
 
             action_detail = f"""Action {idx}: {action.get("description", "Unknown action")}
   Type: {action.get("type", "unknown")}
   Target: {action.get("target", "N/A")}
-  Success: {result.get("success", False)}"""
+  Success: {action_result.get("success", False)}"""
 
             if cu_outcome and cu_outcome != "Action completed":
                 action_detail += f"\n  CU agent observation: {cu_outcome}"
@@ -1264,7 +1265,7 @@ Respond with JSON:
 {replay_wait_response_fields}  "is_blocker": true/false,
   "blocker_reasoning": "Why this would/wouldn't block the next test case"
 }}"""
-        messages = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "user",
                 "content": [{"type": "text", "text": prompt_text}],
@@ -1304,7 +1305,7 @@ Respond with JSON:
                 messages=messages, response_format={"type": "json_object"}
             )
 
-            log_messages = [
+            log_messages: list[dict[str, Any]] = [
                 {
                     "role": "user",
                     "content": [{"type": "text", "text": prompt_text}],
@@ -1343,9 +1344,14 @@ Respond with JSON:
 
             content = response.get("content", "{}")
             if isinstance(content, str):
-                result = json.loads(content)
-            else:
+                parsed_result = json.loads(content)
+                result: dict[str, Any] = (
+                    parsed_result if isinstance(parsed_result, dict) else {}
+                )
+            elif isinstance(content, dict):
                 result = content
+            else:
+                result = {}
 
             # Ensure required fields and proper types
             if "verdict" not in result:
@@ -1503,8 +1509,11 @@ Respond with JSON:
 
         content = response.get("content", "{}")
         if isinstance(content, str):
-            return json.loads(content)
-        return content
+            parsed_content = json.loads(content)
+            return parsed_content if isinstance(parsed_content, dict) else None
+        if isinstance(content, dict):
+            return content
+        return None
 
     async def _create_bug_report(
         self,
@@ -1517,8 +1526,15 @@ Respond with JSON:
         if step_result.status != TestStatus.FAILED:
             return None
 
+        assert self._current_test_plan is not None
+
         # Get verification result if available
-        verification_result = self._current_step_data.get("verification_result", {})
+        verification_payload = self._current_step_data.get("verification_result", {})
+        verification_result: dict[str, Any]
+        if isinstance(verification_payload, dict):
+            verification_result = verification_payload
+        else:
+            verification_result = {}
 
         # Use AI to determine error type and severity
         prompt = f"""Analyze this test failure and create a bug report:
@@ -1570,9 +1586,16 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
             )
 
             # Content is already a dict when using json_object response format
-            result = response.get("content", {})
-            if isinstance(result, str):
-                result = json.loads(result)
+            raw_result = response.get("content", {})
+            if isinstance(raw_result, str):
+                parsed_result = json.loads(raw_result)
+                result: dict[str, Any] = (
+                    parsed_result if isinstance(parsed_result, dict) else {}
+                )
+            elif isinstance(raw_result, dict):
+                result = raw_result
+            else:
+                result = {}
             error_type = result.get("error_type", "unknown_error")
 
             # Map severity string to enum
@@ -1815,20 +1838,21 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
 
     def _determine_overall_status(self) -> TestStatus:
         """Determine overall test execution status."""
-        if not self._test_report.test_cases:
+        report = self._test_report
+        assert report is not None
+
+        if not report.test_cases:
             return TestStatus.FAILED
 
         # If any test case failed, overall status is failed
         failed_cases = [
-            tc for tc in self._test_report.test_cases if tc.status == TestStatus.FAILED
+            tc for tc in report.test_cases if tc.status == TestStatus.FAILED
         ]
         if failed_cases:
             return TestStatus.FAILED
 
         # If all completed, overall is completed
-        all_completed = all(
-            tc.status == TestStatus.PASSED for tc in self._test_report.test_cases
-        )
+        all_completed = all(tc.status == TestStatus.PASSED for tc in report.test_cases)
         if all_completed:
             return TestStatus.PASSED
 
@@ -2009,6 +2033,9 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         entry = self._replay_service.lookup(key)
         if not entry:
             return None
+        driver = self.automation_driver
+        if driver is None:
+            return None
         if self._trace:
             self._trace.record_cache_event(
                 {
@@ -2023,7 +2050,7 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
             )
         try:
             await replay_driver_actions(
-                self.automation_driver,
+                driver,
                 entry.actions,
                 stabilization_wait_ms=self._replay_stabilization_wait_ms(),
                 action_timeout_seconds=max(

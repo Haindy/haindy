@@ -17,14 +17,18 @@ from uuid import uuid4
 from openai import AsyncOpenAI
 
 try:  # Optional dependency for Gemini computer-use
-    import google.genai as genai
+    import google.genai as _genai
 except Exception:  # pragma: no cover - optional dependency
-    genai = None
+    genai: Any | None = None
+else:
+    genai = _genai
 
 try:  # Optional dependency for Claude computer-use
-    from anthropic import AsyncAnthropic as _AsyncAnthropic
+    from anthropic import AsyncAnthropic as _AsyncAnthropicType
 except Exception:  # pragma: no cover - optional dependency
-    _AsyncAnthropic = None
+    _AsyncAnthropic: type[Any] | None = None
+else:
+    _AsyncAnthropic = _AsyncAnthropicType
 
 from src.config.settings import Settings
 from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
@@ -3752,8 +3756,14 @@ class ComputerUseSession:
         from google.genai import types  # type: ignore
 
         coord_props = {
-            "x": types.Schema(type="NUMBER", description="X coordinate (0-999 scale)"),
-            "y": types.Schema(type="NUMBER", description="Y coordinate (0-999 scale)"),
+            "x": types.Schema(
+                type=types.Type.NUMBER,
+                description="X coordinate (0-999 scale)",
+            ),
+            "y": types.Schema(
+                type=types.Type.NUMBER,
+                description="Y coordinate (0-999 scale)",
+            ),
         }
         return types.Tool(
             function_declarations=[
@@ -3765,7 +3775,7 @@ class ComputerUseSession:
                         "selecting multiple files in a file picker."
                     ),
                     parameters=types.Schema(
-                        type="OBJECT",
+                        type=types.Type.OBJECT,
                         properties=coord_props,
                         required=["x", "y"],
                     ),
@@ -3778,7 +3788,7 @@ class ComputerUseSession:
                         "selecting a range of files in a file picker."
                     ),
                     parameters=types.Schema(
-                        type="OBJECT",
+                        type=types.Type.OBJECT,
                         properties=coord_props,
                         required=["x", "y"],
                     ),

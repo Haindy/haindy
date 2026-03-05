@@ -258,6 +258,8 @@ class WorkflowCoordinator:
         runner = self._agents.get("test_runner")
         if not runner:
             raise RuntimeError("Test Runner agent not available")
+        if not isinstance(runner, TestRunner):
+            raise RuntimeError("Configured test_runner agent has unexpected type")
 
         # Create execution task
         test_task = asyncio.create_task(

@@ -86,7 +86,7 @@ class OpenAIClient:
 
     async def call(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.7,
         max_tokens: int | None = None,
         system_prompt: str | None = None,
@@ -98,7 +98,7 @@ class OpenAIClient:
     ) -> dict[str, Any]:
         """Make a call to the OpenAI API."""
 
-        final_messages = []
+        final_messages: list[dict[str, Any]] = []
         if system_prompt:
             final_messages.append({"role": "system", "content": system_prompt})
         final_messages.extend(messages)
@@ -209,7 +209,7 @@ class OpenAIClient:
             f"Schema: {json.dumps(response_schema, indent=2)}"
         )
 
-        messages = []
+        messages: list[dict[str, Any]] = []
 
         # Add examples if provided
         if examples:
@@ -232,7 +232,14 @@ class OpenAIClient:
             response_format={"type": "json_object"},
         )
 
-        return response["content"]
+        content = response.get("content", {})
+        if isinstance(content, dict):
+            return content
+        if isinstance(content, str):
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return parsed
+        raise ValueError("Structured output response was not a JSON object")
 
     def estimate_cost(self, usage: dict[str, int]) -> float:
         """
@@ -262,7 +269,7 @@ class OpenAIClient:
 
     async def _call_responses_api(
         self,
-        final_messages: list[dict[str, str]],
+        final_messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int | None,
         response_format: dict[str, Any] | None,
@@ -339,7 +346,7 @@ class OpenAIClient:
 
     async def _call_responses_api_streaming(
         self,
-        final_messages: list[dict[str, str]],
+        final_messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int | None,
         response_format: dict[str, Any] | None,
@@ -576,8 +583,9 @@ class OpenAIClient:
         return content_items
 
     def _extract_output_text(self, response: Any) -> str:
-        if hasattr(response, "output_text") and response.output_text:
-            return response.output_text
+        output_text = getattr(response, "output_text", None)
+        if isinstance(output_text, str) and output_text:
+            return output_text
 
         output_segments = getattr(response, "output", None)
         if not output_segments:

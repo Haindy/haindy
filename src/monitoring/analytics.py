@@ -315,7 +315,7 @@ class MetricsCollector:
         )
         cutoff = datetime.now(timezone.utc) - window
 
-        values = self.metrics.get(f"counter.{metric_name}", [])
+        values: list[MetricValue] = list(self.metrics.get(f"counter.{metric_name}", []))
         recent_values = [m for m in values if m.timestamp > cutoff]
 
         if not recent_values:
@@ -414,7 +414,7 @@ _metrics_collector = MetricsCollector()
 
 
 # Convenience functions
-async def start_test(test_id: UUID, test_name: str, **metadata) -> None:
+async def start_test(test_id: UUID, test_name: str, **metadata: Any) -> None:
     """Start tracking a test."""
     await _metrics_collector.start_test(test_id, test_name, metadata)
 

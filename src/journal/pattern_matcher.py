@@ -20,7 +20,7 @@ class PatternMatcher:
     from the pattern library.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the pattern matcher."""
         # Weights for different matching criteria
         self.weights = {
@@ -45,7 +45,7 @@ class PatternMatcher:
             PatternMatch if confidence is above threshold
         """
         confidence = 0.0
-        adjustments = {}
+        adjustments: dict[str, Any] = {}
 
         # Action type match (exact match required)
         if pattern.visual_signature.get("action_type") == features.get("action_type"):
