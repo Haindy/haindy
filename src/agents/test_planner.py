@@ -207,6 +207,16 @@ class TestPlannerAgent(BaseAgent):
             "name": "Test case name (e.g., 'Happy Path Login')",
             "description": "Detailed description of this specific test scenario",
             "prerequisites": ["Prerequisite 1", "Prerequisite 2"],
+            "setup_steps": [
+                {
+                    "step_number": 1,
+                    "action": "Action to reach the starting state for this test case (e.g., 'Sign in with existing user credentials')",
+                    "expected_result": "What the screen should look like after this setup action",
+                    "intent": "setup",
+                    "dependencies": [],
+                    "optional": false
+                }
+            ],
             "steps": [
                 {
                     "step_number": 1,
@@ -215,6 +225,16 @@ class TestPlannerAgent(BaseAgent):
                     "intent": "validation",
                     "dependencies": [],
                     "optional": false
+                }
+            ],
+            "cleanup_steps": [
+                {
+                    "step_number": 1,
+                    "action": "Action to clean up after the test case (e.g., 'Log out of the account', 'Clear app data')",
+                    "expected_result": "What the screen should look like after cleanup",
+                    "intent": "setup",
+                    "dependencies": [],
+                    "optional": true
                 }
             ],
             "postconditions": ["Expected state after test completion"],
@@ -233,6 +253,12 @@ IMPORTANT:
 - Assign test case IDs sequentially without gaps (TC001, TC002, ...)
 - Tag each step with an 'intent': use 'setup' for preparatory actions with minimal verification, 'validation' for standard checks, and 'group_assert' when bundling multiple related assertions into one step
 - Do NOT assign or output priority fields
+- setup_steps: actions executed BEFORE the main steps to reach the test case's starting state. Do NOT duplicate actions that are part of the main steps. Choose one of three patterns based on the test case preconditions and the state left by the previous test case:
+  1. EMPTY (continuation): the test case starts exactly where the previous one ended. No setup needed.
+  2. SOFT RESET (navigation/sign-out): the test case needs a different screen or sign-in state, but session data can remain. Emit one or more steps to navigate or sign out.
+  3. HARD RESET (clean app state): the test case requires a completely clean app state — no active session, no cached data (e.g., preconditions say "app freshly launched", "user not signed in", or "new unregistered user"). Describe this as a step with action "Reset the app to a clean state with no active user session" and expected result "App launches to the initial signed-out screen". Do not write technical commands; the executor will handle the mechanism.
+- setup_steps atomicity: each setup_step must be as atomic as a regular step — one action, one expected result. Never collapse a multi-action flow (e.g., "register a new user, pick a role, verify email, reach screen X") into a single setup step. When a test case's preconditions require completing a flow that was already defined in an earlier test case, copy each action from that flow individually as separate setup_steps in the same order. The executor performs each setup_step as a single, unambiguous interaction.
+- cleanup_steps: actions executed AFTER the main steps to restore state for the next test case. Use for things like logging out, clearing app data/cache, or navigating back to a known screen. Leave empty if no cleanup is needed. Cleanup steps are always optional and non-blocking -- a failed cleanup never fails the test case.
 - Respond with well-formed json that matches the structure above."""
         )
 
@@ -310,6 +336,80 @@ IMPORTANT:
                     )
                     steps.append(step)
 
+                # Parse setup_steps for this test case
+                setup_steps = []
+                for default_setup_num, setup_data in enumerate(
+                    case_data.get("setup_steps", []),
+                    start=1,
+                ):
+                    setup_intent_value = setup_data.get("intent")
+                    try:
+                        setup_intent = (
+                            StepIntent(setup_intent_value)
+                            if setup_intent_value
+                            else StepIntent.SETUP
+                        )
+                    except ValueError:
+                        setup_intent = StepIntent.SETUP
+
+                    setup_step_number = self._parse_step_number(
+                        setup_data.get("step_number"),
+                        default=default_setup_num,
+                    )
+
+                    setup_step = TestStep(
+                        step_number=setup_step_number,
+                        description=setup_data.get(
+                            "description", setup_data.get("action", "")
+                        ),
+                        action=setup_data.get("action", ""),
+                        expected_result=setup_data.get("expected_result", ""),
+                        dependencies=self._parse_step_dependencies(
+                            setup_data.get("dependencies")
+                        ),
+                        optional=setup_data.get("optional", False),
+                        intent=setup_intent,
+                        max_retries=setup_data.get("max_retries", 3),
+                    )
+                    setup_steps.append(setup_step)
+
+                # Parse cleanup_steps for this test case
+                cleanup_steps = []
+                for default_cleanup_num, cleanup_data in enumerate(
+                    case_data.get("cleanup_steps", []),
+                    start=1,
+                ):
+                    cleanup_intent_value = cleanup_data.get("intent")
+                    try:
+                        cleanup_intent = (
+                            StepIntent(cleanup_intent_value)
+                            if cleanup_intent_value
+                            else StepIntent.SETUP
+                        )
+                    except ValueError:
+                        cleanup_intent = StepIntent.SETUP
+
+                    cleanup_step_number = self._parse_step_number(
+                        cleanup_data.get("step_number"),
+                        default=default_cleanup_num,
+                    )
+
+                    cleanup_step = TestStep(
+                        step_number=cleanup_step_number,
+                        description=cleanup_data.get(
+                            "description", cleanup_data.get("action", "")
+                        ),
+                        action=cleanup_data.get("action", ""),
+                        expected_result=cleanup_data.get("expected_result", ""),
+                        dependencies=self._parse_step_dependencies(
+                            cleanup_data.get("dependencies")
+                        ),
+                        optional=cleanup_data.get("optional", True),
+                        intent=cleanup_intent,
+                        max_retries=cleanup_data.get("max_retries", 3),
+                    )
+                    cleanup_steps.append(cleanup_step)
+
                 # Create test case
                 test_case = TestCase(
                     test_id=case_data.get("test_id", f"TC{len(test_cases) + 1:03d}"),
@@ -317,7 +417,9 @@ IMPORTANT:
                     description=case_data.get("description", ""),
                     priority=priority,
                     prerequisites=case_data.get("prerequisites", []),
+                    setup_steps=setup_steps,
                     steps=steps,
+                    cleanup_steps=cleanup_steps,
                     postconditions=case_data.get("postconditions", []),
                     tags=case_data.get("tags", []),
                 )

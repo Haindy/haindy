@@ -147,6 +147,7 @@ cython_debug/
 
 # Project specific
 data/
+test_scenarios/
 reports/
 test_reports/
 test_plans/

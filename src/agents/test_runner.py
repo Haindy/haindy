@@ -501,6 +501,77 @@ class TestRunner(BaseAgent):
 
         return self._test_state
 
+    async def _execute_setup_steps(
+        self,
+        test_case: TestCase,
+        case_result: TestCaseResult,
+    ) -> bool:
+        """Execute setup_steps before the main test steps.
+
+        Returns True if all required setup steps passed, False otherwise.
+        """
+        if not test_case.setup_steps:
+            return True
+
+        logger.info(
+            "Executing setup steps",
+            extra={
+                "test_case": test_case.name,
+                "num_setup_steps": len(test_case.setup_steps),
+            },
+        )
+
+        for step in test_case.setup_steps:
+            step_result = await self._execute_test_step(step, test_case, case_result)
+            case_result.setup_step_results.append(step_result)
+
+            if step_result.status == TestStatus.FAILED and not step.optional:
+                logger.error(
+                    "Required setup step failed, skipping test case",
+                    extra={
+                        "step_number": step.step_number,
+                        "action": step.action,
+                        "test_case": test_case.name,
+                    },
+                )
+                return False
+
+        return True
+
+    async def _execute_cleanup_steps(
+        self,
+        test_case: TestCase,
+        case_result: TestCaseResult,
+    ) -> None:
+        """Execute cleanup_steps after the main test steps.
+
+        Cleanup failures are logged but never block subsequent test cases.
+        """
+        if not test_case.cleanup_steps:
+            return
+
+        logger.info(
+            "Executing cleanup steps",
+            extra={
+                "test_case": test_case.name,
+                "num_cleanup_steps": len(test_case.cleanup_steps),
+            },
+        )
+
+        for step in test_case.cleanup_steps:
+            step_result = await self._execute_test_step(step, test_case, case_result)
+            case_result.cleanup_step_results.append(step_result)
+
+            if step_result.status == TestStatus.FAILED:
+                logger.warning(
+                    "Cleanup step failed (non-blocking)",
+                    extra={
+                        "step_number": step.step_number,
+                        "action": step.action,
+                        "test_case": test_case.name,
+                    },
+                )
+
     async def _execute_test_case(self, test_case: TestCase) -> TestCaseResult:
         """Execute a single test case with all its steps."""
         logger.info(
@@ -510,6 +581,7 @@ class TestRunner(BaseAgent):
                 "test_case_name": test_case.name,
                 "priority": test_case.priority.value,
                 "total_steps": len(test_case.steps),
+                "setup_steps": len(test_case.setup_steps),
             },
         )
 
@@ -543,6 +615,12 @@ class TestRunner(BaseAgent):
             if not await self._verify_prerequisites(test_case.prerequisites):
                 case_result.status = TestStatus.SKIPPED
                 case_result.error_message = "Prerequisites not met"
+                return case_result
+
+            # Execute setup steps (navigate to test case starting state)
+            if not await self._execute_setup_steps(test_case, case_result):
+                case_result.status = TestStatus.SKIPPED
+                case_result.error_message = "Setup step failed"
                 return case_result
 
             # Track if any step failed
@@ -614,6 +692,8 @@ class TestRunner(BaseAgent):
             case_result.error_message = str(e)
 
         finally:
+            # Run cleanup steps regardless of test outcome
+            await self._execute_cleanup_steps(test_case, case_result)
             case_result.completed_at = datetime.now(timezone.utc)
 
         return case_result
@@ -1187,6 +1267,7 @@ Mobile-specific constraints:
 - Do NOT propose keyboard/browser shortcuts like Alt+Left, Alt+Right, Ctrl+L, Ctrl+Tab, or "browser back".
 - Prefer tap/swipe interactions and Android-safe navigation.
 - If back navigation is required, use `key_press` with value "back" or tap a visible in-app/system back control.
+- If a setup step requires launching the app in a clean state with no active user session (e.g., "reset app", "clean state", "freshly launched", "no active session"), emit a single `reset_app` action instead of trying to navigate or sign out. Leave computer_use_prompt empty for this action type.
 """.strip()
 
         prompt = f"""You are the HAINDY Test Runner's interpretation agent. Use the current UI snapshot and scenario context to plan the minimal actions needed for the next step. You are preparing instructions for an automated Computer Use executor that will run them without further translation.
@@ -1227,12 +1308,14 @@ Guidelines:
 5. Use the previous/next step context to stay aligned with the intended flow.
 6. Every non-skip action must include a `computer_use_prompt` that is ready to send directly to the Computer Use model—no additional wrapping will be added later.
 7. You are planning actions for the step marked [CURRENT STEP] ONLY. Do not plan actions for any other step. Even if the screenshot appears to show a later step's target already populated or completed, still execute the current step's action on the correct target — the visual state may reflect autofill, prior test state, or an incorrect field.
+8. When the step action names a specific UI element, label, option, or role (e.g., "Athlete", "Coach or Team Admin", "Join Team", "Skip for now"), copy that exact text into the computer_use_prompt. Do not substitute synonyms, shorten the label, or infer a different option. If the step says "Athlete", the prompt must say "Athlete", not "role card" or "Coach".
 
 {environment_specific_guidance}
 
 Action schema for each entry (JSON object):
-- type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation].
+- type: One of [navigate, click, type, assert, key_press, scroll_to_element, scroll_by_pixels, scroll_to_top, scroll_to_bottom, scroll_horizontal, skip_navigation, reset_app].
   • Use `skip_navigation` only when navigation is already satisfied; do not provide a value.
+  • Use `reset_app` (mobile_adb only) when a setup step requires a completely clean app state — no active session, no cached data. This action force-stops the app, clears all its data, and relaunches it. No computer_use_prompt is needed; leave it empty.
 - target: Human description of the element or high-level goal.
 - value: Required only when the action type needs input (navigate URL, type text, key_press key, scroll_by_pixels amount).
 - description: Outcome-focused explanation so the Action Agent knows what success looks like.
@@ -1268,9 +1351,13 @@ Respond with a JSON object containing an "actions" array where every item follow
             self._current_step_data["plan_cache_key"] = step_cache_key
 
         # Log what we're sending to AI
+        test_case_id = (
+            self._current_test_case.test_id if self._current_test_case else None
+        )
         logger.info(
             "Interpreting step with AI",
             extra={
+                "test_case": test_case_id,
                 "step_number": step.step_number,
                 "action": step.action,
                 "expected_result": step.expected_result,
@@ -1361,9 +1448,10 @@ Respond with a JSON object containing an "actions" array where every item follow
                     f"AI failed to provide actions for step {step.step_number}: {step.action}"
                 )
 
-            logger.info(
+            logger.debug(
                 "Step interpretation successful",
                 extra={
+                    "test_case": test_case_id,
                     "step": step.step_number,
                     "original_action": step.action,
                     "decomposed_actions": len(actions),
@@ -1428,6 +1516,46 @@ Respond with a JSON object containing an "actions" array where every item follow
                 self._current_step_actions.append(action_data)
                 return error_result
 
+            # Handle reset_app directly via driver without going through computer use
+            if action_type == ActionType.RESET_APP:
+                try:
+                    driver = self.automation_driver
+                    if hasattr(driver, "force_stop_app"):
+                        await driver.force_stop_app()
+                    if hasattr(driver, "clear_app_data"):
+                        await driver.clear_app_data()
+                    if hasattr(driver, "launch_app"):
+                        state_ctx = (
+                            self._test_state.context
+                            if self._test_state and isinstance(self._test_state.context, dict)
+                            else {}
+                        )
+                        entry_setup = state_ctx.get("entry_setup") or {}
+                        pkg = (
+                            state_ctx.get("app_package")
+                            or entry_setup.get("app_package")
+                            or ""
+                        )
+                        activity = (
+                            state_ctx.get("app_activity")
+                            or entry_setup.get("app_activity")
+                            or ""
+                        )
+                        if pkg:
+                            await driver.launch_app(pkg, activity or None)
+                    await asyncio.sleep(2)
+                    reset_result = {"success": True, "result": "App reset to clean state"}
+                    action_data["result"] = reset_result
+                    action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                    self._current_step_actions.append(action_data)
+                    return reset_result
+                except Exception as exc:
+                    error_result = {"success": False, "error": str(exc)}
+                    action_data["result"] = error_result
+                    action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                    self._current_step_actions.append(action_data)
+                    return error_result
+
             # If driver supports capture, start capturing calls
             if hasattr(self.automation_driver, "start_capture"):
                 self.automation_driver.start_capture()
@@ -1485,6 +1613,7 @@ Respond with a JSON object containing an "actions" array where every item follow
             test_context = {
                 "test_plan_name": self._current_test_plan.name,
                 "test_case_name": self._current_test_case.name,
+                "test_case_id": self._current_test_case.test_id,
                 "step_number": step.step_number,
                 "action_description": action.get("description", ""),
                 "recent_actions": self._execution_history[-3:],
@@ -2947,11 +3076,19 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         print(f"TEST EXECUTION SUMMARY: {self._test_report.test_plan_name}")
         print("=" * 80)
 
+        elapsed = int(s.execution_time_seconds)
+        elapsed_str = f"{elapsed // 60}m{elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+
+        passed_cases = s.completed_test_cases
+        failed_cases = s.failed_test_cases
+
         print(f"\nStatus: {self._test_report.status.value.upper()}")
-        print(f"Test Cases: {s.completed_test_cases}/{s.total_test_cases} completed")
+        print(f"Test Cases run: {s.total_test_cases}/{s.total_test_cases}")
+        print(f"Test Cases passed: {passed_cases}/{s.total_test_cases}")
+        print(f"Test Cases failed: {failed_cases}/{s.total_test_cases}")
         print(f"Steps: {s.completed_steps}/{s.total_steps} completed")
         print(f"Success Rate: {s.success_rate * 100:.1f}%")
-        print(f"Execution Time: {s.execution_time_seconds:.1f}s")
+        print(f"Execution Time: {elapsed_str}")
 
         if self._test_report.bugs:
             print(f"\nBugs Found: {len(self._test_report.bugs)}")

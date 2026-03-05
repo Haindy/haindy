@@ -42,6 +42,7 @@ class ActionType(str, Enum):
     SCROLL_TO_BOTTOM = "scroll_to_bottom"
     SCROLL_HORIZONTAL = "scroll_horizontal"
     SKIP_NAVIGATION = "skip_navigation"
+    RESET_APP = "reset_app"
 
 
 class ConfidenceLevel(str, Enum):
@@ -215,7 +216,15 @@ class TestCase(BaseModel):
     prerequisites: list[str] = Field(
         default_factory=list, description="Prerequisites for this test case"
     )
+    setup_steps: list[TestStep] = Field(
+        default_factory=list,
+        description="Steps executed before main steps to reach the test case starting state (e.g., sign in, open deep link)",
+    )
     steps: list[TestStep] = Field(..., description="Ordered list of test steps")
+    cleanup_steps: list[TestStep] = Field(
+        default_factory=list,
+        description="Steps executed after main steps to clean up state (e.g., log out, clear app data)",
+    )
     postconditions: list[str] = Field(
         default_factory=list, description="Expected state after test completion"
     )
@@ -599,6 +608,14 @@ class TestCaseResult(BaseModel):
     steps_completed: int
     steps_failed: int
     step_results: list[StepResult] = Field(default_factory=list)
+    setup_step_results: list[StepResult] = Field(
+        default_factory=list,
+        description="Results of setup steps executed before main steps",
+    )
+    cleanup_step_results: list[StepResult] = Field(
+        default_factory=list,
+        description="Results of cleanup steps executed after main steps",
+    )
     bugs: list[BugReport] = Field(default_factory=list)
     error_message: str | None = None
 
