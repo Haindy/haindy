@@ -5,6 +5,7 @@ This module creates comprehensive test reports organized by the test plan
 hierarchy with expandable/collapsible sections and rich details.
 """
 
+import base64
 import json
 import logging
 from datetime import datetime, timezone
@@ -622,17 +623,13 @@ ENHANCED_HTML_TEMPLATE = """
                                             <div class="screenshot-container">
                                                 {% if step.screenshots.before %}
                                                 <div class="screenshot-item">
-                                                    <a href="file://{{ step.screenshots.before }}" target="_blank">
-                                                        <img src="file://{{ step.screenshots.before }}" alt="Before">
-                                                    </a>
+                                                    <img src="{{ step.screenshots.before }}" alt="Before">
                                                     <div class="screenshot-label">Before</div>
                                                 </div>
                                                 {% endif %}
                                                 {% if step.screenshots.after %}
                                                 <div class="screenshot-item">
-                                                    <a href="file://{{ step.screenshots.after }}" target="_blank">
-                                                        <img src="file://{{ step.screenshots.after }}" alt="After">
-                                                    </a>
+                                                    <img src="{{ step.screenshots.after }}" alt="After">
                                                     <div class="screenshot-label">After</div>
                                                 </div>
                                                 {% endif %}
@@ -711,17 +708,13 @@ ENHANCED_HTML_TEMPLATE = """
                                                         <div class="screenshot-container">
                                                             {% if action.screenshots.before %}
                                                             <div class="screenshot-item">
-                                                                <a href="file://{{ action.screenshots.before }}" target="_blank">
-                                                                    <img src="file://{{ action.screenshots.before }}" alt="Before Action">
-                                                                </a>
+                                                                <img src="{{ action.screenshots.before }}" alt="Before Action">
                                                                 <div class="screenshot-label">Before Action</div>
                                                             </div>
                                                             {% endif %}
                                                             {% if action.screenshots.after %}
                                                             <div class="screenshot-item">
-                                                                <a href="file://{{ action.screenshots.after }}" target="_blank">
-                                                                    <img src="file://{{ action.screenshots.after }}" alt="After Action">
-                                                                </a>
+                                                                <img src="{{ action.screenshots.after }}" alt="After Action">
                                                                 <div class="screenshot-label">After Action</div>
                                                             </div>
                                                             {% endif %}
@@ -775,6 +768,17 @@ class EnhancedReporter:
     def __init__(self) -> None:
         """Initialize the enhanced reporter."""
         self.logger = logging.getLogger(__name__)
+
+    def _screenshot_to_data_uri(self, path: str | Path | None) -> str | None:
+        """Read a screenshot file and return a base64 data URI, or None if unavailable."""
+        if not path:
+            return None
+        try:
+            data = Path(path).read_bytes()
+            encoded = base64.b64encode(data).decode("ascii")
+            return f"data:image/png;base64,{encoded}"
+        except (OSError, ValueError):
+            return None
 
     def generate_report(
         self,
@@ -903,6 +907,12 @@ class EnhancedReporter:
                                 ai_conversation
                             )
 
+                        raw_screenshots = action.get("screenshots", {}) or {}
+                        action_screenshots = {
+                            k: self._screenshot_to_data_uri(v)
+                            for k, v in raw_screenshots.items()
+                            if k in {"before", "after"} and v
+                        }
                         actions_data.append(
                             {
                                 "action_type": action.get("action_type", "unknown"),
@@ -913,27 +923,23 @@ class EnhancedReporter:
                                 "result": action.get("result"),
                                 "ai_conversation": ai_conversation,
                                 "automation_calls": action.get("automation_calls", []),
-                                "screenshots": {
-                                    k: v
-                                    for k, v in (
-                                        action.get("screenshots", {}) or {}
-                                    ).items()
-                                    if k in {"before", "after"}
-                                },
+                                "screenshots": action_screenshots or None,
                             }
                         )
 
                 # Calculate step duration
                 step_duration = (step.completed_at - step.started_at).total_seconds()
 
-                # Handle screenshots with absolute paths
+                # Embed screenshots as base64 data URIs
                 screenshots = None
                 if step.screenshot_before or step.screenshot_after:
                     screenshots = {}
                     if step.screenshot_before:
-                        screenshots["before"] = Path(step.screenshot_before).absolute()
+                        screenshots["before"] = self._screenshot_to_data_uri(step.screenshot_before)
                     if step.screenshot_after:
-                        screenshots["after"] = Path(step.screenshot_after).absolute()
+                        screenshots["after"] = self._screenshot_to_data_uri(step.screenshot_after)
+                    if not any(screenshots.values()):
+                        screenshots = None
 
                 steps_data.append(
                     {
