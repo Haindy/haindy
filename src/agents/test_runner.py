@@ -1527,7 +1527,8 @@ Respond with a JSON object containing an "actions" array where every item follow
                     if hasattr(driver, "launch_app"):
                         state_ctx = (
                             self._test_state.context
-                            if self._test_state and isinstance(self._test_state.context, dict)
+                            if self._test_state
+                            and isinstance(self._test_state.context, dict)
                             else {}
                         )
                         entry_setup = state_ctx.get("entry_setup") or {}
@@ -1544,15 +1545,22 @@ Respond with a JSON object containing an "actions" array where every item follow
                         if pkg:
                             await driver.launch_app(pkg, activity or None)
                     await asyncio.sleep(2)
-                    reset_result = {"success": True, "result": "App reset to clean state"}
+                    reset_result = {
+                        "success": True,
+                        "result": "App reset to clean state",
+                    }
                     action_data["result"] = reset_result
-                    action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                    action_data["timestamp_end"] = datetime.now(
+                        timezone.utc
+                    ).isoformat()
                     self._current_step_actions.append(action_data)
                     return reset_result
                 except Exception as exc:
                     error_result = {"success": False, "error": str(exc)}
                     action_data["result"] = error_result
-                    action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+                    action_data["timestamp_end"] = datetime.now(
+                        timezone.utc
+                    ).isoformat()
                     self._current_step_actions.append(action_data)
                     return error_result
 
@@ -3077,7 +3085,9 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         print("=" * 80)
 
         elapsed = int(s.execution_time_seconds)
-        elapsed_str = f"{elapsed // 60}m{elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+        elapsed_str = (
+            f"{elapsed // 60}m{elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+        )
 
         passed_cases = s.completed_test_cases
         failed_cases = s.failed_test_cases

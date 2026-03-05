@@ -935,9 +935,13 @@ class EnhancedReporter:
                 if step.screenshot_before or step.screenshot_after:
                     screenshots = {}
                     if step.screenshot_before:
-                        screenshots["before"] = self._screenshot_to_data_uri(step.screenshot_before)
+                        screenshots["before"] = self._screenshot_to_data_uri(
+                            step.screenshot_before
+                        )
                     if step.screenshot_after:
-                        screenshots["after"] = self._screenshot_to_data_uri(step.screenshot_after)
+                        screenshots["after"] = self._screenshot_to_data_uri(
+                            step.screenshot_after
+                        )
                     if not any(screenshots.values()):
                         screenshots = None
 
