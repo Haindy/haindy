@@ -3076,11 +3076,19 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         print(f"TEST EXECUTION SUMMARY: {self._test_report.test_plan_name}")
         print("=" * 80)
 
+        elapsed = int(s.execution_time_seconds)
+        elapsed_str = f"{elapsed // 60}m{elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+
+        passed_cases = s.completed_test_cases
+        failed_cases = s.failed_test_cases
+
         print(f"\nStatus: {self._test_report.status.value.upper()}")
-        print(f"Test Cases: {s.completed_test_cases}/{s.total_test_cases} completed")
+        print(f"Test Cases run: {s.total_test_cases}/{s.total_test_cases}")
+        print(f"Test Cases passed: {passed_cases}/{s.total_test_cases}")
+        print(f"Test Cases failed: {failed_cases}/{s.total_test_cases}")
         print(f"Steps: {s.completed_steps}/{s.total_steps} completed")
         print(f"Success Rate: {s.success_rate * 100:.1f}%")
-        print(f"Execution Time: {s.execution_time_seconds:.1f}s")
+        print(f"Execution Time: {elapsed_str}")
 
         if self._test_report.bugs:
             print(f"\nBugs Found: {len(self._test_report.bugs)}")
