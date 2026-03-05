@@ -1348,9 +1348,13 @@ Respond with a JSON object containing an "actions" array where every item follow
             self._current_step_data["plan_cache_key"] = step_cache_key
 
         # Log what we're sending to AI
+        test_case_id = (
+            self._current_test_case.test_id if self._current_test_case else None
+        )
         logger.info(
             "Interpreting step with AI",
             extra={
+                "test_case": test_case_id,
                 "step_number": step.step_number,
                 "action": step.action,
                 "expected_result": step.expected_result,
@@ -1441,9 +1445,10 @@ Respond with a JSON object containing an "actions" array where every item follow
                     f"AI failed to provide actions for step {step.step_number}: {step.action}"
                 )
 
-            logger.info(
+            logger.debug(
                 "Step interpretation successful",
                 extra={
+                    "test_case": test_case_id,
                     "step": step.step_number,
                     "original_action": step.action,
                     "decomposed_actions": len(actions),
@@ -1565,6 +1570,7 @@ Respond with a JSON object containing an "actions" array where every item follow
             test_context = {
                 "test_plan_name": self._current_test_plan.name,
                 "test_case_name": self._current_test_case.name,
+                "test_case_id": self._current_test_case.test_id,
                 "step_number": step.step_number,
                 "action_description": action.get("description", ""),
                 "recent_actions": self._execution_history[-3:],

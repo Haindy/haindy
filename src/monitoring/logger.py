@@ -53,11 +53,17 @@ HUMAN_LOG_EXTRA_FIELD_ORDER = [
     "verdict",
     "confidence",
     "is_blocker",
-    "prompt_length",
     "decomposed_actions",
+]
+
+# Fields written to JSONL but suppressed from STDOUT for readability.
+HUMAN_LOG_SUPPRESSED_FIELDS = {
+    "prompt_length",
     "screenshot",
     "screenshot_path",
-]
+    "screenshot_source",
+    "intent",
+}
 
 HUMAN_LOG_FIELD_LABELS = {
     "taskName": "Task",
@@ -65,10 +71,8 @@ HUMAN_LOG_FIELD_LABELS = {
     "test_case": "Test Case",
     "action": "Action",
     "expected_result": "Expected Result",
-    "prompt_length": "Prompt Length",
     "decomposed_actions": "Decomposed Actions",
     "is_blocker": "Blocker",
-    "screenshot_path": "Screenshot",
 }
 
 
@@ -233,6 +237,8 @@ class HumanReadableFormatter(logging.Formatter):
             if key == "taskName":
                 continue
             if key in seen or key in STANDARD_LOG_RECORD_ATTRS or key.startswith("_"):
+                continue
+            if key in HUMAN_LOG_SUPPRESSED_FIELDS:
                 continue
             if value is None or callable(value):
                 continue

@@ -624,9 +624,7 @@ class ActionAgent(BaseAgent):
 
         debug_logger = get_debug_logger()
         if debug_logger:
-            test_case_name = None
-            if isinstance(test_context, dict):
-                test_case_name = test_context.get("test_case_name")
+            ctx = test_context if isinstance(test_context, dict) else {}
             debug_logger.log_ai_interaction(
                 agent_name=self.name,
                 action_type="skip_navigation",
@@ -634,8 +632,8 @@ class ActionAgent(BaseAgent):
                 response="Navigation already satisfied; no action taken.",
                 screenshot_path=None,
                 additional_context={
+                    "test_case": ctx.get("test_case_id"),
                     "step_number": test_step.step_number,
-                    "test_case_name": test_case_name,
                 },
             )
 
@@ -824,6 +822,7 @@ class ActionAgent(BaseAgent):
                 response=session_result.final_output or "",
                 screenshot_path=environment_state_after.screenshot_path,
                 additional_context={
+                    "test_case": context_lookup.get("test_case_id"),
                     "step_number": test_step.step_number,
                     "response_ids": session_result.response_ids,
                     "terminal_status": session_result.terminal_status,

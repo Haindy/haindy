@@ -77,17 +77,20 @@ class DebugLogger:
         # Also log to console with formatting
         base_extra: dict[str, Any] = {
             "agent_name": agent_name,
-            "action_type": action_type,
         }
         if additional_context:
             base_extra.update(additional_context)
 
         response_ids = base_extra.pop("response_ids", None)
+        base_extra.pop("failed_action_count", None)
+        base_extra.pop("overall_success", None)
+        base_extra.pop("terminal_status", None)
+        base_extra.pop("terminal_failure_code", None)
 
         truncated_prompt = f"{prompt[:200]}..." if len(prompt) > 200 else prompt
         truncated_response = f"{response[:200]}..." if len(response) > 200 else response
 
-        logger.info("Action: %s", action_type, extra=dict(base_extra))
+        logger.debug("Action: %s", action_type, extra=dict(base_extra))
         logger.info("Prompt: %s", truncated_prompt, extra=dict(base_extra))
         logger.info("Response: %s", truncated_response, extra=dict(base_extra))
         if screenshot_path:
