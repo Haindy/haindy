@@ -21,6 +21,7 @@ from src.core.types import (
     TestCase,
     TestCaseResult,
     TestPlan,
+    TestReport,
     TestState,
     TestStatus,
     TestStep,
@@ -131,6 +132,32 @@ def _build_test_case() -> tuple[TestPlan, TestCase, TestStep]:
         test_cases=[case],
     )
     return plan, case, step
+
+
+def _build_multi_case_plan(case_count: int = 4) -> TestPlan:
+    test_cases: list[TestCase] = []
+    for index in range(case_count):
+        step = TestStep(
+            step_number=1,
+            description=f"Execute case {index + 1}",
+            action=f"Execute case {index + 1}",
+            expected_result=f"Case {index + 1} completes",
+            intent=StepIntent.VALIDATION,
+        )
+        test_cases.append(
+            TestCase(
+                test_id=f"TC{index + 1:03d}",
+                name=f"Case {index + 1}",
+                description=f"Case {index + 1} description",
+                steps=[step],
+            )
+        )
+    return TestPlan(
+        name="Summary regression plan",
+        description="Exercise summary accounting.",
+        requirements_source="unit-test",
+        test_cases=test_cases,
+    )
 
 
 @pytest.mark.asyncio
@@ -929,3 +956,217 @@ async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
     store_mock.assert_not_awaited()
     persist_mock.assert_not_awaited()
     invalidate_coord_mock.assert_awaited_once()
+
+
+def test_calculate_summary_accounts_for_skipped_cases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan = _build_multi_case_plan()
+    now = datetime.now(timezone.utc)
+
+    runner._current_test_plan = plan
+    runner._test_report = TestReport(
+        test_plan_id=plan.plan_id,
+        test_plan_name=plan.name,
+        started_at=now,
+        completed_at=now,
+        status=TestStatus.FAILED,
+        created_by=runner.name,
+        test_cases=[
+            TestCaseResult(
+                case_id=plan.test_cases[0].case_id,
+                test_id=plan.test_cases[0].test_id,
+                name=plan.test_cases[0].name,
+                status=TestStatus.PASSED,
+                started_at=now,
+                completed_at=now,
+                steps_total=6,
+                steps_completed=6,
+                steps_failed=0,
+            ),
+            TestCaseResult(
+                case_id=plan.test_cases[1].case_id,
+                test_id=plan.test_cases[1].test_id,
+                name=plan.test_cases[1].name,
+                status=TestStatus.FAILED,
+                started_at=now,
+                completed_at=now,
+                steps_total=6,
+                steps_completed=0,
+                steps_failed=1,
+                error_message="First assertion failed",
+            ),
+            TestCaseResult(
+                case_id=plan.test_cases[2].case_id,
+                test_id=plan.test_cases[2].test_id,
+                name=plan.test_cases[2].name,
+                status=TestStatus.SKIPPED,
+                started_at=now,
+                completed_at=now,
+                steps_total=6,
+                steps_completed=0,
+                steps_failed=0,
+                error_message="Blocked by earlier failure",
+            ),
+            TestCaseResult(
+                case_id=plan.test_cases[3].case_id,
+                test_id=plan.test_cases[3].test_id,
+                name=plan.test_cases[3].name,
+                status=TestStatus.SKIPPED,
+                started_at=now,
+                completed_at=now,
+                steps_total=6,
+                steps_completed=0,
+                steps_failed=0,
+                error_message="Blocked by earlier failure",
+            ),
+        ],
+    )
+
+    summary = runner._calculate_summary()
+
+    assert summary.total_test_cases == 4
+    assert summary.completed_test_cases == 4
+    assert summary.passed_test_cases == 1
+    assert summary.failed_test_cases == 1
+    assert summary.skipped_test_cases == 2
+    assert summary.completed_steps == 6
+    assert summary.failed_steps == 1
+
+
+def test_print_summary_reports_skipped_case_counts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan = _build_multi_case_plan()
+    now = datetime.now(timezone.utc)
+
+    runner._current_test_plan = plan
+    runner._test_report = TestReport(
+        test_plan_id=plan.plan_id,
+        test_plan_name=plan.name,
+        started_at=now,
+        completed_at=now,
+        status=TestStatus.FAILED,
+        created_by=runner.name,
+        test_cases=[
+            TestCaseResult(
+                case_id=plan.test_cases[0].case_id,
+                test_id=plan.test_cases[0].test_id,
+                name=plan.test_cases[0].name,
+                status=TestStatus.PASSED,
+                started_at=now,
+                completed_at=now,
+                steps_total=1,
+                steps_completed=1,
+                steps_failed=0,
+            ),
+            TestCaseResult(
+                case_id=plan.test_cases[1].case_id,
+                test_id=plan.test_cases[1].test_id,
+                name=plan.test_cases[1].name,
+                status=TestStatus.FAILED,
+                started_at=now,
+                completed_at=now,
+                steps_total=1,
+                steps_completed=0,
+                steps_failed=1,
+                error_message="Failed",
+            ),
+            TestCaseResult(
+                case_id=plan.test_cases[2].case_id,
+                test_id=plan.test_cases[2].test_id,
+                name=plan.test_cases[2].name,
+                status=TestStatus.SKIPPED,
+                started_at=now,
+                completed_at=now,
+                steps_total=1,
+                steps_completed=0,
+                steps_failed=0,
+                error_message="Skipped",
+            ),
+            TestCaseResult(
+                case_id=plan.test_cases[3].case_id,
+                test_id=plan.test_cases[3].test_id,
+                name=plan.test_cases[3].name,
+                status=TestStatus.SKIPPED,
+                started_at=now,
+                completed_at=now,
+                steps_total=1,
+                steps_completed=0,
+                steps_failed=0,
+                error_message="Skipped",
+            ),
+        ],
+    )
+    runner._test_report.summary = runner._calculate_summary()
+
+    runner._print_summary()
+    output = capsys.readouterr().out
+
+    assert "Test Cases run: 4/4" in output
+    assert "Test Cases passed: 1/4" in output
+    assert "Test Cases failed: 1/4" in output
+    assert "Test Cases skipped: 2/4" in output
+
+
+@pytest.mark.asyncio
+async def test_replay_step_preserves_post_replay_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_runner_dependencies(monkeypatch, tmp_path)
+    runner = TestRunner(automation_driver=_StubAutomationDriver())
+    plan, case, step = _build_test_case()
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+
+    before_path = tmp_path / "before.png"
+    after_path = tmp_path / "after.png"
+
+    def _fake_save_screenshot(_payload: bytes, label: str) -> Path:
+        return before_path if label.endswith("_before") else after_path
+
+    async def _fake_try_execution_replay(
+        *,
+        step: TestStep,
+        test_case: TestCase,
+        step_result: StepResult,
+        screenshot_before: bytes | None,
+        execution_history: list[dict[str, object]],
+        next_test_case: TestCase | None,
+    ) -> StepResult:
+        del step, test_case, screenshot_before, execution_history, next_test_case
+        step_result.status = TestStatus.PASSED
+        step_result.actual_result = "Replay succeeded"
+        step_result.screenshot_after = str(after_path)
+        runner._artifacts.update_latest_snapshot(
+            b"after-screenshot",
+            str(after_path),
+            "step_1_after",
+        )
+        return step_result
+
+    monkeypatch.setattr(runner, "_save_screenshot", _fake_save_screenshot)
+    monkeypatch.setattr(runner, "_try_execution_replay", _fake_try_execution_replay)
+
+    case_result = TestCaseResult(
+        case_id=case.case_id,
+        test_id=case.test_id,
+        name=case.name,
+        status=TestStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
+        steps_total=len(case.steps),
+        steps_completed=0,
+        steps_failed=0,
+        step_results=[],
+    )
+
+    result = await runner._execute_test_step(step, case, case_result)
+
+    assert result.status == TestStatus.PASSED
+    assert runner._artifacts.latest_screenshot_path == str(after_path)
+    assert runner._artifacts.latest_screenshot_origin == "step_1_after"

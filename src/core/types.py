@@ -625,7 +625,9 @@ class TestSummary(BaseModel):
 
     total_test_cases: int
     completed_test_cases: int
+    passed_test_cases: int
     failed_test_cases: int
+    skipped_test_cases: int
     total_steps: int
     completed_steps: int
     failed_steps: int

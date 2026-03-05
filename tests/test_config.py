@@ -28,6 +28,27 @@ class TestSettings:
         settings = Settings()
         assert settings.openai_model == "gpt-5.2"
 
+    @pytest.mark.parametrize(
+        ("backend", "expected"),
+        [
+            ("desktop", "desktop"),
+            ("browser", "desktop"),
+            ("web", "desktop"),
+            ("mobile", "mobile_adb"),
+            ("android", "mobile_adb"),
+            ("invalid", "desktop"),
+        ],
+    )
+    def test_automation_backend_aliases(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        backend: str,
+        expected: str,
+    ):
+        monkeypatch.setenv("HAINDY_AUTOMATION_BACKEND", backend)
+        settings = Settings(_env_file=None)
+        assert settings.automation_backend == expected
+
     def test_cu_provider_accepts_anthropic(self, monkeypatch):
         monkeypatch.setenv("CU_PROVIDER", "anthropic")
         settings = Settings(cu_provider="anthropic")

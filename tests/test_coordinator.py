@@ -120,6 +120,15 @@ class TestWorkflowCoordinatorBasics:
         assert "scope_triage" in stats["registered_agents"]
         assert "situational_agent" in stats["registered_agents"]
 
+    @pytest.mark.asyncio
+    async def test_initialize_keeps_message_bus_for_diagnostics_only(self, coordinator):
+        """Coordinator should not install stub control-flow subscriptions."""
+        await coordinator.initialize()
+
+        stats = coordinator.message_bus.get_statistics()
+
+        assert stats["active_subscriptions"] == {}
+
     def test_get_active_tests(self, coordinator):
         """Test getting list of active tests."""
         # Add some mock active tests
