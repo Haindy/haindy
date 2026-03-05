@@ -34,11 +34,11 @@ class TestPlanFormatter:
         for case in plan_dict.get("test_cases", []):
             case["case_id"] = str(case["case_id"])
             # Handle steps within each case
-            for step in case.get("steps", []):
-                step["step_id"] = str(step["step_id"])
-                # Remove deprecated fields
-                if "action_instruction" in step:
-                    del step["action_instruction"]
+            for step_list_key in ("steps", "setup_steps", "cleanup_steps"):
+                for step in case.get(step_list_key, []):
+                    step["step_id"] = str(step["step_id"])
+                    if "action_instruction" in step:
+                        del step["action_instruction"]
 
         # Remove deprecated fields
         if "steps" in plan_dict:
