@@ -115,6 +115,28 @@ class MobileDriver(AutomationDriver):
             await self.adb.run_command(parts)
             self._capture_call("adb_command", {"command": command_text})
 
+    async def force_stop_app(self, app_package: str | None = None) -> None:
+        """Force-stop an Android application."""
+        await self._ensure_ready()
+        package = (app_package or "").strip() or self._app_package
+        if not package:
+            raise RuntimeError("Cannot force-stop: missing Android package name.")
+        await self.adb.run_adb("shell", "am", "force-stop", package)
+        self._capture_call("force_stop_app", {"app_package": package})
+
+    async def clear_app_data(self, app_package: str | None = None) -> None:
+        """Clear all data and cache for an Android application (pm clear).
+
+        This wipes login sessions, databases, shared preferences, and cache.
+        The app will behave as if freshly installed after this call.
+        """
+        await self._ensure_ready()
+        package = (app_package or "").strip() or self._app_package
+        if not package:
+            raise RuntimeError("Cannot clear app data: missing Android package name.")
+        await self.adb.run_adb("shell", "pm", "clear", package)
+        self._capture_call("clear_app_data", {"app_package": package})
+
     async def launch_app(
         self,
         app_package: str,

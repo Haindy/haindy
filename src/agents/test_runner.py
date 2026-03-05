@@ -501,6 +501,77 @@ class TestRunner(BaseAgent):
 
         return self._test_state
 
+    async def _execute_setup_steps(
+        self,
+        test_case: TestCase,
+        case_result: TestCaseResult,
+    ) -> bool:
+        """Execute setup_steps before the main test steps.
+
+        Returns True if all required setup steps passed, False otherwise.
+        """
+        if not test_case.setup_steps:
+            return True
+
+        logger.info(
+            "Executing setup steps",
+            extra={
+                "test_case": test_case.name,
+                "num_setup_steps": len(test_case.setup_steps),
+            },
+        )
+
+        for step in test_case.setup_steps:
+            step_result = await self._execute_test_step(step, test_case, case_result)
+            case_result.setup_step_results.append(step_result)
+
+            if step_result.status == TestStatus.FAILED and not step.optional:
+                logger.error(
+                    "Required setup step failed, skipping test case",
+                    extra={
+                        "step_number": step.step_number,
+                        "action": step.action,
+                        "test_case": test_case.name,
+                    },
+                )
+                return False
+
+        return True
+
+    async def _execute_cleanup_steps(
+        self,
+        test_case: TestCase,
+        case_result: TestCaseResult,
+    ) -> None:
+        """Execute cleanup_steps after the main test steps.
+
+        Cleanup failures are logged but never block subsequent test cases.
+        """
+        if not test_case.cleanup_steps:
+            return
+
+        logger.info(
+            "Executing cleanup steps",
+            extra={
+                "test_case": test_case.name,
+                "num_cleanup_steps": len(test_case.cleanup_steps),
+            },
+        )
+
+        for step in test_case.cleanup_steps:
+            step_result = await self._execute_test_step(step, test_case, case_result)
+            case_result.cleanup_step_results.append(step_result)
+
+            if step_result.status == TestStatus.FAILED:
+                logger.warning(
+                    "Cleanup step failed (non-blocking)",
+                    extra={
+                        "step_number": step.step_number,
+                        "action": step.action,
+                        "test_case": test_case.name,
+                    },
+                )
+
     async def _execute_test_case(self, test_case: TestCase) -> TestCaseResult:
         """Execute a single test case with all its steps."""
         logger.info(
@@ -510,6 +581,7 @@ class TestRunner(BaseAgent):
                 "test_case_name": test_case.name,
                 "priority": test_case.priority.value,
                 "total_steps": len(test_case.steps),
+                "setup_steps": len(test_case.setup_steps),
             },
         )
 
@@ -543,6 +615,12 @@ class TestRunner(BaseAgent):
             if not await self._verify_prerequisites(test_case.prerequisites):
                 case_result.status = TestStatus.SKIPPED
                 case_result.error_message = "Prerequisites not met"
+                return case_result
+
+            # Execute setup steps (navigate to test case starting state)
+            if not await self._execute_setup_steps(test_case, case_result):
+                case_result.status = TestStatus.SKIPPED
+                case_result.error_message = "Setup step failed"
                 return case_result
 
             # Track if any step failed
@@ -614,6 +692,8 @@ class TestRunner(BaseAgent):
             case_result.error_message = str(e)
 
         finally:
+            # Run cleanup steps regardless of test outcome
+            await self._execute_cleanup_steps(test_case, case_result)
             case_result.completed_at = datetime.now(timezone.utc)
 
         return case_result
