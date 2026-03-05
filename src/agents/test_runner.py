@@ -1530,8 +1530,17 @@ Respond with a JSON object containing an "actions" array where every item follow
                             if self._test_state and isinstance(self._test_state.context, dict)
                             else {}
                         )
-                        pkg = state_ctx.get("app_package") or ""
-                        activity = state_ctx.get("app_activity") or ""
+                        entry_setup = state_ctx.get("entry_setup") or {}
+                        pkg = (
+                            state_ctx.get("app_package")
+                            or entry_setup.get("app_package")
+                            or ""
+                        )
+                        activity = (
+                            state_ctx.get("app_activity")
+                            or entry_setup.get("app_activity")
+                            or ""
+                        )
                         if pkg:
                             await driver.launch_app(pkg, activity or None)
                     await asyncio.sleep(2)
