@@ -218,7 +218,9 @@ class TestExecutionReport:
 
         return md
 
-    def save(self, output_dir: Path, formats: list[str] = None) -> dict[str, Path]:
+    def save(
+        self, output_dir: Path, formats: list[str] | None = None
+    ) -> dict[str, Path]:
         """
         Save report in multiple formats.
 
@@ -237,7 +239,7 @@ class TestExecutionReport:
         timestamp = self.generated_at.strftime("%Y%m%d_%H%M%S")
         base_name = f"test_report_{self.test_metrics.test_name}_{timestamp}"
 
-        saved_files = {}
+        saved_files: dict[str, Path] = {}
 
         if "json" in formats:
             json_path = output_dir / f"{base_name}.json"
@@ -336,7 +338,7 @@ class ReportGenerator:
         }
 
     def _calculate_trend(
-        self, metric_name: str, windows: list[int] = None
+        self, metric_name: str, windows: list[int] | None = None
     ) -> dict[str, float]:
         """Calculate metric trends over different time windows."""
         if windows is None:
@@ -376,9 +378,9 @@ class ReportGenerator:
 
         return recommendations
 
-    def save_all_reports(self) -> dict[str, Path]:
+    def save_all_reports(self) -> dict[str, Path | dict[str, Path]]:
         """Generate and save all report types."""
-        saved_files = {}
+        saved_files: dict[str, Path | dict[str, Path]] = {}
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         # Summary report
@@ -674,6 +676,9 @@ class TestReporter:
         Returns:
             Tuple of (report_path, actions_path) where actions_path may be None
         """
+        if test_state.test_report is None:
+            raise ValueError("Cannot generate report without a test report")
+
         # Use enhanced reporter for HTML format
         if format == "html":
             from src.monitoring.enhanced_reporter import EnhancedReporter
@@ -693,9 +698,7 @@ class TestReporter:
             error_report=self._extract_error_report(test_state),
             journal=None,  # TODO: Extract journal if available
             config=self.config,
-            artifacts=test_state.test_report.artifacts
-            if test_state.test_report
-            else None,
+            artifacts=test_state.test_report.artifacts,
         )
 
         # Add bug reports to the report data
@@ -746,6 +749,9 @@ class TestReporter:
         """Convert TestState to TestMetrics."""
         # Calculate metrics from test report
         test_report = test_state.test_report
+        if test_report is None:
+            raise ValueError("Cannot convert test state without a test report")
+
         total_steps = sum(tc.steps_total for tc in test_report.test_cases)
         passed_steps = sum(tc.steps_completed for tc in test_report.test_cases)
         failed_steps = sum(tc.steps_failed for tc in test_report.test_cases)
@@ -776,13 +782,13 @@ class TestReporter:
             pass
 
         # Get test info from test report
-        test_id = test_state.test_report.test_plan_id
-        test_name = test_state.test_report.test_plan_name
-        start_time = test_state.test_report.started_at
-        end_time = test_state.test_report.completed_at or now
+        test_id = test_report.test_plan_id
+        test_name = test_report.test_plan_name
+        start_time = test_report.started_at
+        end_time = test_report.completed_at or now
         skipped_steps = sum(
             tc.steps_total - tc.steps_completed - tc.steps_failed
-            for tc in test_state.test_report.test_cases
+            for tc in test_report.test_cases
         )
 
         return TestMetrics(

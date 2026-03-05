@@ -73,7 +73,6 @@ class WorkflowCoordinator:
 
         # Agent instances
         self._agents: dict[str, Any] = {}
-        self._agent_tasks: dict[str, asyncio.Task] = {}
 
         # Coordinator state
         self._state = CoordinatorState.IDLE
@@ -142,37 +141,15 @@ class WorkflowCoordinator:
         if "test_runner" in self._agents:
             self._agents["test_runner"].action_agent = self._agents["action_agent"]
 
-        # Register agents with message bus
-        for agent_name, agent in self._agents.items():
+        # Register agents with the event bus for diagnostics.
+        for agent_name, _agent in self._agents.items():
             self.message_bus.register_agent(agent_name)
-
-            # Subscribe to relevant messages
-            await self._setup_agent_subscriptions(agent_name, agent)
 
         # Register state callbacks
         self.state_manager.register_state_callback(self._on_state_change)
 
         self._state = CoordinatorState.IDLE
         logger.info("Workflow coordinator initialized successfully")
-
-    async def _setup_agent_subscriptions(self, agent_name: str, agent: Any) -> None:
-        """Set up message subscriptions for an agent."""
-        if agent_name == "test_planner":
-            self.message_bus.subscribe(
-                MessageType.PLAN_TEST, self._handle_plan_request, agent_name
-            )
-
-        elif agent_name == "test_runner":
-            self.message_bus.subscribe(
-                MessageType.EXECUTE_STEP, self._handle_execute_step, agent_name
-            )
-
-        elif agent_name == "action_agent":
-            self.message_bus.subscribe(
-                MessageType.DETERMINE_ACTION, self._handle_determine_action, agent_name
-            )
-
-        # Evaluator agent removed - evaluation now handled by Action Agent
 
     async def execute_test_from_requirements(
         self,
@@ -211,13 +188,10 @@ class WorkflowCoordinator:
                 triage_outcome = triage_result or ScopeTriageResult()
                 self._plan_triage_results[test_plan.plan_id] = triage_outcome
 
-                await self.message_bus.publish(
-                    AgentMessage(
-                        from_agent="test_planner",
-                        to_agent="broadcast",
-                        message_type=MessageType.PLAN_CREATED,
-                        content={"test_plan": test_plan.model_dump()},
-                    )
+                await self._publish_event(
+                    from_agent="test_planner",
+                    message_type=MessageType.PLAN_CREATED,
+                    content={"test_plan": test_plan.model_dump()},
                 )
             else:
                 test_plan, triage_outcome = await self._generate_test_plan(
@@ -255,16 +229,6 @@ class WorkflowCoordinator:
         if not planner:
             raise RuntimeError("Test Planner agent not available")
 
-        # Send plan request
-        message = AgentMessage(
-            from_agent="coordinator",
-            to_agent="test_planner",
-            message_type=MessageType.PLAN_TEST,
-            content={"requirements": requirements},
-        )
-
-        await self.message_bus.publish(message)
-
         # Create test plan via two-pass flow
         test_plan, triage_result = await run_scope_triage_and_plan(
             requirements=requirements,
@@ -276,14 +240,11 @@ class WorkflowCoordinator:
         # Store triage result for downstream consumption
         self._plan_triage_results[test_plan.plan_id] = triage_result
 
-        # Notify plan created
-        await self.message_bus.publish(
-            AgentMessage(
-                from_agent="test_planner",
-                to_agent="broadcast",
-                message_type=MessageType.PLAN_CREATED,
-                content={"test_plan": test_plan.model_dump()},
-            )
+        # Notify plan created for diagnostics.
+        await self._publish_event(
+            from_agent="test_planner",
+            message_type=MessageType.PLAN_CREATED,
+            content={"test_plan": test_plan.model_dump()},
         )
 
         return test_plan, triage_result
@@ -297,6 +258,8 @@ class WorkflowCoordinator:
         runner = self._agents.get("test_runner")
         if not runner:
             raise RuntimeError("Test Runner agent not available")
+        if not isinstance(runner, TestRunner):
+            raise RuntimeError("Configured test_runner agent has unexpected type")
 
         # Create execution task
         test_task = asyncio.create_task(
@@ -336,14 +299,9 @@ class WorkflowCoordinator:
         # Update state
         await self.state_manager.update_test_state(test_id, StateTransition.PAUSE)
 
-        # Send pause message
-        await self.message_bus.publish(
-            AgentMessage(
-                from_agent="coordinator",
-                to_agent="test_runner",
-                message_type=MessageType.PAUSE_TEST,
-                content={"test_id": str(test_id)},
-            )
+        await self._publish_event(
+            message_type=MessageType.PAUSE_TEST,
+            content={"test_id": str(test_id)},
         )
 
     async def resume_test(self, test_id: UUID) -> None:
@@ -353,14 +311,9 @@ class WorkflowCoordinator:
         # Update state
         await self.state_manager.update_test_state(test_id, StateTransition.RESUME)
 
-        # Send resume message
-        await self.message_bus.publish(
-            AgentMessage(
-                from_agent="coordinator",
-                to_agent="test_runner",
-                message_type=MessageType.RESUME_TEST,
-                content={"test_id": str(test_id)},
-            )
+        await self._publish_event(
+            message_type=MessageType.RESUME_TEST,
+            content={"test_id": str(test_id)},
         )
 
     async def stop_test(self, test_id: UUID) -> None:
@@ -380,33 +333,10 @@ class WorkflowCoordinator:
             test_id, StateTransition.ABORT, {"reason": "user_requested"}
         )
 
-        # Send stop message
-        await self.message_bus.publish(
-            AgentMessage(
-                from_agent="coordinator",
-                to_agent="broadcast",
-                message_type=MessageType.STOP_TEST,
-                content={"test_id": str(test_id)},
-            )
+        await self._publish_event(
+            message_type=MessageType.STOP_TEST,
+            content={"test_id": str(test_id)},
         )
-
-    async def _handle_plan_request(self, message: AgentMessage) -> None:
-        """Handle test plan request."""
-        logger.debug("Handling plan request")
-        # Implementation handled by direct agent call
-        pass
-
-    async def _handle_execute_step(self, message: AgentMessage) -> None:
-        """Handle step execution request."""
-        logger.debug("Handling execute step")
-        # Implementation handled by Test Runner
-        pass
-
-    async def _handle_determine_action(self, message: AgentMessage) -> None:
-        """Handle action determination request."""
-        logger.debug("Handling determine action")
-        # Implementation handled by Action Agent
-        pass
 
     async def _on_state_change(
         self, test_id: UUID, test_state: TestState, transition: StateTransition
@@ -417,17 +347,29 @@ class WorkflowCoordinator:
             extra={"status": test_state.status},
         )
 
-        # Broadcast state change
+        await self._publish_event(
+            message_type=MessageType.STATUS_UPDATE,
+            content={
+                "test_id": str(test_id),
+                "status": test_state.status,
+                "transition": transition,
+            },
+        )
+
+    async def _publish_event(
+        self,
+        *,
+        message_type: MessageType,
+        content: dict[str, Any],
+        from_agent: str = "coordinator",
+    ) -> None:
+        """Publish a diagnostics event without implying bus-driven control flow."""
         await self.message_bus.publish(
             AgentMessage(
-                from_agent="coordinator",
+                from_agent=from_agent,
                 to_agent="broadcast",
-                message_type=MessageType.STATUS_UPDATE,
-                content={
-                    "test_id": str(test_id),
-                    "status": test_state.status,
-                    "transition": transition,
-                },
+                message_type=message_type,
+                content=content,
             )
         )
 

@@ -75,12 +75,8 @@ class ExecutionResult(BaseModel):
     execution_time_ms: float = Field(
         ..., description="Execution duration in milliseconds"
     )
-    error_message: str | None = Field(
-        None, description="Error message if execution failed"
-    )
-    error_traceback: str | None = Field(
-        None, description="Full error traceback if available"
-    )
+    error_message: str | None = None
+    error_traceback: str | None = None
     environment_logs: list[str] = Field(
         default_factory=list, description="Environment logs"
     )
@@ -121,10 +117,10 @@ class EnvironmentState(BaseModel):
     viewport_size: tuple[int, int] = Field(
         ..., description="Viewport dimensions (width, height)"
     )
-    screenshot: bytes | None = Field(None, description="Screenshot data")
-    screenshot_path: str | None = Field(None, description="Path to saved screenshot")
-    dom_ready_state: str | None = Field(None, description="Document ready state")
-    active_element: str | None = Field(None, description="Currently focused element")
+    screenshot: bytes | None = None
+    screenshot_path: str | None = None
+    dom_ready_state: str | None = None
+    active_element: str | None = None
 
 
 class ComputerToolTurn(BaseModel):
@@ -136,33 +132,20 @@ class ComputerToolTurn(BaseModel):
         default_factory=dict,
         description="Raw action payload supplied by the model",
     )
-    status: str = Field(
-        "pending",
-        description="Execution status (pending|executed|failed|skipped)",
-    )
-    error_message: str | None = Field(
-        None, description="Error captured during execution or validation"
-    )
-    screenshot_path: str | None = Field(
-        None, description="Path to screenshot captured after this action"
-    )
-    response_id: str | None = Field(
-        None, description="Response ID that produced this action"
-    )
+    status: str = "pending"
+    error_message: str | None = None
+    screenshot_path: str | None = None
+    response_id: str | None = None
     pending_safety_checks: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Safety checks returned alongside this action",
     )
-    acknowledged: bool = Field(
-        False, description="Whether pending safety checks were acknowledged"
-    )
+    acknowledged: bool = False
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when the action was processed",
     )
-    latency_ms: float | None = Field(
-        None, description="Latency of executing the action in milliseconds"
-    )
+    latency_ms: float | None = None
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata for observability"
     )
@@ -203,7 +186,7 @@ class EnhancedActionResult(BaseModel):
     timestamp_start: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
-    timestamp_end: datetime | None = Field(None)
+    timestamp_end: datetime | None = None
 
     # Original request
     test_step: TestStep = Field(..., description="Original test step")
@@ -213,25 +196,17 @@ class EnhancedActionResult(BaseModel):
     validation: ValidationResult = Field(..., description="Validation phase results")
 
     # Coordinate determination
-    coordinates: CoordinateResult | None = Field(
-        None, description="Coordinate determination results"
-    )
+    coordinates: CoordinateResult | None = None
 
     # Environment states
-    environment_state_before: EnvironmentState | None = Field(
-        None, description="Environment state before action"
-    )
-    environment_state_after: EnvironmentState | None = Field(
-        None, description="Environment state after action"
-    )
+    environment_state_before: EnvironmentState | None = None
+    environment_state_after: EnvironmentState | None = None
 
     # Execution
-    execution: ExecutionResult | None = Field(
-        None, description="Execution phase results"
-    )
+    execution: ExecutionResult | None = None
 
     # AI Analysis
-    ai_analysis: AIAnalysis | None = Field(None, description="AI analysis of results")
+    ai_analysis: AIAnalysis | None = None
     computer_actions: list[ComputerToolTurn] = Field(
         default_factory=list,
         description="Sequence of Computer Use tool actions executed",
@@ -240,40 +215,24 @@ class EnhancedActionResult(BaseModel):
         default_factory=list,
         description="Safety check events encountered during execution",
     )
-    final_model_output: str | None = Field(
-        None,
-        description="Final assistant message returned by the model after completion",
-    )
+    final_model_output: str | None = None
     response_ids: list[str] = Field(
         default_factory=list,
         description="OpenAI response IDs involved in this action loop",
     )
-    cache_label: str | None = Field(
-        None, description="Cache label used for coordinate caching"
-    )
-    cache_action: str | None = Field(
-        None, description="Cache action type associated with the label"
-    )
-    cache_hit: bool = Field(False, description="Whether the coordinate cache was used")
-    cache_coordinates: tuple[int, int] | None = Field(
-        None, description="Cached pixel coordinates used for the action"
-    )
-    cache_resolution: tuple[int, int] | None = Field(
-        None, description="Resolution associated with cached coordinates"
-    )
+    cache_label: str | None = None
+    cache_action: str | None = None
+    cache_hit: bool = False
+    cache_coordinates: tuple[int, int] | None = None
+    cache_resolution: tuple[int, int] | None = None
     driver_actions: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Recorded driver actions for execution replay",
     )
 
     # Overall status
-    overall_success: bool = Field(
-        False, description="Whether the entire action completed successfully"
-    )
-    failure_phase: str | None = Field(
-        None,
-        description="Which phase failed: validation|coordinates|execution|analysis",
-    )
+    overall_success: bool = False
+    failure_phase: str | None = None
 
     def dict_for_compatibility(self) -> dict[str, Any]:
         """

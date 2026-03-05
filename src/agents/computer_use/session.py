@@ -17,20 +17,30 @@ from uuid import uuid4
 from openai import AsyncOpenAI
 
 try:  # Optional dependency for Gemini computer-use
-    import google.genai as genai
+    import google.genai as _genai
 except Exception:  # pragma: no cover - optional dependency
-    genai = None
+    genai: Any | None = None
+else:
+    genai = _genai
 
 try:  # Optional dependency for Claude computer-use
-    from anthropic import AsyncAnthropic as _AsyncAnthropic
+    from anthropic import AsyncAnthropic as _AsyncAnthropicType
 except Exception:  # pragma: no cover - optional dependency
-    _AsyncAnthropic = None
+    _AsyncAnthropic: type[Any] | None = None
+else:
+    _AsyncAnthropic = _AsyncAnthropicType
 
 from src.config.settings import Settings
 from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
 from src.core.interfaces import AutomationDriver
 from src.desktop.cache import CoordinateCache
 from src.monitoring.debug_logger import DebugLogger
+from src.runtime.environment import (
+    RuntimeEnvironmentName,
+    coordinate_cache_path_for_environment,
+    normalize_runtime_environment_name,
+    runtime_environment_spec,
+)
 from src.utils.model_logging import ModelCallLogger, get_model_logger
 
 logger = logging.getLogger(__name__)
@@ -231,10 +241,9 @@ class ComputerUseSession:
             getattr(self._settings, "anthropic_cu_max_tokens", 16384)
         )
         self._default_environment = self._normalize_environment_name(environment)
-        coordinate_cache_path = (
-            self._settings.mobile_coordinate_cache_path
-            if self._default_environment == "mobile_adb"
-            else self._settings.desktop_coordinate_cache_path
+        coordinate_cache_path = coordinate_cache_path_for_environment(
+            self._settings,
+            self._default_environment,
         )
         self._coordinate_cache = coordinate_cache or CoordinateCache(
             coordinate_cache_path
@@ -2520,7 +2529,9 @@ class ComputerUseSession:
                 )
             )
         ]
-        if self._normalize_environment_name(environment) != "mobile_adb":
+        if not runtime_environment_spec(
+            self._normalize_environment_name(environment)
+        ).is_mobile:
             tools.append(self._google_modifier_click_tools())
         return tools
 
@@ -3687,33 +3698,31 @@ class ComputerUseSession:
         return '{"' in raw_text or "[{" in raw_text
 
     @staticmethod
-    def _normalize_environment_name(environment: str | None) -> str:
-        value = (environment or "desktop").strip().lower()
-        if value in {"unspecified", "env_unspecified", "default"}:
-            return "unspecified"
-        if value in {"mobile", "mobile_adb", "android", "phone", "tablet"}:
-            return "mobile_adb"
-        if value in {"browser", "web"}:
-            return "browser"
-        if value in {"linux", "desktop", "os", "system"}:
-            return "desktop"
-        return "desktop"
+    def _normalize_environment_name(
+        environment: str | None,
+    ) -> RuntimeEnvironmentName:
+        return normalize_runtime_environment_name(environment)
 
     @staticmethod
     def _map_openai_environment(env_mode: str) -> str:
-        return "browser" if env_mode == "browser" else "linux"
+        return str(
+            runtime_environment_spec(
+                normalize_runtime_environment_name(env_mode)
+            ).openai_computer_environment
+        )
 
     @staticmethod
     def _map_google_environment(env_mode: str) -> Any:
         from google.genai import types  # type: ignore
 
-        if env_mode == "browser":
-            return getattr(
-                types.Environment,
-                "ENVIRONMENT_BROWSER",
-                types.Environment.ENVIRONMENT_UNSPECIFIED,
-            )
-        return types.Environment.ENVIRONMENT_UNSPECIFIED
+        environment_name = runtime_environment_spec(
+            normalize_runtime_environment_name(env_mode)
+        ).google_computer_environment_name
+        return getattr(
+            types.Environment,
+            environment_name,
+            types.Environment.ENVIRONMENT_UNSPECIFIED,
+        )
 
     @staticmethod
     def _wrap_goal_for_mobile(
@@ -3747,8 +3756,14 @@ class ComputerUseSession:
         from google.genai import types  # type: ignore
 
         coord_props = {
-            "x": types.Schema(type="NUMBER", description="X coordinate (0-999 scale)"),
-            "y": types.Schema(type="NUMBER", description="Y coordinate (0-999 scale)"),
+            "x": types.Schema(
+                type=types.Type.NUMBER,
+                description="X coordinate (0-999 scale)",
+            ),
+            "y": types.Schema(
+                type=types.Type.NUMBER,
+                description="Y coordinate (0-999 scale)",
+            ),
         }
         return types.Tool(
             function_declarations=[
@@ -3760,7 +3775,7 @@ class ComputerUseSession:
                         "selecting multiple files in a file picker."
                     ),
                     parameters=types.Schema(
-                        type="OBJECT",
+                        type=types.Type.OBJECT,
                         properties=coord_props,
                         required=["x", "y"],
                     ),
@@ -3773,7 +3788,7 @@ class ComputerUseSession:
                         "selecting a range of files in a file picker."
                     ),
                     parameters=types.Schema(
-                        type="OBJECT",
+                        type=types.Type.OBJECT,
                         properties=coord_props,
                         required=["x", "y"],
                     ),
@@ -3812,7 +3827,10 @@ class ComputerUseSession:
 
     @property
     def _action_timeout_seconds(self) -> float:
-        return max(self._settings.actions_computer_tool_action_timeout_ms / 1000.0, 0.5)
+        return max(
+            float(self._settings.actions_computer_tool_action_timeout_ms) / 1000.0,
+            0.5,
+        )
 
 
 def encode_png_base64(data: bytes) -> str:

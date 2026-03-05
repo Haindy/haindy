@@ -7,7 +7,7 @@ import logging
 import re
 import sys
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, MutableMapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -79,7 +79,7 @@ HUMAN_LOG_FIELD_LABELS = {
 class JSONFormatter(logging.Formatter):
     """JSON log formatter with optional sanitization."""
 
-    def __init__(self, *args, sanitize: bool = True, **kwargs):
+    def __init__(self, *args: Any, sanitize: bool = True, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.sanitize = sanitize
         self.sanitizer = DataSanitizer() if sanitize else None
@@ -283,7 +283,9 @@ class HumanReadableFormatter(logging.Formatter):
 class AgentLogAdapter(logging.LoggerAdapter):
     """Log adapter for agent-specific logging."""
 
-    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def process(
+        self, msg: str, kwargs: MutableMapping[str, Any]
+    ) -> tuple[str, MutableMapping[str, Any]]:
         """Add agent context to log records."""
         extra = kwargs.get("extra", {})
         extra.update(self.extra)
@@ -341,6 +343,7 @@ def setup_logging(
         root_logger.removeHandler(handler)
 
     # Configure console handler
+    console_handler: logging.Handler
     if format_type == "json":
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(JSONFormatter(sanitize=sanitize_logs))
@@ -400,7 +403,7 @@ def setup_logging(
     return root_logger
 
 
-def get_logger(name: str, **context: Any) -> logging.Logger:
+def get_logger(name: str, **context: Any) -> logging.Logger | AgentLogAdapter:
     """
     Get a logger instance with optional context.
 

@@ -10,6 +10,9 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.interfaces import ConfigProvider
+from src.runtime.environment import (
+    normalize_automation_backend as normalize_automation_backend_value,
+)
 
 AGENT_ENV_PREFIX: dict[str, str] = {
     "scope_triage": "HAINDY_SCOPE_TRIAGE",
@@ -498,10 +501,7 @@ class Settings(BaseSettings):
     @field_validator("automation_backend")
     @classmethod
     def normalize_automation_backend(cls, value: str) -> str:
-        normalized = (value or "desktop").strip().lower()
-        if normalized not in {"desktop", "mobile_adb"}:
-            return "desktop"
-        return normalized
+        return normalize_automation_backend_value(value)
 
     @field_validator("cu_provider")
     @classmethod

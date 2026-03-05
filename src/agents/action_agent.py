@@ -25,6 +25,10 @@ from src.desktop.cache import CoordinateCache
 from src.desktop.execution_replay import DriverActionError, normalize_driver_action
 from src.monitoring.debug_logger import get_debug_logger
 from src.monitoring.logger import get_logger
+from src.runtime.environment import (
+    coordinate_cache_path_for_environment,
+    resolve_runtime_environment_from_context,
+)
 
 OBSERVE_ONLY_ALLOWED_ACTIONS: frozenset[str] = frozenset(
     {"screenshot", "wait", "scroll"}
@@ -283,8 +287,10 @@ class ActionAgent(BaseAgent):
                 cache = self.automation_driver.coordinate_cache
             except Exception:
                 cache = self._coordinate_cache
-        elif environment == "mobile_adb":
-            cache = CoordinateCache(self.settings.mobile_coordinate_cache_path)
+        else:
+            cache = CoordinateCache(
+                coordinate_cache_path_for_environment(self.settings, environment)
+            )
 
         return ComputerUseSession(
             client=self.client.client,
@@ -298,15 +304,7 @@ class ActionAgent(BaseAgent):
 
     @staticmethod
     def _resolve_environment(test_context: dict[str, Any]) -> str:
-        if not isinstance(test_context, dict):
-            return "desktop"
-        backend = str(test_context.get("automation_backend") or "").strip().lower()
-        target_type = str(test_context.get("target_type") or "").strip().lower()
-        if backend == "mobile_adb" or target_type == "mobile_adb":
-            return "mobile_adb"
-        if backend in {"web", "browser"} or target_type in {"web", "browser"}:
-            return "browser"
-        return "desktop"
+        return resolve_runtime_environment_from_context(test_context).name
 
     @staticmethod
     def _extract_cache_metadata(

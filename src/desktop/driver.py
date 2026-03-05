@@ -97,7 +97,12 @@ class DesktopDriver(AutomationDriver):
         await self.start()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         await self.stop()
 
     async def navigate(self, url: str) -> None:
@@ -116,12 +121,14 @@ class DesktopDriver(AutomationDriver):
         modifiers: list[str] | None = None,
     ) -> None:
         await self._ensure_ready()
+        virtual_input = self.virtual_input
+        assert virtual_input is not None
         if modifiers:
-            await self.virtual_input.click(
+            await virtual_input.click(
                 x, y, button=button, click_count=click_count, modifiers=modifiers
             )
         else:
-            await self.virtual_input.click(x, y, button=button, click_count=click_count)
+            await virtual_input.click(x, y, button=button, click_count=click_count)
         call_info: dict[str, object] = {
             "x": x,
             "y": y,
@@ -134,7 +141,9 @@ class DesktopDriver(AutomationDriver):
 
     async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
         await self._ensure_ready()
-        await self.virtual_input.move(x, y, steps=steps)
+        virtual_input = self.virtual_input
+        assert virtual_input is not None
+        await virtual_input.move(x, y, steps=steps)
         self._capture_call("move_mouse", {"x": x, "y": y, "steps": steps})
 
     async def drag_mouse(
@@ -146,7 +155,9 @@ class DesktopDriver(AutomationDriver):
         steps: int = 1,
     ) -> None:
         await self._ensure_ready()
-        await self.virtual_input.drag((start_x, start_y), (end_x, end_y), steps=steps)
+        virtual_input = self.virtual_input
+        assert virtual_input is not None
+        await virtual_input.drag((start_x, start_y), (end_x, end_y), steps=steps)
         self._capture_call(
             "drag_mouse",
             {
@@ -160,12 +171,16 @@ class DesktopDriver(AutomationDriver):
 
     async def type_text(self, text: str) -> None:
         await self._ensure_ready()
-        await self.virtual_input.type_text(text)
+        virtual_input = self.virtual_input
+        assert virtual_input is not None
+        await virtual_input.type_text(text)
         self._capture_call("type_text", {"length": len(text)})
 
     async def press_key(self, key: str | Iterable[str]) -> None:
         await self._ensure_ready()
-        await self.virtual_input.press_key(key)
+        virtual_input = self.virtual_input
+        assert virtual_input is not None
+        await virtual_input.press_key(key)
         self._capture_call(
             "press_key",
             {"key": list(key) if isinstance(key, (list, tuple, set)) else key},
@@ -186,7 +201,9 @@ class DesktopDriver(AutomationDriver):
         self, x: int = 0, y: int = 0, smooth: bool = True
     ) -> None:
         await self._ensure_ready()
-        await self.virtual_input.scroll(x=x, y=y)
+        virtual_input = self.virtual_input
+        assert virtual_input is not None
+        await virtual_input.scroll(x=x, y=y)
         self._capture_call("scroll_by_pixels", {"x": x, "y": y, "smooth": smooth})
 
     async def screenshot(self) -> bytes:

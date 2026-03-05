@@ -40,7 +40,7 @@ class StateManager:
     state persistence for recovery.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the state manager."""
         # Current test states by test ID
         self._test_states: dict[UUID, TestState] = {}

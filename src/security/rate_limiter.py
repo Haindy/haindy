@@ -83,7 +83,9 @@ class TokenBucket:
         """
         self.capacity = capacity
         self.refill_rate = refill_rate
-        self.tokens = initial_tokens if initial_tokens is not None else capacity
+        self.tokens: float = float(
+            initial_tokens if initial_tokens is not None else capacity
+        )
         self.last_refill = time.monotonic()
         self._lock = asyncio.Lock()
 

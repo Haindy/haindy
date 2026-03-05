@@ -58,7 +58,7 @@ class MessageBus:
     asynchronously while maintaining loose coupling.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the message bus."""
         # Subscribers mapped by message type
         self._subscribers: dict[str, list[Callable]] = defaultdict(list)

@@ -17,7 +17,7 @@ from rich.table import Table
 from src.agents.scope_triage import ScopeTriageAgent
 from src.agents.situational_agent import SituationalAgent
 from src.agents.test_planner import TestPlannerAgent
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.desktop.controller import DesktopController
 from src.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
@@ -30,6 +30,7 @@ from src.orchestration.communication import MessageBus
 from src.orchestration.coordinator import WorkflowCoordinator
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.orchestration.state_manager import StateManager
+from src.runtime.environment import normalize_automation_backend
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
 
@@ -143,7 +144,7 @@ Examples:
 
 
 def _create_planning_agents(
-    settings,
+    settings: Settings,
 ) -> tuple[ScopeTriageAgent, TestPlannerAgent, SituationalAgent]:
     """Instantiate planning + setup agents from current settings."""
     triage_cfg = settings.get_agent_model_config("scope_triage")
@@ -186,6 +187,7 @@ async def run_test(
     automation_backend: str = "desktop",
 ) -> int:
     """Run a test with mandatory requirements and context inputs."""
+    automation_backend = normalize_automation_backend(automation_backend)
     automation_controller: DesktopController | MobileController | None = None
     coordinator: WorkflowCoordinator | None = None
     screen_recorder: ScreenRecorder | None = None
@@ -450,7 +452,7 @@ async def _create_coordinator_stack(
     backend: str = "desktop",
 ) -> tuple[DesktopController | MobileController, WorkflowCoordinator]:
     """Build and initialize the automation backend/coordinator stack."""
-    normalized_backend = (backend or "desktop").strip().lower()
+    normalized_backend = normalize_automation_backend(backend)
     if normalized_backend == "mobile_adb":
         automation_controller: DesktopController | MobileController = MobileController()
     else:
@@ -677,7 +679,9 @@ async def async_main(args: list[str] | None = None) -> int:
     automation_backend = (
         "mobile_adb"
         if parsed_args.mobile
-        else str(getattr(settings, "automation_backend", "desktop") or "desktop")
+        else normalize_automation_backend(
+            getattr(settings, "automation_backend", "desktop")
+        )
     )
 
     return await run_test(

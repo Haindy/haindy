@@ -18,8 +18,8 @@ try:
     from src.monitoring.logger import get_run_id
 except Exception:  # pragma: no cover - defensive import
 
-    def get_run_id():
-        return "unknown"  # type: ignore[assignment]
+    def get_run_id() -> str:
+        return "unknown"
 
 
 def _now_iso() -> str:

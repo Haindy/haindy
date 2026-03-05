@@ -83,7 +83,7 @@ class TestPlanFormatter:
         lines.append(f"- **Total Test Steps**: {total_steps}")
 
         # Priority breakdown
-        priority_counts = {}
+        priority_counts: dict[str, int] = {}
         for tc in test_plan.test_cases:
             priority_counts[tc.priority.value] = (
                 priority_counts.get(tc.priority.value, 0) + 1

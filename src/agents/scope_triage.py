@@ -5,6 +5,7 @@ and blocking questions from mixed requirement bundles.
 """
 
 import re
+from typing import Any
 
 from src.agents.base_agent import BaseAgent
 from src.config.agent_prompts import SCOPE_TRIAGE_SYSTEM_PROMPT
@@ -17,7 +18,7 @@ logger = get_logger(__name__)
 class ScopeTriageAgent(BaseAgent):
     """Agent responsible for extracting scoped testing inputs from raw requirements."""
 
-    def __init__(self, name: str = "ScopeTriage", **kwargs) -> None:
+    def __init__(self, name: str = "ScopeTriage", **kwargs: Any) -> None:
         super().__init__(name=name, **kwargs)
         self.system_prompt = SCOPE_TRIAGE_SYSTEM_PROMPT
         # Lower temperature for deterministic extraction

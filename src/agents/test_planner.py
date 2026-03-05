@@ -6,6 +6,7 @@ Analyzes requirements/PRDs and creates structured test plans.
 import inspect
 import re
 from pathlib import Path
+from typing import Any
 
 from src.agents.base_agent import BaseAgent
 from src.agents.formatters import TestPlanFormatter
@@ -33,7 +34,7 @@ class TestPlannerAgent(BaseAgent):
 
     __test__ = False
 
-    def __init__(self, name: str = "TestPlanner", **kwargs):
+    def __init__(self, name: str = "TestPlanner", **kwargs: Any) -> None:
         """Initialize the Test Planner Agent."""
         super().__init__(name=name, **kwargs)
         self.system_prompt = TEST_PLANNER_SYSTEM_PROMPT
@@ -42,8 +43,8 @@ class TestPlannerAgent(BaseAgent):
         self,
         messages: list[dict[str, str]],
         stream_observer: ResponseStreamObserver | None = None,
-        **kwargs,
-    ) -> dict:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Get completion from OpenAI."""
         response = await self.call_openai(
             messages=messages,
@@ -70,7 +71,7 @@ class TestPlannerAgent(BaseAgent):
     async def create_test_plan(
         self,
         requirements: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         curated_scope: str | None = None,
         ambiguous_points: list[str] | None = None,
         stream_observer: ResponseStreamObserver | None = None,
@@ -148,7 +149,7 @@ class TestPlannerAgent(BaseAgent):
     def _build_requirements_message(
         self,
         requirements: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         curated_scope: str | None = None,
         ambiguous_points: list[str] | None = None,
     ) -> str:
@@ -264,7 +265,7 @@ IMPORTANT:
 
         return "\n".join(message_parts)
 
-    def _parse_test_plan_response(self, response: dict) -> TestPlan:
+    def _parse_test_plan_response(self, response: dict[str, Any]) -> TestPlan:
         """Parse the AI response into a TestPlan object."""
         try:
             # Extract the content - it's already a dict when using JSON response format
@@ -273,12 +274,14 @@ IMPORTANT:
 
             # If content is a string, parse it. If it's already a dict, use it directly
             if isinstance(content, str):
-                plan_data = json.loads(content)
-            else:
+                plan_data: dict[str, Any] = json.loads(content)
+            elif isinstance(content, dict):
                 plan_data = content
+            else:
+                raise ValueError("Test plan response content must be a JSON object")
 
             # Parse test cases
-            test_cases = []
+            test_cases: list[TestCase] = []
             for case_data in plan_data.get("test_cases", []):
                 # Parse priority
                 priority_map = {
@@ -293,7 +296,7 @@ IMPORTANT:
                 )
 
                 # Parse steps for this test case
-                steps = []
+                steps: list[TestStep] = []
                 for default_step_number, step_data in enumerate(
                     case_data.get("steps", []),
                     start=1,
@@ -337,7 +340,7 @@ IMPORTANT:
                     steps.append(step)
 
                 # Parse setup_steps for this test case
-                setup_steps = []
+                setup_steps: list[TestStep] = []
                 for default_setup_num, setup_data in enumerate(
                     case_data.get("setup_steps", []),
                     start=1,
@@ -374,7 +377,7 @@ IMPORTANT:
                     setup_steps.append(setup_step)
 
                 # Parse cleanup_steps for this test case
-                cleanup_steps = []
+                cleanup_steps: list[TestStep] = []
                 for default_cleanup_num, cleanup_data in enumerate(
                     case_data.get("cleanup_steps", []),
                     start=1,
@@ -624,7 +627,20 @@ Output as JSON object with a "scenarios" array."""
 
             content = response.get("content", "{}")
             scenarios_data = json.loads(content)
-            scenarios = scenarios_data.get("scenarios", [])
+            scenarios_raw = scenarios_data.get("scenarios", [])
+            scenarios: list[dict[str, str]] = []
+            if isinstance(scenarios_raw, list):
+                for item in scenarios_raw:
+                    if not isinstance(item, dict):
+                        continue
+                    scenarios.append(
+                        {
+                            "name": str(item.get("name", "")),
+                            "description": str(item.get("description", "")),
+                            "priority": str(item.get("priority", "")),
+                            "type": str(item.get("type", "")),
+                        }
+                    )
 
             logger.info(f"Extracted {len(scenarios)} test scenarios")
             return scenarios

@@ -126,7 +126,7 @@ Provide response in JSON format:
         Returns:
             List of detected errors
         """
-        errors = []
+        errors: list[DetectedError] = []
 
         if not response.get("has_errors", False):
             return errors

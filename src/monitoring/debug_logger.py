@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class DebugLogger:
     """Enhanced debug logger for AI interactions and screenshots."""
 
-    def __init__(self, test_run_id: str | None = None):
+    def __init__(self, test_run_id: str | None = None) -> None:
         """
         Initialize debug logger.
 
@@ -47,7 +47,7 @@ class DebugLogger:
         response: str,
         screenshot_path: str | None = None,
         additional_context: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """
         Log an AI interaction with prompt and response.
 
@@ -218,10 +218,10 @@ def get_debug_logger() -> DebugLogger | None:
     return _debug_logger
 
 
-def set_debug_logger(logger: DebugLogger):
+def set_debug_logger(debug_logger: DebugLogger) -> None:
     """Set the global debug logger instance."""
     global _debug_logger
-    _debug_logger = logger
+    _debug_logger = debug_logger
 
 
 def initialize_debug_logger(test_run_id: str | None = None) -> DebugLogger:

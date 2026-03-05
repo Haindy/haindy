@@ -61,11 +61,11 @@ class SanitizationRule:
 class DataSanitizer:
     """Main sanitizer for protecting sensitive data."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize with default patterns."""
         self.patterns: list[SensitiveDataPattern] = []
         self.rules: list[SanitizationRule] = []
-        self.custom_sanitizers: dict[str, Callable] = {}
+        self.custom_sanitizers: dict[str, Callable[..., Any]] = {}
         self._setup_default_patterns()
         self._setup_default_rules()
 

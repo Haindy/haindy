@@ -22,7 +22,7 @@ class ScriptRecorder:
     successful visual interactions.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the script recorder."""
         self.selector_strategies = [
             self._generate_data_testid_selector,
@@ -310,8 +310,10 @@ class ScriptRecorder:
 
     def _generate_css_selector(self, element_info: dict[str, Any]) -> str | None:
         """Generate CSS selector."""
-        tag = element_info.get("tag", "").lower()
-        classes = element_info.get("class", "").split()
+        raw_tag = element_info.get("tag", "")
+        tag = raw_tag.lower() if isinstance(raw_tag, str) else ""
+        raw_class_names = element_info.get("class", "")
+        classes = raw_class_names.split() if isinstance(raw_class_names, str) else []
 
         if tag and classes:
             class_selector = ".".join(classes[:2])  # Use first 2 classes
@@ -322,10 +324,11 @@ class ScriptRecorder:
 
     def _generate_xpath_selector(self, element_info: dict[str, Any]) -> str | None:
         """Generate XPath selector as last resort."""
-        tag = element_info.get("tag", "").lower()
+        raw_tag = element_info.get("tag", "")
+        tag = raw_tag.lower() if isinstance(raw_tag, str) else ""
         text = element_info.get("text")
 
-        if tag and text:
+        if tag and isinstance(text, str):
             # Simple XPath for exact text match
             text = text.replace("'", "\\'")
             return f"//{tag}[text()='{text}']"

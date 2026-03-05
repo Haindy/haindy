@@ -16,6 +16,7 @@ from enum import Enum, auto
 from typing import (
     Any,
     TypeVar,
+    cast,
 )
 
 from .exceptions import (
@@ -92,7 +93,7 @@ class ExponentialBackoffStrategy(RetryStrategy):
         max_attempts: int = 5,
         multiplier: float = 2.0,
         jitter: bool = True,
-    ):
+    ) -> None:
         self.base_delay_ms = base_delay_ms
         self.max_delay_ms = max_delay_ms
         self.max_attempts = max_attempts
@@ -138,7 +139,7 @@ class LinearBackoffStrategy(RetryStrategy):
         delay_increment_ms: int = 1000,
         max_delay_ms: int = 10000,
         max_attempts: int = 3,
-    ):
+    ) -> None:
         self.delay_increment_ms = delay_increment_ms
         self.max_delay_ms = max_delay_ms
         self.max_attempts = max_attempts
@@ -159,8 +160,8 @@ class RecoveryManager:
     def __init__(
         self,
         default_strategy: RetryStrategy | None = None,
-        error_handlers: dict[type[Exception], Callable] | None = None,
-    ):
+        error_handlers: dict[type[Exception], Callable[..., Any]] | None = None,
+    ) -> None:
         self.default_strategy = default_strategy or ExponentialBackoffStrategy()
         self.error_handlers = error_handlers or {}
         self._recovery_stats: dict[str, dict[str, Any]] = {}
@@ -169,11 +170,11 @@ class RecoveryManager:
         self,
         operation: Callable[..., Awaitable[T]],
         operation_name: str,
-        *args,
+        *args: Any,
         retry_strategy: RetryStrategy | None = None,
         fallback: Callable[..., Awaitable[T]] | None = None,
         timeout_ms: int | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> T:
         """
         Execute an operation with automatic retry and recovery.
@@ -230,7 +231,7 @@ class RecoveryManager:
                 handler = self._get_error_handler(e)
                 if handler:
                     try:
-                        return await self._apply_handler(handler, e, context)
+                        return cast(T, await self._apply_handler(handler, e, context))
                     except Exception as handler_error:
                         logger.error(
                             f"Error handler failed for {operation_name}: {handler_error}"
@@ -283,7 +284,7 @@ class RecoveryManager:
         # If we have a fallback available, try it
         return RecoveryAction.FALLBACK
 
-    def _get_error_handler(self, error: Exception) -> Callable | None:
+    def _get_error_handler(self, error: Exception) -> Callable[..., Any] | None:
         """Get custom error handler for exception type."""
         for error_type, handler in self.error_handlers.items():
             if isinstance(error, error_type):
@@ -291,7 +292,10 @@ class RecoveryManager:
         return None
 
     async def _apply_handler(
-        self, handler: Callable, error: Exception, context: RecoveryContext
+        self,
+        handler: Callable[..., Any],
+        error: Exception,
+        context: RecoveryContext,
     ) -> Any:
         """Apply custom error handler."""
         if asyncio.iscoroutinefunction(handler):

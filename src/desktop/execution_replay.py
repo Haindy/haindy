@@ -14,10 +14,18 @@ class DriverActionError(ValueError):
 
 
 def _require_int(value: object, *, field: str) -> int:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except Exception as exc:
-        raise DriverActionError(f"Invalid int for '{field}': {value!r}") from exc
+    if isinstance(value, bool):
+        raise DriverActionError(f"Invalid int for '{field}': {value!r}")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise DriverActionError(f"Invalid int for '{field}': {value!r}") from exc
+    raise DriverActionError(f"Invalid int for '{field}': {value!r}")
 
 
 def _normalize_button(value: object) -> str:

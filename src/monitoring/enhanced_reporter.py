@@ -797,6 +797,9 @@ class EnhancedReporter:
         Returns:
             Tuple of (report_path, actions_path)
         """
+        if test_state.test_report is None:
+            raise ValueError("Cannot generate enhanced report without a test report")
+
         # Extract data for template
         template_data = self._extract_template_data(test_state, action_storage)
 
@@ -806,7 +809,8 @@ class EnhancedReporter:
 
         # Save report
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"test_report_{test_state.test_report.test_plan_id}_{timestamp}.html"
+        test_report = test_state.test_report
+        filename = f"test_report_{test_report.test_plan_id}_{timestamp}.html"
         output_path = output_dir / filename
         output_path.write_text(html_content)
 
@@ -815,9 +819,7 @@ class EnhancedReporter:
         # Save actions file if provided
         actions_path = None
         if action_storage and action_storage.get("test_cases"):
-            actions_filename = (
-                f"{test_state.test_report.test_plan_id}_{timestamp}-actions.json"
-            )
+            actions_filename = f"{test_report.test_plan_id}_{timestamp}-actions.json"
             actions_path = output_dir / actions_filename
 
             with open(actions_path, "w") as f:
@@ -832,6 +834,10 @@ class EnhancedReporter:
     ) -> dict[str, Any]:
         """Extract data from test state for template rendering."""
         test_report = test_state.test_report
+        if test_report is None:
+            raise ValueError(
+                "Cannot extract report template data without a test report"
+            )
 
         # Calculate overall metrics
         total_steps = sum(tc.steps_total for tc in test_report.test_cases)
@@ -858,7 +864,7 @@ class EnhancedReporter:
                         break
 
             # Calculate test case duration
-            tc_duration = 0
+            tc_duration: float = 0.0
             if tc.completed_at and tc.started_at:
                 tc_duration = (tc.completed_at - tc.started_at).total_seconds()
 
@@ -931,17 +937,19 @@ class EnhancedReporter:
                 step_duration = (step.completed_at - step.started_at).total_seconds()
 
                 # Embed screenshots as base64 data URIs
-                screenshots = None
+                screenshots: dict[str, str] | None = None
                 if step.screenshot_before or step.screenshot_after:
                     screenshots = {}
                     if step.screenshot_before:
-                        screenshots["before"] = self._screenshot_to_data_uri(
+                        before_uri = self._screenshot_to_data_uri(
                             step.screenshot_before
                         )
+                        if before_uri:
+                            screenshots["before"] = before_uri
                     if step.screenshot_after:
-                        screenshots["after"] = self._screenshot_to_data_uri(
-                            step.screenshot_after
-                        )
+                        after_uri = self._screenshot_to_data_uri(step.screenshot_after)
+                        if after_uri:
+                            screenshots["after"] = after_uri
                     if not any(screenshots.values()):
                         screenshots = None
 
@@ -1004,12 +1012,8 @@ class EnhancedReporter:
         return {
             "test_plan_id": str(test_report.test_plan_id),
             "test_plan_name": test_report.test_plan_name,
-            "test_plan_description": test_state.test_plan.description
-            if test_state.test_plan
-            else "",
-            "test_plan_created": test_state.test_plan.created_at.isoformat()
-            if test_state.test_plan and hasattr(test_state.test_plan, "created_at")
-            else "N/A",
+            "test_plan_description": test_state.test_plan.description,
+            "test_plan_created": test_state.test_plan.created_at.isoformat(),
             "test_started": test_report.started_at.isoformat(),
             "test_completed": test_report.completed_at.isoformat()
             if test_report.completed_at
