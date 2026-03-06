@@ -106,28 +106,30 @@ class TestWorkflowCoordinatorBasics:
         assert coordinator._state == CoordinatorState.IDLE
 
     @pytest.mark.asyncio
-    async def test_initialize_registers_agents(self, coordinator):
-        """Test that agents are registered with the message bus."""
+    async def test_initialize_exposes_initialized_agents(self, coordinator):
+        """Test that coordinator state reflects initialized agents."""
         await coordinator.initialize()
 
-        # Get message bus statistics
-        stats = coordinator.message_bus.get_statistics()
+        state = coordinator.get_coordinator_state()
 
-        # Verify agents are registered
-        assert "test_planner" in stats["registered_agents"]
-        assert "test_runner" in stats["registered_agents"]
-        assert "action_agent" in stats["registered_agents"]
-        assert "scope_triage" in stats["registered_agents"]
-        assert "situational_agent" in stats["registered_agents"]
+        assert "test_planner" in state["agents"]
+        assert "test_runner" in state["agents"]
+        assert "action_agent" in state["agents"]
+        assert "scope_triage" in state["agents"]
+        assert "situational_agent" in state["agents"]
 
     @pytest.mark.asyncio
-    async def test_initialize_keeps_message_bus_for_diagnostics_only(self, coordinator):
-        """Coordinator should not install stub control-flow subscriptions."""
+    async def test_initialize_starts_with_empty_diagnostics(self, coordinator):
+        """Coordinator diagnostics should start empty after initialization."""
         await coordinator.initialize()
 
-        stats = coordinator.message_bus.get_statistics()
+        diagnostics = coordinator.diagnostics.get_statistics()
 
-        assert stats["active_subscriptions"] == {}
+        assert diagnostics == {
+            "total_messages": 0,
+            "message_counts": {},
+            "history_size": 0,
+        }
 
     def test_get_active_tests(self, coordinator):
         """Test getting list of active tests."""
@@ -190,7 +192,7 @@ class TestWorkflowCoordinatorTestControl:
 
     @pytest.mark.asyncio
     async def test_pause_resume_stop_messages(self, coordinator):
-        """Test that control messages are published to message bus."""
+        """Test that control messages are recorded in diagnostics."""
         await coordinator.initialize()
         test_id = uuid4()
 
@@ -209,14 +211,14 @@ class TestWorkflowCoordinatorTestControl:
 
         # Test pause
         await coordinator.pause_test(test_id)
-        pause_messages = coordinator.message_bus.get_message_history(
+        pause_messages = coordinator.diagnostics.get_history(
             message_type=MessageType.PAUSE_TEST
         )
         assert len(pause_messages) > 0
 
         # Test resume
         await coordinator.resume_test(test_id)
-        resume_messages = coordinator.message_bus.get_message_history(
+        resume_messages = coordinator.diagnostics.get_history(
             message_type=MessageType.RESUME_TEST
         )
         assert len(resume_messages) > 0
@@ -293,6 +295,11 @@ class TestWorkflowCoordinatorStateAndProgress:
         # Basic checks
         assert state["state"] == CoordinatorState.EXECUTING
         assert state["active_tests"] == 1
+        assert state["diagnostics"] == {
+            "total_messages": 0,
+            "message_counts": {},
+            "history_size": 0,
+        }
 
 
 class TestWorkflowCoordinatorCleanup:

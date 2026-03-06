@@ -347,7 +347,7 @@ async def test_store_execution_replay_skips_validation_only_and_stores_actionabl
         plan_fingerprint="fingerprint",
     )
     key_mock = AsyncMock(return_value=replay_key)
-    monkeypatch.setattr(runner, "_execution_replay_key", key_mock)
+    monkeypatch.setattr(runner._replay_service, "execution_replay_key", key_mock)
     store_mock = Mock()
     monkeypatch.setattr(runner._execution_replay_cache, "store", store_mock)
 
@@ -393,7 +393,7 @@ async def test_store_execution_replay_skips_validation_only_and_stores_actionabl
     ]
 
     await runner._store_execution_replay(step, case, actionable_results)
-    key_mock.assert_awaited_once_with(step, case)
+    key_mock.assert_awaited_once()
     store_mock.assert_called_once_with(
         replay_key,
         [
@@ -420,10 +420,27 @@ async def test_replay_verification_waits_when_model_requests_it(
     runner._current_test_plan = plan
     runner._current_step_actions = []
     runner._current_step_data = {}
+
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(
+                tmp_path / f"tc{test_case.test_id}_step{step.step_number}_{suffix}.png"
+            ),
+        )
+
     monkeypatch.setattr(
-        runner,
-        "_save_screenshot",
-        lambda _payload, label: tmp_path / f"{label}.png",
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
     )
 
     replay_key = ExecutionReplayCacheKey(
@@ -435,16 +452,23 @@ async def test_replay_verification_waits_when_model_requests_it(
         plan_fingerprint=runner._plan_fingerprint(),
     )
     monkeypatch.setattr(
-        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+        runner._replay_service,
+        "execution_replay_key",
+        AsyncMock(return_value=replay_key),
     )
     monkeypatch.setattr(
         runner._execution_replay_cache,
         "lookup",
         Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
     )
-    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.replay_driver_actions",
+        AsyncMock(),
+    )
     sleep_mock = AsyncMock()
-    monkeypatch.setattr("src.agents.test_runner.asyncio.sleep", sleep_mock)
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.asyncio.sleep", sleep_mock
+    )
 
     verify_mock = AsyncMock(
         side_effect=[
@@ -522,10 +546,27 @@ async def test_replay_verification_uses_budget_cap_and_falls_back(
     runner._current_test_plan = plan
     runner._current_step_actions = []
     runner._current_step_data = {}
+
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(
+                tmp_path / f"tc{test_case.test_id}_step{step.step_number}_{suffix}.png"
+            ),
+        )
+
     monkeypatch.setattr(
-        runner,
-        "_save_screenshot",
-        lambda _payload, label: tmp_path / f"{label}.png",
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
     )
 
     replay_key = ExecutionReplayCacheKey(
@@ -537,7 +578,9 @@ async def test_replay_verification_uses_budget_cap_and_falls_back(
         plan_fingerprint=runner._plan_fingerprint(),
     )
     monkeypatch.setattr(
-        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+        runner._replay_service,
+        "execution_replay_key",
+        AsyncMock(return_value=replay_key),
     )
     monkeypatch.setattr(
         runner._execution_replay_cache,
@@ -546,9 +589,14 @@ async def test_replay_verification_uses_budget_cap_and_falls_back(
     )
     invalidate_mock = Mock()
     monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
-    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.replay_driver_actions",
+        AsyncMock(),
+    )
     sleep_mock = AsyncMock()
-    monkeypatch.setattr("src.agents.test_runner.asyncio.sleep", sleep_mock)
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.asyncio.sleep", sleep_mock
+    )
 
     verify_mock = AsyncMock(
         side_effect=[
@@ -622,10 +670,27 @@ async def test_replay_setup_step_uses_ai_verification(
     runner._current_test_plan = plan
     runner._current_step_actions = []
     runner._current_step_data = {}
+
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(
+                tmp_path / f"tc{test_case.test_id}_step{step.step_number}_{suffix}.png"
+            ),
+        )
+
     monkeypatch.setattr(
-        runner,
-        "_save_screenshot",
-        lambda _payload, label: tmp_path / f"{label}.png",
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
     )
 
     replay_key = ExecutionReplayCacheKey(
@@ -637,14 +702,19 @@ async def test_replay_setup_step_uses_ai_verification(
         plan_fingerprint=runner._plan_fingerprint(),
     )
     monkeypatch.setattr(
-        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+        runner._replay_service,
+        "execution_replay_key",
+        AsyncMock(return_value=replay_key),
     )
     monkeypatch.setattr(
         runner._execution_replay_cache,
         "lookup",
         Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
     )
-    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.replay_driver_actions",
+        AsyncMock(),
+    )
     verify_mock = AsyncMock(
         return_value={
             "verdict": "PASS",
@@ -699,10 +769,27 @@ async def test_replay_setup_step_fail_invalidates_cache(
     runner._current_test_plan = plan
     runner._current_step_actions = []
     runner._current_step_data = {}
+
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(
+                tmp_path / f"tc{test_case.test_id}_step{step.step_number}_{suffix}.png"
+            ),
+        )
+
     monkeypatch.setattr(
-        runner,
-        "_save_screenshot",
-        lambda _payload, label: tmp_path / f"{label}.png",
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
     )
 
     replay_key = ExecutionReplayCacheKey(
@@ -714,7 +801,9 @@ async def test_replay_setup_step_fail_invalidates_cache(
         plan_fingerprint=runner._plan_fingerprint(),
     )
     monkeypatch.setattr(
-        runner, "_execution_replay_key", AsyncMock(return_value=replay_key)
+        runner._replay_service,
+        "execution_replay_key",
+        AsyncMock(return_value=replay_key),
     )
     monkeypatch.setattr(
         runner._execution_replay_cache,
@@ -723,7 +812,10 @@ async def test_replay_setup_step_fail_invalidates_cache(
     )
     invalidate_mock = Mock()
     monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
-    monkeypatch.setattr("src.agents.test_runner.replay_driver_actions", AsyncMock())
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.replay_driver_actions",
+        AsyncMock(),
+    )
     verify_mock = AsyncMock(
         return_value={
             "verdict": "FAIL",
@@ -779,10 +871,27 @@ async def test_execute_setup_step_uses_ai_verification_in_normal_path(
     runner._current_test_case = case
     runner._current_test_case_actions = {"steps": []}
     runner._execution_history = []
+
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(
+                tmp_path / f"tc{test_case.test_id}_step{step.step_number}_{suffix}.png"
+            ),
+        )
+
     monkeypatch.setattr(
-        runner,
-        "_save_screenshot",
-        lambda _payload, label: tmp_path / f"{label}.png",
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
     )
     monkeypatch.setattr(
         runner,
@@ -875,10 +984,27 @@ async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
     runner._current_test_case = case
     runner._current_test_case_actions = {"steps": []}
     runner._execution_history = []
+
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(
+                tmp_path / f"tc{test_case.test_id}_step{step.step_number}_{suffix}.png"
+            ),
+        )
+
     monkeypatch.setattr(
-        runner,
-        "_save_screenshot",
-        lambda _payload, label: tmp_path / f"{label}.png",
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
     )
     monkeypatch.setattr(
         runner,
@@ -1127,8 +1253,19 @@ async def test_replay_step_preserves_post_replay_snapshot(
     before_path = tmp_path / "before.png"
     after_path = tmp_path / "after.png"
 
-    def _fake_save_screenshot(_payload: bytes, label: str) -> Path:
-        return before_path if label.endswith("_before") else after_path
+    async def _fake_capture_test_step_screenshot(
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> SimpleNamespace:
+        del test_case, step, origin, update_latest
+        return SimpleNamespace(
+            screenshot_bytes=b"captured-screenshot",
+            screenshot_path=str(before_path if suffix == "before" else after_path),
+        )
 
     async def _fake_try_execution_replay(
         *,
@@ -1150,7 +1287,11 @@ async def test_replay_step_preserves_post_replay_snapshot(
         )
         return step_result
 
-    monkeypatch.setattr(runner, "_save_screenshot", _fake_save_screenshot)
+    monkeypatch.setattr(
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
+    )
     monkeypatch.setattr(runner, "_try_execution_replay", _fake_try_execution_replay)
 
     case_result = TestCaseResult(

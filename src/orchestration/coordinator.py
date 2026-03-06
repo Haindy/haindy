@@ -7,25 +7,14 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from src.agents import (
-    ActionAgent,
-    ScopeTriageAgent,
-    SituationalAgent,
-    TestPlannerAgent,
-    TestRunner,
-)
-from src.config.settings import get_settings
+from src.agents import ActionAgent, TestRunner
 from src.core.interfaces import AutomationDriver
-from src.core.types import (
-    AgentMessage,
-    ScopeTriageResult,
-    TestPlan,
-    TestState,
-)
+from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.monitoring.logger import get_logger
-from src.orchestration.communication import MessageBus, MessageType
+from src.orchestration.communication import CoordinatorDiagnostics, MessageType
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.orchestration.state_manager import StateManager, StateTransition
+from src.runtime.agent_factory import AgentFactory
 
 logger = get_logger(__name__)
 
@@ -51,25 +40,24 @@ class WorkflowCoordinator:
 
     def __init__(
         self,
-        message_bus: MessageBus | None = None,
+        diagnostics: CoordinatorDiagnostics | None = None,
         state_manager: StateManager | None = None,
         automation_driver: AutomationDriver | None = None,
+        agent_factory: AgentFactory | None = None,
         max_steps: int = 50,
     ):
         """
         Initialize the workflow coordinator.
 
         Args:
-            message_bus: Message bus for agent communication
+            diagnostics: In-memory coordinator diagnostics recorder
             state_manager: State manager for test execution
             automation_driver: Browser driver for web automation
         """
-        self.message_bus = message_bus or MessageBus()
+        self.diagnostics = diagnostics or CoordinatorDiagnostics()
         self.state_manager = state_manager or StateManager()
         self.automation_driver = automation_driver
-
-        # Register the coordinator itself for message bus diagnostics
-        self.message_bus.register_agent("coordinator")
+        self._agent_factory = agent_factory or AgentFactory()
 
         # Agent instances
         self._agents: dict[str, Any] = {}
@@ -88,62 +76,9 @@ class WorkflowCoordinator:
     async def initialize(self) -> None:
         """Initialize the coordinator and create agent instances."""
         logger.info("Initializing workflow coordinator")
-
-        settings = get_settings()
-        triage_cfg = settings.get_agent_model_config("scope_triage")
-        planner_cfg = settings.get_agent_model_config("test_planner")
-        runner_cfg = settings.get_agent_model_config("test_runner")
-        action_cfg = settings.get_agent_model_config("action_agent")
-        situational_cfg = settings.get_agent_model_config("situational_agent")
-
-        # Create agents
-        self._agents = {
-            "scope_triage": ScopeTriageAgent(
-                name="ScopeTriage",
-                model=triage_cfg.model,
-                temperature=triage_cfg.temperature,
-                reasoning_level=triage_cfg.reasoning_level,
-                modalities=triage_cfg.modalities,
-            ),
-            "test_planner": TestPlannerAgent(
-                name="TestPlanner",
-                model=planner_cfg.model,
-                temperature=planner_cfg.temperature,
-                reasoning_level=planner_cfg.reasoning_level,
-                modalities=planner_cfg.modalities,
-            ),
-            "test_runner": TestRunner(
-                name="TestRunner",
-                automation_driver=self.automation_driver,
-                model=runner_cfg.model,
-                temperature=runner_cfg.temperature,
-                reasoning_level=runner_cfg.reasoning_level,
-                modalities=runner_cfg.modalities,
-            ),
-            "action_agent": ActionAgent(
-                name="ActionAgent",
-                automation_driver=self.automation_driver,
-                model=action_cfg.model,
-                temperature=action_cfg.temperature,
-                reasoning_level=action_cfg.reasoning_level,
-                modalities=action_cfg.modalities,
-            ),
-            "situational_agent": SituationalAgent(
-                name="SituationalAgent",
-                model=situational_cfg.model,
-                temperature=situational_cfg.temperature,
-                reasoning_level=situational_cfg.reasoning_level,
-                modalities=situational_cfg.modalities,
-            ),
-        }
-
-        # Set up test runner dependencies
-        if "test_runner" in self._agents:
-            self._agents["test_runner"].action_agent = self._agents["action_agent"]
-
-        # Register agents with the event bus for diagnostics.
-        for agent_name, _agent in self._agents.items():
-            self.message_bus.register_agent(agent_name)
+        self._agents = self._agent_factory.create_runtime_agents(
+            automation_driver=self.automation_driver
+        ).as_dict()
 
         # Register state callbacks
         self.state_manager.register_state_callback(self._on_state_change)
@@ -363,14 +298,11 @@ class WorkflowCoordinator:
         content: dict[str, Any],
         from_agent: str = "coordinator",
     ) -> None:
-        """Publish a diagnostics event without implying bus-driven control flow."""
-        await self.message_bus.publish(
-            AgentMessage(
-                from_agent=from_agent,
-                to_agent="broadcast",
-                message_type=message_type,
-                content=content,
-            )
+        """Record a diagnostics event without implying bus-driven control flow."""
+        self.diagnostics.record_event(
+            message_type=message_type,
+            content=content,
+            source=from_agent,
         )
 
     def get_active_tests(self) -> list[UUID]:
@@ -398,7 +330,7 @@ class WorkflowCoordinator:
             "state": self._state,
             "active_tests": len(self._active_tests),
             "agents": list(self._agents.keys()),
-            "message_stats": self.message_bus.get_statistics(),
+            "diagnostics": self.diagnostics.get_statistics(),
         }
 
     async def generate_test_plan(self, requirements: str) -> TestPlan:
@@ -446,7 +378,7 @@ class WorkflowCoordinator:
         self._active_tests.clear()
 
         # Shutdown components
-        await self.message_bus.shutdown()
+        await self.diagnostics.shutdown()
         await self.state_manager.shutdown()
         self._plan_triage_results.clear()
 

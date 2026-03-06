@@ -24,6 +24,14 @@ class InterpretationScreenshot:
     source: str | None
 
 
+@dataclass(frozen=True)
+class CapturedScreenshot:
+    """Persisted screenshot plus in-memory bytes."""
+
+    screenshot_bytes: bytes
+    screenshot_path: str
+
+
 class TestRunnerArtifacts:
     """Owns screenshot persistence and in-memory screenshot state."""
 
@@ -159,6 +167,52 @@ class TestRunnerArtifacts:
             screenshot_bytes=screenshot,
             screenshot_path=str(screenshot_path),
             source="fresh_capture",
+        )
+
+    async def capture_screenshot(
+        self,
+        name: str,
+        *,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> CapturedScreenshot | None:
+        """Capture, persist, and optionally register a screenshot as latest."""
+        if not self._automation_driver:
+            return None
+
+        try:
+            screenshot = await self._automation_driver.screenshot()
+        except Exception as exc:  # pragma: no cover - defensive path
+            logger.warning(
+                "Failed to capture screenshot",
+                extra={"error": str(exc), "name": name},
+            )
+            return None
+
+        screenshot_path = self.save_screenshot(screenshot, name)
+        screenshot_path_str = str(screenshot_path)
+        if update_latest:
+            self.update_latest_snapshot(screenshot, screenshot_path_str, origin or name)
+
+        return CapturedScreenshot(
+            screenshot_bytes=screenshot,
+            screenshot_path=screenshot_path_str,
+        )
+
+    async def capture_test_step_screenshot(
+        self,
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        suffix: str,
+        origin: str | None = None,
+        update_latest: bool = False,
+    ) -> CapturedScreenshot | None:
+        """Capture a screenshot using the standard test-step naming scheme."""
+        return await self.capture_screenshot(
+            f"tc{test_case.test_id}_step{step.step_number}_{suffix}",
+            origin=origin,
+            update_latest=update_latest,
         )
 
     def save_screenshot(self, screenshot: bytes, name: str) -> Path:
