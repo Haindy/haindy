@@ -4,7 +4,7 @@
 Drafted on 2026-03-06.
 
 ## Relationship to Existing Plan
-This document is a follow-up to `docs/plans/dry-kiss-refactor-plan.md`.
+This document is a follow-up to `docs/plans/dry-kiss-refactor/completed/dry-kiss-refactor-plan.md`.
 It narrows the work to the three highest-value improvements currently visible in the codebase and puts them in implementation order.
 
 ## Top 3 Improvements

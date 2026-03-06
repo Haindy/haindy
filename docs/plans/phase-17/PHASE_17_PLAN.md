@@ -90,7 +90,7 @@ Phase 17 extends HAINDY's Action Agent capabilities with new action types essent
 #### 1.1 Scroll to Element
 **Purpose**: Navigate to elements not visible in current viewport
 
-**Detailed Design**: See [scroll_to_element_design.md](plans/scroll_to_element_design.md) for comprehensive implementation details.
+**Detailed Design**: See [scroll_to_element_design.md](../scroll/scroll_to_element_design.md) for comprehensive implementation details.
 
 **Implementation Approach**:
 ```python
