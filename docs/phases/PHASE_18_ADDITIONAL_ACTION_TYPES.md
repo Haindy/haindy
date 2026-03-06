@@ -11,7 +11,7 @@ Implement additional action types beyond click and type to support more complex 
 Discovered architectural limitation in Test Runner - it currently only executes literal test steps and cannot dynamically inject helper actions (like scrolling). This prevents intelligent use of the new scroll actions.
 
 ### Detailed Implementation Plan
-See [PHASE_17_PLAN.md](../plans/phase-17/PHASE_17_PLAN.md) for comprehensive implementation details and progress tracking.
+The old detailed plan file was removed because it no longer reflected the current codebase. Use this phase document and the current implementation as the source of truth.
 
 ### Current Progress
 - ✅ Scroll actions (5/5) implemented and tested
