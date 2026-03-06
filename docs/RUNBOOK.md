@@ -28,6 +28,7 @@ playwright install chromium
 Create a `.env` file in the project root:
 ```
 OPENAI_API_KEY=your-api-key-here
+HAINDY_COMPUTER_USE_MODEL=gpt-5.4
 CU_PROVIDER=google
 GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
 ANTHROPIC_API_KEY=your-anthropic-api-key
@@ -225,14 +226,18 @@ python -m src.main --plan requirements.md --timeout 3600
 # Custom output directory
 python -m src.main --plan requirements.md --output custom_reports/
 
-# Enable Computer Use and desktop driver (provider via CU_PROVIDER)
-export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
+# Google Computer Use example
 export CU_PROVIDER=google
 export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 
+# OpenAI Computer Use example
+export CU_PROVIDER=openai
+export HAINDY_COMPUTER_USE_MODEL=gpt-5.4
+export HAINDY_AUTOMATION_BACKEND=desktop
+python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
+
 # Anthropic Computer Use example
-export HAINDY_ACTIONS_USE_COMPUTER_TOOL=true
 export CU_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=your-anthropic-api-key
 export HAINDY_AUTOMATION_BACKEND=desktop

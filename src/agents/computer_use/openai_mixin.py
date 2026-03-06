@@ -14,6 +14,7 @@ from .common import (
     _inject_context_metadata,
     encode_png_base64,
     extract_assistant_text,
+    extract_computer_call_actions,
     extract_computer_calls,
     normalize_response,
 )
@@ -52,7 +53,6 @@ class OpenAIComputerUseMixin:
         )
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
         screenshot_b64 = encode_png_base64(screenshot)
-        tool_environment = self._map_openai_environment(environment)
 
         request_payload = self._build_initial_request(
             goal=goal,
@@ -60,7 +60,6 @@ class OpenAIComputerUseMixin:
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             metadata=metadata,
-            environment=tool_environment,
             model=model,
         )
 
@@ -110,7 +109,6 @@ class OpenAIComputerUseMixin:
                 confirmation_payload = await self._build_confirmation_request(
                     previous_response_id=previous_response_id,
                     metadata=metadata,
-                    environment=tool_environment,
                     model=model,
                 )
                 response = await self._create_response(confirmation_payload)
@@ -155,114 +153,141 @@ class OpenAIComputerUseMixin:
                 )
                 break
 
-            call = computer_calls[0]
-            turn = ComputerToolTurn(
-                call_id=call.get("call_id", ""),
-                action_type=call.get("action", {}).get("type", "unknown"),
-                parameters=call.get("action", {}),
-                response_id=response_dict.get("id"),
-                pending_safety_checks=call.get("pending_safety_checks", []) or [],
-            )
+            completed_call_turns: list[list[ComputerToolTurn]] = []
+            should_stop = False
+            stop_remaining_calls = False
 
-            _inject_context_metadata(turn, metadata)
+            for call in computer_calls:
+                call_id = str(call.get("call_id") or "")
+                pending_safety_checks = call.get("pending_safety_checks", []) or []
+                turns = [
+                    ComputerToolTurn(
+                        call_id=call_id,
+                        action_type=action.get("type", "screenshot"),
+                        parameters=action,
+                        response_id=response_dict.get("id"),
+                        pending_safety_checks=(
+                            pending_safety_checks if index == 0 else []
+                        ),
+                    )
+                    for index, action in enumerate(extract_computer_call_actions(call))
+                ]
 
-            if self._should_abort_on_safety(turn, result):
-                return result
+                for turn in turns:
+                    _inject_context_metadata(turn, metadata)
 
-            try:
-                await self._execute_tool_action(
-                    turn=turn,
-                    metadata=metadata,
-                    turn_index=turn_counter,
-                    normalized_coords=False,
-                    allow_unknown=False,
-                    environment=environment,
-                    cache_label=cache_label,
-                    cache_action=cache_action,
-                    use_cache=use_cache,
-                )
-            except Exception as exc:
-                turn.status = "failed"
-                turn.error_message = str(exc)
-                logger.exception(
-                    "Computer Use action execution failed",
-                    extra={"call_id": turn.call_id},
-                )
+                if self._should_abort_on_safety(turns[0], result):
+                    return result
 
-            result.actions.append(turn)
-            metadata["_auto_confirmation_attempts"] = 0
+                acknowledged_safety_checks = self._build_acknowledged_safety_checks(
+                    turns[0]
+                )
+                if acknowledged_safety_checks:
+                    turns[0].acknowledged = True
+                    turns[0].metadata["acknowledged_safety_checks"] = (
+                        acknowledged_safety_checks
+                    )
 
-            if self._is_observe_only_policy_violation(turn):
-                reason = turn.error_message or (
-                    "Observe-only policy violation blocked action execution."
-                )
-                self._mark_terminal_failure(
-                    result=result,
-                    reason=reason,
-                    code="observe_only_policy_violation",
-                )
-                logger.warning(
-                    "Observe-only policy violation detected (openai); aborting action",
-                    extra={
-                        "step_number": metadata.get("step_number"),
-                        "action_type": turn.action_type,
-                        "call_id": turn.call_id,
-                    },
-                )
-                return result
+                processed_turns: list[ComputerToolTurn] = []
+                for action_index, turn in enumerate(turns, start=1):
+                    try:
+                        await self._execute_tool_action(
+                            turn=turn,
+                            metadata=metadata,
+                            turn_index=(turn_counter * 100) + action_index,
+                            normalized_coords=False,
+                            allow_unknown=False,
+                            environment=environment,
+                            cache_label=cache_label,
+                            cache_action=cache_action,
+                            use_cache=use_cache,
+                        )
+                    except Exception as exc:
+                        turn.status = "failed"
+                        turn.error_message = str(exc)
+                        logger.exception(
+                            "Computer Use action execution failed",
+                            extra={"call_id": turn.call_id},
+                        )
 
-            loop_detection = self._update_loop_history(
-                turn=turn,
-                history=loop_history,
-                window=loop_window,
-            )
-            if loop_detection:
-                message = loop_detection["message"]
-                logger.warning(
-                    "Computer Use loop detected",
-                    extra={
-                        "step_number": metadata.get("step_number"),
-                        "action_type": turn.action_type,
-                        "signature": loop_detection.get("signature"),
-                        "loop_window": loop_detection.get("loop_window"),
-                    },
-                )
-                self._append_terminal_failure_turn(
-                    result=result,
-                    metadata=metadata,
-                    response_id=response_dict.get("id"),
-                    reason=message,
-                    code="loop_detected",
-                    parameters={
-                        "signature": loop_detection.get("signature"),
-                        "screenshot_hash": loop_detection.get("screenshot_hash"),
-                        "loop_window": loop_detection.get("loop_window"),
-                    },
-                    metadata_updates=loop_detection,
-                    call_id_prefix="loop-detected",
-                )
+                    processed_turns.append(turn)
+                    result.actions.append(turn)
+                    metadata["_auto_confirmation_attempts"] = 0
+
+                    if self._is_observe_only_policy_violation(turn):
+                        reason = turn.error_message or (
+                            "Observe-only policy violation blocked action execution."
+                        )
+                        self._mark_terminal_failure(
+                            result=result,
+                            reason=reason,
+                            code="observe_only_policy_violation",
+                        )
+                        logger.warning(
+                            "Observe-only policy violation detected (openai); aborting action",
+                            extra={
+                                "step_number": metadata.get("step_number"),
+                                "action_type": turn.action_type,
+                                "call_id": turn.call_id,
+                            },
+                        )
+                        return result
+
+                    loop_detection = self._update_loop_history(
+                        turn=turn,
+                        history=loop_history,
+                        window=loop_window,
+                    )
+                    if loop_detection:
+                        message = loop_detection["message"]
+                        logger.warning(
+                            "Computer Use loop detected",
+                            extra={
+                                "step_number": metadata.get("step_number"),
+                                "action_type": turn.action_type,
+                                "signature": loop_detection.get("signature"),
+                                "loop_window": loop_detection.get("loop_window"),
+                            },
+                        )
+                        self._append_terminal_failure_turn(
+                            result=result,
+                            metadata=metadata,
+                            response_id=response_dict.get("id"),
+                            reason=message,
+                            code="loop_detected",
+                            parameters={
+                                "signature": loop_detection.get("signature"),
+                                "screenshot_hash": loop_detection.get(
+                                    "screenshot_hash"
+                                ),
+                                "loop_window": loop_detection.get("loop_window"),
+                            },
+                            metadata_updates=loop_detection,
+                            call_id_prefix="loop-detected",
+                        )
+                        should_stop = True
+                        break
+
+                    if turn.status != "executed":
+                        stop_remaining_calls = True
+                        break
+
+                completed_call_turns.append(processed_turns or [turns[0]])
+                if should_stop or stop_remaining_calls:
+                    break
+
+            if should_stop:
                 break
 
             follow_up_payload = await self._build_follow_up_request(
                 previous_response_id=previous_response_id,
-                call=turn,
+                calls=completed_call_turns,
                 metadata=metadata,
-                environment=tool_environment,
                 model=model,
             )
 
             response = await self._create_response(follow_up_payload)
-            follow_up_screenshot: bytes | None = None
-            try:
-                image_url = (
-                    follow_up_payload.get("input", [{}])[0]
-                    .get("output", {})
-                    .get("image_url", "")
-                )
-                if isinstance(image_url, str) and "," in image_url:
-                    follow_up_screenshot = base64.b64decode(image_url.split(",", 1)[1])
-            except Exception:
-                follow_up_screenshot = None
+            follow_up_screenshot = self._extract_follow_up_screenshot(follow_up_payload)
             await self._model_logger.log_call(
                 agent="computer_use.openai.follow_up",
                 model=model,
@@ -285,55 +310,24 @@ class OpenAIComputerUseMixin:
     async def _build_follow_up_request(
         self: _ComputerUseSession,
         previous_response_id: str | None,
-        call: ComputerToolTurn,
+        calls: list[list[ComputerToolTurn]],
         metadata: dict[str, Any],
-        environment: str = "browser",
         model: str | None = None,
     ) -> dict[str, Any]:
-        """Build the payload for a follow-up request after executing an action."""
-        screenshot_b64 = call.metadata.get("screenshot_base64")
-        if not screenshot_b64:
-            screenshot_bytes = await self._automation_driver.screenshot()
-            screenshot_b64 = encode_png_base64(screenshot_bytes)
-
-        (
-            viewport_width,
-            viewport_height,
-        ) = await self._automation_driver.get_viewport_size()
-        acknowledged_safety_checks = self._build_acknowledged_safety_checks(call)
-        if acknowledged_safety_checks:
-            call.acknowledged = True
-            call.metadata["acknowledged_safety_checks"] = acknowledged_safety_checks
-
+        """Build the payload for a follow-up request after executing a model turn."""
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
-            "tools": [
-                {
-                    "type": "computer_use_preview",
-                    "display_width": viewport_width,
-                    "display_height": viewport_height,
-                    "environment": environment,
-                }
-            ],
-            "input": [
-                {
-                    "type": "computer_call_output",
-                    "call_id": call.call_id,
-                    "output": {
-                        "type": "computer_screenshot",
-                        "image_url": f"data:image/png;base64,{screenshot_b64}",
-                    },
-                    "current_url": call.metadata.get("current_url"),
-                    "acknowledged_safety_checks": acknowledged_safety_checks,
-                }
-            ],
-            "truncation": "auto",
+            "tools": [{"type": "computer"}],
+            "input": [],
         }
 
         safety_identifier = metadata.get("safety_identifier")
         if safety_identifier:
             payload["safety_identifier"] = safety_identifier
+
+        for turns in calls:
+            payload["input"].append(await self._build_follow_up_item(turns))
 
         interaction_mode = metadata.get("interaction_mode")
         if interaction_mode:
@@ -354,21 +348,53 @@ class OpenAIComputerUseMixin:
                 }
             )
 
-        if call.status != "executed" and call.error_message:
+        execution_errors = [
+            turn.error_message
+            for turns in calls
+            for turn in turns
+            if turn.status != "executed" and turn.error_message
+        ]
+        if execution_errors:
             payload["input"].append(
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "input_text",
-                            "text": f"Execution error: {call.error_message}",
+                            "text": f"Execution error: {execution_errors[0]}",
                         }
                     ],
                 }
             )
 
-        call.metadata.pop("screenshot_base64", None)
         return payload
+
+    async def _build_follow_up_item(
+        self: _ComputerUseSession,
+        turns: list[ComputerToolTurn],
+    ) -> dict[str, Any]:
+        """Build a single computer_call_output item for an executed computer_call."""
+        latest_turn = turns[-1]
+        screenshot_b64 = latest_turn.metadata.get("screenshot_base64")
+        if not screenshot_b64:
+            screenshot_bytes = await self._automation_driver.screenshot()
+            screenshot_b64 = encode_png_base64(screenshot_bytes)
+
+        item: dict[str, Any] = {
+            "type": "computer_call_output",
+            "call_id": latest_turn.call_id,
+            "output": {
+                "type": "computer_screenshot",
+                "image_url": f"data:image/png;base64,{screenshot_b64}",
+            },
+        }
+        acknowledged_safety_checks = turns[0].metadata.get("acknowledged_safety_checks")
+        if acknowledged_safety_checks:
+            item["acknowledged_safety_checks"] = acknowledged_safety_checks
+
+        for turn in turns:
+            turn.metadata.pop("screenshot_base64", None)
+        return item
 
     def _build_acknowledged_safety_checks(
         self: _ComputerUseSession,
@@ -417,7 +443,6 @@ class OpenAIComputerUseMixin:
         viewport_width: int,
         viewport_height: int,
         metadata: dict[str, Any],
-        environment: str = "browser",
         model: str | None = None,
     ) -> dict[str, Any]:
         """Build the payload for the initial Computer Use request."""
@@ -445,14 +470,7 @@ class OpenAIComputerUseMixin:
 
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
-            "tools": [
-                {
-                    "type": "computer_use_preview",
-                    "display_width": viewport_width,
-                    "display_height": viewport_height,
-                    "environment": environment,
-                }
-            ],
+            "tools": [{"type": "computer"}],
             "input": [
                 {
                     "role": "user",
@@ -468,7 +486,6 @@ class OpenAIComputerUseMixin:
                     ],
                 }
             ],
-            "truncation": "auto",
         }
 
         safety_identifier = metadata.get("safety_identifier")
@@ -497,6 +514,19 @@ class OpenAIComputerUseMixin:
             return value
 
         return cast(dict[str, Any], _scrub(payload))
+
+    @staticmethod
+    def _extract_follow_up_screenshot(payload: dict[str, Any]) -> bytes | None:
+        """Decode the first logged screenshot from a follow-up payload."""
+        for item in payload.get("input", []):
+            output = item.get("output") if isinstance(item, dict) else None
+            image_url = output.get("image_url", "") if isinstance(output, dict) else ""
+            if isinstance(image_url, str) and "," in image_url:
+                try:
+                    return base64.b64decode(image_url.split(",", 1)[1])
+                except Exception:
+                    return None
+        return None
 
     async def _create_response(
         self: _ComputerUseSession, payload: dict[str, Any]

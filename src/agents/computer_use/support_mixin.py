@@ -312,7 +312,6 @@ class ComputerUseSupportMixin:
         self: _ComputerUseSession,
         previous_response_id: str | None,
         metadata: dict[str, Any],
-        environment: str = "browser",
         model: str | None = None,
     ) -> dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
@@ -324,29 +323,16 @@ class ComputerUseSupportMixin:
         if target_text:
             confirmation_text += f" Focus on: {target_text}."
 
-        (
-            viewport_width,
-            viewport_height,
-        ) = await self._automation_driver.get_viewport_size()
-
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
-            "tools": [
-                {
-                    "type": "computer_use_preview",
-                    "display_width": viewport_width,
-                    "display_height": viewport_height,
-                    "environment": environment,
-                }
-            ],
+            "tools": [{"type": "computer"}],
             "input": [
                 {
                     "role": "user",
                     "content": [{"type": "input_text", "text": confirmation_text}],
                 }
             ],
-            "truncation": "auto",
         }
 
         safety_identifier = metadata.get("safety_identifier")

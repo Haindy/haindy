@@ -22,6 +22,8 @@ AGENT_ENV_PREFIX: dict[str, str] = {
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
 SUPPORTED_OPENAI_MODEL = "gpt-5.2"
+SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.4"
+LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
 
 ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
@@ -291,7 +293,7 @@ class Settings(BaseSettings):
 
     # Computer Use Configuration
     computer_use_model: str = Field(
-        default="computer-use-preview",
+        default=SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
         description="OpenAI model for computer-use execution",
         validation_alias=AliasChoices(
             "HAINDY_COMPUTER_USE_MODEL", "COMPUTER_USE_MODEL"
@@ -540,6 +542,20 @@ class Settings(BaseSettings):
         if self.cu_provider == "google":
             if self.desktop_prefer_resolution == (1920, 1080):
                 self.desktop_prefer_resolution = (1440, 900)
+        return self
+
+    @model_validator(mode="after")
+    def validate_openai_computer_use_model(self) -> "Settings":
+        """Reject the legacy preview model on the OpenAI computer-use path."""
+        if (
+            self.cu_provider == "openai"
+            and str(self.computer_use_model or "").strip().lower()
+            == LEGACY_OPENAI_COMPUTER_USE_MODEL
+        ):
+            raise ValueError(
+                "OpenAI computer-use model 'computer-use-preview' is no longer "
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.4."
+            )
         return self
 
     @staticmethod

@@ -54,6 +54,8 @@ class ComputerUseSession(
 ):
     """Wraps computer-use providers and orchestrates action execution."""
 
+    _LEGACY_OPENAI_COMPUTER_MODEL = "computer-use-preview"
+
     _DISALLOWED_NAVIGATION_ACTIONS: frozenset[str] = frozenset(
         {
             "open_web_browser",
@@ -123,6 +125,15 @@ class ComputerUseSession(
             if model and self._provider == "openai"
             else settings.computer_use_model
         )
+        if (
+            self._provider == "openai"
+            and str(self._openai_model or "").strip().lower()
+            == self._LEGACY_OPENAI_COMPUTER_MODEL
+        ):
+            raise ValueError(
+                "OpenAI computer-use model 'computer-use-preview' is no longer "
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.4."
+            )
         self._google_model = (
             model
             if model and self._provider == "google"

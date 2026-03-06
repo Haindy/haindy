@@ -146,6 +146,7 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
         }
     ]
     follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["tools"] == [{"type": "computer"}]
     assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
         {
             "id": "sc1",
@@ -153,6 +154,7 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
             "message": "Safety review requested.",
         }
     ]
+    assert "current_url" not in follow_up_payload["input"][0]
 
 
 @pytest.mark.asyncio
@@ -205,6 +207,7 @@ async def test_computer_use_session_safety_auto_approve_with_override_when_fail_
         }
     ]
     follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["tools"] == [{"type": "computer"}]
     assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
         {
             "id": "sc_override",
@@ -212,6 +215,7 @@ async def test_computer_use_session_safety_auto_approve_with_override_when_fail_
             "message": "Approval override required.",
         }
     ]
+    assert "current_url" not in follow_up_payload["input"][0]
 
 
 @pytest.mark.asyncio

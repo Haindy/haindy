@@ -42,7 +42,7 @@ Minimum required settings:
 - `CU_PROVIDER=openai`, `CU_PROVIDER=google`, or `CU_PROVIDER=anthropic`
 
 Provider-specific:
-- OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (typically `computer-use-preview`)
+- OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (default `gpt-5.4`)
 - Google computer-use: `GOOGLE_CU_MODEL` and Vertex credentials/settings (see `.env.example`)
 - Anthropic computer-use: `ANTHROPIC_API_KEY`, optional `ANTHROPIC_CU_MODEL` (default `claude-sonnet-4-6`), optional `ANTHROPIC_CU_MAX_TOKENS` (default `16384`)
 
