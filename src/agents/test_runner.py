@@ -18,6 +18,10 @@ from uuid import uuid4
 from src.agents.action_agent import ActionAgent
 from src.agents.base_agent import BaseAgent
 from src.agents.test_runner_artifacts import TestRunnerArtifacts
+from src.agents.test_runner_bug_reports import (
+    BugReportRequest,
+    TestRunnerBugReportBuilder,
+)
 from src.agents.test_runner_executor import (
     StepActionExecutionRequest,
     TestRunnerExecutor,
@@ -30,8 +34,6 @@ from src.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.interfaces import AutomationDriver
 from src.core.types import (
-    ActionType,
-    BugReport,
     BugSeverity,
     StepResult,
     TestCase,
@@ -44,7 +46,6 @@ from src.core.types import (
     TestSummary,
 )
 from src.desktop.cache import CoordinateCache
-from src.desktop.execution_replay import replay_driver_actions
 from src.monitoring.logger import get_logger, get_run_id
 from src.runtime.environment import (
     coordinate_cache_path_for_environment,
@@ -55,7 +56,10 @@ from src.runtime.execution_replay_cache import (
     ExecutionReplayCache,
     ExecutionReplayCacheKey,
 )
-from src.runtime.execution_replay_service import ExecutionReplayService
+from src.runtime.execution_replay_service import (
+    ExecutionReplayService,
+    ReplayExecutionRequest,
+)
 from src.runtime.task_cache import TaskPlanCache
 from src.runtime.trace import RunTraceWriter, load_model_calls_for_run
 from src.utils.model_logging import get_model_logger
@@ -63,17 +67,6 @@ from src.utils.model_logging import get_model_logger
 logger = get_logger(__name__)
 MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
 LOOP_ERROR_PREFIX = "Computer Use loop detected"
-REPLAY_CACHED_ACTION_MIN_STABILIZATION_WAIT_MS = 2000
-REPLAY_VALIDATION_MODEL_WAIT_BUDGET_MS = 30000
-REPLAY_VALIDATION_MODEL_WAIT_FALLBACK_MS = 1000
-REPLAY_VALIDATION_ONLY_ACTION_TYPES: frozenset[str] = frozenset(
-    {
-        ActionType.ASSERT.value,
-        ActionType.SKIP_NAVIGATION.value,
-        ActionType.WAIT.value,
-        ActionType.SCREENSHOT.value,
-    }
-)
 
 COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
 - Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
@@ -200,16 +193,13 @@ class TestRunner(BaseAgent):
     def _coordinate_cache_path_for_environment(self, environment: str) -> Path:
         return Path(coordinate_cache_path_for_environment(self._settings, environment))
 
-    @staticmethod
-    def _severity_rank(severity: BugSeverity) -> int:
-        """Return an integer rank for comparing bug severities."""
-        severity_order = {
-            BugSeverity.CRITICAL: 0,
-            BugSeverity.HIGH: 1,
-            BugSeverity.MEDIUM: 2,
-            BugSeverity.LOW: 3,
-        }
-        return severity_order.get(severity, 99)
+    def _create_bug_report_builder(self) -> TestRunnerBugReportBuilder:
+        """Build a bug-report helper using the runner's current model hooks."""
+        return TestRunnerBugReportBuilder(
+            model=self.model,
+            call_openai=self.call_openai,
+            model_logger=self._model_logger,
+        )
 
     async def _ensure_initial_screenshot(self) -> None:
         """Capture and cache the initial environment screenshot."""
@@ -618,12 +608,40 @@ class TestRunner(BaseAgent):
                     has_failed_steps = True
 
                     # Create bug report for failed step
-                    bug_report = await self._create_bug_report(
-                        step_result, step, test_case, case_result
+                    assert self._current_test_plan is not None
+                    bug_report_result = (
+                        await self._create_bug_report_builder().build_bug_report(
+                            BugReportRequest(
+                                test_plan=self._current_test_plan,
+                                step_result=step_result,
+                                step=step,
+                                test_case=test_case,
+                                case_result=case_result,
+                                verification_result=self._current_step_data.get(
+                                    "verification_result", {}
+                                )
+                                if isinstance(
+                                    self._current_step_data.get(
+                                        "verification_result", {}
+                                    ),
+                                    dict,
+                                )
+                                else {},
+                            )
+                        )
                     )
-                    if bug_report:
-                        case_result.bugs.append(bug_report)
-                        test_report.bugs.append(bug_report)
+                    if bug_report_result:
+                        case_result.bugs.append(bug_report_result.bug_report)
+                        test_report.bugs.append(bug_report_result.bug_report)
+                        self._current_step_data["plan_level_assessment"] = (
+                            bug_report_result.plan_level_assessment
+                        )
+                        self._current_step_data["is_blocker"] = (
+                            bug_report_result.is_blocker
+                        )
+                        self._current_step_data["blocker_reasoning"] = (
+                            bug_report_result.blocker_reasoning
+                        )
 
                     # Determine if we should continue based on verification
                     is_blocker = self._current_step_data.get("is_blocker", False)
@@ -728,13 +746,14 @@ class TestRunner(BaseAgent):
                 return step_result
 
             # Capture before screenshot
-            if self.automation_driver:
-                screenshot_before = await self.automation_driver.screenshot()
-                screenshot_path = self._save_screenshot(
-                    screenshot_before,
-                    f"tc{test_case.test_id}_step{step.step_number}_before",
-                )
-                step_result.screenshot_before = str(screenshot_path)
+            before_capture = await self._artifacts.capture_test_step_screenshot(
+                test_case=test_case,
+                step=step,
+                suffix="before",
+            )
+            if before_capture:
+                screenshot_before = before_capture.screenshot_bytes
+                step_result.screenshot_before = before_capture.screenshot_path
 
             # Build execution history and next test case context (used for replay/verification)
             execution_history = []
@@ -853,17 +872,16 @@ class TestRunner(BaseAgent):
                 # Capture after screenshot
                 if self.automation_driver:
                     await asyncio.sleep(1)  # Brief wait for UI to stabilize
-                    screenshot_after = await self.automation_driver.screenshot()
-                    screenshot_path = self._save_screenshot(
-                        screenshot_after,
-                        f"tc{test_case.test_id}_step{step.step_number}_after",
-                    )
-                    step_result.screenshot_after = str(screenshot_path)
-                    self._artifacts.update_latest_snapshot(
-                        screenshot_after,
-                        str(screenshot_path),
-                        f"step_{step.step_number}_after",
-                    )
+                after_capture = await self._artifacts.capture_test_step_screenshot(
+                    test_case=test_case,
+                    step=step,
+                    suffix="after",
+                    origin=f"step_{step.step_number}_after",
+                    update_latest=True,
+                )
+                if after_capture:
+                    screenshot_after = after_capture.screenshot_bytes
+                    step_result.screenshot_after = after_capture.screenshot_path
 
                 # Always produce a verification decision for reporting
                 try:
@@ -1419,358 +1437,6 @@ Respond with JSON:
             # Raise the exception - don't fallback
             raise
 
-    async def _evaluate_bug_plan_context(
-        self,
-        bug_report: BugReport,
-        test_case: TestCase,
-        step: TestStep,
-        verification_result: dict[str, Any],
-        initial_severity: BugSeverity,
-    ) -> dict[str, Any] | None:
-        """Ask the model to evaluate bug impact using full test plan context."""
-        if not self._current_test_plan:
-            return None
-
-        plan_payload = self._current_test_plan.model_dump(mode="json")
-        plan_json = json.dumps(plan_payload, indent=2)
-
-        bug_payload = bug_report.model_dump(mode="json")
-        bug_payload["severity"] = bug_report.severity.value
-        bug_payload["initial_severity"] = initial_severity.value
-
-        test_case_context = {
-            "test_case_id": test_case.test_id,
-            "name": test_case.name,
-            "description": test_case.description,
-            "priority": test_case.priority.value,
-            "prerequisites": test_case.prerequisites,
-            "postconditions": test_case.postconditions,
-        }
-
-        step_context = {
-            "step_number": step.step_number,
-            "action": step.action,
-            "expected_result": step.expected_result,
-            "optional": step.optional,
-        }
-
-        verification_context = {
-            "verdict": verification_result.get("verdict"),
-            "reasoning": verification_result.get("reasoning"),
-            "actual_result": verification_result.get("actual_result"),
-            "confidence": verification_result.get("confidence"),
-            "is_blocker": verification_result.get("is_blocker"),
-            "blocker_reasoning": verification_result.get("blocker_reasoning"),
-        }
-
-        prompt = (
-            "You are a senior QA lead reviewing an automated test failure. "
-            "Use the complete test plan to reason about downstream impact. "
-            "If the failure prevents any remaining test cases from achieving their purpose, "
-            "treat it as blocking.\n\n"
-            "Test Plan (JSON):\n"
-            f"{plan_json}\n\n"
-            "Failed Test Case Context:\n"
-            f"{json.dumps(test_case_context, indent=2)}\n\n"
-            "Failed Step Context:\n"
-            f"{json.dumps(step_context, indent=2)}\n\n"
-            "Existing Bug Report:\n"
-            f"{json.dumps(bug_payload, indent=2)}\n\n"
-            "Verification Summary:\n"
-            f"{json.dumps(verification_context, indent=2)}\n\n"
-            "Respond with JSON using this schema:\n"
-            "{\n"
-            '  "severity": "critical|high|medium|low",\n'
-            '  "should_block": true|false,\n'
-            '  "blocker_reason": "Why later cases cannot proceed (or empty)",\n'
-            '  "notes": "Additional context for the report",\n'
-            '  "recommended_actions": ["Optional suggestions"]\n'
-            "}"
-        )
-
-        response = await self.call_openai(
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        await self._model_logger.log_call(
-            agent="test_runner.bug_plan_assessment",
-            model=self.model,
-            prompt=prompt,
-            request_payload={
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-            response=response,
-            metadata={
-                "step_number": step.step_number,
-                "test_case": test_case.name,
-            },
-        )
-
-        content = response.get("content", "{}")
-        if isinstance(content, str):
-            parsed_content = json.loads(content)
-            return parsed_content if isinstance(parsed_content, dict) else None
-        if isinstance(content, dict):
-            return content
-        return None
-
-    async def _create_bug_report(
-        self,
-        step_result: StepResult,
-        step: TestStep,
-        test_case: TestCase,
-        case_result: TestCaseResult,
-    ) -> BugReport | None:
-        """Create a detailed bug report for a failed step."""
-        if step_result.status != TestStatus.FAILED:
-            return None
-
-        assert self._current_test_plan is not None
-
-        # Get verification result if available
-        verification_payload = self._current_step_data.get("verification_result", {})
-        verification_result: dict[str, Any]
-        if isinstance(verification_payload, dict):
-            verification_result = verification_payload
-        else:
-            verification_result = {}
-
-        # Use AI to determine error type and severity
-        prompt = f"""Analyze this test failure and create a bug report:
-
-Test Case: {test_case.name}
-Failed Step: {step.action}
-Expected Result: {step.expected_result}
-
-Verification Results:
-- Verdict: {verification_result.get("verdict", "FAIL")}
-- Reasoning: {verification_result.get("reasoning", step_result.error_message)}
-- Actual Result: {verification_result.get("actual_result", step_result.actual_result)}
-- Is Blocker: {verification_result.get("is_blocker", False)}
-- Blocker Reasoning: {verification_result.get("blocker_reasoning", "N/A")}
-
-Error Details: {step_result.error_message}
-Step is Optional: {step.optional}
-
-Determine:
-1. error_type: One of (element_not_found, assertion_failed, timeout, navigation_error, api_error, validation_error, unknown_error)
-2. severity: One of (critical, high, medium, low)
-   - If is_blocker=true, severity should be at least "high"
-   - critical: Blocks all testing, core functionality broken
-   - high: Major feature broken, blocks test case
-   - medium: Feature partially working, workaround possible
-   - low: Minor issue, cosmetic or edge case
-3. bug_description: A clear, concise description for developers
-
-Respond in JSON format with keys: error_type, severity, bug_description, reasoning"""
-
-        try:
-            response = await self.call_openai(
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-            )
-            await self._model_logger.log_call(
-                agent="test_runner.bug_report",
-                model=self.model,
-                prompt=prompt,
-                request_payload={
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_object"},
-                },
-                response=response,
-                metadata={
-                    "step_number": step.step_number,
-                    "test_case": test_case.name,
-                },
-            )
-
-            # Content is already a dict when using json_object response format
-            raw_result = response.get("content", {})
-            if isinstance(raw_result, str):
-                parsed_result = json.loads(raw_result)
-                result: dict[str, Any] = (
-                    parsed_result if isinstance(parsed_result, dict) else {}
-                )
-            elif isinstance(raw_result, dict):
-                result = raw_result
-            else:
-                result = {}
-            error_type = result.get("error_type", "unknown_error")
-
-            # Map severity string to enum
-            severity_map = {
-                "critical": BugSeverity.CRITICAL,
-                "high": BugSeverity.HIGH,
-                "medium": BugSeverity.MEDIUM,
-                "low": BugSeverity.LOW,
-            }
-            severity = severity_map.get(
-                result.get("severity", "medium").lower(), BugSeverity.MEDIUM
-            )
-
-            logger.debug(
-                "AI bug classification",
-                extra={
-                    "error_type": error_type,
-                    "severity": severity.value,
-                    "reasoning": result.get("reasoning", ""),
-                },
-            )
-
-        except Exception as e:
-            logger.error(
-                "Failed to classify bug with AI",
-                extra={"error": str(e), "step": step.step_number},
-            )
-            # Re-raise - AI failure is fatal
-            raise
-
-        # Build reproduction steps
-        reproduction_steps = [
-            f"1. Execute test case: {test_case.name}",
-            f"2. Navigate to step {step.step_number}: {step.action}",
-        ]
-
-        # Add recent successful steps for context
-        for i, step_res in enumerate(case_result.step_results[-3:]):
-            if step_res.status == TestStatus.PASSED:
-                reproduction_steps.append(
-                    f"{i + 3}. Previous step completed: Step {step_res.step_number}"
-                )
-
-        reproduction_steps.append(
-            f"{len(reproduction_steps) + 1}. Execute failing step: {step.action}"
-        )
-
-        # Use the bug description from AI or fallback
-        bug_description = result.get(
-            "bug_description", f"Step {step.step_number} failed: {step.action}"
-        )
-
-        # Build comprehensive error details including verification info
-        error_details_parts = []
-        if verification_result.get("reasoning"):
-            error_details_parts.append(
-                f"Verification reasoning: {verification_result['reasoning']}"
-            )
-        if verification_result.get("is_blocker"):
-            error_details_parts.append(
-                f"Blocker: Yes - {verification_result.get('blocker_reasoning', 'N/A')}"
-            )
-        else:
-            error_details_parts.append("Blocker: No")
-        if step_result.error_message:
-            error_details_parts.append(f"Error message: {step_result.error_message}")
-
-        bug_report = BugReport(
-            step_id=step.step_id,
-            test_case_id=test_case.case_id,
-            test_plan_id=self._current_test_plan.plan_id,
-            step_number=step.step_number,
-            description=bug_description,
-            severity=severity,
-            error_type=error_type,
-            expected_result=step.expected_result,
-            actual_result=step_result.actual_result,
-            screenshot_path=step_result.screenshot_after,
-            error_details="\n".join(error_details_parts),
-            reproduction_steps=reproduction_steps,
-        )
-
-        # Enrich bug report with plan-level evaluation
-        plan_assessment: dict[str, Any] | None = None
-        try:
-            plan_assessment = await self._evaluate_bug_plan_context(
-                bug_report=bug_report,
-                test_case=test_case,
-                step=step,
-                verification_result=verification_result,
-                initial_severity=severity,
-            )
-        except Exception as e:
-            logger.error(
-                "Plan-level bug assessment failed",
-                extra={
-                    "error": str(e),
-                    "bug_id": str(bug_report.bug_id),
-                },
-            )
-
-        if plan_assessment:
-            self._current_step_data["plan_level_assessment"] = plan_assessment
-
-            plan_severity = plan_assessment.get("severity")
-            if isinstance(plan_severity, str):
-                plan_severity_enum = severity_map.get(plan_severity.lower())
-                if plan_severity_enum:
-                    bug_report.plan_recommended_severity = plan_severity_enum
-                    if self._severity_rank(plan_severity_enum) < self._severity_rank(
-                        bug_report.severity
-                    ):
-                        bug_report.severity = plan_severity_enum
-                else:
-                    logger.warning(
-                        "Plan-level assessment returned unknown severity",
-                        extra={"severity": plan_severity},
-                    )
-
-            blocker_flag = plan_assessment.get("should_block")
-            if blocker_flag is not None:
-                bug_report.plan_blocker = bool(blocker_flag)
-                if bug_report.plan_blocker:
-                    reasoning = (
-                        plan_assessment.get("blocker_reason")
-                        or "Plan-level assessment marked this failure as blocking."
-                    )
-                    bug_report.plan_blocker_reason = reasoning
-                    self._current_step_data["is_blocker"] = True
-                    self._current_step_data["blocker_reasoning"] = reasoning
-                    bug_report.error_details = (
-                        f"{bug_report.error_details}\nPlan-level blocker reasoning: {reasoning}"
-                        if bug_report.error_details
-                        else f"Plan-level blocker reasoning: {reasoning}"
-                    )
-                else:
-                    # Plan assessment explicitly says non-blocking — override any
-                    # forced_blocker_reason that was set by max-turns or loop detection.
-                    self._current_step_data["is_blocker"] = False
-                    non_block_reason = plan_assessment.get("blocker_reason")
-                    if non_block_reason:
-                        bug_report.plan_blocker_reason = non_block_reason
-                        bug_report.error_details = (
-                            f"{bug_report.error_details}\nPlan-level blocker reasoning: {non_block_reason}"
-                            if bug_report.error_details
-                            else f"Plan-level blocker reasoning: {non_block_reason}"
-                        )
-
-            notes = plan_assessment.get("notes")
-            if isinstance(notes, str):
-                bug_report.plan_assessment_notes = notes
-                bug_report.error_details = (
-                    f"{bug_report.error_details}\nPlan-level notes: {notes}"
-                    if bug_report.error_details
-                    else f"Plan-level notes: {notes}"
-                )
-
-            recommendations = plan_assessment.get("recommended_actions")
-            if isinstance(recommendations, list):
-                bug_report.plan_recommendations = [
-                    str(item) for item in recommendations
-                ]
-
-        logger.info(
-            "Bug report created",
-            extra={
-                "bug_id": str(bug_report.bug_id),
-                "severity": bug_report.severity.value,
-                "error_type": error_type,
-                "plan_blocker": bug_report.plan_blocker,
-            },
-        )
-
-        return bug_report
-
     async def _verify_prerequisites(self, prerequisites: list[str]) -> bool:
         """Verify test case prerequisites are met."""
         if not prerequisites:
@@ -2025,273 +1691,60 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         execution_history: list[dict[str, Any]],
         next_test_case: TestCase | None,
     ) -> StepResult | None:
-        if not self._replay_enabled(step):
-            return None
-        key = await self._execution_replay_key(step, test_case)
-        if not key:
-            return None
-        entry = self._replay_service.lookup(key)
-        if not entry:
-            return None
-        driver = self.automation_driver
-        if driver is None:
-            return None
-        if self._trace:
-            self._trace.record_cache_event(
-                {
-                    "type": "execution_replay_cache_hit",
-                    "scenario": key.scenario,
-                    "step": key.step,
-                    "environment": key.environment,
-                    "resolution": key.resolution,
-                    "keyboard_layout": key.keyboard_layout,
-                    "action_count": len(entry.actions),
-                }
-            )
-        try:
-            await replay_driver_actions(
-                driver,
-                entry.actions,
-                stabilization_wait_ms=self._replay_stabilization_wait_ms(),
-                action_timeout_seconds=max(
-                    self._settings.actions_computer_tool_action_timeout_ms / 1000.0,
-                    0.5,
-                ),
-            )
-        except Exception as exc:
-            logger.warning(
-                "TestRunner: execution replay failed; invalidating cache",
-                extra={"step": key.step, "error": str(exc)},
-            )
-            try:
-                self._replay_service.invalidate(key)
-                if self._trace:
-                    self._trace.record_cache_event(
-                        {
-                            "type": "execution_replay_cache_invalidate",
-                            "scenario": key.scenario,
-                            "step": key.step,
-                            "environment": key.environment,
-                            "resolution": key.resolution,
-                            "keyboard_layout": key.keyboard_layout,
-                            "reason": "action_error",
-                            "error": str(exc),
-                        }
-                    )
-            except Exception:
-                logger.debug(
-                    "TestRunner: execution replay cache invalidation failed",
-                    exc_info=True,
-                )
-            if self._trace:
-                self._trace.record_cache_event(
-                    {
-                        "type": "execution_replay_fallback_to_cu",
-                        "scenario": key.scenario,
-                        "step": key.step,
-                    }
-                )
-            return None
-
-        replay_action = {
-            "action": {
-                "type": "execution_replay",
-                "description": f"Replay cached actions for {key.step}",
-            },
-            "result": {
-                "success": True,
-                "outcome": f"Replayed {len(entry.actions)} cached driver action(s).",
-                "driver_actions": entry.actions,
-            },
-            "full_data": {
-                "action_type": "execution_replay",
-                "result": {"success": True, "driver_actions": entry.actions},
-            },
-        }
-        step_result.actions_performed = [
-            {
-                "success": True,
-                "action_type": "execution_replay",
-                "outcome": f"Replayed {len(entry.actions)} cached driver action(s).",
-                "confidence": 1.0,
-                "driver_actions": entry.actions,
-            }
-        ]
-        if self._current_step_actions is None:
-            self._current_step_actions = []
-        self._current_step_actions.append(
-            {
-                "action_id": f"execution_replay_{uuid4()}",
-                "action_type": "execution_replay",
-                "target": "",
-                "value": None,
-                "description": replay_action["action"]["description"],
-                "timestamp_start": datetime.now(timezone.utc).isoformat(),
-                "timestamp_end": datetime.now(timezone.utc).isoformat(),
-                "ai_conversation": {
-                    "test_runner_interpretation": None,
-                    "action_agent_execution": None,
-                },
-                "automation_calls": [],
-                "result": replay_action["result"],
-                "screenshots": {},
-            }
-        )
-
-        screenshot_after = None
-        if self.automation_driver:
-            screenshot_after = await self.automation_driver.screenshot()
-            screenshot_path = self._save_screenshot(
-                screenshot_after,
-                f"tc{test_case.test_id}_step{step.step_number}_after",
-            )
-            step_result.screenshot_after = str(screenshot_path)
-            self._artifacts.update_latest_snapshot(
-                screenshot_after,
-                str(screenshot_path),
-                f"step_{step.step_number}_after",
-            )
-
-        replay_wait_spent_ms = 0
-        replay_wait_cycles = 0
-        replay_wait_budget_ms = REPLAY_VALIDATION_MODEL_WAIT_BUDGET_MS
-
-        while True:
-            verification = await self._verify_expected_outcome(
+        async def _capture_replay_screenshot(
+            suffix: str,
+        ) -> tuple[bytes | None, str | None]:
+            capture = await self._artifacts.capture_test_step_screenshot(
                 test_case=test_case,
                 step=step,
-                action_results=[replay_action],
+                suffix=suffix,
+                origin=f"step_{step.step_number}_{suffix}",
+                update_latest=True,
+            )
+            if capture is None:
+                return None, None
+            return capture.screenshot_bytes, capture.screenshot_path
+
+        replay_result = await self._replay_service.try_execution_replay(
+            ReplayExecutionRequest(
+                step=step,
+                test_case=test_case,
+                step_result=step_result,
                 screenshot_before=screenshot_before,
-                screenshot_after=screenshot_after,
                 execution_history=execution_history,
                 next_test_case=next_test_case,
-                replay_wait_budget_ms=replay_wait_budget_ms,
+                current_test_plan_name=self._current_test_plan.name
+                if self._current_test_plan
+                else "",
+                current_runtime_environment=self._environment,
+                plan_cache_key=self._plan_cache_key(step, test_case),
+                plan_fingerprint=self._plan_fingerprint(),
+                capture_replay_screenshot=_capture_replay_screenshot,
+                verify_expected_outcome=self._verify_expected_outcome,
+                coerce_model_bool=self._coerce_model_bool,
+                trace=self._trace,
             )
-            if verification.get("verdict") == "PASS":
-                break
-
-            request_additional_wait = self._coerce_model_bool(
-                verification.get("request_additional_wait", False)
-            )
-            if not request_additional_wait or replay_wait_budget_ms <= 0:
-                break
-
-            recommended_wait_raw = verification.get("recommended_wait_ms", 0)
-            try:
-                recommended_wait_ms = int(recommended_wait_raw)
-            except (TypeError, ValueError):
-                recommended_wait_ms = 0
-            wait_ms = recommended_wait_ms
-            if wait_ms <= 0:
-                wait_ms = min(
-                    REPLAY_VALIDATION_MODEL_WAIT_FALLBACK_MS,
-                    replay_wait_budget_ms,
-                )
-            wait_ms = max(0, min(wait_ms, replay_wait_budget_ms))
-            if wait_ms <= 0:
-                break
-
-            logger.info(
-                "Execution replay validation requested additional wait",
-                extra={
-                    "step": key.step,
-                    "wait_ms": wait_ms,
-                    "remaining_budget_before_wait_ms": replay_wait_budget_ms,
-                    "wait_reasoning": verification.get("wait_reasoning", ""),
-                },
-            )
-            await asyncio.sleep(wait_ms / 1000.0)
-            replay_wait_budget_ms -= wait_ms
-            replay_wait_spent_ms += wait_ms
-            replay_wait_cycles += 1
-
-            if self.automation_driver:
-                screenshot_after = await self.automation_driver.screenshot()
-                screenshot_path = self._save_screenshot(
-                    screenshot_after,
-                    (
-                        f"tc{test_case.test_id}_step{step.step_number}"
-                        f"_replay_wait_{replay_wait_cycles}_after"
-                    ),
-                )
-                step_result.screenshot_after = str(screenshot_path)
-                self._artifacts.update_latest_snapshot(
-                    screenshot_after,
-                    str(screenshot_path),
-                    (f"step_{step.step_number}_replay_wait_{replay_wait_cycles}_after"),
-                )
-        self._current_step_data["verification_mode"] = "ai"
-
-        self._current_step_data["replay_validation_wait_spent_ms"] = (
-            replay_wait_spent_ms
         )
-        self._current_step_data["replay_validation_wait_cycles"] = replay_wait_cycles
-        self._current_step_data["replay_validation_wait_budget_remaining_ms"] = (
-            replay_wait_budget_ms
-        )
-        self._current_step_data["verification_result"] = verification
-
-        if verification["verdict"] == "PASS":
-            step_result.status = TestStatus.PASSED
-        else:
-            step_result.status = TestStatus.FAILED
-
-        step_result.actual_result = verification["actual_result"]
-        step_result.error_message = (
-            verification["reasoning"] if verification["verdict"] == "FAIL" else None
-        )
-        step_result.confidence = verification.get("confidence", 0.0)
-
-        if verification["verdict"] == "FAIL":
-            logger.info(
-                "Execution replay validation failed; invalidating cache",
-                extra={
-                    "step": key.step,
-                    "validation_reasoning": verification.get("reasoning"),
-                    "replay_wait_spent_ms": replay_wait_spent_ms,
-                    "replay_wait_cycles": replay_wait_cycles,
-                },
-            )
-            try:
-                self._replay_service.invalidate(key)
-                if self._trace:
-                    self._trace.record_cache_event(
-                        {
-                            "type": "execution_replay_cache_invalidate",
-                            "scenario": key.scenario,
-                            "step": key.step,
-                            "environment": key.environment,
-                            "resolution": key.resolution,
-                            "keyboard_layout": key.keyboard_layout,
-                            "reason": "validation_failed",
-                            "message": verification.get("reasoning"),
-                            "replay_wait_spent_ms": replay_wait_spent_ms,
-                            "replay_wait_cycles": replay_wait_cycles,
-                        }
-                    )
-            except Exception:
-                logger.debug(
-                    "TestRunner: execution replay cache invalidation failed",
-                    exc_info=True,
-                )
-            if self._trace:
-                self._trace.record_cache_event(
-                    {
-                        "type": "execution_replay_fallback_to_cu",
-                        "scenario": key.scenario,
-                        "step": key.step,
-                    }
-                )
+        if replay_result is None:
             return None
 
-        if self._trace:
-            self._trace.record_step(
-                scenario_name=key.scenario,
-                step=step,
-                step_result=step_result,
-                attempt=1,
-                plan_cache_hit=None,
-            )
+        if self._current_step_actions is None:
+            self._current_step_actions = []
+        self._current_step_actions.append(replay_result.action_record)
+        step_result.actions_performed = replay_result.actions_performed
+        self._current_step_data["verification_mode"] = "ai"
+        self._current_step_data["replay_validation_wait_spent_ms"] = (
+            replay_result.replay_validation_wait_spent_ms
+        )
+        self._current_step_data["replay_validation_wait_cycles"] = (
+            replay_result.replay_validation_wait_cycles
+        )
+        self._current_step_data["replay_validation_wait_budget_remaining_ms"] = (
+            replay_result.replay_validation_wait_budget_remaining_ms
+        )
+        self._current_step_data["verification_result"] = replay_result.verification
+        if replay_result.fallback_to_cu:
+            return None
         return step_result
 
     async def _store_execution_replay(
@@ -2300,35 +1753,31 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         test_case: TestCase,
         action_results: list[dict[str, Any]],
     ) -> None:
-        if not self._replay_enabled(step) or not action_results:
-            return
-        if self._is_validation_only_step_result_set(action_results):
-            return
-        recorded: list[dict[str, Any]] = []
-        for result in action_results:
-            recorded.extend(self._driver_actions_for_replay(result))
-        if not recorded:
-            return
-        key = await self._execution_replay_key(step, test_case)
-        if key is None:
-            return
-        try:
-            self._replay_service.store(key, recorded)
-            if self._trace:
-                self._trace.record_cache_event(
-                    {
-                        "type": "execution_replay_cache_store",
-                        "scenario": key.scenario,
-                        "step": key.step,
-                        "environment": key.environment,
-                        "resolution": key.resolution,
-                        "keyboard_layout": key.keyboard_layout,
-                        "action_count": len(recorded),
-                    }
-                )
-        except Exception:
-            logger.debug(
-                "TestRunner: failed to store execution replay cache", exc_info=True
+        recorded_action_count = sum(
+            len(self._driver_actions_for_replay(result)) for result in action_results
+        )
+        key = await self._replay_service.store_execution_replay(
+            step=step,
+            test_case=test_case,
+            action_results=action_results,
+            current_test_plan_name=self._current_test_plan.name
+            if self._current_test_plan
+            else "",
+            current_runtime_environment=self._environment,
+            plan_cache_key=self._plan_cache_key(step, test_case),
+            plan_fingerprint=self._plan_fingerprint(),
+        )
+        if key and self._trace:
+            self._trace.record_cache_event(
+                {
+                    "type": "execution_replay_cache_store",
+                    "scenario": key.scenario,
+                    "step": key.step,
+                    "environment": key.environment,
+                    "resolution": key.resolution,
+                    "keyboard_layout": key.keyboard_layout,
+                    "action_count": recorded_action_count,
+                }
             )
 
     async def _persist_coordinate_cache(

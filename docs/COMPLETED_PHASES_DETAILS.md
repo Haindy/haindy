@@ -1,6 +1,6 @@
 # HAINDY - Completed Phases Details
 
-This document contains detailed information about completed phases. For current progress and upcoming phases, see [HAINDY_PLAN.md](./HAINDY_PLAN.md).
+This document contains detailed information about completed phases. For current project state, prefer the current codebase, runbook, and phase documentation.
 
 ## Phase 0 — Repository Setup
 

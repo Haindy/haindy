@@ -14,9 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.agents.scope_triage import ScopeTriageAgent
-from src.agents.situational_agent import SituationalAgent
-from src.agents.test_planner import TestPlannerAgent
+from src.agents import ScopeTriageAgent, SituationalAgent, TestPlannerAgent
 from src.config.settings import Settings, get_settings
 from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.desktop.controller import DesktopController
@@ -26,11 +24,12 @@ from src.mobile.controller import MobileController
 from src.monitoring.debug_logger import initialize_debug_logger
 from src.monitoring.logger import get_logger, get_run_id, setup_logging
 from src.monitoring.reporter import TestReporter
-from src.orchestration.communication import MessageBus
 from src.orchestration.coordinator import WorkflowCoordinator
 from src.orchestration.scope_pipeline import run_scope_triage_and_plan
 from src.orchestration.state_manager import StateManager
+from src.runtime.agent_factory import AgentFactory
 from src.runtime.environment import normalize_automation_backend
+from src.runtime.execution_context_builder import build_execution_context_bundle
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
 
@@ -147,32 +146,12 @@ def _create_planning_agents(
     settings: Settings,
 ) -> tuple[ScopeTriageAgent, TestPlannerAgent, SituationalAgent]:
     """Instantiate planning + setup agents from current settings."""
-    triage_cfg = settings.get_agent_model_config("scope_triage")
-    planner_cfg = settings.get_agent_model_config("test_planner")
-    situational_cfg = settings.get_agent_model_config("situational_agent")
-
-    triage_agent = ScopeTriageAgent(
-        name="ScopeTriage",
-        model=triage_cfg.model,
-        temperature=triage_cfg.temperature,
-        reasoning_level=triage_cfg.reasoning_level,
-        modalities=triage_cfg.modalities,
+    planning_agents = AgentFactory(settings).create_planning_agents()
+    return (
+        planning_agents.scope_triage,
+        planning_agents.test_planner,
+        planning_agents.situational_agent,
     )
-    planner = TestPlannerAgent(
-        name="TestPlanner",
-        model=planner_cfg.model,
-        temperature=planner_cfg.temperature,
-        reasoning_level=planner_cfg.reasoning_level,
-        modalities=planner_cfg.modalities,
-    )
-    situational_agent = SituationalAgent(
-        name="SituationalAgent",
-        model=situational_cfg.model,
-        temperature=situational_cfg.temperature,
-        reasoning_level=situational_cfg.reasoning_level,
-        modalities=situational_cfg.modalities,
-    )
-    return triage_agent, planner, situational_agent
 
 
 async def run_test(
@@ -256,33 +235,26 @@ async def run_test(
                 )
             )
 
-        planning_context = {
-            "execution_context": context_text,
-            "target_type": assessment.target_type,
-            "automation_backend": automation_backend,
-            "web_url": assessment.setup.web_url,
-            "app_name": assessment.setup.app_name,
-            "launch_command": assessment.setup.launch_command,
-            "maximize": str(assessment.setup.maximize),
-            "adb_serial": assessment.setup.adb_serial,
-            "app_package": assessment.setup.app_package,
-            "app_activity": assessment.setup.app_activity,
-            "adb_commands": assessment.setup.adb_commands,
-        }
+        context_bundle = build_execution_context_bundle(
+            context_text=context_text,
+            assessment=assessment,
+            automation_backend=automation_backend,
+        )
 
         console.print("[yellow]Generating test plan...[/yellow]")
         test_plan, triage_result = await run_scope_triage_and_plan(
             requirements=requirements,
             planner=planner,
             triage_agent=triage_agent,
-            context=planning_context,
-            cache_key_context={"execution_context": context_text},
+            context=context_bundle.planning_context,
+            cache_key_context=context_bundle.planning_cache_key_context,
         )
 
         console.print(f"[cyan]Initializing {automation_backend} runtime...[/cyan]")
         automation_controller, coordinator = await _create_coordinator_stack(
             max_steps=max_steps,
             backend=automation_backend,
+            agent_factory=AgentFactory(settings),
         )
         action_agent = coordinator.get_action_agent()
 
@@ -323,23 +295,6 @@ async def run_test(
             action_agent=action_agent,
         )
 
-        test_context = {
-            "execution_context": context_text,
-            "target_type": assessment.target_type,
-            "automation_backend": automation_backend,
-            "entry_setup": {
-                "web_url": assessment.setup.web_url,
-                "app_name": assessment.setup.app_name,
-                "launch_command": assessment.setup.launch_command,
-                "maximize": assessment.setup.maximize,
-                "adb_serial": assessment.setup.adb_serial,
-                "app_package": assessment.setup.app_package,
-                "app_activity": assessment.setup.app_activity,
-                "adb_commands": assessment.setup.adb_commands,
-            },
-            "setup_notes": assessment.notes,
-        }
-
         console.print("[cyan]Running test...[/cyan]")
         test_state = await _run_with_timeout(
             coordinator=coordinator,
@@ -347,8 +302,8 @@ async def run_test(
             precomputed_plan=test_plan,
             triage_result=triage_result,
             timeout=timeout,
-            context=test_context,
-            initial_url=assessment.setup.web_url or None,
+            context=context_bundle.test_context,
+            initial_url=context_bundle.initial_url,
         )
 
         if screen_recorder:
@@ -450,6 +405,7 @@ async def run_test(
 async def _create_coordinator_stack(
     max_steps: int,
     backend: str = "desktop",
+    agent_factory: AgentFactory | None = None,
 ) -> tuple[DesktopController | MobileController, WorkflowCoordinator]:
     """Build and initialize the automation backend/coordinator stack."""
     normalized_backend = normalize_automation_backend(backend)
@@ -467,9 +423,9 @@ async def _create_coordinator_stack(
     coordinator: WorkflowCoordinator | None = None
     try:
         coordinator = WorkflowCoordinator(
-            message_bus=MessageBus(),
             state_manager=StateManager(),
             automation_driver=automation_controller.driver,
+            agent_factory=agent_factory,
             max_steps=max_steps,
         )
         await coordinator.initialize()
