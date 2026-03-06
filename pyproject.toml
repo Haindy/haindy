@@ -66,6 +66,9 @@ Issues = "https://github.com/fkeegan/haindy/issues"
 where = ["."]
 include = ["src*"]
 
+[tool.setuptools.package-data]
+"src.monitoring" = ["templates/*.j2"]
+
 [tool.black]
 line-length = 88
 target-version = ['py310']
