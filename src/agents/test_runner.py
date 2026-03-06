@@ -5,12 +5,7 @@ This agent orchestrates test execution with intelligent step interpretation,
 living document reporting, and comprehensive failure handling.
 """
 
-import asyncio
-import base64
-import json
-import traceback
 from datetime import datetime, timezone
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -22,19 +17,13 @@ from src.agents.test_runner_bug_reports import (
     BugReportRequest,
     TestRunnerBugReportBuilder,
 )
-from src.agents.test_runner_executor import (
-    StepActionExecutionRequest,
-    TestRunnerExecutor,
-)
-from src.agents.test_runner_interpreter import (
-    StepInterpretationRequest,
-    TestRunnerInterpreter,
-)
+from src.agents.test_runner_step_processor import TestRunnerStepProcessor
+from src.agents.test_runner_summary import TestRunnerSummary
+from src.agents.test_runner_verifier import TestRunnerVerifier
 from src.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.interfaces import AutomationDriver
 from src.core.types import (
-    BugSeverity,
     StepResult,
     TestCase,
     TestCaseResult,
@@ -56,38 +45,12 @@ from src.runtime.execution_replay_cache import (
     ExecutionReplayCache,
     ExecutionReplayCacheKey,
 )
-from src.runtime.execution_replay_service import (
-    ExecutionReplayService,
-    ReplayExecutionRequest,
-)
+from src.runtime.execution_replay_service import ExecutionReplayService
 from src.runtime.task_cache import TaskPlanCache
 from src.runtime.trace import RunTraceWriter, load_model_calls_for_run
 from src.utils.model_logging import get_model_logger
 
 logger = get_logger(__name__)
-MAX_TURN_ERROR_PREFIX = "Computer Use max turns exceeded"
-LOOP_ERROR_PREFIX = "Computer Use loop detected"
-
-COMPUTER_USE_PROMPT_MANUAL = """Computer Use execution context:
-- Executor: OpenAI Computer Use tool powered by GPT-5.2 with medium reasoning effort.
-- Environment: Existing runtime UI session (desktop browser/app or Android mobile screenshot) with screenshot-driven interaction.
-- Inputs: Each prompt is delivered with the latest screenshot and scenario metadata; do not capture screenshots yourself.
-
-Prompt construction rules:
-1. Begin with a concise imperative goal that states the desired outcome.
-2. Identify the UI target(s) using the exact labels a human sees (no CSS/XPath speculation).
-3. Provide any text to enter or keys to press when relevant.
-4. Restate the expected outcome based only on what should be *immediately visible* after the action completes — for example, a screen transition, a success message, or a new UI state. Never ask the executor to navigate to a different screen, open a profile, or take any additional step to confirm results; all deeper verification is handled by a separate evaluation pass.
-5. Instruct the executor to act directly without seeking confirmation from the user.
-6. If the screenshot already shows the desired outcome (e.g. a toggle is already selected, a field is already filled, the expected screen is already visible), report success immediately without interacting. Do not tap or click elements that are already in the correct state.
-7. Do not embed retry logic, fallback strategies, or alternative tap targets in the prompt. Retries are handled automatically by the execution infrastructure. Focus each prompt solely on *what* to do and *what success looks like*.
-8. Tell it to rely on the provided screenshot for context and to scroll or refocus if elements are off-screen.
-9. For observation-only (`assert`) actions, explicitly forbid interactions and request a visual verification summary instead.
-10. Avoid backend assumptions, hidden DOM references, or multi-step checklists—each prompt should cover one cohesive action.
-11. After the primary action completes (or fails), stop. Do not take additional navigation steps to verify account details, confirm identity, or validate data that is not immediately visible on screen.
-12. When a step is about entering text into one specific field (e.g. typing a verification/OTP code, entering an email, filling a single input), do NOT instruct the executor to also tap a submit/confirm/send/reset button. Just fill the field and stop. Only include button-tap instructions when the step's explicit purpose is to submit the form or the step action text says to tap that button.
-
-If no interaction is required (`skip_navigation`), leave the computer_use_prompt empty.""".strip()
 
 
 class TestRunner(BaseAgent):
@@ -166,19 +129,11 @@ class TestRunner(BaseAgent):
             execution_replay_cache=self._execution_replay_cache,
             coordinate_cache=self._coordinate_cache,
         )
-        self._interpreter = TestRunnerInterpreter(
-            automation_driver=self.automation_driver,
-            get_interpretation_screenshot=self._get_interpretation_screenshot,
-            task_plan_cache=self._task_plan_cache,
-            trace=self._trace,
-            model_logger=self._model_logger,
-            model=self.model,
-            call_openai=self.call_openai,
-        )
-        self._executor = TestRunnerExecutor(
-            action_agent=self.action_agent,
-            automation_driver=self.automation_driver,
-        )
+        self._interpreter: Any | None = None
+        self._executor: Any | None = None
+        self._step_processor = TestRunnerStepProcessor(self)
+        self._verifier = TestRunnerVerifier(self)
+        self._summary_helper = TestRunnerSummary(self)
 
         # Action storage for Phase 17
         self._action_storage: dict[str, Any] = {
@@ -269,19 +224,8 @@ class TestRunner(BaseAgent):
         self._artifacts.reset()
         self._replay_service.set_automation_driver(self.automation_driver)
         self._replay_service.set_coordinate_cache(self._coordinate_cache)
-        self._interpreter = TestRunnerInterpreter(
-            automation_driver=self.automation_driver,
-            get_interpretation_screenshot=self._get_interpretation_screenshot,
-            task_plan_cache=self._task_plan_cache,
-            trace=self._trace,
-            model_logger=self._model_logger,
-            model=self.model,
-            call_openai=self.call_openai,
-        )
-        self._executor = TestRunnerExecutor(
-            action_agent=self.action_agent,
-            automation_driver=self.automation_driver,
-        )
+        self._interpreter = None
+        self._executor = None
 
         # Initialize action storage for this test run
         self._action_storage = {
@@ -696,380 +640,9 @@ class TestRunner(BaseAgent):
     async def _execute_test_step(
         self, step: TestStep, test_case: TestCase, case_result: TestCaseResult
     ) -> StepResult:
-        """Execute a single test step with intelligent interpretation."""
-        logger.info(
-            "Executing test step",
-            extra={
-                "step_number": step.step_number,
-                "action": step.action,
-                "test_case": test_case.name,
-            },
+        return await self._step_processor.execute_test_step(
+            step, test_case, case_result
         )
-
-        self._current_test_step = step
-
-        # Initialize action tracking for this step
-        self._current_step_actions = []
-        self._current_step_data = {
-            "step_number": step.step_number,
-            "step_id": str(step.step_id),
-            "step_description": step.action,
-            "actions": self._current_step_actions,
-            "step_intent": step.intent.value,
-        }
-        current_case_actions = self._current_test_case_actions
-        assert current_case_actions is not None
-        current_case_actions["steps"].append(self._current_step_data)
-
-        # Initialize step result
-        step_result = StepResult(
-            step_id=step.step_id,
-            step_number=step.step_number,
-            status=TestStatus.IN_PROGRESS,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),  # Will update later
-            action=step.action,
-            expected_result=step.expected_result,
-            actual_result="",
-        )
-        screenshot_before: bytes | None = None
-        screenshot_after: bytes | None = None
-        attempt = 1
-        plan_cache_hit = False
-        replay_used = False
-
-        try:
-            # Check dependencies
-            if not self._check_dependencies(step, case_result):
-                step_result.status = TestStatus.SKIPPED
-                step_result.actual_result = "Skipped due to unmet dependencies"
-                return step_result
-
-            # Capture before screenshot
-            before_capture = await self._artifacts.capture_test_step_screenshot(
-                test_case=test_case,
-                step=step,
-                suffix="before",
-            )
-            if before_capture:
-                screenshot_before = before_capture.screenshot_bytes
-                step_result.screenshot_before = before_capture.screenshot_path
-
-            # Build execution history and next test case context (used for replay/verification)
-            execution_history = []
-            for prev_step in case_result.step_results:
-                execution_history.append(
-                    {
-                        "step_number": prev_step.step_number,
-                        "action": prev_step.action,
-                        "status": prev_step.status,
-                        "actual_result": prev_step.actual_result,
-                    }
-                )
-
-            next_test_case = None
-            if self._current_test_plan:
-                current_idx = None
-                for idx, tc in enumerate(self._current_test_plan.test_cases):
-                    if tc.case_id == test_case.case_id:
-                        current_idx = idx
-                        break
-                if (
-                    current_idx is not None
-                    and current_idx < len(self._current_test_plan.test_cases) - 1
-                ):
-                    next_test_case = self._current_test_plan.test_cases[current_idx + 1]
-
-            replay_result = await self._try_execution_replay(
-                step=step,
-                test_case=test_case,
-                step_result=step_result,
-                screenshot_before=screenshot_before,
-                execution_history=execution_history,
-                next_test_case=next_test_case,
-            )
-            if replay_result is not None:
-                replay_used = True
-                return replay_result
-            latest_action_results: list[dict[str, Any]] = []
-
-            while True:
-                actions, plan_cache_hit = await self._interpret_step(
-                    step, test_case, case_result, use_cache=(attempt == 1)
-                )
-
-                # Execute each action
-                action_results: list[dict[str, Any]] = []
-                forced_blocker_reason = None
-                step_result.actions_performed = []
-
-                for action in actions:
-                    logger.debug(
-                        "Executing sub-action",
-                        extra={
-                            "action_type": action["type"],
-                            "description": action.get("description", ""),
-                        },
-                    )
-
-                    action_result = await self._execute_action(
-                        action, step, record_driver_actions=self._replay_enabled(step)
-                    )
-                    step_result.actions_performed.append(action_result)
-
-                    # Store full action data
-                    action_results.append(
-                        {
-                            "action": action,
-                            "result": action_result,
-                            "full_data": self._current_step_actions[-1]
-                            if self._current_step_actions
-                            else {},
-                        }
-                    )
-
-                    if forced_blocker_reason is None:
-                        error_text = action_result.get("error")
-                        if not error_text:
-                            full_data = action_results[-1]["full_data"]
-                            if isinstance(full_data, dict):
-                                result_blob = full_data.get("result", {})
-                                if isinstance(result_blob, dict):
-                                    exec_blob = result_blob.get("execution") or {}
-                                    error_text = result_blob.get(
-                                        "error"
-                                    ) or exec_blob.get("error_message")
-                        if (
-                            error_text
-                            and isinstance(error_text, str)
-                            and (
-                                error_text.startswith(MAX_TURN_ERROR_PREFIX)
-                                or error_text.startswith(LOOP_ERROR_PREFIX)
-                            )
-                        ):
-                            forced_blocker_reason = error_text
-                            logger.error(
-                                "Action aborted due to Computer Use limit or loop",
-                                extra={
-                                    "step_number": step.step_number,
-                                    "action_description": action.get("description", ""),
-                                    "reason": error_text,
-                                },
-                            )
-                            self._current_step_data["blocker_reasoning"] = error_text
-                            self._current_step_data["forced_blocker_reason"] = (
-                                error_text
-                            )
-
-                    if not action_result.get("success", False):
-                        # Determine if we should continue with remaining actions
-                        if action.get("critical", True):
-                            break
-
-                latest_action_results = action_results
-                self._current_step_data["plan_cache_hit"] = plan_cache_hit
-
-                # Capture after screenshot
-                if self.automation_driver:
-                    await asyncio.sleep(1)  # Brief wait for UI to stabilize
-                after_capture = await self._artifacts.capture_test_step_screenshot(
-                    test_case=test_case,
-                    step=step,
-                    suffix="after",
-                    origin=f"step_{step.step_number}_after",
-                    update_latest=True,
-                )
-                if after_capture:
-                    screenshot_after = after_capture.screenshot_bytes
-                    step_result.screenshot_after = after_capture.screenshot_path
-
-                # Always produce a verification decision for reporting
-                try:
-                    if forced_blocker_reason:
-                        verification = {
-                            "verdict": "FAIL",
-                            "reasoning": forced_blocker_reason,
-                            "actual_result": forced_blocker_reason,
-                            "confidence": 1.0,
-                            "is_blocker": True,
-                            "blocker_reasoning": forced_blocker_reason,
-                        }
-                        self._current_step_data["verification_mode"] = (
-                            "runner_short_circuit"
-                        )
-                    else:
-                        verification = await self._verify_expected_outcome(
-                            test_case=test_case,
-                            step=step,
-                            action_results=action_results,
-                            screenshot_before=screenshot_before,
-                            screenshot_after=screenshot_after,
-                            execution_history=execution_history,
-                            next_test_case=next_test_case,
-                        )
-                        self._current_step_data["verification_mode"] = "ai"
-
-                    # Store verification result for bug reporting
-                    self._current_step_data["verification_result"] = verification
-
-                    # Set step result based on verdict
-                    if verification["verdict"] == "PASS":
-                        step_result.status = TestStatus.PASSED
-                    else:
-                        step_result.status = TestStatus.FAILED
-
-                    step_result.actual_result = verification["actual_result"]
-                    step_result.error_message = (
-                        verification["reasoning"]
-                        if verification["verdict"] == "FAIL"
-                        else None
-                    )
-                    step_result.confidence = verification.get("confidence", 0.0)
-
-                    # Store blocker status
-                    if verification["verdict"] == "FAIL":
-                        self._current_step_data["is_blocker"] = verification.get(
-                            "is_blocker", False
-                        )
-                        self._current_step_data["blocker_reasoning"] = verification.get(
-                            "blocker_reasoning", ""
-                        )
-
-                except Exception as e:
-                    # AI verification failed - this is a fatal error
-                    logger.error(
-                        "AI verification failed - marking test as failed",
-                        extra={
-                            "error": str(e),
-                            "step_number": step.step_number,
-                            "test_case": test_case.name,
-                        },
-                    )
-                    step_result.status = TestStatus.FAILED
-                    step_result.actual_result = "Verification failed due to AI error"
-                    step_result.error_message = f"AI verification failed: {str(e)}"
-                    step_result.confidence = 0.0
-                    # Re-raise to trigger the outer exception handler
-                    raise
-
-                if (
-                    verification["verdict"] == "PASS"
-                    or not plan_cache_hit
-                    or attempt >= 2
-                ):
-                    break
-
-                cache_key_raw = self._current_step_data.get("plan_cache_key")
-                cache_context_raw = self._current_step_data.get("plan_cache_context")
-                cache_key = cache_key_raw if isinstance(cache_key_raw, str) else None
-                cache_context = (
-                    cache_context_raw if isinstance(cache_context_raw, dict) else None
-                )
-                if cache_key and cache_context:
-                    logger.warning(
-                        "Cached plan failed; invalidating and retrying without cache",
-                        extra={"step": cache_key, "attempt": attempt},
-                    )
-                    try:
-                        self._task_plan_cache.invalidate(cache_key, cache_context)
-                        if self._trace:
-                            self._trace.record_cache_event(
-                                {
-                                    "type": "task_plan_cache_invalidate",
-                                    "scenario": self._current_test_plan.name
-                                    if self._current_test_plan
-                                    else "",
-                                    "step": cache_key,
-                                    "reason": "validation_failed_with_cached_plan",
-                                }
-                            )
-                    except Exception:
-                        logger.debug(
-                            "Failed to invalidate task plan cache",
-                            exc_info=True,
-                        )
-
-                attempt += 1
-
-            cache_key_raw = self._current_step_data.get("plan_cache_key")
-            cache_context_raw = self._current_step_data.get("plan_cache_context")
-            cache_key = cache_key_raw if isinstance(cache_key_raw, str) else None
-            cache_context = (
-                cache_context_raw if isinstance(cache_context_raw, dict) else None
-            )
-            if step_result.status == TestStatus.PASSED:
-                if cache_key and cache_context and not plan_cache_hit:
-                    try:
-                        self._task_plan_cache.store(cache_key, cache_context, actions)
-                        if self._trace:
-                            self._trace.record_cache_event(
-                                {
-                                    "type": "task_plan_cache_store",
-                                    "scenario": self._current_test_plan.name
-                                    if self._current_test_plan
-                                    else "",
-                                    "step": cache_key,
-                                }
-                            )
-                    except Exception:
-                        logger.debug("Failed to store task plan cache", exc_info=True)
-
-                await self._store_execution_replay(
-                    step, test_case, latest_action_results
-                )
-                await self._persist_coordinate_cache(latest_action_results)
-            else:
-                await self._invalidate_coordinate_cache(latest_action_results)
-
-        except Exception as e:
-            logger.error(
-                "Step execution failed",
-                extra={"error": str(e), "step_number": step.step_number},
-            )
-            step_result.status = TestStatus.FAILED
-            step_result.actual_result = f"Error: {str(e)}"
-            step_result.error_message = str(e)
-
-        finally:
-            step_result.completed_at = datetime.now(timezone.utc)
-            # Preserve the post-action snapshot captured by replay/execution paths.
-            # Without this guard, a replayed step that returned early could still
-            # overwrite the latest snapshot with the stale "before" image.
-            if (
-                step_result.screenshot_after is None
-                and screenshot_after is None
-                and screenshot_before is not None
-                and step_result.screenshot_before
-            ):
-                self._artifacts.update_latest_snapshot(
-                    screenshot_before,
-                    step_result.screenshot_before,
-                    f"step_{step.step_number}_before",
-                )
-
-            # Add to execution history
-            self._execution_history.append(
-                {
-                    "test_case": test_case.name,
-                    "step": step.step_number,
-                    "action": step.action,
-                    "result": step_result.status.value,
-                    "timestamp": step_result.completed_at,
-                }
-            )
-
-            if self._trace and not replay_used:
-                self._trace.record_step(
-                    scenario_name=self._current_test_plan.name
-                    if self._current_test_plan
-                    else "",
-                    step=step,
-                    step_result=step_result,
-                    attempt=attempt,
-                    plan_cache_hit=plan_cache_hit,
-                )
-
-        return step_result
 
     async def _interpret_step(
         self,
@@ -1078,42 +651,12 @@ class TestRunner(BaseAgent):
         case_result: TestCaseResult,
         use_cache: bool = True,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Interpret a test step and decompose it into executable actions."""
-        self._interpreter = TestRunnerInterpreter(
-            automation_driver=self.automation_driver,
-            get_interpretation_screenshot=self._get_interpretation_screenshot,
-            task_plan_cache=self._task_plan_cache,
-            trace=self._trace,
-            model_logger=self._model_logger,
-            model=self.model,
-            call_openai=self.call_openai,
+        return await self._step_processor.interpret_step(
+            step,
+            test_case,
+            case_result,
+            use_cache=use_cache,
         )
-        interpretation = await self._interpreter.interpret_step(
-            StepInterpretationRequest(
-                step=step,
-                test_case=test_case,
-                case_result=case_result,
-                current_test_plan=self._current_test_plan,
-                test_report=self._test_report,
-                execution_history=self._execution_history,
-                runtime_environment=self._environment or "desktop",
-                computer_use_prompt_manual=COMPUTER_USE_PROMPT_MANUAL,
-                use_cache=use_cache,
-            )
-        )
-        if hasattr(self, "_current_step_data"):
-            self._current_step_data["interpretation_context"] = (
-                interpretation.interpretation_context
-            )
-            self._current_step_data["plan_cache_hit"] = interpretation.cache_hit
-            self._current_step_data["plan_cache_key"] = interpretation.plan_cache_key
-            self._current_step_data["plan_cache_context"] = (
-                interpretation.plan_cache_context
-            )
-            self._current_step_data["test_runner_interpretation"] = (
-                interpretation.interpretation_record
-            )
-        return interpretation.actions, interpretation.cache_hit
 
     async def _execute_action(
         self,
@@ -1121,36 +664,11 @@ class TestRunner(BaseAgent):
         step: TestStep,
         record_driver_actions: bool = False,
     ) -> dict[str, Any]:
-        """Execute a single decomposed action with comprehensive tracking."""
-        self._executor = TestRunnerExecutor(
-            action_agent=self.action_agent,
-            automation_driver=self.automation_driver,
+        return await self._step_processor.execute_action(
+            action,
+            step,
+            record_driver_actions=record_driver_actions,
         )
-        execution = await self._executor.execute_action(
-            StepActionExecutionRequest(
-                action=action,
-                step=step,
-                runtime_environment=self._environment,
-                current_test_plan_name=self._current_test_plan.name
-                if self._current_test_plan
-                else None,
-                current_test_case_name=self._current_test_case.name
-                if self._current_test_case
-                else None,
-                current_test_case_id=self._current_test_case.test_id
-                if self._current_test_case
-                else None,
-                state_context=self._test_state.context
-                if self._test_state and isinstance(self._test_state.context, dict)
-                else {},
-                recent_actions=self._execution_history[-3:],
-                record_driver_actions=record_driver_actions,
-            )
-        )
-        if self._current_step_actions is None:
-            self._current_step_actions = []
-        self._current_step_actions.append(execution.action_data)
-        return execution.compatibility_result
 
     async def _verify_expected_outcome(
         self,
@@ -1163,435 +681,33 @@ class TestRunner(BaseAgent):
         next_test_case: TestCase | None,
         replay_wait_budget_ms: int | None = None,
     ) -> dict[str, Any]:
-        """Use AI to verify if expected outcome was achieved with full context."""
-
-        # Build execution history context
-        history_context = []
-        for hist_item in execution_history:
-            status_emoji = "✓" if hist_item.get("status") == TestStatus.PASSED else "✗"
-            history_context.append(
-                f"Step {hist_item.get('step_number')}: {hist_item.get('action')} - {status_emoji} {hist_item.get('status')}\n"
-                f"  Result: {hist_item.get('actual_result', 'N/A')}"
-            )
-
-        # Build detailed action results context
-        actions_context = []
-        for idx, action_data in enumerate(action_results, 1):
-            action = action_data.get("action", {})
-            action_result = action_data.get("result", {})
-
-            # Extract validation details
-            validation = action_result.get("validation", {})
-            ai_analysis = action_result.get("ai_analysis", {})
-            execution = action_result.get("execution", {})
-            # CU agent's real-time narrative observation (may contain transient UI
-            # feedback such as toast text that disappears before the evaluator screenshot)
-            cu_outcome = action_result.get("outcome", "")
-
-            action_detail = f"""Action {idx}: {action.get("description", "Unknown action")}
-  Type: {action.get("type", "unknown")}
-  Target: {action.get("target", "N/A")}
-  Success: {action_result.get("success", False)}"""
-
-            if cu_outcome and cu_outcome != "Action completed":
-                action_detail += f"\n  CU agent observation: {cu_outcome}"
-
-            action_detail += "\n\n  Validation Results:"
-
-            # Add validation fields if present
-            if validation:
-                for key, value in validation.items():
-                    if key not in [
-                        "target_reference",
-                        "pixel_coordinates",
-                        "relative_x",
-                        "relative_y",
-                    ]:  # Skip coordinate data
-                        action_detail += f"\n    {key}: {value}"
-
-            # Add AI analysis
-            if ai_analysis:
-                action_detail += "\n  \n  AI Analysis:"
-                action_detail += (
-                    f"\n    Reasoning: {ai_analysis.get('reasoning', 'N/A')}"
-                )
-                action_detail += (
-                    f"\n    Actual outcome: {ai_analysis.get('actual_outcome', 'N/A')}"
-                )
-                action_detail += (
-                    f"\n    Confidence: {ai_analysis.get('confidence', 0.0)}"
-                )
-
-            # Add execution details
-            if execution:
-                action_detail += "\n  \n  Execution Details:"
-                action_detail += (
-                    f"\n    Duration: {execution.get('duration_ms', 'N/A')}ms"
-                )
-                if execution.get("error_message"):
-                    action_detail += f"\n    Error: {execution.get('error_message')}"
-
-            actions_context.append(action_detail)
-
-        replay_wait_section = ""
-        replay_wait_response_fields = ""
-        if replay_wait_budget_ms is not None:
-            remaining_budget_ms = max(int(replay_wait_budget_ms), 0)
-            replay_wait_section = f"""
-3. This validation is for a replayed cached action. Decide whether this step should wait longer before final failure.
-   - Request additional wait ONLY when there is clear evidence the UI is still settling (for example loading indicators, transition overlays, in-flight navigation, or a partially updated state).
-   - If evidence already supports a final PASS or final FAIL, do not request more wait.
-   - Remaining wait budget for this step: {remaining_budget_ms} ms.
-"""
-            replay_wait_response_fields = """
-  "request_additional_wait": true/false,
-  "recommended_wait_ms": integer (0 when no wait requested; must be <= remaining budget),
-  "wait_reasoning": "Why additional wait is or is not needed",
-"""
-
-        # Build the prompt with screenshots
-        prompt_text = f"""I'm executing a test case: "{test_case.name}"
-Test case description: {test_case.description or "N/A"}
-
-Previous steps in this test case:
-{chr(10).join(history_context) if history_context else "None"}
-
-Current step to validate:
-Step {step.step_number}: {step.action}
-Expected result: {step.expected_result}
-
-Actions performed:
-{chr(10).join(actions_context)}
-
-Based on all this information:
-
-IMPORTANT: The "CU agent observation" fields above are real-time descriptions captured by the executor during the action, before the final screenshot was taken. Transient UI feedback such as toast messages, snackbars, and brief success banners may have auto-dismissed by the time the screenshot was captured. If the CU agent observation describes a success message or toast, treat that as strong evidence the action succeeded even if the message is no longer visible in the screenshot.
-
-1. Did this step achieve its intended purpose? Consider the validation results and reasoning from the action execution, not just literal text matching. Look at the overall intent of the step and whether it was accomplished.
-
-2. Is this failure (if failed) a blocker that would prevent the next test case from running successfully?
-   Next test case: {next_test_case.name if next_test_case else "None (last test case)"}
-   (Consider: Does this failure leave the system in a state where the next test case cannot execute meaningfully?)
-{replay_wait_section}
-
-Respond with JSON:
-{{
-  "verdict": "PASS" or "FAIL",
-  "reasoning": "Your analysis of why the step passed or failed",
-  "actual_result": "Concise description of what actually happened",
-  "confidence": 0.0-1.0,
-{replay_wait_response_fields}  "is_blocker": true/false,
-  "blocker_reasoning": "Why this would/wouldn't block the next test case"
-}}"""
-        messages: list[dict[str, Any]] = [
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": prompt_text}],
-            }
-        ]
-
-        # Add screenshots if available
-        if screenshot_before:
-            messages[0]["content"].insert(
-                1, {"type": "text", "text": "\nScreenshot before actions:"}
-            )
-            messages[0]["content"].insert(
-                2,
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{base64.b64encode(screenshot_before).decode()}"
-                    },
-                },
-            )
-
-        if screenshot_after:
-            messages[0]["content"].append(
-                {"type": "text", "text": "\nScreenshot after actions:"}
-            )
-            messages[0]["content"].append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{base64.b64encode(screenshot_after).decode()}"
-                    },
-                }
-            )
-
-        try:
-            response = await self.call_openai(
-                messages=messages, response_format={"type": "json_object"}
-            )
-
-            log_messages: list[dict[str, Any]] = [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": prompt_text}],
-                }
-            ]
-            if screenshot_before:
-                log_messages[0]["content"].append(
-                    {"type": "image_url", "image_url": "<<attached screenshot>>"}
-                )
-            if screenshot_after:
-                log_messages[0]["content"].append(
-                    {"type": "image_url", "image_url": "<<attached screenshot>>"}
-                )
-
-            screenshots: list[tuple[str, bytes]] = []
-            if screenshot_before:
-                screenshots.append(("verification_before", screenshot_before))
-            if screenshot_after:
-                screenshots.append(("verification_after", screenshot_after))
-
-            await self._model_logger.log_call(
-                agent="test_runner.verify_step",
-                model=self.model,
-                prompt=prompt_text,
-                request_payload={
-                    "messages": log_messages,
-                    "response_format": {"type": "json_object"},
-                },
-                response=response,
-                screenshots=screenshots or None,
-                metadata={
-                    "step_number": step.step_number,
-                    "test_case": test_case.name,
-                },
-            )
-
-            content = response.get("content", "{}")
-            if isinstance(content, str):
-                parsed_result = json.loads(content)
-                result: dict[str, Any] = (
-                    parsed_result if isinstance(parsed_result, dict) else {}
-                )
-            elif isinstance(content, dict):
-                result = content
-            else:
-                result = {}
-
-            # Ensure required fields and proper types
-            if "verdict" not in result:
-                result["verdict"] = "FAIL"
-            result["verdict"] = str(result.get("verdict", "FAIL")).strip().upper()
-            if result["verdict"] not in {"PASS", "FAIL"}:
-                result["verdict"] = "FAIL"
-            if "reasoning" not in result:
-                result["reasoning"] = "Verification failed - no reasoning provided"
-            if "actual_result" not in result:
-                result["actual_result"] = "Unknown outcome"
-            if "confidence" not in result:
-                result["confidence"] = 0.5
-            if "is_blocker" not in result:
-                result["is_blocker"] = False
-            if "blocker_reasoning" not in result:
-                result["blocker_reasoning"] = ""
-            if replay_wait_budget_ms is not None:
-                request_additional_wait = self._coerce_model_bool(
-                    result.get("request_additional_wait", False)
-                )
-                recommended_wait_raw = result.get("recommended_wait_ms", 0)
-                try:
-                    recommended_wait_ms = int(recommended_wait_raw)
-                except (TypeError, ValueError):
-                    recommended_wait_ms = 0
-                remaining_budget_ms = max(int(replay_wait_budget_ms), 0)
-                if remaining_budget_ms <= 0:
-                    request_additional_wait = False
-                    recommended_wait_ms = 0
-                else:
-                    recommended_wait_ms = max(
-                        0, min(recommended_wait_ms, remaining_budget_ms)
-                    )
-                    if not request_additional_wait:
-                        recommended_wait_ms = 0
-                result["request_additional_wait"] = request_additional_wait
-                result["recommended_wait_ms"] = recommended_wait_ms
-                if "wait_reasoning" not in result:
-                    result["wait_reasoning"] = ""
-
-            # Log the verification
-            logger.info(
-                "Step verification completed",
-                extra={
-                    "step_number": step.step_number,
-                    "verdict": result["verdict"],
-                    "confidence": result["confidence"],
-                    "is_blocker": result["is_blocker"],
-                },
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(
-                "Failed to verify outcome with AI",
-                extra={
-                    "error": str(e),
-                    "traceback": traceback.format_exc(),
-                    "step": step.step_number,
-                    "test_case": test_case.name,
-                },
-            )
-            # Raise the exception - don't fallback
-            raise
+        return await self._verifier.verify_expected_outcome(
+            test_case,
+            step,
+            action_results,
+            screenshot_before,
+            screenshot_after,
+            execution_history,
+            next_test_case,
+            replay_wait_budget_ms=replay_wait_budget_ms,
+        )
 
     async def _verify_prerequisites(self, prerequisites: list[str]) -> bool:
-        """Verify test case prerequisites are met."""
-        if not prerequisites:
-            return True
-
-        # For now, log prerequisites and assume they're met
-        # In future, could implement actual verification
-        logger.info("Checking prerequisites", extra={"prerequisites": prerequisites})
-
-        return True
+        return await self._verifier.verify_prerequisites(prerequisites)
 
     async def _verify_postconditions(self, postconditions: list[str]) -> bool:
-        """Verify test case postconditions are met."""
-        if not postconditions:
-            return True
-
-        # Take screenshot for verification
-        if self.automation_driver:
-            await self.automation_driver.screenshot()
-
-            # Use AI to verify postconditions
-            f"""Verify these postconditions are met based on the current state:
-
-Postconditions:
-{chr(10).join(f"- {pc}" for pc in postconditions)}
-
-Analyze the screenshot and determine if all postconditions are satisfied.
-
-Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...]}}"""
-
-            # For now, assume postconditions are met
-            # Full implementation would analyze screenshot with AI
-            logger.info(
-                "Checking postconditions", extra={"postconditions": postconditions}
-            )
-
-        return True
+        return await self._verifier.verify_postconditions(postconditions)
 
     def _check_dependencies(self, step: TestStep, case_result: TestCaseResult) -> bool:
-        """Check if step dependencies are satisfied."""
-        if not step.dependencies:
-            return True
-
-        # Check if all dependent steps completed successfully
-        for dep_num in step.dependencies:
-            # Find the step result for the dependency
-            dep_result = next(
-                (r for r in case_result.step_results if r.step_number == dep_num), None
-            )
-
-            if not dep_result or dep_result.status != TestStatus.PASSED:
-                logger.warning(
-                    "Step dependency not met",
-                    extra={
-                        "step": step.step_number,
-                        "dependency": dep_num,
-                        "dependency_status": dep_result.status.value
-                        if dep_result
-                        else "not_found",
-                    },
-                )
-                return False
-
-        return True
+        return self._verifier.check_dependencies(step, case_result)
 
     def _determine_overall_status(self) -> TestStatus:
-        """Determine overall test execution status."""
-        report = self._test_report
-        assert report is not None
-
-        if not report.test_cases:
-            return TestStatus.FAILED
-
-        # If any test case failed, overall status is failed
-        failed_cases = [
-            tc for tc in report.test_cases if tc.status == TestStatus.FAILED
-        ]
-        if failed_cases:
-            return TestStatus.FAILED
-
-        # If all completed, overall is completed
-        all_completed = all(tc.status == TestStatus.PASSED for tc in report.test_cases)
-        if all_completed:
-            return TestStatus.PASSED
-
-        # Otherwise, partial completion
-        return TestStatus.SKIPPED
+        return self._summary_helper.determine_overall_status()
 
     def _calculate_summary(self) -> TestSummary:
-        """Calculate test execution summary statistics."""
-        report = self._test_report
-        assert report is not None
-
-        total_cases = (
-            len(self._current_test_plan.test_cases)
-            if self._current_test_plan is not None
-            else len(report.test_cases)
-        )
-        executed_cases = len(report.test_cases)
-        passed_cases = sum(
-            1
-            for tc in report.test_cases
-            if tc.status in {TestStatus.PASSED, TestStatus.COMPLETED}
-        )
-        failed_cases = sum(
-            1 for tc in report.test_cases if tc.status == TestStatus.FAILED
-        )
-        skipped_cases = sum(
-            1
-            for tc in report.test_cases
-            if tc.status in {TestStatus.SKIPPED, TestStatus.BLOCKED}
-        )
-
-        total_steps = sum(tc.steps_total for tc in report.test_cases)
-        completed_steps = sum(tc.steps_completed for tc in report.test_cases)
-        failed_steps = sum(tc.steps_failed for tc in report.test_cases)
-
-        # Count bugs by severity
-        critical_bugs = sum(
-            1 for bug in report.bugs if bug.severity == BugSeverity.CRITICAL
-        )
-        high_bugs = sum(1 for bug in report.bugs if bug.severity == BugSeverity.HIGH)
-        medium_bugs = sum(
-            1 for bug in report.bugs if bug.severity == BugSeverity.MEDIUM
-        )
-        low_bugs = sum(1 for bug in report.bugs if bug.severity == BugSeverity.LOW)
-
-        # Calculate execution time
-        if report.completed_at and report.started_at:
-            execution_time = (report.completed_at - report.started_at).total_seconds()
-        else:
-            execution_time = 0.0
-
-        # Calculate success rate
-        success_rate = completed_steps / total_steps if total_steps > 0 else 0.0
-
-        return TestSummary(
-            total_test_cases=total_cases,
-            completed_test_cases=executed_cases,
-            passed_test_cases=passed_cases,
-            failed_test_cases=failed_cases,
-            skipped_test_cases=skipped_cases,
-            total_steps=total_steps,
-            completed_steps=completed_steps,
-            failed_steps=failed_steps,
-            critical_bugs=critical_bugs,
-            high_bugs=high_bugs,
-            medium_bugs=medium_bugs,
-            low_bugs=low_bugs,
-            success_rate=success_rate,
-            execution_time_seconds=execution_time,
-        )
+        return self._summary_helper.calculate_summary()
 
     def _save_screenshot(self, screenshot: bytes, name: str) -> Path:
-        """Save screenshot to disk and return path."""
         return Path(self._artifacts.save_screenshot(screenshot, name))
 
     def _register_evidence(self, path: Path) -> None:
@@ -1599,87 +715,45 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
 
     @staticmethod
     def _plan_cache_key(step: TestStep, test_case: TestCase) -> str:
-        return TestRunnerInterpreter.plan_cache_key(step, test_case)
+        return TestRunnerStepProcessor.plan_cache_key(step, test_case)
 
     @staticmethod
     def _strip_plan_fingerprint_volatile_fields(payload: Any) -> Any:
-        """Remove unstable fields from plan payloads before hashing."""
-        if isinstance(payload, dict):
-            stripped: dict[str, Any] = {}
-            for key, value in payload.items():
-                if key in {"plan_id", "created_at", "case_id", "step_id"}:
-                    continue
-                stripped[key] = TestRunner._strip_plan_fingerprint_volatile_fields(
-                    value
-                )
-            return stripped
-        if isinstance(payload, list):
-            return [
-                TestRunner._strip_plan_fingerprint_volatile_fields(item)
-                for item in payload
-            ]
-        return payload
+        return TestRunnerSummary.strip_plan_fingerprint_volatile_fields(payload)
 
     def _plan_fingerprint(self) -> str:
-        if not self._current_test_plan:
-            return ""
-        payload = self._current_test_plan.model_dump(mode="json")
-        stable_payload = self._strip_plan_fingerprint_volatile_fields(payload)
-        serialized = json.dumps(
-            stable_payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            default=str,
-        )
-        return sha256(serialized.encode("utf-8")).hexdigest()
+        return self._summary_helper.plan_fingerprint()
 
     @staticmethod
     def _is_validation_only_action_result(result: dict[str, Any]) -> bool:
-        return ExecutionReplayService.is_validation_only_action_result(result)
+        return TestRunnerStepProcessor.is_validation_only_action_result(result)
 
     @classmethod
     def _is_validation_only_step_result_set(
         cls, action_results: list[dict[str, Any]]
     ) -> bool:
-        return ExecutionReplayService.is_validation_only_step_result_set(action_results)
+        return TestRunnerStepProcessor.is_validation_only_step_result_set(
+            action_results
+        )
 
     @staticmethod
     def _driver_actions_for_replay(result: dict[str, Any]) -> list[dict[str, Any]]:
-        """Accept both wrapped and direct action-result payload shapes."""
-        return ExecutionReplayService.driver_actions_for_replay(result)
+        return TestRunnerStepProcessor.driver_actions_for_replay(result)
 
     def _replay_enabled(self, step: TestStep) -> bool:
-        return self._replay_service.replay_enabled(step)
+        return self._step_processor.replay_enabled(step)
 
     def _replay_stabilization_wait_ms(self) -> int:
-        """Return stabilization wait used only for replayed macro actions."""
-        return self._replay_service.replay_stabilization_wait_ms()
+        return self._step_processor.replay_stabilization_wait_ms()
 
     @staticmethod
     def _coerce_model_bool(value: Any) -> bool:
-        """Normalize model-provided boolean-like values."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "y"}
-        return False
+        return TestRunnerVerifier.coerce_model_bool(value)
 
     async def _execution_replay_key(
         self, step: TestStep, test_case: TestCase
     ) -> ExecutionReplayCacheKey | None:
-        return await self._replay_service.execution_replay_key(
-            step=step,
-            test_case=test_case,
-            current_test_plan_name=self._current_test_plan.name
-            if self._current_test_plan
-            else "",
-            current_runtime_environment=self._environment,
-            plan_cache_key=self._plan_cache_key(step, test_case),
-            plan_fingerprint=self._plan_fingerprint(),
-        )
+        return await self._step_processor.execution_replay_key(step, test_case)
 
     async def _try_execution_replay(
         self,
@@ -1691,61 +765,14 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         execution_history: list[dict[str, Any]],
         next_test_case: TestCase | None,
     ) -> StepResult | None:
-        async def _capture_replay_screenshot(
-            suffix: str,
-        ) -> tuple[bytes | None, str | None]:
-            capture = await self._artifacts.capture_test_step_screenshot(
-                test_case=test_case,
-                step=step,
-                suffix=suffix,
-                origin=f"step_{step.step_number}_{suffix}",
-                update_latest=True,
-            )
-            if capture is None:
-                return None, None
-            return capture.screenshot_bytes, capture.screenshot_path
-
-        replay_result = await self._replay_service.try_execution_replay(
-            ReplayExecutionRequest(
-                step=step,
-                test_case=test_case,
-                step_result=step_result,
-                screenshot_before=screenshot_before,
-                execution_history=execution_history,
-                next_test_case=next_test_case,
-                current_test_plan_name=self._current_test_plan.name
-                if self._current_test_plan
-                else "",
-                current_runtime_environment=self._environment,
-                plan_cache_key=self._plan_cache_key(step, test_case),
-                plan_fingerprint=self._plan_fingerprint(),
-                capture_replay_screenshot=_capture_replay_screenshot,
-                verify_expected_outcome=self._verify_expected_outcome,
-                coerce_model_bool=self._coerce_model_bool,
-                trace=self._trace,
-            )
+        return await self._step_processor.try_execution_replay(
+            step=step,
+            test_case=test_case,
+            step_result=step_result,
+            screenshot_before=screenshot_before,
+            execution_history=execution_history,
+            next_test_case=next_test_case,
         )
-        if replay_result is None:
-            return None
-
-        if self._current_step_actions is None:
-            self._current_step_actions = []
-        self._current_step_actions.append(replay_result.action_record)
-        step_result.actions_performed = replay_result.actions_performed
-        self._current_step_data["verification_mode"] = "ai"
-        self._current_step_data["replay_validation_wait_spent_ms"] = (
-            replay_result.replay_validation_wait_spent_ms
-        )
-        self._current_step_data["replay_validation_wait_cycles"] = (
-            replay_result.replay_validation_wait_cycles
-        )
-        self._current_step_data["replay_validation_wait_budget_remaining_ms"] = (
-            replay_result.replay_validation_wait_budget_remaining_ms
-        )
-        self._current_step_data["verification_result"] = replay_result.verification
-        if replay_result.fallback_to_cu:
-            return None
-        return step_result
 
     async def _store_execution_replay(
         self,
@@ -1753,101 +780,22 @@ Respond with JSON: {{"all_met": true/false, "details": ["condition: status", ...
         test_case: TestCase,
         action_results: list[dict[str, Any]],
     ) -> None:
-        recorded_action_count = sum(
-            len(self._driver_actions_for_replay(result)) for result in action_results
+        await self._step_processor.store_execution_replay(
+            step, test_case, action_results
         )
-        key = await self._replay_service.store_execution_replay(
-            step=step,
-            test_case=test_case,
-            action_results=action_results,
-            current_test_plan_name=self._current_test_plan.name
-            if self._current_test_plan
-            else "",
-            current_runtime_environment=self._environment,
-            plan_cache_key=self._plan_cache_key(step, test_case),
-            plan_fingerprint=self._plan_fingerprint(),
-        )
-        if key and self._trace:
-            self._trace.record_cache_event(
-                {
-                    "type": "execution_replay_cache_store",
-                    "scenario": key.scenario,
-                    "step": key.step,
-                    "environment": key.environment,
-                    "resolution": key.resolution,
-                    "keyboard_layout": key.keyboard_layout,
-                    "action_count": recorded_action_count,
-                }
-            )
 
     async def _persist_coordinate_cache(
         self, action_results: list[dict[str, Any]]
     ) -> None:
-        plan_cache_key = self._current_step_data.get("plan_cache_key")
-        await self._replay_service.persist_coordinate_cache(
-            action_results=action_results,
-            plan_cache_key=plan_cache_key if isinstance(plan_cache_key, str) else None,
-            current_test_plan_name=self._current_test_plan.name
-            if self._current_test_plan
-            else "",
-            trace=self._trace,
-        )
+        await self._step_processor.persist_coordinate_cache(action_results)
 
     async def _invalidate_coordinate_cache(
         self, action_results: list[dict[str, Any]]
     ) -> None:
-        plan_cache_key = self._current_step_data.get("plan_cache_key")
-        await self._replay_service.invalidate_coordinate_cache(
-            action_results=action_results,
-            plan_cache_key=plan_cache_key if isinstance(plan_cache_key, str) else None,
-            current_test_plan_name=self._current_test_plan.name
-            if self._current_test_plan
-            else "",
-            trace=self._trace,
-        )
+        await self._step_processor.invalidate_coordinate_cache(action_results)
 
     def _print_summary(self) -> None:
-        """Print test execution summary to console."""
-        if not self._test_report or not self._test_report.summary:
-            return
-
-        s = self._test_report.summary
-
-        print("\n" + "=" * 80)
-        print(f"TEST EXECUTION SUMMARY: {self._test_report.test_plan_name}")
-        print("=" * 80)
-
-        elapsed = int(s.execution_time_seconds)
-        elapsed_str = (
-            f"{elapsed // 60}m{elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
-        )
-
-        print(f"\nStatus: {self._test_report.status.value.upper()}")
-        print(f"Test Cases run: {s.completed_test_cases}/{s.total_test_cases}")
-        print(f"Test Cases passed: {s.passed_test_cases}/{s.total_test_cases}")
-        print(f"Test Cases failed: {s.failed_test_cases}/{s.total_test_cases}")
-        print(f"Test Cases skipped: {s.skipped_test_cases}/{s.total_test_cases}")
-        print(f"Steps: {s.completed_steps}/{s.total_steps} completed")
-        print(f"Success Rate: {s.success_rate * 100:.1f}%")
-        print(f"Execution Time: {elapsed_str}")
-
-        if self._test_report.bugs:
-            print(f"\nBugs Found: {len(self._test_report.bugs)}")
-            print(f"  Critical: {s.critical_bugs}")
-            print(f"  High: {s.high_bugs}")
-            print(f"  Medium: {s.medium_bugs}")
-            print(f"  Low: {s.low_bugs}")
-
-            # Show critical bugs
-            critical = [
-                b for b in self._test_report.bugs if b.severity == BugSeverity.CRITICAL
-            ]
-            if critical:
-                print("\nCRITICAL BUGS:")
-                for bug in critical:
-                    print(f"  - {bug.description}")
-
-        print("\n" + "=" * 80 + "\n")
+        self._summary_helper.print_summary()
 
     def get_action_storage(self) -> dict[str, Any]:
         """Return the captured action storage data."""
