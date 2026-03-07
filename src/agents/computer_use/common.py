@@ -20,7 +20,10 @@ def normalize_response(response: Any) -> dict[str, Any]:
     if response is None:
         return {}
     if hasattr(response, "model_dump"):
-        return cast(dict[str, Any], response.model_dump())
+        try:
+            return cast(dict[str, Any], response.model_dump(warnings="none"))
+        except TypeError:
+            return cast(dict[str, Any], response.model_dump())
     if hasattr(response, "to_dict"):
         try:
             return cast(dict[str, Any], response.to_dict())
@@ -98,12 +101,35 @@ def normalize_key_sequence(key: str) -> str:
 
 
 def extract_computer_calls(response_dict: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract computer_call items from a response."""
+    """Extract OpenAI computer_call items from a response."""
     return [
         item
         for item in response_dict.get("output", [])
         if item.get("type") == "computer_call"
     ]
+
+
+def extract_computer_call_actions(call: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Extract executable actions from an OpenAI computer_call item.
+
+    GPT-5.4 emits batched `actions[]` per `computer_call`. A legacy singular
+    `action` payload is still accepted here so tests and fixtures can evolve
+    without breaking the internal execution contract.
+    """
+    actions = call.get("actions")
+    if isinstance(actions, list):
+        normalized = [item for item in actions if isinstance(item, dict)]
+        if normalized:
+            return normalized
+
+    legacy_action = call.get("action")
+    if isinstance(legacy_action, dict) and legacy_action:
+        return [legacy_action]
+
+    # A screenshot-only turn may omit executable actions but still expects
+    # the harness to return the latest screenshot state.
+    return [{"type": "screenshot"}]
 
 
 def extract_google_function_calls(response_obj: Any) -> list[Any]:
@@ -302,6 +328,7 @@ __all__ = [
     "encode_png_base64",
     "extract_anthropic_computer_calls",
     "extract_assistant_text",
+    "extract_computer_call_actions",
     "extract_computer_calls",
     "extract_google_computer_calls",
     "extract_google_function_call_envelopes",

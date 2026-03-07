@@ -28,6 +28,10 @@ class TestSettings:
         settings = Settings()
         assert settings.openai_model == "gpt-5.2"
 
+    def test_default_openai_computer_use_model(self):
+        settings = Settings(_env_file=None)
+        assert settings.computer_use_model == "gpt-5.4"
+
     @pytest.mark.parametrize(
         ("backend", "expected"),
         [
@@ -61,6 +65,14 @@ class TestSettings:
     def test_default_anthropic_computer_use_max_tokens(self):
         settings = Settings(_env_file=None)
         assert settings.anthropic_cu_max_tokens == 16384
+
+    def test_openai_computer_use_rejects_legacy_preview_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("CU_PROVIDER", "openai")
+        monkeypatch.setenv("HAINDY_COMPUTER_USE_MODEL", "computer-use-preview")
+        with pytest.raises(ValueError, match="computer-use-preview"):
+            Settings(_env_file=None)
 
     def test_default_computer_action_timeout(self):
         settings = Settings(_env_file=None)

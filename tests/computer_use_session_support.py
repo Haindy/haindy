@@ -36,7 +36,7 @@ def session_settings(tmp_path):
         scroll_default_magnitude=450,
         scroll_max_magnitude=600,
         cu_provider="openai",
-        computer_use_model="computer-use-preview",
+        computer_use_model="gpt-5.4",
         google_cu_model="gemini-2.5-computer-use-preview-10-2025",
         anthropic_api_key="",
         anthropic_cu_model="claude-sonnet-4-6",
@@ -103,14 +103,20 @@ def make_session(
 
 def openai_computer_call(
     call_id: str,
-    action: dict[str, object],
+    action: dict[str, object] | list[dict[str, object]] | None = None,
     pending_safety_checks: list[dict[str, object]] | None = None,
     status: str = "completed",
 ) -> dict[str, object]:
+    if isinstance(action, list):
+        actions = action
+    elif isinstance(action, dict):
+        actions = [action]
+    else:
+        actions = []
     return {
         "type": "computer_call",
         "call_id": call_id,
-        "action": action,
+        "actions": actions,
         "pending_safety_checks": pending_safety_checks or [],
         "status": status,
     }

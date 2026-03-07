@@ -12,6 +12,10 @@ from tests.computer_use_session_support import make_google_client, make_session
 pytest_plugins = ("tests.computer_use_session_support",)
 
 
+async def _invoke_google_call_direct(call):
+    return call()
+
+
 @pytest.mark.asyncio
 async def test_computer_use_session_google_failure_does_not_fallback_to_openai(
     mock_client, mock_browser, session_settings
@@ -94,7 +98,6 @@ async def test_google_computer_use_retries_resource_exhausted_then_succeeds(
         ]
     )
     sleep_mock = AsyncMock()
-    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
 
     session = make_session(
         mock_client=mock_client,
@@ -103,6 +106,8 @@ async def test_google_computer_use_retries_resource_exhausted_then_succeeds(
         provider="google",
         google_client=make_google_client(generate_content),
     )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+    session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     response = await session._create_google_response(
         {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
@@ -141,7 +146,6 @@ async def test_google_computer_use_retries_prompt_safety_block_then_succeeds(
     )
     sleep_mock = AsyncMock()
     jitter_mock = MagicMock(side_effect=[0.05, 0.1])
-    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
     monkeypatch.setattr(cu_session_module.random, "uniform", jitter_mock)
 
     session = make_session(
@@ -151,6 +155,8 @@ async def test_google_computer_use_retries_prompt_safety_block_then_succeeds(
         provider="google",
         google_client=make_google_client(generate_content),
     )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+    session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     response = await session._create_google_response(
         {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
@@ -189,7 +195,6 @@ async def test_google_computer_use_returns_blocked_response_after_safety_retries
     )
     sleep_mock = AsyncMock()
     jitter_mock = MagicMock(side_effect=[0.01, 0.02])
-    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
     monkeypatch.setattr(cu_session_module.random, "uniform", jitter_mock)
 
     session = make_session(
@@ -199,6 +204,8 @@ async def test_google_computer_use_returns_blocked_response_after_safety_retries
         provider="google",
         google_client=make_google_client(generate_content),
     )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+    session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     response = await session._create_google_response(
         {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
@@ -226,7 +233,6 @@ async def test_google_computer_use_raises_after_retry_budget_exhausted(
         ]
     )
     sleep_mock = AsyncMock()
-    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
 
     session = make_session(
         mock_client=mock_client,
@@ -235,6 +241,8 @@ async def test_google_computer_use_raises_after_retry_budget_exhausted(
         provider="google",
         google_client=make_google_client(generate_content),
     )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+    session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
         await session._create_google_response(
@@ -255,7 +263,6 @@ async def test_google_computer_use_non_retryable_error_does_not_retry(
     session_settings.cu_provider = "google"
     generate_content = MagicMock(side_effect=RuntimeError("google failed"))
     sleep_mock = AsyncMock()
-    monkeypatch.setattr(cu_session_module.asyncio, "sleep", sleep_mock)
 
     session = make_session(
         mock_client=mock_client,
@@ -264,6 +271,8 @@ async def test_google_computer_use_non_retryable_error_does_not_retry(
         provider="google",
         google_client=make_google_client(generate_content),
     )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+    session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="google failed"):
         await session._create_google_response(

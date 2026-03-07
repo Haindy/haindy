@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import src.agents.computer_use.session as cu_session_module
+from src.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     make_session,
     openai_computer_call,
@@ -15,6 +16,49 @@ from tests.computer_use_session_support import (
 )
 
 pytest_plugins = ("tests.computer_use_session_support",)
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_uses_task_only_initial_request_before_screenshot_follow_up(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_1",
+            [openai_computer_call("call_1", {"type": "screenshot"})],
+        ),
+        openai_response("resp_2", [openai_message("Screen inspected.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    result = await session.run(
+        goal="Check whether the filters panel is open.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 1},
+    )
+
+    assert len(result.actions) == 1
+    assert result.actions[0].action_type == "screenshot"
+    assert result.actions[0].status == "executed"
+    initial_payload = mock_client.responses.create.await_args_list[0].kwargs
+    assert initial_payload["model"] == "gpt-5.4"
+    assert initial_payload["tools"] == [{"type": "computer"}]
+    assert isinstance(initial_payload["input"], str)
+    assert "Check whether the filters panel is open." in initial_payload["input"]
+
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["previous_response_id"] == "resp_1"
+    assert len(follow_up_payload["input"]) == 1
+    assert follow_up_payload["input"][0]["type"] == "computer_call_output"
+    assert follow_up_payload["input"][0]["output"] == {
+        "type": "computer_screenshot",
+        "image_url": "data:image/png;base64,ZmFrZV9wbmdfYnl0ZXM=",
+        "detail": "original",
+    }
 
 
 @pytest.mark.asyncio
@@ -53,6 +97,23 @@ async def test_computer_use_session_executes_actions_successfully(
     assert not result.safety_events
     assert result.terminal_status == "success"
     assert mock_client.responses.create.await_count == 2
+    initial_payload = mock_client.responses.create.await_args_list[0].kwargs
+    assert initial_payload["model"] == "gpt-5.4"
+    assert initial_payload["tools"] == [{"type": "computer"}]
+    assert isinstance(initial_payload["input"], str)
+    assert "Click the primary action button." in initial_payload["input"]
+
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["tools"] == [{"type": "computer"}]
+    assert len(follow_up_payload["input"]) == 1
+    assert follow_up_payload["input"][0]["type"] == "computer_call_output"
+    assert "actions" not in follow_up_payload["input"][0]
+    assert "current_url" not in follow_up_payload["input"][0]
+    assert follow_up_payload["input"][0]["output"] == {
+        "type": "computer_screenshot",
+        "image_url": "data:image/png;base64,ZmFrZV9wbmdfYnl0ZXM=",
+        "detail": "original",
+    }
 
 
 @pytest.mark.asyncio
@@ -176,6 +237,139 @@ async def test_computer_use_session_records_execution_failure(
     assert turn.error_message == "click failed"
     assert result.final_output == "Could not click the button."
     assert mock_client.responses.create.await_count == 2
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert len(follow_up_payload["input"]) == 1
+    assert follow_up_payload["input"][0]["output"] == {
+        "type": "computer_screenshot",
+        "image_url": "data:image/png;base64,ZmFrZV9wbmdfYnl0ZXM=",
+        "detail": "original",
+    }
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_runs_all_actions_in_a_returned_batch(
+    mock_client, mock_browser, session_settings
+):
+    mock_browser.click.side_effect = RuntimeError("click failed")
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_batch_fail_1",
+            [
+                openai_computer_call(
+                    "call_batch",
+                    [
+                        {"type": "click", "x": 10, "y": 20},
+                        {"type": "type", "text": "openai"},
+                    ],
+                )
+            ],
+        ),
+        openai_response("resp_batch_fail_2", [openai_message("Batch attempted.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    result = await session.run(
+        goal="Click the field and type the query.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 8},
+    )
+
+    assert [turn.action_type for turn in result.actions] == ["click", "type"]
+    assert [turn.status for turn in result.actions] == ["failed", "executed"]
+    mock_browser.type_text.assert_awaited_once_with("openai")
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert len(follow_up_payload["input"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_executes_batched_actions_in_single_call(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_batch_1",
+            [
+                openai_computer_call(
+                    "call_batch",
+                    [
+                        {"type": "click", "x": 10, "y": 20},
+                        {"type": "type", "text": "openai"},
+                    ],
+                )
+            ],
+        ),
+        openai_response("resp_batch_2", [openai_message("Batch completed.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    result = await session.run(
+        goal="Click the field and type the query.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 8},
+    )
+
+    assert result.terminal_status == "success"
+    assert [turn.action_type for turn in result.actions] == ["click", "type"]
+    mock_browser.click.assert_awaited_once_with(10, 20, button="left", click_count=1)
+    mock_browser.type_text.assert_awaited_once_with("openai")
+    assert mock_client.responses.create.await_count == 2
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert len(follow_up_payload["input"]) == 1
+    assert (
+        len(
+            [
+                item
+                for item in follow_up_payload["input"]
+                if item.get("type") == "computer_call_output"
+            ]
+        )
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_computer_use_session_processes_multiple_computer_calls_in_one_turn(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_multi_1",
+            [
+                openai_computer_call("call_click", {"type": "click", "x": 5, "y": 6}),
+                openai_computer_call("call_type", {"type": "type", "text": "done"}),
+            ],
+        ),
+        openai_response("resp_multi_2", [openai_message("All actions completed.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    result = await session.run(
+        goal="Execute both computer calls.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 9},
+    )
+
+    assert result.terminal_status == "success"
+    assert [turn.call_id for turn in result.actions] == ["call_click", "call_type"]
+    follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    outputs = [
+        item
+        for item in follow_up_payload["input"]
+        if item.get("type") == "computer_call_output"
+    ]
+    assert [item["call_id"] for item in outputs] == ["call_click", "call_type"]
 
 
 @pytest.mark.asyncio
@@ -189,7 +383,61 @@ async def test_openai_computer_use_calls_do_not_pass_request_timeout(
         provider="openai",
     )
 
-    payload = {"model": "computer-use-preview", "input": "hello"}
+    payload = {"model": "gpt-5.4", "input": "hello"}
     await session._create_response(payload)
 
     mock_client.responses.create.assert_awaited_once_with(**payload)
+
+
+def test_openai_session_rejects_legacy_preview_model(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.computer_use_model = "computer-use-preview"
+
+    with pytest.raises(ValueError, match="computer-use-preview"):
+        make_session(
+            mock_client=mock_client,
+            mock_browser=mock_browser,
+            session_settings=session_settings,
+            provider="openai",
+        )
+
+
+@pytest.mark.asyncio
+async def test_openai_follow_up_uses_fresh_batch_capture_and_preserves_turn_snapshot_metadata(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="openai",
+    )
+    turn = ComputerToolTurn(
+        call_id="call_snapshot",
+        action_type="click",
+        parameters={"type": "click"},
+        status="executed",
+        metadata={
+            "screenshot_base64": "stored_snapshot",
+            "current_url": "https://stale.example.com",
+            "x": 42,
+            "y": 24,
+        },
+    )
+
+    payload, _ = await session._build_follow_up_request(
+        previous_response_id="resp_prev",
+        calls=[[turn]],
+        metadata={},
+        model="gpt-5.4",
+    )
+
+    assert (
+        payload["input"][0]["output"]["image_url"]
+        == "data:image/png;base64,ZmFrZV9wbmdfYnl0ZXM="
+    )
+    assert payload["input"][0]["output"]["detail"] == "original"
+    assert turn.metadata["screenshot_base64"] == "stored_snapshot"
+    assert turn.metadata["current_url"] == "https://stale.example.com"
+    assert len(payload["input"]) == 1

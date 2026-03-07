@@ -259,6 +259,83 @@ class TestTestPlannerAgent:
         assert second_step.step_number == 2
         assert second_step.dependencies == [1, 3]
 
+    def test_build_requirements_message_allows_multi_step_hard_reset_setup(self, agent):
+        """Planner prompt should allow reset plus follow-up readiness setup steps."""
+        message = agent._build_requirements_message(
+            requirements="Test auth flows",
+            context={"notes": "Splash/loading screen may remain visible after reset"},
+        )
+
+        assert "This may require MULTIPLE setup_steps." in message
+        assert (
+            "The first setup_step should use action "
+            '"Reset the app to a clean state with no active user session".' in message
+        )
+        assert (
+            "Do NOT require the reset step alone to prove that the signed-out "
+            "welcome/login screen is already visible."
+        ) in message
+        assert (
+            "emit additional setup_steps such as waiting for the intended ready screen"
+            in message
+        )
+
+    def test_parse_test_plan_response_preserves_multiple_setup_steps(self, agent):
+        """Multiple setup steps should remain ordered and intact."""
+        response = {
+            "content": json.dumps(
+                {
+                    "name": "Setup Ordering Plan",
+                    "description": "Preserve setup sequencing",
+                    "requirements_source": "Unit test",
+                    "test_cases": [
+                        {
+                            "test_id": "TC001",
+                            "name": "Startup readiness case",
+                            "description": "Verify setup sequencing",
+                            "setup_steps": [
+                                {
+                                    "step_number": 1,
+                                    "action": "Reset the app to a clean state with no active user session",
+                                    "expected_result": "App relaunch begins from a clean state",
+                                    "intent": "setup",
+                                },
+                                {
+                                    "step_number": 2,
+                                    "action": "Wait until the signed-out welcome entry UI is visible",
+                                    "expected_result": "The signed-out welcome entry UI is visible",
+                                    "intent": "setup",
+                                },
+                                {
+                                    "step_number": 3,
+                                    "action": "Navigate to the Sign-In screen",
+                                    "expected_result": "The Sign-In screen is displayed",
+                                    "intent": "setup",
+                                },
+                            ],
+                            "steps": [
+                                {
+                                    "step_number": 1,
+                                    "action": "Enter credentials",
+                                    "expected_result": "Credentials are entered",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+        }
+
+        test_plan = agent._parse_test_plan_response(response)
+        setup_steps = test_plan.test_cases[0].setup_steps
+
+        assert [step.step_number for step in setup_steps] == [1, 2, 3]
+        assert [step.action for step in setup_steps] == [
+            "Reset the app to a clean state with no active user session",
+            "Wait until the signed-out welcome entry UI is visible",
+            "Navigate to the Sign-In screen",
+        ]
+
     @pytest.mark.asyncio
     async def test_refine_test_plan(self, agent):
         """Test refining an existing test plan."""

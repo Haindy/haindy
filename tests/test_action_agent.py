@@ -21,7 +21,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
             desktop_coordinate_cache_path=Path(
                 "data/desktop_cache/test_coordinates.json"
             ),
-            computer_use_model="computer-use-preview",
+            computer_use_model="gpt-5.4",
             cu_provider="openai",
         ),
     )

@@ -22,6 +22,7 @@ from .common import (
     denormalize_coordinates,
     normalize_coordinates,
 )
+from .turn_result import ComputerUseFollowUpBatch, build_follow_up_batch
 from .types import ComputerUseExecutionError, ComputerUseSessionResult
 
 logger = logging.getLogger("src.agents.computer_use.session")
@@ -69,7 +70,10 @@ class ComputerUseSupportMixin:
                 "loop_window": window,
             }
 
-        if all(hash_ == screenshot_hash for _, hash_ in history):
+        action_label = signature[0] if signature else "unknown"
+        if all(hash_ == screenshot_hash for _, hash_ in history) and all(
+            bool(sig) and sig[0] == action_label for sig, _ in history
+        ):
             action_label = signature[0] if signature else "unknown"
             message = (
                 f"Computer Use loop detected: screen unchanged after "
@@ -308,11 +312,29 @@ class ComputerUseSupportMixin:
             return goal
         return f"{goal}\n\n{guidance}"
 
+    async def _build_follow_up_batch(
+        self: _ComputerUseSession,
+        *,
+        call_groups: list[list[ComputerToolTurn]],
+        metadata: dict[str, Any],
+    ) -> ComputerUseFollowUpBatch:
+        """Capture one fresh follow-up state and build the shared batch model."""
+        screenshot_bytes = await self._automation_driver.screenshot()
+        current_url = await self._maybe_get_current_url()
+        if not current_url:
+            current_url = "desktop://"
+        interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
+        return build_follow_up_batch(
+            call_groups,
+            screenshot_bytes=screenshot_bytes,
+            current_url=current_url,
+            interaction_mode=interaction_mode,
+        )
+
     async def _build_confirmation_request(
         self: _ComputerUseSession,
         previous_response_id: str | None,
         metadata: dict[str, Any],
-        environment: str = "browser",
         model: str | None = None,
     ) -> dict[str, Any]:
         """Construct a follow-up request that confirms execution should proceed."""
@@ -324,29 +346,16 @@ class ComputerUseSupportMixin:
         if target_text:
             confirmation_text += f" Focus on: {target_text}."
 
-        (
-            viewport_width,
-            viewport_height,
-        ) = await self._automation_driver.get_viewport_size()
-
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
-            "tools": [
-                {
-                    "type": "computer_use_preview",
-                    "display_width": viewport_width,
-                    "display_height": viewport_height,
-                    "environment": environment,
-                }
-            ],
+            "tools": [{"type": "computer"}],
             "input": [
                 {
                     "role": "user",
                     "content": [{"type": "input_text", "text": confirmation_text}],
                 }
             ],
-            "truncation": "auto",
         }
 
         safety_identifier = metadata.get("safety_identifier")

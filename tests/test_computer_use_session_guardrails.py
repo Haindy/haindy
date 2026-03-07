@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections import deque
+
 import pytest
 
+from src.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     make_session,
     openai_computer_call,
@@ -146,6 +149,8 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
         }
     ]
     follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["tools"] == [{"type": "computer"}]
+    assert len(follow_up_payload["input"]) == 1
     assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
         {
             "id": "sc1",
@@ -153,6 +158,8 @@ async def test_computer_use_session_safety_auto_approve_when_fail_fast_disabled(
             "message": "Safety review requested.",
         }
     ]
+    assert "current_url" not in follow_up_payload["input"][0]
+    assert follow_up_payload["input"][0]["output"]["detail"] == "original"
 
 
 @pytest.mark.asyncio
@@ -205,6 +212,8 @@ async def test_computer_use_session_safety_auto_approve_with_override_when_fail_
         }
     ]
     follow_up_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_payload["tools"] == [{"type": "computer"}]
+    assert len(follow_up_payload["input"]) == 1
     assert follow_up_payload["input"][0]["acknowledged_safety_checks"] == [
         {
             "id": "sc_override",
@@ -212,6 +221,8 @@ async def test_computer_use_session_safety_auto_approve_with_override_when_fail_
             "message": "Approval override required.",
         }
     ]
+    assert "current_url" not in follow_up_payload["input"][0]
+    assert follow_up_payload["input"][0]["output"]["detail"] == "original"
 
 
 @pytest.mark.asyncio
@@ -281,3 +292,68 @@ async def test_computer_use_session_enforces_domain_allowlist(
     assert "allowlist" in (turn.error_message or "")
     assert turn.metadata.get("policy") == "rejected"
     mock_browser.click.assert_not_called()
+
+
+def test_loop_detection_ignores_mixed_actions_with_unchanged_screen_hash(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=3)
+
+    screenshot_turn = ComputerToolTurn(
+        call_id="call_1",
+        action_type="screenshot",
+        parameters={"type": "screenshot"},
+        status="executed",
+        metadata={"screenshot_base64": "same"},
+    )
+    click_turn = ComputerToolTurn(
+        call_id="call_2",
+        action_type="click",
+        parameters={"type": "click", "x": 10, "y": 20},
+        status="executed",
+        metadata={"screenshot_base64": "same"},
+    )
+    wait_turn = ComputerToolTurn(
+        call_id="call_3",
+        action_type="wait",
+        parameters={"type": "wait"},
+        status="executed",
+        metadata={"screenshot_base64": "same"},
+    )
+
+    assert session._update_loop_history(screenshot_turn, history, 3) is None
+    assert session._update_loop_history(click_turn, history, 3) is None
+    assert session._update_loop_history(wait_turn, history, 3) is None
+
+
+def test_loop_detection_still_detects_repeated_wait_actions(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=3)
+
+    turns = [
+        ComputerToolTurn(
+            call_id=f"call_wait_{index}",
+            action_type="wait",
+            parameters={"type": "wait"},
+            status="executed",
+            metadata={"screenshot_base64": "same"},
+        )
+        for index in range(3)
+    ]
+
+    assert session._update_loop_history(turns[0], history, 3) is None
+    assert session._update_loop_history(turns[1], history, 3) is None
+    loop_detection = session._update_loop_history(turns[2], history, 3)
+    assert loop_detection is not None
+    assert "wait" in loop_detection["message"]

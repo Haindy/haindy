@@ -37,7 +37,12 @@ def _normalize_response_obj(response: Any) -> Any:
         return response
     if hasattr(response, "model_dump"):
         try:
-            return response.model_dump()
+            return response.model_dump(warnings="none")
+        except TypeError:
+            try:
+                return response.model_dump()
+            except Exception:
+                return str(response)
         except Exception:
             return str(response)
     if hasattr(response, "to_dict"):
@@ -78,7 +83,15 @@ def _sanitize_for_json(value: Any, *, _seen: set[int] | None = None) -> Any:
 
     if hasattr(value, "model_dump"):
         try:
-            return _sanitize_for_json(value.model_dump(), _seen=_seen)
+            return _sanitize_for_json(
+                value.model_dump(warnings="none"),
+                _seen=_seen,
+            )
+        except TypeError:
+            try:
+                return _sanitize_for_json(value.model_dump(), _seen=_seen)
+            except Exception:
+                return str(value)
         except Exception:
             return str(value)
     if hasattr(value, "to_dict"):
