@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import base64
 import logging
 from collections import deque
 from typing import TYPE_CHECKING, Any
@@ -24,6 +23,7 @@ from .common import (
     extract_assistant_text,
     normalize_response,
 )
+from .turn_result import ComputerUseActionResult
 from .types import (
     ComputerUseExecutionError,
     ComputerUseSessionResult,
@@ -260,6 +260,7 @@ class AnthropicComputerUseMixin:
                 history_messages=history_messages,
                 previous_response=response_dict,
                 turns=executed_turns,
+                metadata=metadata,
                 model=model,
             )
             history_messages = list(follow_up_payload.get("messages", []))
@@ -375,40 +376,33 @@ class AnthropicComputerUseMixin:
         history_messages: list[dict[str, Any]],
         previous_response: dict[str, Any],
         turns: list[ComputerToolTurn],
+        metadata: dict[str, Any],
         model: str | None = None,
     ) -> tuple[dict[str, Any], bytes | None]:
+        follow_up_batch = await self._build_follow_up_batch(
+            call_groups=[[turn] for turn in turns],
+            metadata=metadata,
+        )
         (
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
         tool_results: list[dict[str, Any]] = []
-        primary_screenshot: bytes | None = None
+        extra_content: list[dict[str, Any]] = []
 
-        for turn in turns:
-            screenshot_b64 = turn.metadata.get("screenshot_base64")
-            if not screenshot_b64:
-                screenshot_bytes = await self._automation_driver.screenshot()
-                screenshot_b64 = encode_png_base64(screenshot_bytes)
-                turn.metadata["screenshot_base64"] = screenshot_b64
-            elif primary_screenshot is None:
-                try:
-                    primary_screenshot = base64.b64decode(str(screenshot_b64))
-                except Exception:
-                    primary_screenshot = None
-
-            if primary_screenshot is None:
-                try:
-                    primary_screenshot = base64.b64decode(str(screenshot_b64))
-                except Exception:
-                    primary_screenshot = None
-
+        for call_result in follow_up_batch.calls:
+            action_result = (
+                call_result.actions[0]
+                if call_result.actions
+                else ComputerUseActionResult(action_type="unknown", status="pending")
+            )
             tool_result_block: dict[str, Any] = {
                 "type": "tool_result",
-                "tool_use_id": turn.call_id,
+                "tool_use_id": call_result.call_id,
             }
 
-            if turn.status != "executed":
-                error_text = turn.error_message or "Action execution failed."
+            if action_result.status != "executed":
+                error_text = action_result.error_message or "Action execution failed."
                 tool_result_block["content"] = [
                     {"type": "text", "text": f"Execution error: {error_text}"}
                 ]
@@ -420,17 +414,25 @@ class AnthropicComputerUseMixin:
                         "source": {
                             "type": "base64",
                             "media_type": "image/png",
-                            "data": screenshot_b64,
+                            "data": follow_up_batch.screenshot_base64,
                         },
                     }
                 ]
             tool_results.append(tool_result_block)
-            turn.metadata.pop("screenshot_base64", None)
+
+        if follow_up_batch.grounding_text:
+            extra_content.append(
+                {"type": "text", "text": follow_up_batch.grounding_text}
+            )
+        if follow_up_batch.reminder_text:
+            extra_content.append(
+                {"type": "text", "text": follow_up_batch.reminder_text}
+            )
 
         messages: list[dict[str, Any]] = list(history_messages)
         assistant_content = previous_response.get("content") or []
         messages.append({"role": "assistant", "content": assistant_content})
-        messages.append({"role": "user", "content": tool_results})
+        messages.append({"role": "user", "content": tool_results + extra_content})
 
         payload: dict[str, Any] = {
             "model": model or self._anthropic_model,
@@ -446,7 +448,7 @@ class AnthropicComputerUseMixin:
             ],
             "messages": messages,
         }
-        return payload, primary_screenshot
+        return payload, follow_up_batch.screenshot_bytes
 
     async def _create_anthropic_response(
         self: _ComputerUseSession, payload: dict[str, Any]

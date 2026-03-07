@@ -20,7 +20,10 @@ def normalize_response(response: Any) -> dict[str, Any]:
     if response is None:
         return {}
     if hasattr(response, "model_dump"):
-        return cast(dict[str, Any], response.model_dump())
+        try:
+            return cast(dict[str, Any], response.model_dump(warnings="none"))
+        except TypeError:
+            return cast(dict[str, Any], response.model_dump())
     if hasattr(response, "to_dict"):
         try:
             return cast(dict[str, Any], response.to_dict())

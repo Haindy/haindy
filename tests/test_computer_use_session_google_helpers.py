@@ -233,3 +233,59 @@ async def test_google_follow_up_uses_original_google_function_call_name(
     function_response = payload["contents"][0].parts[0].function_response
     assert function_response is not None
     assert function_response.name == "key_press"
+
+
+@pytest.mark.asyncio
+async def test_google_follow_up_preserves_rich_grounding_fields(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+    turn = ComputerToolTurn(
+        call_id="call_google_rich",
+        action_type="click_at",
+        parameters={"x": 120, "y": 340},
+        status="failed",
+        pending_safety_checks=[],
+        error_message="click failed",
+        metadata={
+            "x": 120,
+            "y": 340,
+            "clipboard_text": "copied value",
+            "clipboard_truncated": False,
+            "clipboard_error": "clipboard unavailable",
+            "google_function_call_name": "click_at",
+            "google_function_call_sequence": 3,
+            "google_correlation_mode": "provider_id",
+            "google_function_call_id": "google_call_3",
+        },
+    )
+
+    payload, _, screenshot_bytes = await session._build_google_follow_up_request(
+        goal="Tap the button.",
+        history=[],
+        turns=[turn],
+        metadata={},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    function_response = payload["contents"][0].parts[0].function_response
+    assert function_response is not None
+    assert function_response.id == "google_call_3"
+    assert function_response.response["status"] == "failed"
+    assert function_response.response["call_id"] == "call_google_rich"
+    assert function_response.response["url"] == "https://example.com"
+    assert function_response.response["x"] == 120
+    assert function_response.response["y"] == 340
+    assert function_response.response["clipboard_text"] == "copied value"
+    assert function_response.response["clipboard_truncated"] is False
+    assert function_response.response["clipboard_error"] == "clipboard unavailable"
+    assert function_response.response["error"] == "click failed"
+    assert screenshot_bytes == b"fake_png_bytes"

@@ -56,3 +56,32 @@ async def test_model_call_logger_prunes_screenshots(tmp_path: Path) -> None:
     screenshot_dir = log_path.parent / "screenshots"
     pngs = sorted(screenshot_dir.glob("*.png"))
     assert len(pngs) == 2
+
+
+@pytest.mark.asyncio
+async def test_model_call_logger_suppresses_model_dump_warnings(
+    tmp_path: Path,
+) -> None:
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def model_dump(self, **kwargs: object) -> dict[str, object]:
+            self.calls.append(kwargs)
+            return {"ok": True}
+
+    log_path = tmp_path / "model_calls.jsonl"
+    logger = ModelCallLogger(log_path)
+    response = DummyResponse()
+
+    await logger.log_call(
+        agent="test-agent",
+        model="test-model",
+        prompt="hello",
+        request_payload={},
+        response=response,
+        screenshots=None,
+        metadata={},
+    )
+
+    assert response.calls == [{"warnings": "none"}]

@@ -24,6 +24,7 @@ from .common import (
     extract_google_function_call_envelopes,
     normalize_response,
 )
+from .turn_result import ComputerUseActionResult
 from .types import (
     ComputerUseExecutionError,
     ComputerUseSessionResult,
@@ -600,45 +601,49 @@ class GoogleComputerUseMixin:
         from google.genai import types  # type: ignore
 
         del goal
-        screenshot_bytes = await self._automation_driver.screenshot()
-        page_url = ""
-        try:
-            page_url = await self._automation_driver.get_page_url()
-        except Exception:
-            page_url = ""
-        if not page_url:
-            page_url = "desktop://"
+        follow_up_batch = await self._build_follow_up_batch(
+            call_groups=[[turn] for turn in turns],
+            metadata=metadata,
+        )
         parts: list[Any] = []
-        for turn in turns:
+        for call_result in follow_up_batch.calls:
+            action_result = (
+                call_result.actions[0]
+                if call_result.actions
+                else ComputerUseActionResult(action_type="unknown", status="pending")
+            )
             google_call_id = str(
-                turn.metadata.get("google_function_call_id") or ""
+                call_result.provider_metadata.get("google_function_call_id") or ""
             ).strip()
             response_name = str(
-                turn.metadata.get("google_function_call_name") or ""
+                call_result.provider_metadata.get("google_function_call_name") or ""
             ).strip()
             if not response_name:
-                response_name = str(turn.action_type or "action").strip() or "action"
+                response_name = (
+                    str(action_result.action_type or "action").strip() or "action"
+                )
             response_payload = {
-                "status": turn.status,
-                "call_id": turn.call_id,
-                "google_function_call_sequence": turn.metadata.get(
+                "status": action_result.status,
+                "call_id": call_result.call_id,
+                "google_function_call_sequence": call_result.provider_metadata.get(
                     "google_function_call_sequence"
                 ),
-                "google_correlation_mode": turn.metadata.get("google_correlation_mode"),
-                "google_function_call_fallback_id": turn.metadata.get(
+                "google_correlation_mode": call_result.provider_metadata.get(
+                    "google_correlation_mode"
+                ),
+                "google_function_call_fallback_id": call_result.provider_metadata.get(
                     "google_function_call_fallback_id"
                 ),
-                "url": page_url,
-                "x": turn.metadata.get("x"),
-                "y": turn.metadata.get("y"),
-                "clipboard_text": turn.metadata.get("clipboard_text"),
-                "clipboard_truncated": turn.metadata.get("clipboard_truncated"),
-                "clipboard_error": turn.metadata.get("clipboard_error"),
-                "error": turn.error_message,
+                "url": follow_up_batch.current_url,
+                "x": action_result.x,
+                "y": action_result.y,
+                "clipboard_text": action_result.clipboard_text,
+                "clipboard_truncated": action_result.clipboard_truncated,
+                "clipboard_error": action_result.clipboard_error,
+                "error": action_result.error_message,
             }
-            safety_acknowledgement = self._google_safety_acknowledgement(turn)
-            if safety_acknowledgement:
-                response_payload["safety_acknowledgement"] = safety_acknowledgement
+            if call_result.requires_safety_acknowledgement:
+                response_payload["safety_acknowledgement"] = "true"
             response_payload = {
                 k: v for k, v in response_payload.items() if v is not None
             }
@@ -651,7 +656,8 @@ class GoogleComputerUseMixin:
                         parts=[
                             types.FunctionResponsePart(
                                 inline_data=types.FunctionResponseBlob(
-                                    mime_type="image/png", data=screenshot_bytes
+                                    mime_type="image/png",
+                                    data=follow_up_batch.screenshot_bytes,
                                 )
                             )
                         ],
@@ -661,19 +667,11 @@ class GoogleComputerUseMixin:
 
         function_response_content = types.Content(role="user", parts=parts)
         contents = list(history) + [function_response_content]
-        interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
-        if interaction_mode:
-            reminder = (
-                "Reminder: Observe-only mode is active. Do not interact with the UI. "
-                "Do not call click_at, type_text_at, key_combination, or drag actions. "
-                "Only inspect and report findings."
-                if interaction_mode == "observe_only"
-                else "Reminder: Execute mode is active. Complete the requested interaction directly without asking for confirmation."
-            )
+        if follow_up_batch.reminder_text:
             contents.append(
                 types.Content(
                     role="user",
-                    parts=[types.Part.from_text(text=reminder)],
+                    parts=[types.Part.from_text(text=follow_up_batch.reminder_text)],
                 )
             )
         return (
@@ -683,7 +681,7 @@ class GoogleComputerUseMixin:
                 "config": self._build_google_generate_config(environment),
             },
             function_response_content,
-            screenshot_bytes,
+            follow_up_batch.screenshot_bytes,
         )
 
     def _build_google_generate_config(
@@ -742,17 +740,6 @@ class GoogleComputerUseMixin:
 
         return [payload]
 
-    @staticmethod
-    def _google_safety_acknowledgement(turn: ComputerToolTurn) -> str | None:
-        """Return the acknowledgement marker required for confirm-gated actions."""
-        for check in turn.pending_safety_checks:
-            if not isinstance(check, dict):
-                continue
-            decision = str(check.get("decision") or check.get("code") or "").strip()
-            if decision.lower() == "require_confirmation":
-                return "true"
-        return None
-
     async def _create_google_response(
         self: _ComputerUseSession, payload: dict[str, Any]
     ) -> Any:
@@ -789,7 +776,7 @@ class GoogleComputerUseMixin:
         while True:
             attempt_number = transport_retry_count + 1
             try:
-                response = await asyncio.to_thread(_call)
+                response = await self._invoke_google_request(_call)
             except Exception as exc:
                 if transport_retry_count >= len(
                     retry_delays
@@ -807,7 +794,7 @@ class GoogleComputerUseMixin:
                         "error": str(exc),
                     },
                 )
-                await session_module.asyncio.sleep(delay_seconds)
+                await self._sleep_google_retry(delay_seconds)
                 continue
 
             response_dict = normalize_response(response)
@@ -830,7 +817,25 @@ class GoogleComputerUseMixin:
                     "delay_seconds": delay_seconds,
                 },
             )
-            await session_module.asyncio.sleep(delay_seconds)
+            await self._sleep_google_retry(delay_seconds)
+
+    async def _invoke_google_request(
+        self: _ComputerUseSession, call: Any
+    ) -> Any:
+        """Run a synchronous Google client request off the event loop."""
+        return await asyncio.to_thread(call)
+
+    async def _sleep_google_retry(
+        self: _ComputerUseSession, delay_seconds: float
+    ) -> None:
+        """Sleep between Google retry attempts.
+
+        Kept as an instance method so tests can stub retry waits without monkeypatching
+        the global asyncio module used by event-loop teardown.
+        """
+        from . import session as session_module
+
+        await session_module.asyncio.sleep(delay_seconds)
 
     @staticmethod
     def _normalize_google_block_reason(value: Any) -> str | None:

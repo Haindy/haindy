@@ -170,6 +170,7 @@ async def test_anthropic_error_tool_result_uses_text_only_content(
         ],
         previous_response={"content": []},
         turns=[failed_turn],
+        metadata={},
         model="claude-sonnet-4-6",
     )
 
@@ -178,6 +179,61 @@ async def test_anthropic_error_tool_result_uses_text_only_content(
     assert tool_result.get("is_error") is True
     assert all(part.get("type") == "text" for part in tool_result["content"])
     assert payload["max_tokens"] == 16384
+
+
+@pytest.mark.asyncio
+async def test_anthropic_follow_up_adds_shared_grounding_text_and_preserves_turn_snapshot(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "test-key"
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+
+    successful_turn = ComputerToolTurn(
+        call_id="toolu_success_1",
+        action_type="click",
+        parameters={"type": "click"},
+        response_id="msg_1",
+        pending_safety_checks=[],
+        status="executed",
+        metadata={
+            "screenshot_base64": "stored_snapshot",
+            "current_url": "https://stale.example.com",
+            "x": 11,
+            "y": 22,
+        },
+    )
+
+    payload, screenshot_bytes = await session._build_anthropic_follow_up_request(
+        history_messages=[
+            {"role": "user", "content": [{"type": "text", "text": "go"}]}
+        ],
+        previous_response={"content": []},
+        turns=[successful_turn],
+        metadata={"interaction_mode": "observe_only"},
+        model="claude-sonnet-4-6",
+    )
+
+    content = payload["messages"][-1]["content"]
+    assert content[0]["type"] == "tool_result"
+    assert content[0]["content"][0]["type"] == "image"
+    assert content[0]["content"][0]["source"]["data"] == "ZmFrZV9wbmdfYnl0ZXM="
+    assert content[1]["text"].startswith('current_url="https://example.com"\n')
+    assert (
+        'call_id="toolu_success_1" action_index=1 action="click" status="executed" x=11 y=22'
+        in (content[1]["text"])
+    )
+    assert "Observe-only mode is active" in content[2]["text"]
+    assert successful_turn.metadata["screenshot_base64"] == "stored_snapshot"
+    assert successful_turn.metadata["current_url"] == "https://stale.example.com"
+    assert screenshot_bytes == b"fake_png_bytes"
 
 
 @pytest.mark.asyncio

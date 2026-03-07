@@ -12,12 +12,12 @@ from src.core.enhanced_types import ComputerToolTurn
 
 from .common import (
     _inject_context_metadata,
-    encode_png_base64,
     extract_assistant_text,
     extract_computer_call_actions,
     extract_computer_calls,
     normalize_response,
 )
+from .turn_result import ComputerUseCallResult, ComputerUseFollowUpBatch
 from .types import ComputerUseSessionResult
 
 logger = logging.getLogger("src.agents.computer_use.session")
@@ -28,6 +28,24 @@ if TYPE_CHECKING:
 
 class OpenAIComputerUseMixin:
     """OpenAI-specific request builders and execution loop."""
+
+    @staticmethod
+    def _apply_openai_localization_guidance(goal: str, environment: str) -> str:
+        """Add OpenAI-specific screenshot targeting guidance."""
+        if environment != "mobile_adb":
+            return goal
+
+        guidance = (
+            "OPENAI CLICK LOCALIZATION RULES:\n"
+            "- For a visible button, tap inside the button body itself, not nearby subtitle text, whitespace, or background.\n"
+            "- Prefer the geometric center of the button rectangle when the full control is visible.\n"
+            "- On bottom action rows, anchor to the actual button pill/rectangle, not the copy above it.\n"
+            "- Do not stop after a tap unless the expected destination screen is visible in the latest screenshot.\n"
+            "- If a tap does not change the screen, adjust the tap point within the visible control on the next turn instead of repeating the same off-target area.\n"
+        )
+        if guidance in goal:
+            return goal
+        return f"{goal}\n\n{guidance}"
 
     async def _run_openai(
         self: _ComputerUseSession,
@@ -51,14 +69,11 @@ class OpenAIComputerUseMixin:
         goal = self._wrap_goal_for_mobile(
             goal, environment, viewport_width, viewport_height
         )
-        screenshot = initial_screenshot or await self._automation_driver.screenshot()
-        screenshot_b64 = encode_png_base64(screenshot)
+        goal = self._apply_openai_localization_guidance(goal, environment)
+        del initial_screenshot
 
         request_payload = self._build_initial_request(
             goal=goal,
-            screenshot_b64=screenshot_b64,
-            viewport_width=viewport_width,
-            viewport_height=viewport_height,
             metadata=metadata,
             model=model,
         )
@@ -70,7 +85,6 @@ class OpenAIComputerUseMixin:
             prompt=goal,
             request_payload=self._sanitize_payload_for_log(request_payload),
             response=response,
-            screenshots=[("computer_use_initial", screenshot)],
             metadata={"environment": environment, **metadata},
         )
         response_dict = normalize_response(response)
@@ -155,7 +169,6 @@ class OpenAIComputerUseMixin:
 
             completed_call_turns: list[list[ComputerToolTurn]] = []
             should_stop = False
-            stop_remaining_calls = False
 
             for call in computer_calls:
                 call_id = str(call.get("call_id") or "")
@@ -268,18 +281,14 @@ class OpenAIComputerUseMixin:
                         should_stop = True
                         break
 
-                    if turn.status != "executed":
-                        stop_remaining_calls = True
-                        break
-
                 completed_call_turns.append(processed_turns or [turns[0]])
-                if should_stop or stop_remaining_calls:
+                if should_stop:
                     break
 
             if should_stop:
                 break
 
-            follow_up_payload = await self._build_follow_up_request(
+            follow_up_payload, follow_up_batch = await self._build_follow_up_request(
                 previous_response_id=previous_response_id,
                 calls=completed_call_turns,
                 metadata=metadata,
@@ -287,7 +296,6 @@ class OpenAIComputerUseMixin:
             )
 
             response = await self._create_response(follow_up_payload)
-            follow_up_screenshot = self._extract_follow_up_screenshot(follow_up_payload)
             await self._model_logger.log_call(
                 agent="computer_use.openai.follow_up",
                 model=model,
@@ -295,8 +303,8 @@ class OpenAIComputerUseMixin:
                 request_payload=self._sanitize_payload_for_log(follow_up_payload),
                 response=response,
                 screenshots=(
-                    [("computer_use_follow_up", follow_up_screenshot)]
-                    if follow_up_screenshot
+                    [("computer_use_follow_up", follow_up_batch.screenshot_bytes)]
+                    if follow_up_batch.screenshot_bytes
                     else None
                 ),
                 metadata={"environment": environment, **metadata},
@@ -313,8 +321,12 @@ class OpenAIComputerUseMixin:
         calls: list[list[ComputerToolTurn]],
         metadata: dict[str, Any],
         model: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], ComputerUseFollowUpBatch]:
         """Build the payload for a follow-up request after executing a model turn."""
+        follow_up_batch = await self._build_follow_up_batch(
+            call_groups=calls,
+            metadata=metadata,
+        )
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
@@ -326,74 +338,34 @@ class OpenAIComputerUseMixin:
         if safety_identifier:
             payload["safety_identifier"] = safety_identifier
 
-        for turns in calls:
-            payload["input"].append(await self._build_follow_up_item(turns))
-
-        interaction_mode = metadata.get("interaction_mode")
-        if interaction_mode:
-            reminder = (
-                "Reminder: You are in observe-only mode - analyze the UI and report findings without interacting."
-                if interaction_mode == "observe_only"
-                else "Reminder: You have approval to execute the requested action directly. Do not pause for confirmation; complete the interaction."
-            )
+        for call_result in follow_up_batch.calls:
             payload["input"].append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": reminder,
-                        }
-                    ],
-                }
+                self._build_follow_up_item(call_result, follow_up_batch)
             )
 
-        execution_errors = [
-            turn.error_message
-            for turns in calls
-            for turn in turns
-            if turn.status != "executed" and turn.error_message
-        ]
-        if execution_errors:
-            payload["input"].append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": f"Execution error: {execution_errors[0]}",
-                        }
-                    ],
-                }
-            )
+        return payload, follow_up_batch
 
-        return payload
-
-    async def _build_follow_up_item(
+    def _build_follow_up_item(
         self: _ComputerUseSession,
-        turns: list[ComputerToolTurn],
+        call_result: ComputerUseCallResult,
+        follow_up_batch: ComputerUseFollowUpBatch,
     ) -> dict[str, Any]:
         """Build a single computer_call_output item for an executed computer_call."""
-        latest_turn = turns[-1]
-        screenshot_b64 = latest_turn.metadata.get("screenshot_base64")
-        if not screenshot_b64:
-            screenshot_bytes = await self._automation_driver.screenshot()
-            screenshot_b64 = encode_png_base64(screenshot_bytes)
-
         item: dict[str, Any] = {
             "type": "computer_call_output",
-            "call_id": latest_turn.call_id,
+            "call_id": call_result.call_id,
             "output": {
                 "type": "computer_screenshot",
-                "image_url": f"data:image/png;base64,{screenshot_b64}",
+                "image_url": (
+                    f"data:image/png;base64,{follow_up_batch.screenshot_base64}"
+                ),
+                "detail": "original",
             },
         }
-        acknowledged_safety_checks = turns[0].metadata.get("acknowledged_safety_checks")
-        if acknowledged_safety_checks:
-            item["acknowledged_safety_checks"] = acknowledged_safety_checks
-
-        for turn in turns:
-            turn.metadata.pop("screenshot_base64", None)
+        if call_result.acknowledged_safety_checks:
+            item["acknowledged_safety_checks"] = list(
+                call_result.acknowledged_safety_checks
+            )
         return item
 
     def _build_acknowledged_safety_checks(
@@ -439,9 +411,6 @@ class OpenAIComputerUseMixin:
     def _build_initial_request(
         self: _ComputerUseSession,
         goal: str,
-        screenshot_b64: str,
-        viewport_width: int,
-        viewport_height: int,
         metadata: dict[str, Any],
         model: str | None = None,
     ) -> dict[str, Any]:
@@ -471,21 +440,7 @@ class OpenAIComputerUseMixin:
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "tools": [{"type": "computer"}],
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": context_text,
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/png;base64,{screenshot_b64}",
-                        },
-                    ],
-                }
-            ],
+            "input": context_text,
         }
 
         safety_identifier = metadata.get("safety_identifier")
