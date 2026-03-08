@@ -7,6 +7,7 @@ import json
 import traceback
 from typing import Any
 
+from src.agents.computer_use.visual_state import VisualBounds, crop_to_bounds
 from src.core.types import TestCase, TestCaseResult, TestStatus, TestStep
 from src.monitoring.logger import get_logger
 
@@ -31,6 +32,28 @@ class TestRunnerVerifier:
         replay_wait_budget_ms: int | None = None,
     ) -> dict[str, Any]:
         """Use AI to verify if expected outcome was achieved with full context."""
+        verification_before = screenshot_before
+        verification_after = screenshot_after
+        verification_visual_note = self._build_verification_visual_note(
+            step=step,
+            action_results=action_results,
+        )
+        patch_bounds = self._extract_patch_bounds(action_results)
+        if (
+            verification_before is not None
+            and verification_after is not None
+            and patch_bounds is not None
+            and step.intent.value != "group_assert"
+            and len(action_results) == 1
+        ):
+            try:
+                verification_before = crop_to_bounds(verification_before, patch_bounds)
+            except Exception:
+                logger.debug(
+                    "Failed to crop verification before image; falling back to full frame",
+                    exc_info=True,
+                )
+
         history_context = []
         for hist_item in execution_history:
             status_emoji = "✓" if hist_item.get("status") == TestStatus.PASSED else "✗"
@@ -130,6 +153,7 @@ IMPORTANT: The "CU agent observation" fields above are real-time descriptions ca
    Next test case: {next_test_case.name if next_test_case else "None (last test case)"}
    (Consider: Does this failure leave the system in a state where the next test case cannot execute meaningfully?)
 {replay_wait_section}
+{verification_visual_note}
 
 Respond with JSON:
 {{
@@ -147,7 +171,7 @@ Respond with JSON:
             }
         ]
 
-        if screenshot_before:
+        if verification_before:
             messages[0]["content"].insert(
                 1, {"type": "text", "text": "\nScreenshot before actions:"}
             )
@@ -156,12 +180,12 @@ Respond with JSON:
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{base64.b64encode(screenshot_before).decode()}"
+                        "url": f"data:image/png;base64,{base64.b64encode(verification_before).decode()}"
                     },
                 },
             )
 
-        if screenshot_after:
+        if verification_after:
             messages[0]["content"].append(
                 {"type": "text", "text": "\nScreenshot after actions:"}
             )
@@ -169,7 +193,7 @@ Respond with JSON:
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{base64.b64encode(screenshot_after).decode()}"
+                        "url": f"data:image/png;base64,{base64.b64encode(verification_after).decode()}"
                     },
                 }
             )
@@ -185,20 +209,20 @@ Respond with JSON:
                     "content": [{"type": "text", "text": prompt_text}],
                 }
             ]
-            if screenshot_before:
+            if verification_before:
                 log_messages[0]["content"].append(
                     {"type": "image_url", "image_url": "<<attached screenshot>>"}
                 )
-            if screenshot_after:
+            if verification_after:
                 log_messages[0]["content"].append(
                     {"type": "image_url", "image_url": "<<attached screenshot>>"}
                 )
 
             screenshots: list[tuple[str, bytes]] = []
-            if screenshot_before:
-                screenshots.append(("verification_before", screenshot_before))
-            if screenshot_after:
-                screenshots.append(("verification_after", screenshot_after))
+            if verification_before:
+                screenshots.append(("verification_before", verification_before))
+            if verification_after:
+                screenshots.append(("verification_after", verification_after))
 
             await self._runner._model_logger.log_call(
                 agent="test_runner.verify_step",
@@ -346,3 +370,72 @@ Respond with JSON:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "y"}
         return False
+
+    @staticmethod
+    def _extract_patch_bounds(
+        action_results: list[dict[str, Any]],
+    ) -> VisualBounds | None:
+        if len(action_results) != 1:
+            return None
+        full_data = action_results[0].get("full_data", {})
+        if not isinstance(full_data, dict):
+            return None
+        result_blob = full_data.get("result", {})
+        if not isinstance(result_blob, dict):
+            return None
+        env_after = result_blob.get("environment_state_after", {})
+        if not isinstance(env_after, dict):
+            return None
+        if str(env_after.get("frame_kind") or "").strip().lower() != "patch":
+            return None
+        patch_bounds = env_after.get("patch_bounds")
+        if not isinstance(patch_bounds, (list, tuple)) or len(patch_bounds) != 4:
+            return None
+        try:
+            return VisualBounds(
+                x=int(patch_bounds[0]),
+                y=int(patch_bounds[1]),
+                width=int(patch_bounds[2]),
+                height=int(patch_bounds[3]),
+            )
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _build_verification_visual_note(
+        cls,
+        *,
+        step: TestStep,
+        action_results: list[dict[str, Any]],
+    ) -> str:
+        patch_bounds = cls._extract_patch_bounds(action_results)
+        if patch_bounds is None or step.intent.value == "group_assert":
+            return ""
+        full_data = action_results[0].get("full_data", {}) if action_results else {}
+        result_blob = full_data.get("result", {}) if isinstance(full_data, dict) else {}
+        env_after = (
+            result_blob.get("environment_state_after", {})
+            if isinstance(result_blob, dict)
+            else {}
+        )
+        viewport = (
+            env_after.get("viewport_size") if isinstance(env_after, dict) else None
+        )
+        frame_id = env_after.get("frame_id") if isinstance(env_after, dict) else None
+        details = [
+            "Visual verification note: the after image is a local patch crop, not the full screen.",
+            (
+                f"Patch bounds in full-screen coordinates: x={patch_bounds.x}, "
+                f"y={patch_bounds.y}, width={patch_bounds.width}, height={patch_bounds.height}."
+            ),
+        ]
+        if isinstance(viewport, (list, tuple)) and len(viewport) == 2:
+            details.append(
+                f"Original full-screen size: width={viewport[0]}, height={viewport[1]}."
+            )
+        if frame_id:
+            details.append(f"Patch frame id: {frame_id}.")
+        details.append(
+            "Interpret any cropped before/after screenshots as views into that local region of the original screen."
+        )
+        return "\n".join(details)

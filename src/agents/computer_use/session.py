@@ -35,12 +35,19 @@ from .common import (
 from .google_mixin import GoogleComputerUseMixin, genai
 from .openai_mixin import OpenAIComputerUseMixin
 from .support_mixin import ComputerUseSupportMixin
+from .transports import (
+    ComputerUseTransport,
+    OpenAIResponsesHTTPTransport,
+    OpenAIResponsesWebSocketTransport,
+)
 from .types import (
     ComputerUseExecutionError,
     ComputerUseSessionResult,
     GoogleFunctionCallEnvelope,
     InteractionConstraints,
 )
+from .visual_pipeline import VisualStatePlanner
+from .visual_state import VisualFrame
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +101,11 @@ class ComputerUseSession(
     _pending_context_menu_selection: bool
     _interaction_constraints: InteractionConstraints
     _last_pointer_position: tuple[int, int] | None
+    _openai_transport: ComputerUseTransport | None
+    _visual_state_planner: VisualStatePlanner
+    _current_keyframe: VisualFrame | None
+    _last_visual_frame: VisualFrame | None
+    _turns_since_keyframe: int
 
     def __init__(
         self,
@@ -208,6 +220,32 @@ class ComputerUseSession(
         self._pending_context_menu_selection = False
         self._interaction_constraints = InteractionConstraints()
         self._last_pointer_position: tuple[int, int] | None = None
+        self._openai_transport = None
+        if self._provider == "openai":
+            self._openai_transport = self._build_openai_transport()
+        self._visual_state_planner = VisualStatePlanner(
+            visual_mode=getattr(self._settings, "cu_visual_mode", "keyframe_patch"),
+            keyframe_max_turns=getattr(self._settings, "cu_keyframe_max_turns", 3),
+            patch_max_area_ratio=getattr(
+                self._settings, "cu_patch_max_area_ratio", 0.35
+            ),
+            patch_margin_ratio=getattr(self._settings, "cu_patch_margin_ratio", 0.12),
+        )
+        self._current_keyframe = None
+        self._last_visual_frame = None
+        self._turns_since_keyframe = 0
+
+    def _build_openai_transport(self) -> ComputerUseTransport:
+        """Build the transport used for OpenAI computer-use requests."""
+        transport_mode = str(
+            getattr(self._settings, "openai_cu_transport", "responses_websocket")
+        ).strip()
+        if transport_mode == "responses_http":
+            return OpenAIResponsesHTTPTransport(self._client)
+        return OpenAIResponsesWebSocketTransport(
+            client=self._client,
+            timeout_seconds=float(self._settings.openai_request_timeout_seconds),
+        )
 
     async def run(
         self,
@@ -235,6 +273,9 @@ class ComputerUseSession(
         self._allowed_actions = allowed_actions
         self._pending_context_menu_selection = False
         self._last_pointer_position = None
+        self._current_keyframe = None
+        self._last_visual_frame = None
+        self._turns_since_keyframe = 0
 
         step_goal = str(metadata.get("step_goal") or "").strip()
         constraint_source = " ".join([step_goal, goal]).strip()
@@ -287,6 +328,8 @@ class ComputerUseSession(
                 "Supported providers are 'openai', 'google', and 'anthropic'."
             )
         finally:
+            if self._openai_transport is not None:
+                await self._openai_transport.close()
             self._allowed_actions = None
 
 

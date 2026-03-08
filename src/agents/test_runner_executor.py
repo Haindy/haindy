@@ -28,6 +28,7 @@ class StepActionExecutionRequest:
     state_context: dict[str, Any]
     recent_actions: list[dict[str, Any]]
     record_driver_actions: bool
+    screenshot: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -44,9 +45,11 @@ class TestRunnerExecutor:
         *,
         action_agent: Any,
         automation_driver: Any,
+        artifacts: Any | None = None,
     ) -> None:
         self._action_agent = action_agent
         self._automation_driver = automation_driver
+        self._artifacts = artifacts
 
     async def execute_action(
         self,
@@ -185,7 +188,9 @@ class TestRunnerExecutor:
                 "cache_action": step.cache_action or "click",
             }
 
-            screenshot = await self._automation_driver.screenshot()
+            screenshot = request.screenshot
+            if screenshot is None:
+                screenshot = await self._automation_driver.screenshot()
             result = await self._action_agent.execute_action(
                 test_step=action_step,
                 test_context=test_context,
@@ -218,6 +223,24 @@ class TestRunnerExecutor:
                 "ai_analysis": result.ai_analysis.model_dump()
                 if result.ai_analysis
                 else None,
+                "environment_state_before": (
+                    {
+                        k: v
+                        for k, v in result.environment_state_before.model_dump().items()
+                        if k != "screenshot"
+                    }
+                    if result.environment_state_before
+                    else None
+                ),
+                "environment_state_after": (
+                    {
+                        k: v
+                        for k, v in result.environment_state_after.model_dump().items()
+                        if k != "screenshot"
+                    }
+                    if result.environment_state_after
+                    else None
+                ),
                 "cache": {
                     "label": result.cache_label,
                     "action": result.cache_action,
@@ -240,6 +263,17 @@ class TestRunnerExecutor:
             ):
                 action_data["screenshots"]["after"] = (
                     result.environment_state_after.screenshot_path
+                )
+            if (
+                self._artifacts is not None
+                and result.environment_state_after
+                and result.environment_state_after.screenshot is not None
+                and result.environment_state_after.screenshot_path
+            ):
+                self._artifacts.update_latest_snapshot(
+                    result.environment_state_after.screenshot,
+                    result.environment_state_after.screenshot_path,
+                    f"action_{step.step_number}_after",
                 )
 
             success = (result.validation.valid if result.validation else False) and (

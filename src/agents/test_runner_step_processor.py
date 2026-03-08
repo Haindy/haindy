@@ -107,6 +107,8 @@ class TestRunnerStepProcessor:
                 test_case=test_case,
                 step=step,
                 suffix="before",
+                origin=f"step_{step.step_number}_before",
+                update_latest=True,
             )
             if before_capture:
                 screenshot_before = before_capture.screenshot_bytes
@@ -224,18 +226,26 @@ class TestRunnerStepProcessor:
                 latest_action_results = action_results
                 runner._current_step_data["plan_cache_hit"] = plan_cache_hit
 
-                if runner.automation_driver:
-                    await asyncio.sleep(1)
-                after_capture = await runner._artifacts.capture_test_step_screenshot(
-                    test_case=test_case,
-                    step=step,
-                    suffix="after",
-                    origin=f"step_{step.step_number}_after",
-                    update_latest=True,
-                )
-                if after_capture:
-                    screenshot_after = after_capture.screenshot_bytes
-                    step_result.screenshot_after = after_capture.screenshot_path
+                latest_after = runner._artifacts.latest_screenshot_bytes
+                latest_after_path = runner._artifacts.latest_screenshot_path
+                if latest_after is not None and latest_after_path is not None:
+                    screenshot_after = latest_after
+                    step_result.screenshot_after = latest_after_path
+                else:
+                    if runner.automation_driver:
+                        await asyncio.sleep(1)
+                    after_capture = (
+                        await runner._artifacts.capture_test_step_screenshot(
+                            test_case=test_case,
+                            step=step,
+                            suffix="after",
+                            origin=f"step_{step.step_number}_after",
+                            update_latest=True,
+                        )
+                    )
+                    if after_capture:
+                        screenshot_after = after_capture.screenshot_bytes
+                        step_result.screenshot_after = after_capture.screenshot_path
 
                 try:
                     if forced_blocker_reason:
@@ -470,6 +480,7 @@ class TestRunnerStepProcessor:
         runner._executor = TestRunnerExecutor(
             action_agent=runner.action_agent,
             automation_driver=runner.automation_driver,
+            artifacts=runner._artifacts,
         )
         execution = await runner._executor.execute_action(
             StepActionExecutionRequest(
@@ -490,6 +501,7 @@ class TestRunnerStepProcessor:
                 else {},
                 recent_actions=runner._execution_history[-3:],
                 record_driver_actions=record_driver_actions,
+                screenshot=runner._artifacts.latest_screenshot_bytes,
             )
         )
         if runner._current_step_actions is None:

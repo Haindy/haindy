@@ -216,6 +216,7 @@ class ActionAgent(BaseAgent):
         debug_logger: Any,
         step_number: int | None,
         label: str,
+        visual_frame: Any | None = None,
     ) -> EnvironmentState:
         """Capture current page state for debugging."""
         if not self.automation_driver:
@@ -264,6 +265,39 @@ class ActionAgent(BaseAgent):
             viewport_size=(viewport_width, viewport_height),
             screenshot=screenshot,
             screenshot_path=screenshot_path,
+            frame_kind=(
+                getattr(visual_frame, "kind", "keyframe")
+                if visual_frame is not None
+                else "keyframe"
+            ),
+            frame_id=getattr(visual_frame, "frame_id", None),
+            parent_keyframe_id=getattr(visual_frame, "parent_keyframe_id", None),
+            patch_bounds=(
+                getattr(
+                    getattr(visual_frame, "bounds", None), "as_tuple", lambda: None
+                )()
+                if visual_frame is not None
+                and getattr(visual_frame, "kind", "keyframe") == "patch"
+                else None
+            ),
+            target_bounds=(
+                getattr(
+                    getattr(visual_frame, "target_bounds", None),
+                    "as_tuple",
+                    lambda: None,
+                )()
+                if visual_frame is not None
+                and getattr(visual_frame, "target_bounds", None) is not None
+                else None
+            ),
+            diff_bounds=(
+                getattr(
+                    getattr(visual_frame, "diff_bounds", None), "as_tuple", lambda: None
+                )()
+                if visual_frame is not None
+                and getattr(visual_frame, "diff_bounds", None) is not None
+                else None
+            ),
         )
 
     def _new_computer_use_session(
@@ -738,12 +772,19 @@ class ActionAgent(BaseAgent):
 
         duration_ms = (time.perf_counter() - start_ts) * 1000
 
-        after_screenshot = await self.automation_driver.screenshot()
+        after_screenshot = (
+            session_result.final_visual_frame.image_bytes
+            if session_result.final_visual_frame is not None
+            else None
+        )
+        if after_screenshot is None:
+            after_screenshot = await self.automation_driver.screenshot()
         environment_state_after = await self._capture_environment_state(
             after_screenshot,
             debug_logger,
             test_step.step_number,
             "after",
+            visual_frame=session_result.final_visual_frame,
         )
 
         failing_action = next(

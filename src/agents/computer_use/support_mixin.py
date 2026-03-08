@@ -24,6 +24,8 @@ from .common import (
 )
 from .turn_result import ComputerUseFollowUpBatch, build_follow_up_batch
 from .types import ComputerUseExecutionError, ComputerUseSessionResult
+from .visual_pipeline import VisualStatePlanner
+from .visual_state import CartographyMap, VisualFrame
 
 logger = logging.getLogger("src.agents.computer_use.session")
 
@@ -33,6 +35,10 @@ if TYPE_CHECKING:
 
 class ComputerUseSupportMixin:
     """Support helpers shared across provider implementations."""
+
+    _current_keyframe: VisualFrame | None
+    _last_visual_frame: VisualFrame | None
+    _visual_state_planner: VisualStatePlanner
 
     def _update_loop_history(
         self: _ComputerUseSession,
@@ -324,12 +330,61 @@ class ComputerUseSupportMixin:
         if not current_url:
             current_url = "desktop://"
         interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
+        action_types = [
+            str(turn.action_type or "").strip().lower()
+            for group in call_groups
+            for turn in group
+            if turn.action_type
+        ]
+        (
+            visual_frame,
+            current_keyframe,
+        ) = await self._visual_state_planner.build_follow_up_frame(
+            screenshot_bytes=screenshot_bytes,
+            metadata=metadata,
+            action_types=action_types,
+            previous_keyframe=self._current_keyframe,
+            turns_since_keyframe=self._turns_since_keyframe,
+            generate_cartography=self._generate_cartography,
+        )
+        self._current_keyframe = current_keyframe
+        self._last_visual_frame = visual_frame
+        if visual_frame.kind == "keyframe":
+            self._turns_since_keyframe = 0
+        else:
+            self._turns_since_keyframe += 1
         return build_follow_up_batch(
             call_groups,
-            screenshot_bytes=screenshot_bytes,
+            screenshot_bytes=visual_frame.image_bytes,
             current_url=current_url,
             interaction_mode=interaction_mode,
+            visual_frame=visual_frame,
         )
+
+    async def _generate_cartography(
+        self: _ComputerUseSession,
+        frame: VisualFrame,
+        metadata: dict[str, Any],
+    ) -> CartographyMap | None:
+        """Dispatch provider-owned cartography generation for a keyframe."""
+        try:
+            if self._provider == "openai" and hasattr(
+                self, "_generate_openai_cartography_map"
+            ):
+                return await self._generate_openai_cartography_map(frame, metadata)
+            if self._provider == "google" and hasattr(
+                self, "_generate_google_cartography_map"
+            ):
+                result = await self._generate_google_cartography_map(frame, metadata)
+                return cast(CartographyMap | None, result)
+            if self._provider == "anthropic" and hasattr(
+                self, "_generate_anthropic_cartography_map"
+            ):
+                result = await self._generate_anthropic_cartography_map(frame, metadata)
+                return cast(CartographyMap | None, result)
+        except Exception:
+            logger.warning("Cartography generation failed", exc_info=True)
+        return None
 
     async def _build_confirmation_request(
         self: _ComputerUseSession,
