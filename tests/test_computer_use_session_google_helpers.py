@@ -141,17 +141,26 @@ async def test_google_follow_up_adds_safety_acknowledgement_and_call_id(
 
     payload, _, _ = await session._build_google_follow_up_request(
         goal="Confirm sign out.",
-        history=[],
+        previous_interaction_id="int_prev",
         turns=[turn],
         metadata={},
         environment="desktop",
         model="gemini-3-flash-preview",
     )
 
-    function_response = payload["contents"][0].parts[0].function_response
-    assert function_response is not None
-    assert function_response.id == "call_google_1"
-    assert function_response.response["safety_acknowledgement"] == "true"
+    function_result = payload["input"][0]
+    assert payload["api_surface"] == "interactions"
+    assert payload["previous_interaction_id"] == "int_prev"
+    assert function_result["type"] == "function_result"
+    assert function_result["call_id"] == "call_google_1"
+    assert function_result["result"]["safety_acknowledgement"] is True
+    assert function_result["result"]["current_url"] == "https://example.com"
+    assert function_result["result"]["items"][0]["type"] == "text"
+    assert (
+        'google_function_call_id="call_google_1"'
+        in function_result["result"]["items"][0]["text"]
+    )
+    assert function_result["result"]["items"][-1]["mime_type"] == "image/png"
 
 
 @pytest.mark.asyncio
@@ -181,23 +190,21 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
 
     payload, _, _ = await session._build_google_follow_up_request(
         goal="Tap settings.",
-        history=[],
+        previous_interaction_id="int_prev",
         turns=[turn],
         metadata={},
         environment="desktop",
         model="gemini-3-flash-preview",
     )
 
-    function_response = payload["contents"][0].parts[0].function_response
-    assert function_response is not None
-    assert function_response.id is None
-    assert function_response.response["call_id"] == "google_turn_1_call_2"
-    assert function_response.response["google_function_call_sequence"] == 2
-    assert function_response.response["google_correlation_mode"] == "sequence_fallback"
-    assert (
-        function_response.response["google_function_call_fallback_id"]
-        == "google_turn_1_call_2"
-    )
+    function_result = payload["input"][0]
+    assert function_result["call_id"] == "google_turn_1_call_2"
+    assert function_result["result"]["current_url"] == "https://example.com"
+    call_text = function_result["result"]["items"][0]["text"]
+    assert 'call_id="google_turn_1_call_2"' in call_text
+    assert "google_function_call_sequence=2" in call_text
+    assert 'google_correlation_mode="sequence_fallback"' in call_text
+    assert 'google_function_call_fallback_id="google_turn_1_call_2"' in call_text
 
 
 @pytest.mark.asyncio
@@ -223,16 +230,15 @@ async def test_google_follow_up_uses_original_google_function_call_name(
 
     payload, _, _ = await session._build_google_follow_up_request(
         goal="Press enter.",
-        history=[],
+        previous_interaction_id="int_prev",
         turns=[turn],
         metadata={},
         environment="desktop",
         model="gemini-3-flash-preview",
     )
 
-    function_response = payload["contents"][0].parts[0].function_response
-    assert function_response is not None
-    assert function_response.name == "key_press"
+    function_result = payload["input"][0]
+    assert function_result["name"] == "key_press"
 
 
 @pytest.mark.asyncio
@@ -269,23 +275,29 @@ async def test_google_follow_up_preserves_rich_grounding_fields(
 
     payload, _, screenshot_bytes = await session._build_google_follow_up_request(
         goal="Tap the button.",
-        history=[],
+        previous_interaction_id="int_prev",
         turns=[turn],
         metadata={},
         environment="desktop",
         model="gemini-3-flash-preview",
     )
 
-    function_response = payload["contents"][0].parts[0].function_response
-    assert function_response is not None
-    assert function_response.id == "google_call_3"
-    assert function_response.response["status"] == "failed"
-    assert function_response.response["call_id"] == "call_google_rich"
-    assert function_response.response["url"] == "https://example.com"
-    assert function_response.response["x"] == 120
-    assert function_response.response["y"] == 340
-    assert function_response.response["clipboard_text"] == "copied value"
-    assert function_response.response["clipboard_truncated"] is False
-    assert function_response.response["clipboard_error"] == "clipboard unavailable"
-    assert function_response.response["error"] == "click failed"
+    function_result = payload["input"][0]
+    assert function_result["call_id"] == "google_call_3"
+    assert function_result["name"] == "click_at"
+    assert function_result["is_error"] is True
+    assert function_result["result"]["status"] == "failed"
+    assert function_result["result"]["current_url"] == "https://example.com"
+    call_text = function_result["result"]["items"][0]["text"]
+    assert 'call_id="call_google_rich"' in call_text
+    assert "x=120" in call_text
+    assert "y=340" in call_text
+    assert 'clipboard_text="copied value"' in call_text
+    assert "clipboard_truncated=false" in call_text
+    assert 'clipboard_error="clipboard unavailable"' in call_text
+    assert 'error="click failed"' in call_text
+    assert "google_function_call_sequence=3" in call_text
+    assert 'google_correlation_mode="provider_id"' in call_text
+    assert 'google_function_call_id="google_call_3"' in call_text
+    assert function_result["result"]["items"][-1]["type"] == "image"
     assert screenshot_bytes == b"fake_png_bytes"

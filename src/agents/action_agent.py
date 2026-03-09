@@ -179,9 +179,10 @@ class ActionAgent(BaseAgent):
 
     def supports_step_scoped_validation(self) -> bool:
         """Return True when this agent can reuse one CU session across a step."""
-        return (
-            str(getattr(self.settings, "cu_provider", "")).strip().lower() == "openai"
-        )
+        return str(getattr(self.settings, "cu_provider", "")).strip().lower() in {
+            "openai",
+            "google",
+        }
 
     async def begin_step_session(
         self,
@@ -1102,7 +1103,10 @@ Respond with JSON only:
 
         start_ts = time.perf_counter()
         try:
-            if step_session is not None and step_session.provider == "openai":
+            if step_session is not None and step_session.provider in {
+                "openai",
+                "google",
+            }:
                 session_result = await session.execute_step_action(
                     goal,
                     initial_screenshot,

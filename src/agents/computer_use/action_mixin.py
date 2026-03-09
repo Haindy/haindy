@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 from src.core.enhanced_types import ComputerToolTurn
 
 from .common import (
-    denormalize_coordinates,
     encode_png_base64,
     normalize_coordinates,
     normalize_key_sequence,
@@ -122,6 +121,7 @@ class ComputerUseActionMixin:
                             viewport_width,
                             viewport_height,
                             normalized=normalized_coords,
+                            turn=turn,
                         )
                     button = (action.get("button", "left") or "left").lower()
                     click_count = int(action.get("click_count", 1))
@@ -161,6 +161,7 @@ class ComputerUseActionMixin:
                             viewport_width,
                             viewport_height,
                             normalized=normalized_coords,
+                            turn=turn,
                         )
                     button = "right" if action_type == "right_click" else "left"
                     click_count = 2 if action_type == "double_click" else 1
@@ -183,6 +184,7 @@ class ComputerUseActionMixin:
                             viewport_width,
                             viewport_height,
                             normalized=normalized_coords,
+                            turn=turn,
                         )
                     raw_steps = action.get("steps") or action.get("step_count")
                     steps = 1
@@ -265,11 +267,23 @@ class ComputerUseActionMixin:
                         )
 
                     if normalized_coords:
-                        start_x, start_y = denormalize_coordinates(
-                            start_x_raw, start_y_raw, viewport_width, viewport_height
+                        start_x, start_y = (
+                            self._denormalize_coordinates_for_active_frame(
+                                start_x_raw,
+                                start_y_raw,
+                                viewport_width,
+                                viewport_height,
+                                turn=turn,
+                                prefix="start_",
+                            )
                         )
-                        end_x, end_y = denormalize_coordinates(
-                            end_x_raw, end_y_raw, viewport_width, viewport_height
+                        end_x, end_y = self._denormalize_coordinates_for_active_frame(
+                            end_x_raw,
+                            end_y_raw,
+                            viewport_width,
+                            viewport_height,
+                            turn=turn,
+                            prefix="end_",
                         )
                     else:
                         start_x, start_y = normalize_coordinates(
@@ -362,6 +376,7 @@ class ComputerUseActionMixin:
                             viewport_width,
                             viewport_height,
                             normalized=normalized_coords,
+                            turn=turn,
                         )
                     turn.metadata["scroll_direction"] = direction
                     turn.metadata["scroll_magnitude"] = magnitude
@@ -402,6 +417,7 @@ class ComputerUseActionMixin:
                             viewport_width,
                             viewport_height,
                             normalized=normalized_coords,
+                            turn=turn,
                         )
                     tap_count = (
                         3 if (clear_before and environment == "mobile_adb") else 1

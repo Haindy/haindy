@@ -146,7 +146,17 @@ def make_anthropic_client(create_mock: AsyncMock) -> SimpleNamespace:
     )
 
 
-def make_google_client(generate_content_mock: MagicMock) -> SimpleNamespace:
+def make_google_client(
+    generate_content_mock: MagicMock | None = None,
+    interactions_create_mock: AsyncMock | None = None,
+) -> SimpleNamespace:
+    if generate_content_mock is None:
+        generate_content_mock = MagicMock()
+    if interactions_create_mock is None:
+        interactions_create_mock = AsyncMock()
     return SimpleNamespace(
-        models=SimpleNamespace(generate_content=generate_content_mock)
+        models=SimpleNamespace(generate_content=generate_content_mock),
+        aio=SimpleNamespace(
+            interactions=SimpleNamespace(create=interactions_create_mock)
+        ),
     )

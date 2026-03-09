@@ -276,7 +276,7 @@ class HumanReadableFormatter(logging.Formatter):
     @staticmethod
     def _stringify(value: Any) -> str:
         if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=True)
+            return json.dumps(value, ensure_ascii=True, default=str)
         return str(value)
 
 

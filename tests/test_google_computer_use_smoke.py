@@ -38,6 +38,18 @@ class DummyGoogleResponse:
         return self._payload
 
 
+def _stub_initial_interaction_request(*args, **kwargs):
+    return (
+        {
+            "api_surface": "interactions",
+            "model": "gemini-2.5-computer-use-preview-10-2025",
+            "input": [{"type": "text", "text": "stub"}],
+            "tools": [{"type": "computer_use"}],
+        },
+        kwargs.get("screenshot_bytes"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
     settings = SimpleNamespace(
@@ -80,9 +92,7 @@ async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
         provider="google",
     )
 
-    session._build_google_initial_request = (  # type: ignore[assignment]
-        lambda *args, **kwargs: ([{"role": "user"}], "config")
-    )
+    session._build_google_initial_request = _stub_initial_interaction_request  # type: ignore[assignment]
     session._create_google_response = AsyncMock(  # type: ignore[assignment]
         return_value=DummyGoogleResponse({"id": "resp_1", "candidates": []})
     )
@@ -146,9 +156,7 @@ async def test_google_observe_only_policy_violation_fails_immediately(
         google_client=object(),
         provider="google",
     )
-    session._build_google_initial_request = (  # type: ignore[assignment]
-        lambda *args, **kwargs: ([{"role": "user"}], "config")
-    )
+    session._build_google_initial_request = _stub_initial_interaction_request  # type: ignore[assignment]
     session._create_google_response = AsyncMock(return_value=response)  # type: ignore[assignment]
 
     result = await session.run(
@@ -215,9 +223,7 @@ async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> N
         google_client=object(),
         provider="google",
     )
-    session._build_google_initial_request = (  # type: ignore[assignment]
-        lambda *args, **kwargs: ([{"role": "user"}], "config")
-    )
+    session._build_google_initial_request = _stub_initial_interaction_request  # type: ignore[assignment]
     session._create_google_response = AsyncMock(return_value=response)  # type: ignore[assignment]
 
     result = await session.run(
@@ -302,9 +308,7 @@ async def test_google_executes_duplicate_name_batch_with_ids(tmp_path: Path) -> 
         google_client=object(),
         provider="google",
     )
-    session._build_google_initial_request = (  # type: ignore[assignment]
-        lambda *args, **kwargs: ([{"role": "user"}], "config")
-    )
+    session._build_google_initial_request = _stub_initial_interaction_request  # type: ignore[assignment]
     session._create_google_response = AsyncMock(  # type: ignore[assignment]
         side_effect=[first, second]
     )
@@ -407,9 +411,7 @@ async def test_google_duplicate_name_batch_without_ids_reasks_then_executes_sing
         google_client=object(),
         provider="google",
     )
-    session._build_google_initial_request = (  # type: ignore[assignment]
-        lambda *args, **kwargs: ([{"role": "user"}], "config")
-    )
+    session._build_google_initial_request = _stub_initial_interaction_request  # type: ignore[assignment]
     session._create_google_response = AsyncMock(  # type: ignore[assignment]
         side_effect=[ambiguous, single, done]
     )
@@ -426,7 +428,7 @@ async def test_google_duplicate_name_batch_without_ids_reasks_then_executes_sing
     browser.press_key.assert_awaited_once_with("Control+c")
     assert session._create_google_response.await_count == 3  # type: ignore[attr-defined]
     reask_payload = session._create_google_response.await_args_list[1].args[0]  # type: ignore[attr-defined]
-    reask_prompt = reask_payload["contents"][-1].parts[0].text
+    reask_prompt = reask_payload["input"][0]["text"]
     assert "Return exactly one function call" in reask_prompt
 
 
@@ -508,9 +510,7 @@ async def test_google_duplicate_name_batch_without_ids_fails_after_single_retry(
         google_client=object(),
         provider="google",
     )
-    session._build_google_initial_request = (  # type: ignore[assignment]
-        lambda *args, **kwargs: ([{"role": "user"}], "config")
-    )
+    session._build_google_initial_request = _stub_initial_interaction_request  # type: ignore[assignment]
     session._create_google_response = AsyncMock(  # type: ignore[assignment]
         side_effect=[ambiguous_first, ambiguous_second]
     )

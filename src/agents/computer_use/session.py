@@ -107,6 +107,8 @@ class ComputerUseSession(
     _last_visual_frame: VisualFrame | None
     _turns_since_keyframe: int
     _openai_previous_response_id: str | None
+    _google_previous_interaction_id: str | None
+    _google_turn_index: int
     _step_response_ids: list[str]
     _step_last_response: dict[str, Any]
 
@@ -238,6 +240,8 @@ class ComputerUseSession(
         self._last_visual_frame = None
         self._turns_since_keyframe = 0
         self._openai_previous_response_id = None
+        self._google_previous_interaction_id = None
+        self._google_turn_index = 0
         self._step_response_ids = []
         self._step_last_response = {}
 
@@ -272,6 +276,8 @@ class ComputerUseSession(
         self._last_visual_frame = None
         self._turns_since_keyframe = 0
         self._openai_previous_response_id = None
+        self._google_previous_interaction_id = None
+        self._google_turn_index = 0
         self._step_response_ids = []
         self._step_last_response = {}
 
@@ -280,6 +286,16 @@ class ComputerUseSession(
         if self._openai_transport is not None:
             await self._openai_transport.close()
         self._allowed_actions = None
+        self._pending_context_menu_selection = False
+        self._last_pointer_position = None
+        self._current_keyframe = None
+        self._last_visual_frame = None
+        self._turns_since_keyframe = 0
+        self._openai_previous_response_id = None
+        self._google_previous_interaction_id = None
+        self._google_turn_index = 0
+        self._step_response_ids = []
+        self._step_last_response = {}
 
     async def execute_step_action(
         self,
@@ -293,7 +309,7 @@ class ComputerUseSession(
         use_cache: bool = True,
     ) -> ComputerUseSessionResult:
         """Execute one action inside an existing step-scoped session."""
-        if self._provider != "openai":
+        if self._provider not in {"openai", "google"}:
             return await self.run(
                 goal=goal,
                 initial_screenshot=initial_screenshot,
@@ -320,6 +336,18 @@ class ComputerUseSession(
             environment or metadata.get("environment") or self._default_environment
         )
         try:
+            if self._provider == "google":
+                return await self._run_google(
+                    goal=goal,
+                    initial_screenshot=initial_screenshot,
+                    metadata=metadata,
+                    environment=env_mode,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                    use_cache=use_cache,
+                    model=self._google_model,
+                    previous_interaction_id=self._google_previous_interaction_id,
+                )
             return await self._run_openai(
                 goal=goal,
                 initial_screenshot=initial_screenshot,
@@ -341,9 +369,15 @@ class ComputerUseSession(
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Request a final structured verdict from the active step-scoped session."""
+        if self._provider == "google":
+            return await self._reflect_google_step(
+                prompt=prompt,
+                metadata=metadata or {},
+                model=self._google_model,
+            )
         if self._provider != "openai":
             raise ComputerUseExecutionError(
-                "Step-scoped reflection is only supported for the OpenAI provider."
+                "Step-scoped reflection is only supported for the OpenAI and Google providers."
             )
         return await self._reflect_openai_step(
             prompt=prompt,
@@ -394,12 +428,14 @@ class ComputerUseSession(
             if self._provider == "google":
                 return await self._run_google(
                     goal=goal,
+                    initial_screenshot=initial_screenshot,
                     metadata=metadata,
                     environment=env_mode,
                     cache_label=cache_label,
                     cache_action=cache_action,
                     use_cache=use_cache,
                     model=self._google_model,
+                    previous_interaction_id=None,
                 )
             if self._provider == "openai":
                 return await self._run_openai(

@@ -608,6 +608,7 @@ class ComputerUseSupportMixin:
         *,
         prefix: str = "",
         normalized: bool = False,
+        turn: ComputerToolTurn | None = None,
     ) -> tuple[int, int]:
         x = action.get(f"{prefix}x")
         y = action.get(f"{prefix}y")
@@ -628,8 +629,61 @@ class ComputerUseSupportMixin:
                 y = action.get("to_y")
 
         if normalized:
-            return denormalize_coordinates(x, y, viewport_width, viewport_height)
+            return self._denormalize_coordinates_for_active_frame(
+                x,
+                y,
+                viewport_width,
+                viewport_height,
+                turn=turn,
+                prefix=prefix,
+            )
         return normalize_coordinates(x, y, viewport_width, viewport_height)
+
+    def _denormalize_coordinates_for_active_frame(
+        self: _ComputerUseSession,
+        x: float | None,
+        y: float | None,
+        viewport_width: int,
+        viewport_height: int,
+        *,
+        turn: ComputerToolTurn | None = None,
+        prefix: str = "",
+    ) -> tuple[int, int]:
+        """Resolve normalized coordinates against the latest model-visible frame."""
+        frame = self._last_visual_frame
+        normalized_prefix = f"{prefix}normalized_"
+        if turn is not None:
+            turn.metadata[f"{normalized_prefix}x"] = x
+            turn.metadata[f"{normalized_prefix}y"] = y
+
+        if self._provider != "google" or frame is None or frame.kind != "patch":
+            resolved = denormalize_coordinates(x, y, viewport_width, viewport_height)
+            if turn is not None:
+                turn.metadata[f"{prefix}coordinate_frame_kind"] = (
+                    frame.kind if frame is not None else "viewport"
+                )
+            return resolved
+
+        patch_bounds = frame.bounds
+        patch_x, patch_y = denormalize_coordinates(
+            x,
+            y,
+            max(patch_bounds.width, 1),
+            max(patch_bounds.height, 1),
+        )
+        resolved = normalize_coordinates(
+            patch_bounds.x + patch_x,
+            patch_bounds.y + patch_y,
+            viewport_width,
+            viewport_height,
+        )
+        if turn is not None:
+            turn.metadata[f"{prefix}coordinate_frame_kind"] = "patch"
+            turn.metadata[f"{prefix}patch_bounds"] = patch_bounds.as_tuple()
+            turn.metadata[f"{prefix}patch_coordinate"] = (patch_x, patch_y)
+            turn.metadata[f"{prefix}full_screen_coordinate"] = resolved
+            turn.metadata["visual_frame_id"] = frame.frame_id
+        return resolved
 
     @staticmethod
     def _action_matches_cache(action_type: str | None, cache_action: str) -> bool:
@@ -862,6 +916,11 @@ class ComputerUseSupportMixin:
         )
 
     @staticmethod
+    def _map_google_interaction_environment(env_mode: str) -> str | None:
+        spec = runtime_environment_spec(normalize_runtime_environment_name(env_mode))
+        return "browser" if spec.is_browser else None
+
+    @staticmethod
     def _wrap_goal_for_mobile(
         goal: str,
         env_mode: str,
@@ -927,6 +986,46 @@ class ComputerUseSupportMixin:
                 ),
             ]
         )
+
+    @staticmethod
+    def _google_modifier_click_function_tools() -> list[dict[str, Any]]:
+        """Return Interactions API tool declarations for modifier-click actions."""
+        coord_schema = {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "number",
+                    "description": "X coordinate (0-999 scale)",
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Y coordinate (0-999 scale)",
+                },
+            },
+            "required": ["x", "y"],
+        }
+        return [
+            {
+                "type": "function",
+                "name": "ctrl_click",
+                "description": (
+                    "Performs a Ctrl+Click at the given coordinates. "
+                    "Use this to add items to an existing selection, e.g. "
+                    "selecting multiple files in a file picker."
+                ),
+                "parameters": coord_schema,
+            },
+            {
+                "type": "function",
+                "name": "shift_click",
+                "description": (
+                    "Performs a Shift+Click at the given coordinates. "
+                    "Use this to extend a contiguous selection, e.g. "
+                    "selecting a range of files in a file picker."
+                ),
+                "parameters": coord_schema,
+            },
+        ]
 
     @staticmethod
     def _parse_betas(raw: str) -> list[str]:
