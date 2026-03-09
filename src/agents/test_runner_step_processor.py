@@ -107,6 +107,8 @@ class TestRunnerStepProcessor:
                 test_case=test_case,
                 step=step,
                 suffix="before",
+                origin=f"step_{step.step_number}_before",
+                update_latest=True,
             )
             if before_capture:
                 screenshot_before = before_capture.screenshot_bytes
@@ -159,145 +161,229 @@ class TestRunnerStepProcessor:
                 action_results: list[dict[str, Any]] = []
                 forced_blocker_reason = None
                 step_result.actions_performed = []
+                step_session = None
 
-                for action in actions:
-                    logger.debug(
-                        "Executing sub-action",
-                        extra={
-                            "action_type": action["type"],
-                            "description": action.get("description", ""),
+                if (
+                    runner.action_agent is not None
+                    and hasattr(runner.action_agent, "begin_step_session")
+                    and callable(runner.action_agent.begin_step_session)
+                ):
+                    step_session = await runner.action_agent.begin_step_session(
+                        step,
+                        {
+                            **(
+                                runner._test_state.context
+                                if runner._test_state
+                                and isinstance(runner._test_state.context, dict)
+                                else {}
+                            ),
+                            "test_plan_name": runner._current_test_plan.name
+                            if runner._current_test_plan
+                            else None,
+                            "test_case_name": runner._current_test_case.name
+                            if runner._current_test_case
+                            else None,
+                            "test_case_id": runner._current_test_case.test_id
+                            if runner._current_test_case
+                            else None,
+                            "step_number": step.step_number,
+                            "environment": runner._environment,
                         },
                     )
-
-                    action_result = await runner._execute_action(
-                        action, step, record_driver_actions=runner._replay_enabled(step)
-                    )
-                    step_result.actions_performed.append(action_result)
-                    action_results.append(
-                        {
-                            "action": action,
-                            "result": action_result,
-                            "full_data": runner._current_step_actions[-1]
-                            if runner._current_step_actions
-                            else {},
-                        }
-                    )
-
-                    if forced_blocker_reason is None:
-                        error_text = action_result.get("error")
-                        if not error_text:
-                            full_data = action_results[-1]["full_data"]
-                            if isinstance(full_data, dict):
-                                result_blob = full_data.get("result", {})
-                                if isinstance(result_blob, dict):
-                                    exec_blob = result_blob.get("execution") or {}
-                                    error_text = result_blob.get(
-                                        "error"
-                                    ) or exec_blob.get("error_message")
-                        if (
-                            error_text
-                            and isinstance(error_text, str)
-                            and (
-                                error_text.startswith(MAX_TURN_ERROR_PREFIX)
-                                or error_text.startswith(LOOP_ERROR_PREFIX)
-                            )
-                        ):
-                            forced_blocker_reason = error_text
-                            logger.error(
-                                "Action aborted due to Computer Use limit or loop",
-                                extra={
-                                    "step_number": step.step_number,
-                                    "action_description": action.get("description", ""),
-                                    "reason": error_text,
-                                },
-                            )
-                            runner._current_step_data["blocker_reasoning"] = error_text
-                            runner._current_step_data["forced_blocker_reason"] = (
-                                error_text
-                            )
-
-                    if not action_result.get("success", False) and action.get(
-                        "critical", True
-                    ):
-                        break
-
-                latest_action_results = action_results
-                runner._current_step_data["plan_cache_hit"] = plan_cache_hit
-
-                if runner.automation_driver:
-                    await asyncio.sleep(1)
-                after_capture = await runner._artifacts.capture_test_step_screenshot(
-                    test_case=test_case,
-                    step=step,
-                    suffix="after",
-                    origin=f"step_{step.step_number}_after",
-                    update_latest=True,
-                )
-                if after_capture:
-                    screenshot_after = after_capture.screenshot_bytes
-                    step_result.screenshot_after = after_capture.screenshot_path
 
                 try:
-                    if forced_blocker_reason:
-                        verification = {
-                            "verdict": "FAIL",
-                            "reasoning": forced_blocker_reason,
-                            "actual_result": forced_blocker_reason,
-                            "confidence": 1.0,
-                            "is_blocker": True,
-                            "blocker_reasoning": forced_blocker_reason,
-                        }
-                        runner._current_step_data["verification_mode"] = (
-                            "runner_short_circuit"
+                    for action in actions:
+                        logger.debug(
+                            "Executing sub-action",
+                            extra={
+                                "action_type": action["type"],
+                                "description": action.get("description", ""),
+                            },
                         )
+
+                        action_result = await runner._execute_action(
+                            action,
+                            step,
+                            record_driver_actions=runner._replay_enabled(step),
+                            step_session=step_session,
+                        )
+                        step_result.actions_performed.append(action_result)
+                        action_results.append(
+                            {
+                                "action": action,
+                                "result": action_result,
+                                "full_data": runner._current_step_actions[-1]
+                                if runner._current_step_actions
+                                else {},
+                            }
+                        )
+
+                        if forced_blocker_reason is None:
+                            error_text = action_result.get("error")
+                            if not error_text:
+                                full_data = action_results[-1]["full_data"]
+                                if isinstance(full_data, dict):
+                                    result_blob = full_data.get("result", {})
+                                    if isinstance(result_blob, dict):
+                                        exec_blob = result_blob.get("execution") or {}
+                                        error_text = result_blob.get(
+                                            "error"
+                                        ) or exec_blob.get("error_message")
+                            if (
+                                error_text
+                                and isinstance(error_text, str)
+                                and (
+                                    error_text.startswith(MAX_TURN_ERROR_PREFIX)
+                                    or error_text.startswith(LOOP_ERROR_PREFIX)
+                                )
+                            ):
+                                forced_blocker_reason = error_text
+                                logger.error(
+                                    "Action aborted due to Computer Use limit or loop",
+                                    extra={
+                                        "step_number": step.step_number,
+                                        "action_description": action.get(
+                                            "description", ""
+                                        ),
+                                        "reason": error_text,
+                                    },
+                                )
+                                runner._current_step_data["blocker_reasoning"] = (
+                                    error_text
+                                )
+                                runner._current_step_data["forced_blocker_reason"] = (
+                                    error_text
+                                )
+
+                        if not action_result.get("success", False) and action.get(
+                            "critical", True
+                        ):
+                            break
+
+                    latest_action_results = action_results
+                    runner._current_step_data["plan_cache_hit"] = plan_cache_hit
+
+                    latest_after = runner._artifacts.latest_screenshot_bytes
+                    latest_after_path = runner._artifacts.latest_screenshot_path
+                    if latest_after is not None and latest_after_path is not None:
+                        screenshot_after = latest_after
+                        step_result.screenshot_after = latest_after_path
                     else:
-                        verification = await runner._verify_expected_outcome(
-                            test_case=test_case,
-                            step=step,
-                            action_results=action_results,
-                            screenshot_before=screenshot_before,
-                            screenshot_after=screenshot_after,
-                            execution_history=execution_history,
-                            next_test_case=next_test_case,
+                        if runner.automation_driver:
+                            await asyncio.sleep(1)
+                        after_capture = (
+                            await runner._artifacts.capture_test_step_screenshot(
+                                test_case=test_case,
+                                step=step,
+                                suffix="after",
+                                origin=f"step_{step.step_number}_after",
+                                update_latest=True,
+                            )
                         )
-                        runner._current_step_data["verification_mode"] = "ai"
+                        if after_capture:
+                            screenshot_after = after_capture.screenshot_bytes
+                            step_result.screenshot_after = after_capture.screenshot_path
 
-                    runner._current_step_data["verification_result"] = verification
-                    step_result.status = (
-                        TestStatus.PASSED
-                        if verification["verdict"] == "PASS"
-                        else TestStatus.FAILED
-                    )
-                    step_result.actual_result = verification["actual_result"]
-                    step_result.error_message = (
-                        verification["reasoning"]
-                        if verification["verdict"] == "FAIL"
-                        else None
-                    )
-                    step_result.confidence = verification.get("confidence", 0.0)
+                    try:
+                        if forced_blocker_reason:
+                            verification = {
+                                "verdict": "FAIL",
+                                "reasoning": forced_blocker_reason,
+                                "actual_result": forced_blocker_reason,
+                                "confidence": 1.0,
+                                "is_blocker": True,
+                                "blocker_reasoning": forced_blocker_reason,
+                            }
+                            runner._current_step_data["verification_mode"] = (
+                                "runner_short_circuit"
+                            )
+                        elif step_session is not None and getattr(
+                            step_session, "has_computer_use_action", False
+                        ):
+                            validation_result = (
+                                await runner.action_agent.validate_step_with_session(
+                                    step_session=step_session,
+                                    test_case=test_case,
+                                    step=step,
+                                    action_results=action_results,
+                                    execution_history=execution_history,
+                                    next_test_case=next_test_case,
+                                )
+                            )
+                            verification = validation_result.verification
+                            runner._current_step_data["verification_mode"] = (
+                                "action_agent_session"
+                            )
+                            runner._current_step_data[
+                                "action_agent_step_validation"
+                            ] = {
+                                "prompt": validation_result.prompt,
+                                "response": validation_result.raw_response,
+                                "response_ids": validation_result.response_ids,
+                                "session_response_ids": getattr(
+                                    step_session, "response_ids", []
+                                ),
+                            }
+                        else:
+                            verification = await runner._verify_expected_outcome(
+                                test_case=test_case,
+                                step=step,
+                                action_results=action_results,
+                                screenshot_before=screenshot_before,
+                                screenshot_after=screenshot_after,
+                                execution_history=execution_history,
+                                next_test_case=next_test_case,
+                            )
+                            runner._current_step_data["verification_mode"] = "ai"
 
-                    if verification["verdict"] == "FAIL":
-                        runner._current_step_data["is_blocker"] = verification.get(
-                            "is_blocker", False
+                        runner._current_step_data["verification_result"] = verification
+                        step_result.status = (
+                            TestStatus.PASSED
+                            if verification["verdict"] == "PASS"
+                            else TestStatus.FAILED
                         )
-                        runner._current_step_data["blocker_reasoning"] = (
-                            verification.get("blocker_reasoning", "")
+                        step_result.actual_result = verification["actual_result"]
+                        step_result.error_message = (
+                            verification["reasoning"]
+                            if verification["verdict"] == "FAIL"
+                            else None
                         )
+                        step_result.confidence = verification.get("confidence", 0.0)
 
-                except Exception as exc:
-                    logger.error(
-                        "AI verification failed - marking test as failed",
-                        extra={
-                            "error": str(exc),
-                            "step_number": step.step_number,
-                            "test_case": test_case.name,
-                        },
-                    )
-                    step_result.status = TestStatus.FAILED
-                    step_result.actual_result = "Verification failed due to AI error"
-                    step_result.error_message = f"AI verification failed: {str(exc)}"
-                    step_result.confidence = 0.0
-                    raise
+                        if verification["verdict"] == "FAIL":
+                            runner._current_step_data["is_blocker"] = verification.get(
+                                "is_blocker", False
+                            )
+                            runner._current_step_data["blocker_reasoning"] = (
+                                verification.get("blocker_reasoning", "")
+                            )
+
+                    except Exception as exc:
+                        logger.error(
+                            "AI verification failed - marking test as failed",
+                            extra={
+                                "error": str(exc),
+                                "step_number": step.step_number,
+                                "test_case": test_case.name,
+                            },
+                        )
+                        step_result.status = TestStatus.FAILED
+                        step_result.actual_result = (
+                            "Verification failed due to AI error"
+                        )
+                        step_result.error_message = (
+                            f"AI verification failed: {str(exc)}"
+                        )
+                        step_result.confidence = 0.0
+                        raise
+                finally:
+                    if (
+                        step_session is not None
+                        and runner.action_agent is not None
+                        and hasattr(runner.action_agent, "end_step_session")
+                        and callable(runner.action_agent.end_step_session)
+                    ):
+                        await runner.action_agent.end_step_session(step_session)
 
                 if (
                     verification["verdict"] == "PASS"
@@ -464,12 +550,14 @@ class TestRunnerStepProcessor:
         action: dict[str, Any],
         step: TestStep,
         record_driver_actions: bool = False,
+        step_session: Any | None = None,
     ) -> dict[str, Any]:
         """Execute a single decomposed action with comprehensive tracking."""
         runner = self._runner
         runner._executor = TestRunnerExecutor(
             action_agent=runner.action_agent,
             automation_driver=runner.automation_driver,
+            artifacts=runner._artifacts,
         )
         execution = await runner._executor.execute_action(
             StepActionExecutionRequest(
@@ -490,6 +578,8 @@ class TestRunnerStepProcessor:
                 else {},
                 recent_actions=runner._execution_history[-3:],
                 record_driver_actions=record_driver_actions,
+                screenshot=runner._artifacts.latest_screenshot_bytes,
+                step_session=step_session,
             )
         )
         if runner._current_step_actions is None:

@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from src.core.enhanced_types import ComputerToolTurn, SafetyEvent
 
+from .visual_state import VisualFrame
+
 
 class ComputerUseExecutionError(RuntimeError):
     """Raised when the Computer Use orchestration fails irrecoverably."""
@@ -118,6 +120,7 @@ class ComputerUseSessionResult:
     terminal_status: Literal["success", "failed"] = "success"
     terminal_failure_reason: str | None = None
     terminal_failure_code: str | None = None
+    final_visual_frame: VisualFrame | None = None
 
 
 @dataclass(frozen=True)

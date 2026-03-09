@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from collections import deque
 from typing import TYPE_CHECKING, Any, cast
@@ -17,8 +18,10 @@ from .common import (
     extract_computer_calls,
     normalize_response,
 )
+from .transports import ComputerUseTransport, OpenAIResponsesHTTPTransport
 from .turn_result import ComputerUseCallResult, ComputerUseFollowUpBatch
 from .types import ComputerUseSessionResult
+from .visual_state import CartographyMap, CartographyTarget, VisualBounds, VisualFrame
 
 logger = logging.getLogger("src.agents.computer_use.session")
 
@@ -28,6 +31,8 @@ if TYPE_CHECKING:
 
 class OpenAIComputerUseMixin:
     """OpenAI-specific request builders and execution loop."""
+
+    _openai_transport: ComputerUseTransport | None
 
     @staticmethod
     def _apply_openai_localization_guidance(goal: str, environment: str) -> str:
@@ -58,6 +63,7 @@ class OpenAIComputerUseMixin:
         cache_action: str,
         use_cache: bool,
         model: str,
+        previous_response_id: str | None,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
@@ -72,15 +78,20 @@ class OpenAIComputerUseMixin:
         goal = self._apply_openai_localization_guidance(goal, environment)
         del initial_screenshot
 
-        request_payload = self._build_initial_request(
+        request_payload = self._build_openai_action_request(
             goal=goal,
             metadata=metadata,
             model=model,
+            previous_response_id=previous_response_id,
         )
 
         response = await self._create_response(request_payload)
         await self._model_logger.log_call(
-            agent="computer_use.openai.initial",
+            agent=(
+                "computer_use.openai.initial"
+                if previous_response_id is None
+                else "computer_use.openai.continuation"
+            ),
             model=model,
             prompt=goal,
             request_payload=self._sanitize_payload_for_log(request_payload),
@@ -91,7 +102,7 @@ class OpenAIComputerUseMixin:
         result.response_ids.append(response_dict.get("id", ""))
 
         turn_counter = 0
-        previous_response_id = response_dict.get("id")
+        current_response_id = response_dict.get("id")
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
         loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
@@ -121,14 +132,14 @@ class OpenAIComputerUseMixin:
                     extra={"response_id": response_dict.get("id")},
                 )
                 confirmation_payload = await self._build_confirmation_request(
-                    previous_response_id=previous_response_id,
+                    previous_response_id=current_response_id,
                     metadata=metadata,
                     model=model,
                 )
                 response = await self._create_response(confirmation_payload)
                 response_dict = normalize_response(response)
                 result.response_ids.append(response_dict.get("id", ""))
-                previous_response_id = response_dict.get("id")
+                current_response_id = response_dict.get("id")
                 continue
 
             if not computer_calls:
@@ -289,7 +300,7 @@ class OpenAIComputerUseMixin:
                 break
 
             follow_up_payload, follow_up_batch = await self._build_follow_up_request(
-                previous_response_id=previous_response_id,
+                previous_response_id=current_response_id,
                 calls=completed_call_turns,
                 metadata=metadata,
                 model=model,
@@ -309,9 +320,16 @@ class OpenAIComputerUseMixin:
                 ),
                 metadata={"environment": environment, **metadata},
             )
+            result.final_visual_frame = follow_up_batch.visual_frame
             response_dict = normalize_response(response)
             result.response_ids.append(response_dict.get("id", ""))
-            previous_response_id = response_dict.get("id")
+            current_response_id = response_dict.get("id")
+
+        self._openai_previous_response_id = current_response_id
+        self._step_last_response = response_dict
+        self._step_response_ids.extend(
+            response_id for response_id in result.response_ids if response_id
+        )
 
         return result
 
@@ -341,6 +359,32 @@ class OpenAIComputerUseMixin:
         for call_result in follow_up_batch.calls:
             payload["input"].append(
                 self._build_follow_up_item(call_result, follow_up_batch)
+            )
+        extra_text_blocks: list[str] = []
+        if (
+            follow_up_batch.visual_frame is not None
+            and follow_up_batch.visual_frame.kind == "patch"
+        ):
+            extra_text_blocks = [
+                text
+                for text in (
+                    follow_up_batch.grounding_text,
+                    self._build_visual_grounding_text(follow_up_batch),
+                    follow_up_batch.reminder_text,
+                )
+                if text
+            ]
+        if extra_text_blocks:
+            payload["input"].append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "\n\n".join(extra_text_blocks),
+                        }
+                    ],
+                }
             )
 
         return payload, follow_up_batch
@@ -408,13 +452,99 @@ class OpenAIComputerUseMixin:
 
         return acknowledged
 
-    def _build_initial_request(
+    @staticmethod
+    def _build_visual_grounding_text(
+        follow_up_batch: ComputerUseFollowUpBatch,
+    ) -> str | None:
+        """Describe the current visual frame when using patch mode."""
+        frame = follow_up_batch.visual_frame
+        if frame is None or frame.kind != "patch":
+            return None
+        bounds = frame.bounds
+        full_width, full_height = frame.screen_size
+        details = [
+            "Visual frame mode: patch",
+            f"Patch bounds in full screenshot coordinates: x={bounds.x}, y={bounds.y}, width={bounds.width}, height={bounds.height}",
+            f"Original full screenshot size: width={full_width}, height={full_height}",
+        ]
+        if frame.parent_keyframe_id:
+            details.append(f"Parent keyframe id: {frame.parent_keyframe_id}")
+        if frame.target_bounds is not None:
+            target = frame.target_bounds
+            details.append(
+                "Target bounds in full screenshot coordinates: "
+                f"x={target.x}, y={target.y}, width={target.width}, height={target.height}"
+            )
+        if frame.diff_bounds is not None:
+            diff = frame.diff_bounds
+            details.append(
+                "Detected changed-region bounds in full screenshot coordinates: "
+                f"x={diff.x}, y={diff.y}, width={diff.width}, height={diff.height}"
+            )
+        details.append(
+            "Interpret all future action coordinates in the full screenshot coordinate space, not the patch-local coordinate space."
+        )
+        return "\n".join(details)
+
+    async def _reflect_openai_step(
+        self: _ComputerUseSession,
+        *,
+        prompt: str,
+        metadata: dict[str, Any],
+        model: str,
+    ) -> dict[str, Any]:
+        """Request a structured step verdict in the active OpenAI conversation."""
+        if not self._openai_previous_response_id:
+            raise RuntimeError(
+                "OpenAI step reflection requires an active prior response id."
+            )
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "previous_response_id": self._openai_previous_response_id,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                }
+            ],
+            "text": {"format": {"type": "json_object"}},
+        }
+
+        safety_identifier = metadata.get("safety_identifier")
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
+
+        response = await self._create_response(payload)
+        await self._model_logger.log_call(
+            agent="computer_use.openai.step_reflection",
+            model=model,
+            prompt=prompt,
+            request_payload=self._sanitize_payload_for_log(payload),
+            response=response,
+            metadata=metadata,
+        )
+
+        response_dict = normalize_response(response)
+        response_id = response_dict.get("id")
+        if response_id:
+            self._openai_previous_response_id = response_id
+            self._step_response_ids.append(response_id)
+        self._step_last_response = response_dict
+
+        return {
+            "response_id": response_id,
+            "response_ids": [response_id] if response_id else [],
+            "response_dict": response_dict,
+            "raw_text": extract_assistant_text(response_dict) or "",
+        }
+
+    def _build_openai_goal_input(
         self: _ComputerUseSession,
         goal: str,
         metadata: dict[str, Any],
-        model: str | None = None,
-    ) -> dict[str, Any]:
-        """Build the payload for the initial Computer Use request."""
+    ) -> str:
+        """Build the goal text sent to OpenAI for one action turn."""
         context_lines = []
         if metadata.get("test_plan_name"):
             context_lines.append(f"Test plan: {metadata['test_plan_name']}")
@@ -437,17 +567,129 @@ class OpenAIComputerUseMixin:
                 f"- {line}" for line in context_lines
             )
 
+        return context_text
+
+    def _build_openai_action_request(
+        self: _ComputerUseSession,
+        goal: str,
+        metadata: dict[str, Any],
+        model: str | None = None,
+        previous_response_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Build the payload for an OpenAI Computer Use action turn."""
+        context_text = self._build_openai_goal_input(goal, metadata)
+
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "tools": [{"type": "computer"}],
-            "input": context_text,
         }
+        if previous_response_id is None:
+            payload["input"] = context_text
+        else:
+            payload["previous_response_id"] = previous_response_id
+            payload["input"] = [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": context_text}],
+                }
+            ]
 
         safety_identifier = metadata.get("safety_identifier")
         if safety_identifier:
             payload["safety_identifier"] = safety_identifier
 
         return payload
+
+    async def _generate_openai_cartography_map(
+        self: _ComputerUseSession,
+        frame: VisualFrame,
+        metadata: dict[str, Any],
+    ) -> CartographyMap | None:
+        """Generate a lightweight target map for the current keyframe."""
+        target_text = str(metadata.get("target") or "").strip()
+        if not target_text:
+            return None
+
+        prompt = (
+            "You are generating a strictly visual cartography map for a computer-use "
+            "agent. Look only at the screenshot. Do not infer DOM or hidden state. "
+            "Find the best visible interactable target matching the requested target "
+            f"description: {target_text!r}. "
+            "Return ONLY valid JSON with this shape: "
+            '{"targets":[{"target_id":"target_1","label":"visible label or short descriptor",'
+            '"bbox":{"x":0,"y":0,"width":0,"height":0},'
+            '"interaction_point":{"x":0,"y":0},"confidence":0.0}]}. '
+            "Use absolute pixel coordinates in the screenshot coordinate space. "
+            'If the target is not visible, return {"targets":[]}.'
+        )
+        image_b64 = base64.b64encode(frame.image_bytes).decode("utf-8")
+        payload = {
+            "model": getattr(self._settings, "cu_cartography_model", "").strip()
+            or self._openai_model,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{image_b64}",
+                        },
+                    ],
+                }
+            ],
+        }
+        response = await self._create_response(payload)
+        response_dict = normalize_response(response)
+        raw_text = extract_assistant_text(response_dict)
+        if not raw_text:
+            return None
+
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            logger.debug(
+                "OpenAI cartography response was not valid JSON",
+                extra={"response_text": raw_text},
+            )
+            return None
+
+        raw_targets = parsed.get("targets", []) if isinstance(parsed, dict) else []
+        targets: list[CartographyTarget] = []
+        for index, item in enumerate(raw_targets, start=1):
+            if not isinstance(item, dict):
+                continue
+            bbox = item.get("bbox") or {}
+            point = item.get("interaction_point") or {}
+            try:
+                bounds = VisualBounds(
+                    x=int(bbox.get("x", 0)),
+                    y=int(bbox.get("y", 0)),
+                    width=int(bbox.get("width", 0)),
+                    height=int(bbox.get("height", 0)),
+                )
+                target = CartographyTarget(
+                    target_id=str(item.get("target_id") or f"target_{index}"),
+                    label=str(item.get("label") or target_text).strip() or target_text,
+                    bounds=bounds,
+                    interaction_point=(
+                        int(point.get("x", bounds.x + (bounds.width // 2))),
+                        int(point.get("y", bounds.y + (bounds.height // 2))),
+                    ),
+                    confidence=float(item.get("confidence", 0.0)),
+                )
+            except (TypeError, ValueError):
+                continue
+            if target.bounds.is_empty():
+                continue
+            targets.append(target)
+
+        return CartographyMap(
+            frame_id=frame.frame_id,
+            targets=tuple(targets),
+            model=str(payload["model"]),
+            provider="openai",
+        )
 
     @staticmethod
     def _sanitize_payload_for_log(payload: dict[str, Any]) -> dict[str, Any]:
@@ -490,4 +732,21 @@ class OpenAIComputerUseMixin:
         logger.debug(
             "Calling OpenAI Responses API", extra={"model": payload.get("model")}
         )
-        return await self._client.responses.create(**payload)
+        transport = getattr(self, "_openai_transport", None)
+        if transport is None:
+            return await self._client.responses.create(**payload)
+        try:
+            return await transport.request(payload)
+        except Exception:
+            transport_mode = str(
+                getattr(self._settings, "openai_cu_transport", "responses_websocket")
+            ).strip()
+            if transport_mode != "responses_websocket":
+                raise
+            logger.warning(
+                "OpenAI CU WebSocket transport failed; falling back to HTTP transport",
+                exc_info=True,
+            )
+            fallback_transport = OpenAIResponsesHTTPTransport(self._client)
+            self._openai_transport = fallback_transport
+            return await fallback_transport.request(payload)

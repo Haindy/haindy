@@ -35,12 +35,19 @@ from .common import (
 from .google_mixin import GoogleComputerUseMixin, genai
 from .openai_mixin import OpenAIComputerUseMixin
 from .support_mixin import ComputerUseSupportMixin
+from .transports import (
+    ComputerUseTransport,
+    OpenAIResponsesHTTPTransport,
+    OpenAIResponsesWebSocketTransport,
+)
 from .types import (
     ComputerUseExecutionError,
     ComputerUseSessionResult,
     GoogleFunctionCallEnvelope,
     InteractionConstraints,
 )
+from .visual_pipeline import VisualStatePlanner
+from .visual_state import VisualFrame
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +101,14 @@ class ComputerUseSession(
     _pending_context_menu_selection: bool
     _interaction_constraints: InteractionConstraints
     _last_pointer_position: tuple[int, int] | None
+    _openai_transport: ComputerUseTransport | None
+    _visual_state_planner: VisualStatePlanner
+    _current_keyframe: VisualFrame | None
+    _last_visual_frame: VisualFrame | None
+    _turns_since_keyframe: int
+    _openai_previous_response_id: str | None
+    _step_response_ids: list[str]
+    _step_last_response: dict[str, Any]
 
     def __init__(
         self,
@@ -208,6 +223,133 @@ class ComputerUseSession(
         self._pending_context_menu_selection = False
         self._interaction_constraints = InteractionConstraints()
         self._last_pointer_position: tuple[int, int] | None = None
+        self._openai_transport = None
+        if self._provider == "openai":
+            self._openai_transport = self._build_openai_transport()
+        self._visual_state_planner = VisualStatePlanner(
+            visual_mode=getattr(self._settings, "cu_visual_mode", "keyframe_patch"),
+            keyframe_max_turns=getattr(self._settings, "cu_keyframe_max_turns", 3),
+            patch_max_area_ratio=getattr(
+                self._settings, "cu_patch_max_area_ratio", 0.35
+            ),
+            patch_margin_ratio=getattr(self._settings, "cu_patch_margin_ratio", 0.12),
+        )
+        self._current_keyframe = None
+        self._last_visual_frame = None
+        self._turns_since_keyframe = 0
+        self._openai_previous_response_id = None
+        self._step_response_ids = []
+        self._step_last_response = {}
+
+    def _build_openai_transport(self) -> ComputerUseTransport:
+        """Build the transport used for OpenAI computer-use requests."""
+        transport_mode = str(
+            getattr(self._settings, "openai_cu_transport", "responses_websocket")
+        ).strip()
+        if transport_mode == "responses_http":
+            return OpenAIResponsesHTTPTransport(self._client)
+        return OpenAIResponsesWebSocketTransport(
+            client=self._client,
+            timeout_seconds=float(self._settings.openai_request_timeout_seconds),
+        )
+
+    @property
+    def provider(self) -> str:
+        """Return the configured Computer Use provider."""
+        return self._provider
+
+    @property
+    def step_response_ids(self) -> list[str]:
+        """Return the response ids accumulated across the current step scope."""
+        return list(self._step_response_ids)
+
+    def begin_step_scope(self) -> None:
+        """Reset state so the session can be reused across one test step."""
+        self._allowed_actions = None
+        self._pending_context_menu_selection = False
+        self._last_pointer_position = None
+        self._current_keyframe = None
+        self._last_visual_frame = None
+        self._turns_since_keyframe = 0
+        self._openai_previous_response_id = None
+        self._step_response_ids = []
+        self._step_last_response = {}
+
+    async def close(self) -> None:
+        """Close provider transport state for the current session."""
+        if self._openai_transport is not None:
+            await self._openai_transport.close()
+        self._allowed_actions = None
+
+    async def execute_step_action(
+        self,
+        goal: str,
+        initial_screenshot: bytes | None,
+        metadata: dict[str, Any] | None = None,
+        allowed_actions: set[str] | None = None,
+        environment: str | None = None,
+        cache_label: str | None = None,
+        cache_action: str = "click",
+        use_cache: bool = True,
+    ) -> ComputerUseSessionResult:
+        """Execute one action inside an existing step-scoped session."""
+        if self._provider != "openai":
+            return await self.run(
+                goal=goal,
+                initial_screenshot=initial_screenshot,
+                metadata=metadata,
+                allowed_actions=allowed_actions,
+                environment=environment,
+                cache_label=cache_label,
+                cache_action=cache_action,
+                use_cache=use_cache,
+            )
+
+        metadata = metadata or {}
+        step_goal = str(metadata.get("step_goal") or "").strip()
+        constraint_source = " ".join([step_goal, goal]).strip()
+        self._interaction_constraints = InteractionConstraints.from_text(
+            constraint_source
+        ).apply_overrides(metadata)
+        if self._interaction_constraints.has_any():
+            goal = (
+                goal + "\n\nCONSTRAINTS:\n" + self._interaction_constraints.to_prompt()
+            )
+        self._allowed_actions = allowed_actions
+        env_mode = self._normalize_environment_name(
+            environment or metadata.get("environment") or self._default_environment
+        )
+        try:
+            return await self._run_openai(
+                goal=goal,
+                initial_screenshot=initial_screenshot,
+                metadata=metadata,
+                environment=env_mode,
+                cache_label=cache_label,
+                cache_action=cache_action,
+                use_cache=use_cache,
+                model=self._openai_model,
+                previous_response_id=self._openai_previous_response_id,
+            )
+        finally:
+            self._allowed_actions = None
+
+    async def reflect_step(
+        self,
+        *,
+        prompt: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Request a final structured verdict from the active step-scoped session."""
+        if self._provider != "openai":
+            raise ComputerUseExecutionError(
+                "Step-scoped reflection is only supported for the OpenAI provider."
+            )
+        return await self._reflect_openai_step(
+            prompt=prompt,
+            metadata=metadata or {},
+            model=self._openai_model,
+        )
 
     async def run(
         self,
@@ -232,9 +374,8 @@ class ComputerUseSession(
             ComputerUseSessionResult with action traces and final output.
         """
         metadata = metadata or {}
+        self.begin_step_scope()
         self._allowed_actions = allowed_actions
-        self._pending_context_menu_selection = False
-        self._last_pointer_position = None
 
         step_goal = str(metadata.get("step_goal") or "").strip()
         constraint_source = " ".join([step_goal, goal]).strip()
@@ -270,6 +411,7 @@ class ComputerUseSession(
                     cache_action=cache_action,
                     use_cache=use_cache,
                     model=self._openai_model,
+                    previous_response_id=None,
                 )
             if self._provider == "anthropic":
                 return await self._run_anthropic(
@@ -287,7 +429,7 @@ class ComputerUseSession(
                 "Supported providers are 'openai', 'google', and 'anthropic'."
             )
         finally:
-            self._allowed_actions = None
+            await self.close()
 
 
 __all__ = [

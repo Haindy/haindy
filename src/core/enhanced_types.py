@@ -121,6 +121,12 @@ class EnvironmentState(BaseModel):
     screenshot_path: str | None = None
     dom_ready_state: str | None = None
     active_element: str | None = None
+    frame_kind: str = "keyframe"
+    frame_id: str | None = None
+    parent_keyframe_id: str | None = None
+    patch_bounds: tuple[int, int, int, int] | None = None
+    target_bounds: tuple[int, int, int, int] | None = None
+    diff_bounds: tuple[int, int, int, int] | None = None
 
 
 class ComputerToolTurn(BaseModel):

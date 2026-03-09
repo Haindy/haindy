@@ -33,6 +33,8 @@ ALLOWED_REASONING_LEVELS: set[str] = {
     "high",
     "xhigh",
 }
+ALLOWED_OPENAI_CU_TRANSPORTS: set[str] = {"responses_websocket", "responses_http"}
+ALLOWED_CU_VISUAL_MODES: set[str] = {"keyframe_patch", "legacy_full_frame"}
 
 
 class AgentModelConfig(BaseModel):
@@ -354,6 +356,50 @@ class Settings(BaseSettings):
         description="Handling for provider safety confirmations (auto_approve, auto_deny, error)",
         validation_alias=AliasChoices("CU_SAFETY_POLICY", "HAINDY_CU_SAFETY_POLICY"),
     )
+    openai_cu_transport: str = Field(
+        default="responses_websocket",
+        description="Transport for OpenAI computer-use requests",
+        validation_alias=AliasChoices(
+            "HAINDY_OPENAI_CU_TRANSPORT",
+            "OPENAI_CU_TRANSPORT",
+        ),
+    )
+    cu_visual_mode: str = Field(
+        default="keyframe_patch",
+        description="Visual-state strategy for computer-use follow-up screenshots",
+        validation_alias=AliasChoices(
+            "HAINDY_CU_VISUAL_MODE",
+            "CU_VISUAL_MODE",
+        ),
+    )
+    cu_cartography_model: str = Field(
+        default="",
+        description="Optional override model for provider-owned cartography generation",
+        validation_alias=AliasChoices(
+            "HAINDY_CU_CARTOGRAPHY_MODEL",
+            "CU_CARTOGRAPHY_MODEL",
+        ),
+    )
+    cu_keyframe_max_turns: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum turns to reuse a keyframe before forcing a refresh",
+        validation_alias=AliasChoices("HAINDY_CU_KEYFRAME_MAX_TURNS"),
+    )
+    cu_patch_max_area_ratio: float = Field(
+        default=0.35,
+        ge=0.01,
+        le=1.0,
+        description="Maximum full-frame area ratio allowed for patch-mode follow-ups",
+        validation_alias=AliasChoices("HAINDY_CU_PATCH_MAX_AREA_RATIO"),
+    )
+    cu_patch_margin_ratio: float = Field(
+        default=0.12,
+        ge=0.0,
+        le=1.0,
+        description="Margin ratio to expand patch crops around the target/delta union",
+        validation_alias=AliasChoices("HAINDY_CU_PATCH_MARGIN_RATIO"),
+    )
     actions_computer_tool_max_turns: int = Field(
         default=12,
         ge=1,
@@ -523,6 +569,22 @@ class Settings(BaseSettings):
         normalized = (value or "").strip().lower()
         if normalized not in {"auto_approve", "auto_deny", "error"}:
             return "auto_approve"
+        return normalized
+
+    @field_validator("openai_cu_transport")
+    @classmethod
+    def normalize_openai_cu_transport(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in ALLOWED_OPENAI_CU_TRANSPORTS:
+            return "responses_websocket"
+        return normalized
+
+    @field_validator("cu_visual_mode")
+    @classmethod
+    def normalize_cu_visual_mode(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in ALLOWED_CU_VISUAL_MODES:
+            return "keyframe_patch"
         return normalized
 
     @model_validator(mode="after")

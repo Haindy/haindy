@@ -286,6 +286,10 @@ class GoogleComputerUseMixin:
                             environment=environment,
                             model=model,
                         )
+                        result.final_visual_frame = response_dict.pop(
+                            "_haindy_visual_frame",
+                            None,
+                        )
                         result.response_ids.append(response_dict.get("id", ""))
                     return result
 
@@ -343,6 +347,10 @@ class GoogleComputerUseMixin:
                             metadata=metadata,
                             environment=environment,
                             model=model,
+                        )
+                        result.final_visual_frame = response_dict.pop(
+                            "_haindy_visual_frame",
+                            None,
                         )
                         result.response_ids.append(response_dict.get("id", ""))
                     return result
@@ -402,6 +410,10 @@ class GoogleComputerUseMixin:
                     metadata=metadata,
                     environment=environment,
                     model=model,
+                )
+                result.final_visual_frame = response_dict.pop(
+                    "_haindy_visual_frame",
+                    None,
                 )
                 result.response_ids.append(response_dict.get("id", ""))
 
@@ -556,6 +568,7 @@ class GoogleComputerUseMixin:
             screenshots=[("computer_use_follow_up", follow_up_screenshot)],
             metadata={"environment": environment, **metadata},
         )
+        result_frame = getattr(func_response_content, "_haindy_visual_frame", None)
         response_dict = normalize_response(response)
         if hasattr(response, "candidates"):
             try:
@@ -565,6 +578,8 @@ class GoogleComputerUseMixin:
                     "Unable to append Google response content to history",
                     exc_info=True,
                 )
+        if result_frame is not None:
+            response_dict.setdefault("_haindy_visual_frame", result_frame)
         return response, response_dict
 
     def _build_google_initial_request(
@@ -666,6 +681,7 @@ class GoogleComputerUseMixin:
             )
 
         function_response_content = types.Content(role="user", parts=parts)
+        function_response_content._haindy_visual_frame = follow_up_batch.visual_frame  # type: ignore[attr-defined]
         contents = list(history) + [function_response_content]
         if follow_up_batch.reminder_text:
             contents.append(
@@ -743,8 +759,6 @@ class GoogleComputerUseMixin:
     async def _create_google_response(
         self: _ComputerUseSession, payload: dict[str, Any]
     ) -> Any:
-        from . import session as session_module
-
         client = self._ensure_google_client()
         if not client:
             raise ComputerUseExecutionError(
@@ -819,9 +833,7 @@ class GoogleComputerUseMixin:
             )
             await self._sleep_google_retry(delay_seconds)
 
-    async def _invoke_google_request(
-        self: _ComputerUseSession, call: Any
-    ) -> Any:
+    async def _invoke_google_request(self: _ComputerUseSession, call: Any) -> Any:
         """Run a synchronous Google client request off the event loop."""
         return await asyncio.to_thread(call)
 

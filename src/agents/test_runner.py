@@ -663,11 +663,13 @@ class TestRunner(BaseAgent):
         action: dict[str, Any],
         step: TestStep,
         record_driver_actions: bool = False,
+        step_session: Any | None = None,
     ) -> dict[str, Any]:
         return await self._step_processor.execute_action(
             action,
             step,
             record_driver_actions=record_driver_actions,
+            step_session=step_session,
         )
 
     async def _verify_expected_outcome(
