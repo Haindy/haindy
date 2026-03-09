@@ -63,6 +63,7 @@ class OpenAIComputerUseMixin:
         cache_action: str,
         use_cache: bool,
         model: str,
+        previous_response_id: str | None,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
@@ -77,15 +78,20 @@ class OpenAIComputerUseMixin:
         goal = self._apply_openai_localization_guidance(goal, environment)
         del initial_screenshot
 
-        request_payload = self._build_initial_request(
+        request_payload = self._build_openai_action_request(
             goal=goal,
             metadata=metadata,
             model=model,
+            previous_response_id=previous_response_id,
         )
 
         response = await self._create_response(request_payload)
         await self._model_logger.log_call(
-            agent="computer_use.openai.initial",
+            agent=(
+                "computer_use.openai.initial"
+                if previous_response_id is None
+                else "computer_use.openai.continuation"
+            ),
             model=model,
             prompt=goal,
             request_payload=self._sanitize_payload_for_log(request_payload),
@@ -96,7 +102,7 @@ class OpenAIComputerUseMixin:
         result.response_ids.append(response_dict.get("id", ""))
 
         turn_counter = 0
-        previous_response_id = response_dict.get("id")
+        current_response_id = response_dict.get("id")
         loop_window = max(2, self._settings.actions_computer_tool_loop_detection_window)
         loop_history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=loop_window)
 
@@ -126,14 +132,14 @@ class OpenAIComputerUseMixin:
                     extra={"response_id": response_dict.get("id")},
                 )
                 confirmation_payload = await self._build_confirmation_request(
-                    previous_response_id=previous_response_id,
+                    previous_response_id=current_response_id,
                     metadata=metadata,
                     model=model,
                 )
                 response = await self._create_response(confirmation_payload)
                 response_dict = normalize_response(response)
                 result.response_ids.append(response_dict.get("id", ""))
-                previous_response_id = response_dict.get("id")
+                current_response_id = response_dict.get("id")
                 continue
 
             if not computer_calls:
@@ -294,7 +300,7 @@ class OpenAIComputerUseMixin:
                 break
 
             follow_up_payload, follow_up_batch = await self._build_follow_up_request(
-                previous_response_id=previous_response_id,
+                previous_response_id=current_response_id,
                 calls=completed_call_turns,
                 metadata=metadata,
                 model=model,
@@ -317,7 +323,13 @@ class OpenAIComputerUseMixin:
             result.final_visual_frame = follow_up_batch.visual_frame
             response_dict = normalize_response(response)
             result.response_ids.append(response_dict.get("id", ""))
-            previous_response_id = response_dict.get("id")
+            current_response_id = response_dict.get("id")
+
+        self._openai_previous_response_id = current_response_id
+        self._step_last_response = response_dict
+        self._step_response_ids.extend(
+            response_id for response_id in result.response_ids if response_id
+        )
 
         return result
 
@@ -474,13 +486,65 @@ class OpenAIComputerUseMixin:
         )
         return "\n".join(details)
 
-    def _build_initial_request(
+    async def _reflect_openai_step(
+        self: _ComputerUseSession,
+        *,
+        prompt: str,
+        metadata: dict[str, Any],
+        model: str,
+    ) -> dict[str, Any]:
+        """Request a structured step verdict in the active OpenAI conversation."""
+        if not self._openai_previous_response_id:
+            raise RuntimeError(
+                "OpenAI step reflection requires an active prior response id."
+            )
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "previous_response_id": self._openai_previous_response_id,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                }
+            ],
+            "text": {"format": {"type": "json_object"}},
+        }
+
+        safety_identifier = metadata.get("safety_identifier")
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
+
+        response = await self._create_response(payload)
+        await self._model_logger.log_call(
+            agent="computer_use.openai.step_reflection",
+            model=model,
+            prompt=prompt,
+            request_payload=self._sanitize_payload_for_log(payload),
+            response=response,
+            metadata=metadata,
+        )
+
+        response_dict = normalize_response(response)
+        response_id = response_dict.get("id")
+        if response_id:
+            self._openai_previous_response_id = response_id
+            self._step_response_ids.append(response_id)
+        self._step_last_response = response_dict
+
+        return {
+            "response_id": response_id,
+            "response_ids": [response_id] if response_id else [],
+            "response_dict": response_dict,
+            "raw_text": extract_assistant_text(response_dict) or "",
+        }
+
+    def _build_openai_goal_input(
         self: _ComputerUseSession,
         goal: str,
         metadata: dict[str, Any],
-        model: str | None = None,
-    ) -> dict[str, Any]:
-        """Build the payload for the initial Computer Use request."""
+    ) -> str:
+        """Build the goal text sent to OpenAI for one action turn."""
         context_lines = []
         if metadata.get("test_plan_name"):
             context_lines.append(f"Test plan: {metadata['test_plan_name']}")
@@ -503,11 +567,32 @@ class OpenAIComputerUseMixin:
                 f"- {line}" for line in context_lines
             )
 
+        return context_text
+
+    def _build_openai_action_request(
+        self: _ComputerUseSession,
+        goal: str,
+        metadata: dict[str, Any],
+        model: str | None = None,
+        previous_response_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Build the payload for an OpenAI Computer Use action turn."""
+        context_text = self._build_openai_goal_input(goal, metadata)
+
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "tools": [{"type": "computer"}],
-            "input": context_text,
         }
+        if previous_response_id is None:
+            payload["input"] = context_text
+        else:
+            payload["previous_response_id"] = previous_response_id
+            payload["input"] = [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": context_text}],
+                }
+            ]
 
         safety_identifier = metadata.get("safety_identifier")
         if safety_identifier:

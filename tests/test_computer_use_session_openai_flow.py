@@ -441,3 +441,100 @@ async def test_openai_follow_up_uses_fresh_batch_capture_and_preserves_turn_snap
     assert turn.metadata["screenshot_base64"] == "stored_snapshot"
     assert turn.metadata["current_url"] == "https://stale.example.com"
     assert len(payload["input"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_openai_step_actions_reuse_previous_response_chain(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_1",
+            [openai_computer_call("call_1", {"type": "click", "x": 12, "y": 24})],
+        ),
+        openai_response("resp_2", [openai_message("Clicked.")]),
+        openai_response(
+            "resp_3",
+            [openai_computer_call("call_2", {"type": "type", "text": "done"})],
+        ),
+        openai_response("resp_4", [openai_message("Typed.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    session.begin_step_scope()
+
+    first = await session.execute_step_action(
+        goal="Click the first control.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 1},
+    )
+    second = await session.execute_step_action(
+        goal="Type done into the field.",
+        initial_screenshot=None,
+        metadata={"step_number": 1},
+    )
+
+    assert first.response_ids == ["resp_1", "resp_2"]
+    assert second.response_ids == ["resp_3", "resp_4"]
+    assert session.step_response_ids == ["resp_1", "resp_2", "resp_3", "resp_4"]
+
+    continuation_payload = mock_client.responses.create.await_args_list[2].kwargs
+    assert continuation_payload["previous_response_id"] == "resp_2"
+    assert continuation_payload["tools"] == [{"type": "computer"}]
+    assert continuation_payload["input"][0]["role"] == "user"
+    assert (
+        continuation_payload["input"][0]["content"][0]["text"]
+        == "Type done into the field.\n\nContext:\n- Step number: 1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_openai_step_reflection_uses_json_output_without_tools(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_1",
+            [openai_computer_call("call_1", {"type": "click", "x": 5, "y": 6})],
+        ),
+        openai_response("resp_2", [openai_message("Clicked.")]),
+        openai_response(
+            "resp_3",
+            [
+                openai_message(
+                    '{"verdict":"PASS","reasoning":"ok","actual_result":"done","confidence":0.9,"is_blocker":false,"blocker_reasoning":""}'
+                )
+            ],
+        ),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    session.begin_step_scope()
+    await session.execute_step_action(
+        goal="Click the primary action.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 2},
+    )
+
+    reflection = await session.reflect_step(
+        prompt="Respond with valid JSON for the step verdict.",
+        metadata={"step_number": 2},
+    )
+
+    payload = mock_client.responses.create.await_args_list[2].kwargs
+    assert payload["previous_response_id"] == "resp_2"
+    assert "tools" not in payload
+    assert payload["text"] == {"format": {"type": "json_object"}}
+    assert payload["input"][0]["content"][0]["text"].startswith(
+        "Respond with valid JSON"
+    )
+    assert reflection["response_ids"] == ["resp_3"]
+    assert '"verdict":"PASS"' in reflection["raw_text"]

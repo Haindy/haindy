@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from src.agents.action_agent import ActionAgentStepSession
 from src.core.types import ActionInstruction, ActionType, TestStep
 from src.runtime.environment import (
     normalize_automation_backend,
@@ -29,6 +30,7 @@ class StepActionExecutionRequest:
     recent_actions: list[dict[str, Any]]
     record_driver_actions: bool
     screenshot: bytes | None = None
+    step_session: ActionAgentStepSession | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,18 @@ class TestRunnerExecutor:
             if action_type == ActionType.RESET_APP:
                 reset_result = await self._execute_reset_app(request)
                 action_data["result"] = reset_result
+                if (
+                    self._artifacts is not None
+                    and reset_result.get("success")
+                    and request.current_test_case_id
+                ):
+                    capture = await self._artifacts.capture_screenshot(
+                        f"tc{request.current_test_case_id}_step{step.step_number}_reset_after",
+                        origin=f"reset_app_{step.step_number}_after",
+                        update_latest=True,
+                    )
+                    if capture is not None:
+                        action_data["screenshots"]["after"] = capture.screenshot_path
                 action_data["timestamp_end"] = datetime.now(timezone.utc).isoformat()
                 return StepActionExecutionResult(
                     compatibility_result=reset_result,
@@ -196,6 +210,7 @@ class TestRunnerExecutor:
                 test_context=test_context,
                 screenshot=screenshot,
                 record_driver_actions=request.record_driver_actions,
+                step_session=request.step_session,
             )
 
             if hasattr(self._automation_driver, "stop_capture"):

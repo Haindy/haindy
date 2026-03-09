@@ -46,10 +46,11 @@ class _StubAutomationDriver:
 
 
 class _StubActionAgent:
-    def __init__(self) -> None:
+    def __init__(self, *, supports_step_sessions: bool = False) -> None:
         self.conversation_history: list[dict[str, object]] = []
         self.last_test_step: TestStep | None = None
         self.last_test_context: dict[str, object] | None = None
+        self._supports_step_sessions = supports_step_sessions
 
     async def execute_action(
         self,
@@ -57,8 +58,9 @@ class _StubActionAgent:
         test_context: dict[str, object],
         screenshot: bytes | None = None,
         record_driver_actions: bool = False,
+        step_session: object | None = None,
     ) -> EnhancedActionResult:
-        del screenshot, record_driver_actions
+        del screenshot, record_driver_actions, step_session
         self.last_test_step = test_step
         self.last_test_context = test_context
         return EnhancedActionResult(
@@ -68,6 +70,43 @@ class _StubActionAgent:
             validation=ValidationResult(valid=True, confidence=1.0, reasoning="ok"),
             execution=ExecutionResult(success=True, execution_time_ms=1.0),
             overall_success=True,
+        )
+
+    def supports_step_scoped_validation(self) -> bool:
+        return self._supports_step_sessions
+
+    async def begin_step_session(
+        self,
+        test_step: TestStep,
+        test_context: dict[str, object],
+    ) -> object | None:
+        del test_step, test_context
+        if not self._supports_step_sessions:
+            return None
+        return SimpleNamespace(
+            has_computer_use_action=True,
+            usable=True,
+            unusable_reason=None,
+            response_ids=[],
+        )
+
+    async def end_step_session(self, step_session: object | None) -> None:
+        del step_session
+
+    async def validate_step_with_session(self, **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        return SimpleNamespace(
+            verification={
+                "verdict": "PASS",
+                "reasoning": "validated in session",
+                "actual_result": "validated in session",
+                "confidence": 0.9,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+            },
+            prompt="session prompt",
+            raw_response='{"verdict":"PASS"}',
+            response_ids=["resp_session"],
         )
 
 

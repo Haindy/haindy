@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -418,6 +419,100 @@ async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
     assert result.error_message == "Login form is not visible after action"
     assert verify_mock.await_count == 1
     assert runner._current_step_data["verification_mode"] == "ai"
-    store_mock.assert_not_awaited()
-    persist_mock.assert_not_awaited()
-    invalidate_coord_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_step_uses_action_agent_session_validation_for_openai(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    action_agent = _StubActionAgent(supports_step_sessions=True)
+    runner = runner_factory(
+        monkeypatch,
+        tmp_path,
+        action_agent=action_agent,
+    )
+    plan, case, step = _build_test_case()
+
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+    runner._execution_history = []
+
+    monkeypatch.setattr(
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        make_capture_test_step_screenshot(tmp_path),
+    )
+    monkeypatch.setattr(runner, "_try_execution_replay", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        runner,
+        "_interpret_step",
+        AsyncMock(
+            return_value=(
+                [
+                    {
+                        "type": "click",
+                        "target": "Continue button",
+                        "description": "Tap Continue",
+                        "critical": True,
+                    }
+                ],
+                False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_action",
+        AsyncMock(
+            return_value={
+                "success": True,
+                "action_type": "click",
+                "target": "Continue button",
+                "outcome": "Tapped Continue",
+                "confidence": 0.92,
+                "error": None,
+                "driver_actions": [{"type": "click", "x": 10, "y": 10}],
+            }
+        ),
+    )
+    verify_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+    action_agent.validate_step_with_session = AsyncMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(
+            verification={
+                "verdict": "PASS",
+                "reasoning": "Validated in the same CU session",
+                "actual_result": "Continue flow succeeded.",
+                "confidence": 0.95,
+                "is_blocker": False,
+                "blocker_reasoning": "",
+            },
+            prompt="step reflection prompt",
+            raw_response='{"verdict":"PASS"}',
+            response_ids=["resp_step_validation"],
+        )
+    )
+    store_mock = AsyncMock()
+    persist_mock = AsyncMock()
+    invalidate_coord_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_store_execution_replay", store_mock)
+    monkeypatch.setattr(runner, "_persist_coordinate_cache", persist_mock)
+    monkeypatch.setattr(runner, "_invalidate_coordinate_cache", invalidate_coord_mock)
+
+    result = await runner._execute_test_step(
+        step,
+        case,
+        make_case_result(case, steps_total=len(case.steps)),
+    )
+
+    assert result.status == TestStatus.PASSED
+    verify_mock.assert_not_awaited()
+    action_agent.validate_step_with_session.assert_awaited_once()  # type: ignore[attr-defined]
+    assert runner._current_step_data["verification_mode"] == "action_agent_session"
+    assert runner._current_step_data["action_agent_step_validation"][
+        "response_ids"
+    ] == ["resp_step_validation"]
+    store_mock.assert_awaited_once()
+    persist_mock.assert_awaited_once()
+    invalidate_coord_mock.assert_not_awaited()

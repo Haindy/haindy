@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -20,7 +22,7 @@ from src.core.enhanced_types import (
     ValidationResult,
 )
 from src.core.interfaces import AutomationDriver
-from src.core.types import ActionInstruction, ActionType, TestStep
+from src.core.types import ActionInstruction, ActionType, TestCase, TestStatus, TestStep
 from src.desktop.cache import CoordinateCache
 from src.desktop.execution_replay import DriverActionError, normalize_driver_action
 from src.monitoring.debug_logger import get_debug_logger
@@ -35,6 +37,31 @@ OBSERVE_ONLY_ALLOWED_ACTIONS: frozenset[str] = frozenset(
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class ActionAgentStepSession:
+    """OpenAI Computer Use session state shared across one test step."""
+
+    session: ComputerUseSession
+    provider: str
+    environment: str
+    base_metadata: dict[str, Any]
+    safety_identifier: str
+    has_computer_use_action: bool = False
+    usable: bool = True
+    unusable_reason: str | None = None
+    response_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class StepSessionValidationResult:
+    """Structured validation response returned from the step session."""
+
+    verification: dict[str, Any]
+    prompt: str
+    raw_response: str
+    response_ids: list[str] = field(default_factory=list)
 
 
 class ActionAgent(BaseAgent):
@@ -149,6 +176,329 @@ class ActionAgent(BaseAgent):
         """Reset conversation history for a new action."""
         self.conversation_history = []
         logger.debug("Conversation history reset for new action")
+
+    def supports_step_scoped_validation(self) -> bool:
+        """Return True when this agent can reuse one CU session across a step."""
+        return (
+            str(getattr(self.settings, "cu_provider", "")).strip().lower() == "openai"
+        )
+
+    async def begin_step_session(
+        self,
+        test_step: TestStep,
+        test_context: dict[str, Any],
+    ) -> ActionAgentStepSession | None:
+        """Create a reusable Computer Use session for one test step."""
+        if not self.supports_step_scoped_validation():
+            return None
+
+        debug_logger = get_debug_logger()
+        context_lookup = test_context if isinstance(test_context, dict) else {}
+        environment = self._resolve_environment(context_lookup)
+        safety_identifier = self._resolve_safety_identifier(test_step, context_lookup)
+        session = self._new_computer_use_session(
+            debug_logger,
+            environment=environment,
+        )
+        session.begin_step_scope()
+
+        return ActionAgentStepSession(
+            session=session,
+            provider=session.provider,
+            environment=environment,
+            safety_identifier=safety_identifier,
+            base_metadata={
+                "step_number": test_step.step_number,
+                "test_plan_name": context_lookup.get("test_plan_name")
+                or context_lookup.get("plan_name"),
+                "test_case_name": context_lookup.get("test_case_name")
+                or context_lookup.get("case_name"),
+                "step_goal": test_step.description,
+                "environment": environment,
+                "allow_safety_auto_approve": True,
+                "safety_identifier": safety_identifier,
+            },
+        )
+
+    async def end_step_session(
+        self,
+        step_session: ActionAgentStepSession | None,
+    ) -> None:
+        """Close the step-scoped Computer Use session if one is active."""
+        if step_session is None:
+            return
+        await step_session.session.close()
+
+    @staticmethod
+    def _mark_step_session_unusable(
+        step_session: ActionAgentStepSession | None,
+        reason: str,
+    ) -> None:
+        if step_session is None:
+            return
+        step_session.usable = False
+        step_session.unusable_reason = reason
+
+    def _build_action_session_metadata(
+        self,
+        step_session: ActionAgentStepSession | None,
+        *,
+        test_step: TestStep,
+        instruction: ActionInstruction,
+        interaction_mode: str,
+        current_url: str,
+        context_lookup: dict[str, Any],
+    ) -> tuple[dict[str, Any], str, str]:
+        """Build per-action session metadata and return metadata/environment/safety."""
+        environment = (
+            step_session.environment
+            if step_session is not None
+            else self._resolve_environment(context_lookup)
+        )
+        safety_identifier = (
+            step_session.safety_identifier
+            if step_session is not None
+            else self._resolve_safety_identifier(test_step, context_lookup)
+        )
+        metadata = (
+            dict(step_session.base_metadata)
+            if step_session is not None
+            else {
+                "step_number": test_step.step_number,
+                "test_plan_name": context_lookup.get("test_plan_name")
+                or context_lookup.get("plan_name"),
+                "test_case_name": context_lookup.get("test_case_name")
+                or context_lookup.get("case_name"),
+                "step_goal": test_step.description,
+                "environment": environment,
+                "allow_safety_auto_approve": True,
+                "safety_identifier": safety_identifier,
+            }
+        )
+        metadata.update(
+            {
+                "target": instruction.target,
+                "value": instruction.value,
+                "interaction_mode": interaction_mode,
+                "environment": environment,
+                "safety_identifier": safety_identifier,
+            }
+        )
+        if current_url:
+            metadata["current_url"] = current_url
+        return metadata, environment, safety_identifier
+
+    @staticmethod
+    def _format_execution_history(execution_history: list[dict[str, Any]]) -> str:
+        history_context: list[str] = []
+        for hist_item in execution_history:
+            status = hist_item.get("status")
+            status_emoji = "✓" if status == TestStatus.PASSED else "✗"
+            history_context.append(
+                f"Step {hist_item.get('step_number')}: {hist_item.get('action')} - {status_emoji} {status}\n"
+                f"  Result: {hist_item.get('actual_result', 'N/A')}"
+            )
+        return "\n".join(history_context) if history_context else "None"
+
+    @staticmethod
+    def _format_action_results(action_results: list[dict[str, Any]]) -> str:
+        rendered: list[str] = []
+        for idx, action_data in enumerate(action_results, start=1):
+            action = action_data.get("action", {})
+            action_result = action_data.get("result", {})
+            validation = action_result.get("validation", {})
+            ai_analysis = action_result.get("ai_analysis", {})
+            execution = action_result.get("execution", {})
+            cu_outcome = action_result.get("outcome", "")
+
+            action_detail = f"""Action {idx}: {action.get("description", "Unknown action")}
+  Type: {action.get("type", "unknown")}
+  Target: {action.get("target", "N/A")}
+  Success: {action_result.get("success", False)}"""
+
+            if cu_outcome and cu_outcome != "Action completed":
+                action_detail += f"\n  CU agent observation: {cu_outcome}"
+
+            action_detail += "\n\n  Validation Results:"
+            if isinstance(validation, dict):
+                for key, value in validation.items():
+                    if key in {
+                        "target_reference",
+                        "pixel_coordinates",
+                        "relative_x",
+                        "relative_y",
+                    }:
+                        continue
+                    action_detail += f"\n    {key}: {value}"
+
+            if isinstance(ai_analysis, dict) and ai_analysis:
+                action_detail += "\n  \n  AI Analysis:"
+                action_detail += (
+                    f"\n    Reasoning: {ai_analysis.get('reasoning', 'N/A')}"
+                )
+                action_detail += (
+                    f"\n    Actual outcome: {ai_analysis.get('actual_outcome', 'N/A')}"
+                )
+                action_detail += (
+                    f"\n    Confidence: {ai_analysis.get('confidence', 0.0)}"
+                )
+
+            if isinstance(execution, dict) and execution:
+                action_detail += "\n  \n  Execution Details:"
+                action_detail += (
+                    f"\n    Duration: {execution.get('duration_ms', 'N/A')}ms"
+                )
+                if execution.get("error_message"):
+                    action_detail += f"\n    Error: {execution.get('error_message')}"
+
+            rendered.append(action_detail)
+
+        return "\n".join(rendered)
+
+    def _build_step_validation_prompt(
+        self,
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        action_results: list[dict[str, Any]],
+        execution_history: list[dict[str, Any]],
+        next_test_case: TestCase | None,
+    ) -> str:
+        """Build the final in-session step validation prompt."""
+        return f"""We have finished executing one test step inside this same Computer Use conversation.
+
+Original test case: "{test_case.name}"
+Test case description: {test_case.description or "N/A"}
+
+Previous steps in this test case:
+{self._format_execution_history(execution_history)}
+
+Current step to validate:
+Step {step.step_number}: {step.action}
+Expected result: {step.expected_result}
+
+Actions performed in this step:
+{self._format_action_results(action_results)}
+
+Use the full context already present in this conversation, including the screenshots and intermediate follow-up frames that were exchanged during these actions.
+Do not ask for more screenshots, do not call tools, and do not restart the analysis from scratch.
+
+IMPORTANT:
+- The "CU agent observation" fields above are real-time descriptions captured during execution.
+- Consider the overall intent of the step, not just literal text matching.
+- Return a final verdict for the step, not for any single sub-action.
+
+Determine:
+1. Did this step achieve its intended purpose?
+2. If it failed, is the failure a blocker for the next test case?
+   Next test case: {next_test_case.name if next_test_case else "None (last test case)"}
+
+Respond with JSON only:
+{{
+  "verdict": "PASS" or "FAIL",
+  "reasoning": "Your analysis of why the step passed or failed",
+  "actual_result": "Concise description of what actually happened",
+  "confidence": 0.0-1.0,
+  "is_blocker": true/false,
+  "blocker_reasoning": "Why this would or would not block the next test case"
+}}"""
+
+    @staticmethod
+    def _normalize_step_validation_result(
+        payload: dict[str, Any] | None,
+        *,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Normalize ActionAgent-produced step validation output."""
+        result = dict(payload or {})
+        result["verdict"] = str(result.get("verdict", "FAIL")).strip().upper()
+        if result["verdict"] not in {"PASS", "FAIL"}:
+            result["verdict"] = "FAIL"
+        result["reasoning"] = str(
+            result.get("reasoning") or failure_reason or "Step validation failed."
+        )
+        result["actual_result"] = str(
+            result.get("actual_result") or failure_reason or "Unknown outcome"
+        )
+        try:
+            result["confidence"] = float(result.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            result["confidence"] = 0.0
+        result["confidence"] = max(0.0, min(result["confidence"], 1.0))
+        result["is_blocker"] = bool(result.get("is_blocker", False))
+        result["blocker_reasoning"] = str(result.get("blocker_reasoning") or "")
+        return result
+
+    async def validate_step_with_session(
+        self,
+        *,
+        step_session: ActionAgentStepSession,
+        test_case: TestCase,
+        step: TestStep,
+        action_results: list[dict[str, Any]],
+        execution_history: list[dict[str, Any]],
+        next_test_case: TestCase | None,
+    ) -> StepSessionValidationResult:
+        """Request the final step verdict from the active session."""
+        prompt = self._build_step_validation_prompt(
+            test_case=test_case,
+            step=step,
+            action_results=action_results,
+            execution_history=execution_history,
+            next_test_case=next_test_case,
+        )
+
+        if not step_session.usable:
+            verification = self._normalize_step_validation_result(
+                None,
+                failure_reason=step_session.unusable_reason
+                or "Computer Use session became unusable before final validation.",
+            )
+            return StepSessionValidationResult(
+                verification=verification,
+                prompt=prompt,
+                raw_response="",
+                response_ids=[],
+            )
+
+        try:
+            reflection = await step_session.session.reflect_step(
+                prompt=prompt,
+                metadata={
+                    **step_session.base_metadata,
+                    "validation_phase": "step_reflection",
+                },
+            )
+            raw_response = str(reflection.get("raw_text") or "")
+            parsed = json.loads(raw_response) if raw_response else {}
+            verification = self._normalize_step_validation_result(
+                parsed if isinstance(parsed, dict) else None,
+                failure_reason="Step reflection returned a non-object JSON payload.",
+            )
+            response_ids = [
+                response_id
+                for response_id in reflection.get("response_ids", [])
+                if isinstance(response_id, str) and response_id
+            ]
+            step_session.response_ids.extend(response_ids)
+            return StepSessionValidationResult(
+                verification=verification,
+                prompt=prompt,
+                raw_response=raw_response,
+                response_ids=response_ids,
+            )
+        except Exception as exc:
+            self._mark_step_session_unusable(step_session, str(exc))
+            verification = self._normalize_step_validation_result(
+                None,
+                failure_reason=f"Step validation failed in the ActionAgent session: {exc}",
+            )
+            return StepSessionValidationResult(
+                verification=verification,
+                prompt=prompt,
+                raw_response="",
+                response_ids=[],
+            )
 
     @staticmethod
     def _slugify_identifier(value: str, max_length: int = 32) -> str:
@@ -677,6 +1027,7 @@ class ActionAgent(BaseAgent):
         test_context: dict[str, Any],
         screenshot: bytes | None = None,
         record_driver_actions: bool = False,
+        step_session: ActionAgentStepSession | None = None,
     ) -> EnhancedActionResult:
         """Execute an action using the Computer Use tool and return a rich result."""
         if not self.automation_driver:
@@ -710,34 +1061,27 @@ class ActionAgent(BaseAgent):
         context_for_result = (
             dict(test_context) if isinstance(test_context, dict) else {}
         )
-        environment = self._resolve_environment(context_lookup)
-
-        session_metadata = {
-            "step_number": test_step.step_number,
-            "test_plan_name": context_lookup.get("test_plan_name")
-            or context_lookup.get("plan_name"),
-            "test_case_name": context_lookup.get("test_case_name")
-            or context_lookup.get("case_name"),
-            "target": instruction.target,
-            "value": instruction.value,
-            "interaction_mode": interaction_mode,
-            "step_goal": test_step.description,
-            "environment": environment,
-            # Allow auto-approve safety policy to continue execution when enabled.
-            "allow_safety_auto_approve": True,
-        }
-
-        safety_identifier = self._resolve_safety_identifier(test_step, context_lookup)
-        session_metadata["safety_identifier"] = safety_identifier
-        if environment_state_before.url:
-            session_metadata["current_url"] = environment_state_before.url
+        session_metadata, environment, safety_identifier = (
+            self._build_action_session_metadata(
+                step_session,
+                test_step=test_step,
+                instruction=instruction,
+                interaction_mode=interaction_mode,
+                current_url=environment_state_before.url,
+                context_lookup=context_lookup,
+            )
+        )
 
         context_for_result["safety_identifier"] = safety_identifier
         context_for_result["interaction_mode"] = interaction_mode
 
-        session = self._new_computer_use_session(
-            debug_logger,
-            environment=environment,
+        session = (
+            step_session.session
+            if step_session is not None
+            else self._new_computer_use_session(
+                debug_logger,
+                environment=environment,
+            )
         )
 
         self.conversation_history.append({"role": "user", "content": goal})
@@ -758,16 +1102,28 @@ class ActionAgent(BaseAgent):
 
         start_ts = time.perf_counter()
         try:
-            session_result = await session.run(
-                goal,
-                initial_screenshot,
-                session_metadata,
-                allowed_actions=allowed_actions,
-                environment=environment,
-                cache_label=cache_label,
-                cache_action=cache_action,
-            )
+            if step_session is not None and step_session.provider == "openai":
+                session_result = await session.execute_step_action(
+                    goal,
+                    initial_screenshot,
+                    session_metadata,
+                    allowed_actions=allowed_actions,
+                    environment=environment,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                )
+            else:
+                session_result = await session.run(
+                    goal,
+                    initial_screenshot,
+                    session_metadata,
+                    allowed_actions=allowed_actions,
+                    environment=environment,
+                    cache_label=cache_label,
+                    cache_action=cache_action,
+                )
         except Exception as exc:
+            self._mark_step_session_unusable(step_session, str(exc))
             raise ComputerUseExecutionError(str(exc)) from exc
 
         duration_ms = (time.perf_counter() - start_ts) * 1000
@@ -813,6 +1169,20 @@ class ActionAgent(BaseAgent):
             )
 
         success = execution_error is None
+        if step_session is not None:
+            step_session.has_computer_use_action = True
+            step_session.response_ids.extend(
+                response_id
+                for response_id in session_result.response_ids
+                if response_id
+            )
+            if session_result.terminal_status == "failed":
+                self._mark_step_session_unusable(
+                    step_session,
+                    execution_error
+                    or session_result.terminal_failure_reason
+                    or "Computer Use session terminated with a failure state.",
+                )
 
         execution_result = ExecutionResult(
             success=success,
@@ -913,6 +1283,7 @@ class ActionAgent(BaseAgent):
         test_context: dict[str, Any],
         screenshot: bytes | None = None,
         record_driver_actions: bool = False,
+        step_session: ActionAgentStepSession | None = None,
     ) -> EnhancedActionResult:
         """Execute an action through Computer Use (except explicit skip-navigation)."""
         self.reset_conversation()
@@ -934,6 +1305,7 @@ class ActionAgent(BaseAgent):
                 test_context=test_context,
                 screenshot=screenshot,
                 record_driver_actions=record_driver_actions,
+                step_session=step_session,
             )
         except ComputerUseExecutionError:
             logger.error(

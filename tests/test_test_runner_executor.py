@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,7 +35,19 @@ def _build_step() -> TestStep:
 @pytest.mark.asyncio
 async def test_executor_reset_app_uses_state_context_package_metadata() -> None:
     driver = _ResetDriver()
-    executor = TestRunnerExecutor(action_agent=None, automation_driver=driver)
+    artifacts = SimpleNamespace(
+        capture_screenshot=AsyncMock(
+            return_value=SimpleNamespace(
+                screenshot_bytes=b"reset-screenshot",
+                screenshot_path="debug_screenshots/tcTC001_step1_reset_after.png",
+            )
+        )
+    )
+    executor = TestRunnerExecutor(
+        action_agent=None,
+        automation_driver=driver,
+        artifacts=artifacts,
+    )
 
     result = await executor.execute_action(
         StepActionExecutionRequest(
@@ -63,6 +76,14 @@ async def test_executor_reset_app_uses_state_context_package_metadata() -> None:
     driver.force_stop_app.assert_awaited_once()
     driver.clear_app_data.assert_awaited_once()
     driver.launch_app.assert_awaited_once_with("com.example.app", "MainActivity")
+    artifacts.capture_screenshot.assert_awaited_once_with(
+        "tcTC001_step1_reset_after",
+        origin="reset_app_1_after",
+        update_latest=True,
+    )
+    assert result.action_data["screenshots"]["after"].endswith(
+        "tcTC001_step1_reset_after.png"
+    )
 
 
 @pytest.mark.asyncio
