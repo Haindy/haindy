@@ -25,7 +25,7 @@ from .common import (
 from .turn_result import ComputerUseFollowUpBatch, build_follow_up_batch
 from .types import ComputerUseExecutionError, ComputerUseSessionResult
 from .visual_pipeline import VisualStatePlanner
-from .visual_state import CartographyMap, VisualFrame
+from .visual_state import CartographyMap, VisualFrame, build_keyframe
 
 logger = logging.getLogger("src.agents.computer_use.session")
 
@@ -36,9 +36,21 @@ if TYPE_CHECKING:
 class ComputerUseSupportMixin:
     """Support helpers shared across provider implementations."""
 
+    _GOOGLE_MOBILE_EXCLUDED_PREDEFINED_FUNCTIONS: tuple[str, ...] = (
+        "open_web_browser",
+        "search",
+        "navigate",
+        "hover_at",
+        "go_forward",
+        "scroll_document",
+        "key_combination",
+        "drag_and_drop",
+    )
+
     _current_keyframe: VisualFrame | None
     _last_visual_frame: VisualFrame | None
     _visual_state_planner: VisualStatePlanner
+    _turns_since_keyframe: int
 
     def _update_loop_history(
         self: _ComputerUseSession,
@@ -179,6 +191,28 @@ class ComputerUseSupportMixin:
         """Ensure the automation_driver session is started before execution."""
         await self._automation_driver.start()
 
+    def _maybe_seed_initial_keyframe(
+        self: _ComputerUseSession,
+        initial_screenshot: bytes | None,
+    ) -> None:
+        """Seed the first step keyframe from the caller-provided screenshot."""
+        if self._current_keyframe is not None or initial_screenshot is None:
+            return
+
+        self._current_keyframe = build_keyframe(
+            initial_screenshot,
+            source="initial_screenshot",
+        )
+        self._turns_since_keyframe = 0
+        logger.info(
+            "Computer Use seeded initial keyframe",
+            extra={
+                "visual_frame_id": self._current_keyframe.frame_id,
+                "visual_frame_kind": self._current_keyframe.kind,
+                "has_cartography": False,
+            },
+        )
+
     async def invalidate_cache(
         self: _ComputerUseSession, cache_label: str, cache_action: str
     ) -> None:
@@ -247,6 +281,7 @@ class ComputerUseSupportMixin:
             "drag_and_drop": "drag",
             "dragdrop": "drag",
             "mouse_drag": "drag",
+            "long_press": "long_press_at",
         }
         return alias_map.get(normalized, normalized)
 
@@ -305,7 +340,12 @@ class ComputerUseSupportMixin:
         """Inject explicit interaction-mode instructions into provider prompts."""
         interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
         if interaction_mode != "observe_only":
-            return goal
+            reporting_guidance = ComputerUseSupportMixin._build_reporting_guidance(
+                metadata
+            )
+            if not reporting_guidance or reporting_guidance in goal:
+                return goal
+            return f"{goal}\n\n{reporting_guidance}"
 
         guidance = (
             "CRITICAL OBSERVE-ONLY MODE:\n"
@@ -317,6 +357,32 @@ class ComputerUseSupportMixin:
         if guidance in goal:
             return goal
         return f"{goal}\n\n{guidance}"
+
+    @staticmethod
+    def _build_reporting_guidance(metadata: dict[str, Any]) -> str | None:
+        """Constrain how much detail the executor should include in final replies."""
+        scope = str(metadata.get("response_reporting_scope") or "").strip().lower()
+        if scope != "state_only":
+            return None
+        return (
+            "REPORTING RULES:\n"
+            "- In your final confirmation, summarize only the requested visible state change.\n"
+            "- Do NOT quote or infer exact field values, email addresses, usernames, codes, IDs, or other on-screen text unless the task explicitly asks you to verify or read that exact text.\n"
+            "- For navigation/opening steps, confirm that the target screen or section is visible and stop."
+        )
+
+    @staticmethod
+    def _build_execute_follow_up_reporting_reminder(
+        metadata: dict[str, Any],
+    ) -> str | None:
+        """Return a compact execute-mode reminder for follow-up turns."""
+        scope = str(metadata.get("response_reporting_scope") or "").strip().lower()
+        if scope != "state_only":
+            return None
+        return (
+            "In your confirmation, summarize only the requested visible state change. "
+            "Do not quote exact field values or other on-screen text unless the task explicitly asks for that text."
+        )
 
     async def _build_follow_up_batch(
         self: _ComputerUseSession,
@@ -353,13 +419,25 @@ class ComputerUseSupportMixin:
             self._turns_since_keyframe = 0
         else:
             self._turns_since_keyframe += 1
-        return build_follow_up_batch(
+        follow_up_batch = build_follow_up_batch(
             call_groups,
             screenshot_bytes=visual_frame.image_bytes,
             current_url=current_url,
             interaction_mode=interaction_mode,
             visual_frame=visual_frame,
         )
+        execute_reporting_reminder = self._build_execute_follow_up_reporting_reminder(
+            metadata
+        )
+        if execute_reporting_reminder:
+            existing_reminder = str(follow_up_batch.reminder_text or "").strip()
+            if existing_reminder:
+                follow_up_batch.reminder_text = (
+                    f"{existing_reminder}\n{execute_reporting_reminder}"
+                )
+            else:
+                follow_up_batch.reminder_text = execute_reporting_reminder
+        return follow_up_batch
 
     async def _generate_cartography(
         self: _ComputerUseSession,
@@ -817,29 +895,16 @@ class ComputerUseSupportMixin:
             return browser_context + goal
 
         if env_mode == "mobile_adb":
+            goal = self._strip_mobile_goal_wrapper(goal)
             mobile_context = (
-                "IMPORTANT: You are controlling an Android mobile app through ADB-backed screenshots. "
-                "Treat coordinates as mobile screen positions. Avoid desktop assumptions (dock, alt-tab, windows).\n\n"
-                "SCREEN DETAILS:\n"
-                "- Screenshot orientation and resolution may vary per device; always rely on the provided screenshot.\n"
-                "- Prefer tap and type interactions; use scroll_document/scroll_at for vertical movement.\n"
-                "- Do not use open_web_browser/search/go_back/go_forward desktop-browser actions unless explicitly required.\n\n"
-                "AVAILABLE ACTIONS:\n"
-                "- click_at: Tap at screen coordinates\n"
-                "- type_text_at: Tap and type text into focused field\n"
-                "- key_combination: Android key events - valid values include: 'home' (go to home screen), 'back' (navigate back), 'app_switch' (open recent apps switcher), 'enter', 'delete'\n"
-                "- scroll_at / scroll_document: Scroll app content\n"
-                "- drag_and_drop: Swipe/drag gestures when necessary\n\n"
-                "APP SWITCHING ON ANDROID:\n"
-                "- To switch to a recently used app: use key_combination: 'app_switch' to open the recents overlay, then tap the app card you want.\n"
-                "- Do NOT use swipe/drag gestures from the bottom edge to open recents - use key_combination: 'app_switch' instead.\n"
-                "- To go to the home screen: use key_combination: 'home'.\n\n"
-                "TEXT INPUT ON ANDROID:\n"
-                "- To replace existing text in a field: use type_text_at directly - it automatically selects all existing content before typing.\n"
-                "- Do NOT use key_combination with ctrl+a or any other desktop shortcut to select or clear text; these do not work on Android.\n"
-                "- For type_text_at, set press_enter=true ONLY when the task explicitly says to submit the form or press Enter. Do NOT set press_enter=true just because you are typing into a field - doing so submits the form prematurely.\n"
-                "- Do NOT use key_combination or press_key with 'enter' or 'return' after typing into a field unless the task explicitly says to submit the form. Pressing Enter submits the whole form - if there are more fields to fill, use tap/type_text_at for the next field instead. Only tap the on-screen submit button (e.g. 'Reset Password', 'Sign In') when all fields are filled.\n"
-                "- For password fields that mask input with dots or asterisks: a single type_text_at call is sufficient. Do NOT retry just because you cannot read the entered text. Seeing masked characters (dots) after typing confirms the field is populated - stop immediately.\n\n"
+                "IMPORTANT: You are controlling an Android mobile app through ADB-backed screenshots.\n"
+                "- Treat coordinates as positions on the provided mobile screenshot.\n"
+                "- Use mobile interactions only: click_at, type_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at, go_home, and open_app when needed.\n"
+                "- Browser-style actions such as open_web_browser, search, navigate, hover_at, go_forward, scroll_document, drag_and_drop, and key_combination are unavailable in this mobile flow.\n"
+                "- For system navigation, prefer the custom go_home helper for the launcher and direct visual taps for in-app navigation.\n"
+                "- Do not use desktop assumptions, browser navigation actions, or desktop shortcuts like ctrl+a.\n"
+                "- For text entry, use type_text_at directly. Set press_enter=true only when the task explicitly says to submit or press Enter.\n"
+                "- If masked password dots are visible after typing, treat the field as filled and stop retrying.\n\n"
                 + completion_instruction
                 + "YOUR TASK: "
             )
@@ -889,6 +954,22 @@ class ComputerUseSupportMixin:
         return '{"' in raw_text or "[{" in raw_text
 
     @staticmethod
+    def _strip_mobile_goal_wrapper(goal: str) -> str:
+        """Remove the generic mobile goal prefix when a provider adds its own wrapper."""
+        marker = "MOBILE EXECUTION CONTEXT:"
+        text = str(goal or "").strip()
+        if not text.startswith(marker):
+            return text
+
+        task_marker = "\n\nTASK:\n"
+        task_index = text.find(task_marker)
+        if task_index == -1:
+            return text
+
+        stripped = text[task_index + len(task_marker) :].strip()
+        return stripped or text
+
+    @staticmethod
     def _normalize_environment_name(
         environment: str | None,
     ) -> RuntimeEnvironmentName:
@@ -918,7 +999,7 @@ class ComputerUseSupportMixin:
     @staticmethod
     def _map_google_interaction_environment(env_mode: str) -> str | None:
         spec = runtime_environment_spec(normalize_runtime_environment_name(env_mode))
-        return "browser" if spec.is_browser else None
+        return "browser" if (spec.is_browser or spec.is_mobile) else None
 
     @staticmethod
     def _wrap_goal_for_mobile(
@@ -986,6 +1067,153 @@ class ComputerUseSupportMixin:
                 ),
             ]
         )
+
+    @staticmethod
+    def _google_mobile_excluded_predefined_functions() -> list[str]:
+        """Return Google Computer Use actions that should be unavailable on mobile."""
+        return list(
+            ComputerUseSupportMixin._GOOGLE_MOBILE_EXCLUDED_PREDEFINED_FUNCTIONS
+        )
+
+    @staticmethod
+    def _google_mobile_custom_tools() -> Any:
+        """Return a Tool with the documented mobile helper functions."""
+        from google.genai import types  # type: ignore
+
+        return types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name="open_app",
+                    description=(
+                        "Open the configured Android app under test, or launch a "
+                        "deep link when one is provided. Use this when the task "
+                        "explicitly requires opening or foregrounding the app."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "app_name": types.Schema(
+                                type=types.Type.STRING,
+                                description=(
+                                    "Name of the app to open. Prefer the app "
+                                    "currently under test."
+                                ),
+                            ),
+                            "intent": types.Schema(
+                                type=types.Type.STRING,
+                                description=(
+                                    "Optional deep link or Android intent URL to "
+                                    "launch."
+                                ),
+                            ),
+                        },
+                        required=["app_name"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="long_press_at",
+                    description=(
+                        "Long-press at the given mobile screen coordinates. Use "
+                        "for context menus or press-and-hold interactions."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "x": types.Schema(
+                                type=types.Type.NUMBER,
+                                description="X coordinate (0-999 scale)",
+                            ),
+                            "y": types.Schema(
+                                type=types.Type.NUMBER,
+                                description="Y coordinate (0-999 scale)",
+                            ),
+                            "duration_ms": types.Schema(
+                                type=types.Type.INTEGER,
+                                description="Optional hold duration in milliseconds.",
+                            ),
+                        },
+                        required=["x", "y"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="go_home",
+                    description="Navigate to the Android home screen.",
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={},
+                    ),
+                ),
+            ]
+        )
+
+    @staticmethod
+    def _google_mobile_function_tools() -> list[dict[str, Any]]:
+        """Return Interactions API mobile-only function declarations."""
+        return [
+            {
+                "type": "function",
+                "name": "open_app",
+                "description": (
+                    "Open the configured Android app under test, or launch a deep "
+                    "link when one is provided. Use this when the task explicitly "
+                    "requires opening or foregrounding the app."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the app to open. Prefer the app currently "
+                                "under test."
+                            ),
+                        },
+                        "intent": {
+                            "type": "string",
+                            "description": (
+                                "Optional deep link or Android intent URL to launch."
+                            ),
+                        },
+                    },
+                    "required": ["app_name"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "long_press_at",
+                "description": (
+                    "Long-press at the given mobile screen coordinates. Use for "
+                    "context menus or press-and-hold interactions."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "x": {
+                            "type": "number",
+                            "description": "X coordinate (0-999 scale)",
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": "Y coordinate (0-999 scale)",
+                        },
+                        "duration_ms": {
+                            "type": "integer",
+                            "description": "Optional hold duration in milliseconds.",
+                        },
+                    },
+                    "required": ["x", "y"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "go_home",
+                "description": "Navigate to the Android home screen.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+        ]
 
     @staticmethod
     def _google_modifier_click_function_tools() -> list[dict[str, Any]]:

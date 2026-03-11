@@ -82,7 +82,11 @@ class RuntimeEnvironmentSpec:
 
     @property
     def google_computer_environment_name(self) -> str:
-        return "ENVIRONMENT_BROWSER" if self.is_browser else "ENVIRONMENT_UNSPECIFIED"
+        return (
+            "ENVIRONMENT_BROWSER"
+            if (self.is_browser or self.is_mobile)
+            else "ENVIRONMENT_UNSPECIFIED"
+        )
 
     def coordinate_cache_path(self, settings: Any) -> Path:
         path = getattr(settings, self.coordinate_cache_attribute)

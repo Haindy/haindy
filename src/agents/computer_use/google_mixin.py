@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import logging
+import warnings
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +45,92 @@ if TYPE_CHECKING:
 class GoogleComputerUseMixin:
     """Google-specific request builders and execution loop."""
 
+    _GOOGLE_INTERACTIONS_WARNING_MESSAGES: tuple[str, ...] = (
+        "Interactions usage is experimental and may change in future versions.",
+        "Async interactions client cannot use aiohttp, fallingback to httpx.",
+    )
+
+    @staticmethod
+    def _sanitize_google_payload_for_log(payload: dict[str, Any]) -> dict[str, Any]:
+        def _scrub(value: Any) -> Any:
+            if isinstance(value, dict):
+                scrubbed: dict[str, Any] = {}
+                for key, item in value.items():
+                    if key == "data" and isinstance(item, str):
+                        scrubbed[key] = f"<<base64:{len(item)}>>"
+                    elif (
+                        key == "image_url"
+                        and isinstance(item, str)
+                        and item.startswith("data:image/")
+                    ):
+                        scrubbed[key] = "<<data-image-url>>"
+                    else:
+                        scrubbed[key] = _scrub(item)
+                return scrubbed
+            if isinstance(value, list):
+                return [_scrub(item) for item in value]
+            return value
+
+        sanitized = _scrub(payload)
+        if isinstance(sanitized, dict):
+            return sanitized
+        return {}
+
+    @classmethod
+    def _summarize_google_payload_for_log(
+        cls, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        input_items = payload.get("input")
+        input_summary: list[dict[str, Any]] = []
+        if isinstance(input_items, list):
+            for index, item in enumerate(input_items[:8], start=1):
+                if not isinstance(item, dict):
+                    input_summary.append({"index": index, "type": type(item).__name__})
+                    continue
+                summary: dict[str, Any] = {
+                    "index": index,
+                    "type": str(item.get("type") or "").strip() or "unknown",
+                }
+                text_value = item.get("text")
+                if isinstance(text_value, str):
+                    summary["text_length"] = len(text_value)
+                    summary["text_preview"] = text_value[:200]
+                if item.get("type") == "image" and isinstance(item.get("data"), str):
+                    summary["image_base64_length"] = len(str(item["data"]))
+                result = item.get("result")
+                if isinstance(result, dict):
+                    summary["result_status"] = result.get("status")
+                    result_items = result.get("items")
+                    if isinstance(result_items, list):
+                        summary["result_item_types"] = [
+                            str(result_item.get("type") or "").strip() or "unknown"
+                            for result_item in result_items[:6]
+                            if isinstance(result_item, dict)
+                        ]
+                        for result_item in result_items:
+                            if not isinstance(result_item, dict):
+                                continue
+                            result_text = result_item.get("text")
+                            if isinstance(result_text, str):
+                                summary["result_text_preview"] = result_text[:200]
+                                break
+                input_summary.append(summary)
+        tool_types = [
+            str(tool.get("type") or "").strip() or "unknown"
+            for tool in (payload.get("tools") or [])
+            if isinstance(tool, dict)
+        ]
+        return {
+            "api_surface": str(payload.get("api_surface") or "").strip() or None,
+            "model": str(payload.get("model") or "").strip() or None,
+            "previous_interaction_id": payload.get("previous_interaction_id"),
+            "response_mime_type": payload.get("response_mime_type"),
+            "has_response_format": payload.get("response_format") is not None,
+            "input_count": len(input_items) if isinstance(input_items, list) else None,
+            "input_summary": input_summary or None,
+            "tool_types": tool_types or None,
+        }
+
     async def _run_google(
         self: _ComputerUseSession,
         *,
@@ -64,11 +151,12 @@ class GoogleComputerUseMixin:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
-        goal = self._wrap_goal_for_mobile(
-            goal, environment, viewport_width, viewport_height
-        )
         goal = self._apply_interaction_mode_guidance(goal, metadata)
-        wrapped_goal = self._wrap_goal_for_google(goal, environment)
+        wrapped_goal = (
+            self._wrap_goal_for_google(goal, environment)
+            if previous_interaction_id is None
+            else goal
+        )
         include_screenshot = (
             previous_interaction_id is None or self._last_visual_frame is None
         )
@@ -94,14 +182,15 @@ class GoogleComputerUseMixin:
                 else "computer_use.google.continuation"
             ),
             model=model,
-            prompt=goal,
+            prompt=wrapped_goal,
             request_payload={
                 "provider": "google",
                 "environment": environment,
-                "payload": (
+                "payload_type": (
                     "initial" if previous_interaction_id is None else "continuation"
                 ),
                 "api_surface": "interactions",
+                "request": self._sanitize_google_payload_for_log(request_payload),
             },
             response=response,
             screenshots=(
@@ -219,8 +308,9 @@ class GoogleComputerUseMixin:
                     request_payload={
                         "provider": "google",
                         "environment": environment,
-                        "payload": "ambiguous_reask",
+                        "payload_type": "ambiguous_reask",
                         "api_surface": "interactions",
+                        "request": self._sanitize_google_payload_for_log(reask_payload),
                     },
                     response=response,
                     screenshots=None,
@@ -607,8 +697,9 @@ class GoogleComputerUseMixin:
             request_payload={
                 "provider": "google",
                 "environment": environment,
-                "payload": "follow_up",
+                "payload_type": "follow_up",
                 "api_surface": "interactions",
+                "request": self._sanitize_google_payload_for_log(follow_up_payload),
             },
             response=response,
             screenshots=[("computer_use_follow_up", follow_up_screenshot)],
@@ -676,11 +767,16 @@ class GoogleComputerUseMixin:
             input_items.append(
                 self._build_google_follow_up_item(
                     call_result,
-                    follow_up_batch,
                     current_url=effective_current_url,
-                    context_text=follow_up_context_text,
                 )
             )
+        input_items.extend(
+            self._build_google_follow_up_shared_items(
+                follow_up_batch=follow_up_batch,
+                current_url=effective_current_url,
+                context_text=follow_up_context_text,
+            )
+        )
 
         payload: dict[str, Any] = {
             "api_surface": "interactions",
@@ -696,24 +792,27 @@ class GoogleComputerUseMixin:
         self: _ComputerUseSession, environment: str
     ) -> list[dict[str, Any]]:
         """Build Interactions API tool declarations for Google CU."""
+        spec = runtime_environment_spec(self._normalize_environment_name(environment))
         tool: dict[str, Any] = {"type": "computer_use"}
         interaction_environment = self._map_google_interaction_environment(environment)
         if interaction_environment:
             tool["environment"] = interaction_environment
+        if spec.is_mobile:
+            tool["excluded_predefined_functions"] = (
+                self._google_mobile_excluded_predefined_functions()
+            )
+            return [tool, *self._google_mobile_function_tools()]
+
         tools = [tool]
-        if not runtime_environment_spec(
-            self._normalize_environment_name(environment)
-        ).is_mobile:
+        if not spec.is_mobile:
             tools.extend(self._google_modifier_click_function_tools())
         return tools
 
     def _build_google_follow_up_item(
         self: _ComputerUseSession,
         call_result: Any,
-        follow_up_batch: Any,
         *,
         current_url: str,
-        context_text: str | None,
     ) -> dict[str, Any]:
         """Build a single Interactions API function_result item."""
         action_result = (
@@ -740,33 +839,9 @@ class GoogleComputerUseMixin:
         if not provider_call_id:
             provider_call_id = response_name
 
-        result_items: list[dict[str, Any]] = []
-        call_summary_text = self._build_google_follow_up_call_text(
-            call_result=call_result,
-            action_result=action_result,
-            current_url=current_url,
-        )
-        if call_summary_text:
-            result_items.append({"type": "text", "text": call_summary_text})
-        if context_text:
-            result_items.append({"type": "text", "text": context_text})
-        result_items.append(
-            {
-                "type": "image",
-                "data": follow_up_batch.screenshot_base64,
-                "mime_type": "image/png",
-                "resolution": "high",
-            }
-        )
-        result_payload = {
-            "status": action_result.status,
-            "current_url": current_url,
-            "items": result_items,
-        }
+        result_payload: dict[str, Any] = {"url": current_url}
         if call_result.requires_safety_acknowledgement:
             result_payload["safety_acknowledgement"] = True
-        result_payload = {k: v for k, v in result_payload.items() if v is not None}
-
         return {
             "type": "function_result",
             "call_id": provider_call_id,
@@ -774,6 +849,43 @@ class GoogleComputerUseMixin:
             "is_error": action_result.status != "executed",
             "result": result_payload,
         }
+
+    def _build_google_follow_up_shared_items(
+        self: _ComputerUseSession,
+        *,
+        follow_up_batch: Any,
+        current_url: str,
+        context_text: str | None,
+    ) -> list[dict[str, Any]]:
+        """Build shared summary/image items appended after function_result blocks."""
+        items: list[dict[str, Any]] = []
+        call_texts: list[str] = []
+        for call_result in follow_up_batch.calls:
+            action_result = (
+                call_result.actions[0]
+                if call_result.actions
+                else ComputerUseActionResult(action_type="unknown", status="pending")
+            )
+            call_text = self._build_google_follow_up_call_text(
+                call_result=call_result,
+                action_result=action_result,
+                current_url=current_url,
+            )
+            if call_text:
+                call_texts.append(call_text)
+        if call_texts:
+            items.append({"type": "text", "text": "\n\n".join(call_texts)})
+        if context_text:
+            items.append({"type": "text", "text": context_text})
+        items.append(
+            {
+                "type": "image",
+                "data": follow_up_batch.screenshot_base64,
+                "mime_type": "image/png",
+                "resolution": "high",
+            }
+        )
+        return items
 
     @staticmethod
     def _build_google_follow_up_call_text(
@@ -847,26 +959,25 @@ class GoogleComputerUseMixin:
         follow_up_batch: Any,
         current_url: str,
     ) -> str | None:
-        """Render the shared grounding text embedded in each function_result."""
+        """Render shared follow-up guidance appended after function_result items."""
         blocks: list[str] = []
-        grounding_text = str(follow_up_batch.grounding_text or "").strip()
-        if grounding_text:
-            original_current_url = json.dumps(
-                follow_up_batch.current_url or "desktop://"
-            )
-            replacement_current_url = json.dumps(current_url)
-            prefix = f"current_url={original_current_url}"
-            if grounding_text.startswith(prefix):
-                grounding_text = grounding_text.replace(
-                    prefix,
-                    f"current_url={replacement_current_url}",
-                    1,
-                )
-            blocks.append(grounding_text)
         visual_grounding = self._build_google_visual_grounding_text(follow_up_batch)
         if visual_grounding:
             blocks.append(visual_grounding)
-        reminder_text = str(follow_up_batch.reminder_text or "").strip()
+        reminder_text = ""
+        if follow_up_batch.interaction_mode == "observe_only":
+            reminder_text = str(follow_up_batch.reminder_text or "").strip()
+        elif follow_up_batch.interaction_mode:
+            reminder_parts = [
+                "If the requested outcome is already visible in this screenshot, "
+                "stop and confirm success."
+            ]
+            execute_reporting_reminder = str(
+                follow_up_batch.reminder_text or ""
+            ).strip()
+            if execute_reporting_reminder:
+                reminder_parts.append(execute_reporting_reminder)
+            reminder_text = "\n".join(reminder_parts)
         if reminder_text:
             blocks.append(reminder_text)
         if not blocks:
@@ -897,15 +1008,11 @@ class GoogleComputerUseMixin:
             return None
 
         bounds = frame.bounds
-        full_width, full_height = frame.screen_size
         details = [
             "Visual frame mode: patch",
             f"Patch bounds in full screenshot coordinates: x={bounds.x}, y={bounds.y}, width={bounds.width}, height={bounds.height}",
-            f"Original full screenshot size: width={full_width}, height={full_height}",
-            "Emit future coordinates normalized against the visible patch image, not the full screenshot. The harness will remap them back to full-screen pixels.",
+            "Interpret future coordinates against this patch image, not the full screenshot. The harness remaps them back to full-screen pixels.",
         ]
-        if frame.parent_keyframe_id:
-            details.append(f"Parent keyframe id: {frame.parent_keyframe_id}")
         if frame.target_bounds is not None:
             target = frame.target_bounds
             details.append(
@@ -949,8 +1056,9 @@ class GoogleComputerUseMixin:
             prompt=prompt,
             request_payload={
                 "provider": "google",
-                "payload": "step_reflection",
+                "payload_type": "step_reflection",
                 "api_surface": "interactions",
+                "request": self._sanitize_google_payload_for_log(payload),
             },
             response=response,
             metadata=metadata,
@@ -1050,9 +1158,37 @@ class GoogleComputerUseMixin:
             },
         }
         response = await self._create_google_response(payload)
+        await self._model_logger.log_call(
+            agent="computer_use.google.cartography",
+            model=str(payload["model"]),
+            prompt=prompt,
+            request_payload={
+                "provider": "google",
+                "payload_type": "cartography",
+                "api_surface": "interactions",
+                "request": self._sanitize_google_payload_for_log(payload),
+            },
+            response=response,
+            screenshots=[("computer_use_cartography", frame.image_bytes)],
+            metadata={
+                "target": target_text,
+                "frame_id": frame.frame_id,
+                "frame_kind": frame.kind,
+                "step_number": metadata.get("step_number"),
+            },
+        )
         response_dict = normalize_response(response)
         raw_text = extract_assistant_text(response_dict)
         if not raw_text:
+            logger.info(
+                "Google cartography returned no text content",
+                extra={
+                    "target": target_text,
+                    "frame_id": frame.frame_id,
+                    "frame_kind": frame.kind,
+                    "step_number": metadata.get("step_number"),
+                },
+            )
             return None
 
         try:
@@ -1094,6 +1230,17 @@ class GoogleComputerUseMixin:
                 continue
             targets.append(target)
 
+        logger.info(
+            "Google cartography generated targets",
+            extra={
+                "target": target_text,
+                "frame_id": frame.frame_id,
+                "frame_kind": frame.kind,
+                "step_number": metadata.get("step_number"),
+                "cartography_target_count": len(targets),
+                "cartography_labels": [target.label for target in targets] or None,
+            },
+        )
         return CartographyMap(
             frame_id=frame.frame_id,
             targets=tuple(targets),
@@ -1116,16 +1263,21 @@ class GoogleComputerUseMixin:
     def _build_google_tools(self: _ComputerUseSession, environment: str) -> list[Any]:
         from google.genai import types  # type: ignore
 
-        tools: list[Any] = [
-            types.Tool(
-                computer_use=types.ComputerUse(
-                    environment=self._map_google_environment(environment),
-                )
+        spec = runtime_environment_spec(self._normalize_environment_name(environment))
+        computer_use_kwargs: dict[str, Any] = {
+            "environment": self._map_google_environment(environment),
+        }
+        if spec.is_mobile:
+            computer_use_kwargs["excluded_predefined_functions"] = (
+                self._google_mobile_excluded_predefined_functions()
             )
+
+        tools: list[Any] = [
+            types.Tool(computer_use=types.ComputerUse(**computer_use_kwargs))
         ]
-        if not runtime_environment_spec(
-            self._normalize_environment_name(environment)
-        ).is_mobile:
+        if spec.is_mobile:
+            tools.append(self._google_mobile_custom_tools())
+        else:
             tools.append(self._google_modifier_click_tools())
         return tools
 
@@ -1191,14 +1343,22 @@ class GoogleComputerUseMixin:
             )
 
         async def _call_interactions() -> Any:
-            if hasattr(client, "aio") and hasattr(client.aio, "interactions"):
-                return await client.aio.interactions.create(**request_payload)
-            if hasattr(client, "interactions") and hasattr(
-                client.interactions, "create"
-            ):
-                return await self._invoke_google_request(
-                    lambda: client.interactions.create(**request_payload)
-                )
+            with warnings.catch_warnings():
+                for message in self._GOOGLE_INTERACTIONS_WARNING_MESSAGES:
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=message,
+                        category=UserWarning,
+                    )
+
+                if hasattr(client, "aio") and hasattr(client.aio, "interactions"):
+                    return await client.aio.interactions.create(**request_payload)
+                if hasattr(client, "interactions") and hasattr(
+                    client.interactions, "create"
+                ):
+                    return await self._invoke_google_request(
+                        lambda: client.interactions.create(**request_payload)
+                    )
             raise ComputerUseExecutionError(
                 "Google GenAI client does not support interactions.create calls."
             )
@@ -1216,9 +1376,19 @@ class GoogleComputerUseMixin:
                 else:
                     response = await self._invoke_google_request(_call_generate_content)
             except Exception as exc:
+                payload_summary = self._summarize_google_payload_for_log(payload)
                 if transport_retry_count >= len(
                     retry_delays
                 ) or not self._is_google_retryable_error(exc):
+                    logger.error(
+                        "Google Computer Use request failed",
+                        extra={
+                            "api_surface": api_surface or None,
+                            "attempt": attempt_number,
+                            "error": str(exc),
+                            "payload_summary": payload_summary,
+                        },
+                    )
                     raise
 
                 delay_seconds = retry_delays[transport_retry_count]
@@ -1230,6 +1400,7 @@ class GoogleComputerUseMixin:
                         "max_attempts": 1 + len(retry_delays),
                         "delay_seconds": delay_seconds,
                         "error": str(exc),
+                        "payload_summary": payload_summary,
                     },
                 )
                 await self._sleep_google_retry(delay_seconds)

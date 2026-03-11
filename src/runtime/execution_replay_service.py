@@ -67,6 +67,8 @@ class ReplayExecutionResult:
     replay_validation_wait_cycles: int
     replay_validation_wait_budget_remaining_ms: int
     fallback_to_cu: bool = False
+    fallback_screenshot_bytes: bytes | None = None
+    fallback_screenshot_path: str | None = None
 
 
 @dataclass
@@ -283,7 +285,9 @@ class ExecutionReplayService:
             },
             "automation_calls": [],
             "result": replay_result,
-            "screenshots": {},
+            "screenshots": {
+                "before": request.step_result.screenshot_before,
+            },
         }
 
         screenshot_after = None
@@ -293,6 +297,7 @@ class ExecutionReplayService:
         )
         if screenshot_path:
             request.step_result.screenshot_after = screenshot_path
+            replay_action_record["screenshots"]["after"] = screenshot_path
 
         replay_action = {
             "action": {
@@ -401,6 +406,15 @@ class ExecutionReplayService:
                     "replay_wait_cycles": replay_wait_cycles,
                 },
             )
+            fallback_screenshot_bytes = None
+            fallback_screenshot_path = None
+            (
+                fallback_screenshot_bytes,
+                fallback_screenshot_path,
+            ) = await request.capture_replay_screenshot("replay_failure")
+            if fallback_screenshot_path:
+                request.step_result.screenshot_after = fallback_screenshot_path
+                replay_action_record["screenshots"]["after"] = fallback_screenshot_path
             self._invalidate_replay_entry(
                 key=key,
                 trace=request.trace,
@@ -418,6 +432,8 @@ class ExecutionReplayService:
                 replay_validation_wait_cycles=replay_wait_cycles,
                 replay_validation_wait_budget_remaining_ms=replay_wait_budget_ms,
                 fallback_to_cu=True,
+                fallback_screenshot_bytes=fallback_screenshot_bytes,
+                fallback_screenshot_path=fallback_screenshot_path,
             )
 
         if request.trace:

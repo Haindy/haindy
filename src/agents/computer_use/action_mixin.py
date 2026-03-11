@@ -436,6 +436,81 @@ class ComputerUseActionMixin:
                         await self._automation_driver.press_key("enter")
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
+                elif action_type == "long_press_at":
+                    duration_ms = int(action.get("duration_ms") or 500)
+                    if cached:
+                        x, y = int(cached.x), int(cached.y)
+                    else:
+                        x, y = self._resolve_coordinates(
+                            action,
+                            viewport_width,
+                            viewport_height,
+                            normalized=normalized_coords,
+                            turn=turn,
+                        )
+                    steps = max(int(round(duration_ms / 16.0)), 8)
+                    await self._automation_driver.drag_mouse(x, y, x, y, steps=steps)
+                    turn.metadata.update(
+                        {"x": x, "y": y, "duration_ms": duration_ms, "steps": steps}
+                    )
+                    turn.status = "executed"
+                elif action_type == "go_home":
+                    await self._automation_driver.press_key("home")
+                    turn.metadata["key"] = "home"
+                    turn.status = "executed"
+                elif action_type == "press_android_key":
+                    key_value = action.get("key") or action.get("keys")
+                    if isinstance(key_value, (list, tuple)):
+                        key_tokens = [
+                            str(token).strip().lower()
+                            for token in key_value
+                            if str(token).strip()
+                        ]
+                    elif isinstance(key_value, str):
+                        key_tokens = [key_value.strip().lower()]
+                    else:
+                        key_tokens = []
+                    if len(key_tokens) != 1:
+                        raise ComputerUseExecutionError(
+                            "press_android_key action requires exactly one key."
+                        )
+                    await self._automation_driver.press_key(key_tokens[0])
+                    turn.metadata["key"] = key_tokens[0]
+                    turn.status = "executed"
+                elif action_type == "open_app":
+                    launch_app = getattr(self._automation_driver, "launch_app", None)
+                    navigate = getattr(self._automation_driver, "navigate", None)
+                    app_name = str(action.get("app_name") or "").strip()
+                    intent = str(action.get("intent") or "").strip()
+                    app_package = str(
+                        action.get("app_package")
+                        or action.get("package")
+                        or metadata.get("app_package")
+                        or ""
+                    ).strip()
+                    app_activity_raw = str(
+                        action.get("app_activity")
+                        or action.get("activity")
+                        or metadata.get("app_activity")
+                        or ""
+                    ).strip()
+                    if callable(launch_app) and app_package:
+                        await launch_app(app_package, app_activity_raw or None)
+                    elif intent and callable(navigate):
+                        await navigate(intent)
+                    else:
+                        raise ComputerUseExecutionError(
+                            "open_app requires configured app_package metadata or a supported intent."
+                        )
+                    if app_name:
+                        turn.metadata["app_name"] = app_name
+                    if intent:
+                        turn.metadata["intent"] = intent
+                    if app_package:
+                        turn.metadata["app_package"] = app_package
+                    if app_activity_raw:
+                        turn.metadata["app_activity"] = app_activity_raw
+                    turn.status = "executed"
                 elif action_type in {"keypress", "key_combination"}:
                     if action_type == "keypress":
                         key_sequence = self._resolve_key_sequence(action, metadata)
@@ -492,7 +567,10 @@ class ComputerUseActionMixin:
                     turn.metadata["duration_ms"] = 5000
                     turn.status = "executed"
                 elif action_type == "go_back":
-                    await self._automation_driver.press_key("alt+left")
+                    if environment == "mobile_adb":
+                        await self._automation_driver.press_key("back")
+                    else:
+                        await self._automation_driver.press_key("alt+left")
                     turn.status = "executed"
                 elif action_type == "go_forward":
                     await self._automation_driver.press_key("alt+right")

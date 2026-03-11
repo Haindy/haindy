@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from .visual_state import (
     CartographyMap,
+    CartographyTarget,
     VisualBounds,
     VisualFrame,
     build_keyframe,
@@ -19,6 +21,8 @@ from .visual_state import (
 CartographyGenerator = Callable[
     [VisualFrame, dict[str, Any]], Awaitable[CartographyMap | None]
 ]
+
+logger = logging.getLogger("src.agents.computer_use.session")
 
 _KEYFRAME_ACTIONS = {
     "scroll",
@@ -59,6 +63,8 @@ class VisualStatePlanner:
     ) -> tuple[VisualFrame, VisualFrame]:
         """Return the frame to send plus the current full keyframe state."""
         current_full = build_keyframe(screenshot_bytes, source="follow_up_capture")
+        target_text = str(metadata.get("target") or "").strip()
+        interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
 
         if self.visual_mode != "keyframe_patch":
             cartography = await generate_cartography(current_full, metadata)
@@ -68,15 +74,27 @@ class VisualStatePlanner:
                     source="follow_up_capture",
                     cartography=cartography,
                 )
+            self._log_visual_decision(
+                decision="visual_mode_disabled",
+                metadata=metadata,
+                action_types=action_types,
+                interaction_mode=interaction_mode,
+                target_text=target_text,
+                previous_keyframe=previous_keyframe,
+                returned_frame=current_full,
+                current_keyframe=current_full,
+                turns_since_keyframe=turns_since_keyframe,
+                cartography=cartography,
+            )
             return current_full, current_full
 
-        force_keyframe = self._should_force_keyframe(
+        force_keyframe_reason = self._resolve_keyframe_requirement(
             metadata=metadata,
             action_types=action_types,
             previous_keyframe=previous_keyframe,
             turns_since_keyframe=turns_since_keyframe,
         )
-        if force_keyframe or previous_keyframe is None:
+        if force_keyframe_reason is not None:
             cartography = await generate_cartography(current_full, metadata)
             if cartography is not None:
                 current_full = build_keyframe(
@@ -84,14 +102,27 @@ class VisualStatePlanner:
                     source="follow_up_capture",
                     cartography=cartography,
                 )
+            self._log_visual_decision(
+                decision=force_keyframe_reason,
+                metadata=metadata,
+                action_types=action_types,
+                interaction_mode=interaction_mode,
+                target_text=target_text,
+                previous_keyframe=previous_keyframe,
+                returned_frame=current_full,
+                current_keyframe=current_full,
+                turns_since_keyframe=turns_since_keyframe,
+                cartography=cartography,
+            )
             return current_full, current_full
+
+        assert previous_keyframe is not None
 
         diff_bounds = compute_diff_bounds(
             previous_keyframe.image_bytes, screenshot_bytes
         )
-        target_bounds = self._match_target_bounds(
-            previous_keyframe.cartography, metadata
-        )
+        matched_target = self._match_target(previous_keyframe.cartography, metadata)
+        target_bounds = matched_target.bounds if matched_target is not None else None
         selected_bounds = union_bounds(
             [bound for bound in (diff_bounds, target_bounds) if bound is not None]
         )
@@ -103,6 +134,20 @@ class VisualStatePlanner:
                     source="follow_up_capture",
                     cartography=cartography,
                 )
+            self._log_visual_decision(
+                decision="missing_diff_and_target_bounds",
+                metadata=metadata,
+                action_types=action_types,
+                interaction_mode=interaction_mode,
+                target_text=target_text,
+                previous_keyframe=previous_keyframe,
+                returned_frame=current_full,
+                current_keyframe=current_full,
+                turns_since_keyframe=turns_since_keyframe,
+                diff_bounds=diff_bounds,
+                matched_target=matched_target,
+                cartography=cartography,
+            )
             return current_full, current_full
 
         expanded = expand_bounds(
@@ -110,10 +155,8 @@ class VisualStatePlanner:
             screen_size=current_full.screen_size,
             margin_ratio=self.patch_margin_ratio,
         )
-        if (
-            expanded.area / float(max(current_full.bounds.area, 1))
-            > self.patch_max_area_ratio
-        ):
+        patch_area_ratio = expanded.area / float(max(current_full.bounds.area, 1))
+        if patch_area_ratio > self.patch_max_area_ratio:
             cartography = await generate_cartography(current_full, metadata)
             if cartography is not None:
                 current_full = build_keyframe(
@@ -121,6 +164,23 @@ class VisualStatePlanner:
                     source="follow_up_capture",
                     cartography=cartography,
                 )
+            self._log_visual_decision(
+                decision="patch_area_ratio_exceeded",
+                metadata=metadata,
+                action_types=action_types,
+                interaction_mode=interaction_mode,
+                target_text=target_text,
+                previous_keyframe=previous_keyframe,
+                returned_frame=current_full,
+                current_keyframe=current_full,
+                turns_since_keyframe=turns_since_keyframe,
+                diff_bounds=diff_bounds,
+                matched_target=matched_target,
+                selected_bounds=selected_bounds,
+                expanded_bounds=expanded,
+                patch_area_ratio=patch_area_ratio,
+                cartography=cartography,
+            )
             return current_full, current_full
 
         patch = build_patch(
@@ -131,37 +191,53 @@ class VisualStatePlanner:
             target_bounds=target_bounds,
             source="follow_up_patch",
         )
+        self._log_visual_decision(
+            decision="patch_selected",
+            metadata=metadata,
+            action_types=action_types,
+            interaction_mode=interaction_mode,
+            target_text=target_text,
+            previous_keyframe=previous_keyframe,
+            returned_frame=patch,
+            current_keyframe=current_full,
+            turns_since_keyframe=turns_since_keyframe,
+            diff_bounds=diff_bounds,
+            matched_target=matched_target,
+            selected_bounds=selected_bounds,
+            expanded_bounds=expanded,
+            patch_area_ratio=patch_area_ratio,
+        )
         return patch, current_full
 
-    def _should_force_keyframe(
+    def _resolve_keyframe_requirement(
         self,
         *,
         metadata: dict[str, Any],
         action_types: Sequence[str],
         previous_keyframe: VisualFrame | None,
         turns_since_keyframe: int,
-    ) -> bool:
+    ) -> str | None:
         if previous_keyframe is None:
-            return True
+            return "missing_previous_keyframe"
         if turns_since_keyframe >= self.keyframe_max_turns:
-            return True
+            return "keyframe_refresh_interval"
         if (
             str(metadata.get("interaction_mode") or "").strip().lower()
             == "observe_only"
         ):
-            return True
+            return "observe_only_mode"
         if any(
             str(action_type or "").strip().lower() in _KEYFRAME_ACTIONS
             for action_type in action_types
         ):
-            return True
-        return False
+            return "action_requires_keyframe"
+        return None
 
     @staticmethod
-    def _match_target_bounds(
+    def _match_target(
         cartography: CartographyMap | None,
         metadata: dict[str, Any],
-    ) -> VisualBounds | None:
+    ) -> CartographyTarget | None:
         if cartography is None or not cartography.targets:
             return None
         target_text = str(metadata.get("target") or "").strip().lower()
@@ -171,8 +247,83 @@ class VisualStatePlanner:
             if not target.label:
                 continue
             if target_text in target.label.lower():
-                return target.bounds
+                return target
         return None
+
+    @staticmethod
+    def _bounds_tuple(bounds: VisualBounds | None) -> tuple[int, int, int, int] | None:
+        if bounds is None:
+            return None
+        return bounds.as_tuple()
+
+    def _log_visual_decision(
+        self,
+        *,
+        decision: str,
+        metadata: dict[str, Any],
+        action_types: Sequence[str],
+        interaction_mode: str,
+        target_text: str,
+        previous_keyframe: VisualFrame | None,
+        returned_frame: VisualFrame,
+        current_keyframe: VisualFrame,
+        turns_since_keyframe: int,
+        diff_bounds: VisualBounds | None = None,
+        matched_target: CartographyTarget | None = None,
+        selected_bounds: VisualBounds | None = None,
+        expanded_bounds: VisualBounds | None = None,
+        patch_area_ratio: float | None = None,
+        cartography: CartographyMap | None = None,
+    ) -> None:
+        previous_cartography = (
+            previous_keyframe.cartography if previous_keyframe is not None else None
+        )
+        effective_cartography = cartography or previous_cartography
+        labels = (
+            [target.label for target in effective_cartography.targets if target.label]
+            if effective_cartography is not None
+            else []
+        )
+        logger.info(
+            "Computer Use visual frame selected",
+            extra={
+                "visual_decision": decision,
+                "visual_mode": self.visual_mode,
+                "visual_frame_kind": returned_frame.kind,
+                "visual_frame_id": returned_frame.frame_id,
+                "current_keyframe_id": current_keyframe.frame_id,
+                "previous_keyframe_id": (
+                    previous_keyframe.frame_id
+                    if previous_keyframe is not None
+                    else None
+                ),
+                "turns_since_keyframe": turns_since_keyframe,
+                "interaction_mode": interaction_mode,
+                "action_types": list(action_types),
+                "target": target_text or None,
+                "previous_has_cartography": bool(
+                    previous_cartography is not None and previous_cartography.targets
+                ),
+                "cartography_target_count": len(labels),
+                "cartography_labels": labels or None,
+                "matched_target_label": (
+                    matched_target.label if matched_target is not None else None
+                ),
+                "matched_target_bounds": (
+                    self._bounds_tuple(matched_target.bounds)
+                    if matched_target is not None
+                    else None
+                ),
+                "diff_bounds": self._bounds_tuple(diff_bounds),
+                "selected_bounds": self._bounds_tuple(selected_bounds),
+                "expanded_bounds": self._bounds_tuple(expanded_bounds),
+                "returned_frame_bounds": returned_frame.bounds.as_tuple(),
+                "patch_area_ratio": (
+                    round(patch_area_ratio, 6) if patch_area_ratio is not None else None
+                ),
+                "step_number": metadata.get("step_number"),
+            },
+        )
 
 
 __all__ = ["CartographyGenerator", "VisualStatePlanner"]

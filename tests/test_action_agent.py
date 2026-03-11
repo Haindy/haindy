@@ -11,7 +11,7 @@ from src.core.enhanced_types import (
     ExecutionResult,
     ValidationResult,
 )
-from src.core.types import ActionInstruction, ActionType, TestStep
+from src.core.types import ActionInstruction, ActionType, TestCase, TestStep
 
 
 def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,6 +64,84 @@ def test_build_computer_use_goal_generates_structured_prompt_when_needed() -> No
     assert "Action type: type" in goal
     assert "Target: Search field" in goal
     assert "Value: openai" in goal
+
+
+def test_build_action_session_metadata_preserves_mobile_app_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings(monkeypatch)
+    agent = ActionAgent()
+    step = TestStep(
+        step_number=4,
+        description="Open the configured app.",
+        action="open_app",
+        expected_result="App is foregrounded",
+        action_instruction=ActionInstruction(
+            action_type=ActionType.CLICK,
+            description="Open the configured app",
+            expected_outcome="App is foregrounded",
+        ),
+    )
+
+    metadata, environment, safety_identifier = agent._build_action_session_metadata(
+        step_session=None,
+        test_step=step,
+        instruction=step.action_instruction,
+        interaction_mode="execute",
+        current_url="android://screen",
+        context_lookup={
+            "environment": "mobile_adb",
+            "app_package": "co.playerup.app",
+            "app_activity": ".MainActivity",
+        },
+    )
+
+    assert environment == "mobile_adb"
+    assert safety_identifier
+    assert metadata["app_package"] == "co.playerup.app"
+    assert metadata["app_activity"] == ".MainActivity"
+    assert metadata["current_url"] == "android://screen"
+    assert metadata["response_reporting_scope"] == "state_only"
+
+
+def test_build_step_validation_prompt_scopes_verdict_to_current_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings(monkeypatch)
+    agent = ActionAgent()
+    test_case = TestCase(
+        test_id="TC002",
+        name="Case-insensitive sign-in",
+        description=(
+            "Verify sign-in succeeds and later confirm the displayed account email "
+            "is normalized."
+        ),
+        steps=[],
+    )
+    step = TestStep(
+        step_number=7,
+        description='Tap "Account Settings".',
+        action='Tap "Account Settings".',
+        expected_result=(
+            "The Account Settings screen is displayed and shows the account email "
+            "address."
+        ),
+    )
+
+    prompt = agent._build_step_validation_prompt(
+        test_case=test_case,
+        step=step,
+        action_results=[],
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert "Test case description:" not in prompt
+    assert (
+        "Evaluate ONLY whether this current step achieved its stated expected result."
+        in prompt
+    )
+    assert "Do NOT fail this step based on broader test-case goals" in prompt
 
 
 @pytest.mark.asyncio

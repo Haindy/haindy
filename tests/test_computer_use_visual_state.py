@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -115,6 +116,104 @@ async def test_visual_state_planner_uses_target_aware_patch_when_cartography_mat
     assert visual_frame.target_bounds == VisualBounds(x=40, y=30, width=30, height=20)
     assert current_keyframe.kind == "keyframe"
     generate_cartography.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
+    screenshot = _png_with_rect(width=200, height=120)
+    cartography = CartographyMap(
+        frame_id="vk_prev",
+        targets=(
+            CartographyTarget(
+                target_id="target_1",
+                label="email",
+                bounds=VisualBounds(x=20, y=10, width=80, height=30),
+                interaction_point=(60, 25),
+                confidence=0.95,
+            ),
+        ),
+        model="test-model",
+        provider="google",
+    )
+    previous_keyframe = build_keyframe(
+        screenshot,
+        source="test",
+        cartography=cartography,
+    )
+    planner = VisualStatePlanner(
+        visual_mode="keyframe_patch",
+        keyframe_max_turns=3,
+        patch_max_area_ratio=0.35,
+        patch_margin_ratio=0.12,
+    )
+    generate_cartography = AsyncMock(return_value=None)
+
+    with caplog.at_level(logging.INFO, logger="src.agents.computer_use.session"):
+        await planner.build_follow_up_frame(
+            screenshot_bytes=screenshot,
+            metadata={"target": "email"},
+            action_types=["click_at"],
+            previous_keyframe=previous_keyframe,
+            turns_since_keyframe=1,
+            generate_cartography=generate_cartography,
+        )
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Computer Use visual frame selected"
+    )
+    assert record.visual_decision == "patch_selected"
+    assert record.visual_frame_kind == "patch"
+    assert record.matched_target_label == "email"
+    assert record.cartography_labels == ["email"]
+
+
+@pytest.mark.asyncio
+async def test_initial_screenshot_seeding_enables_patch_on_first_follow_up(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    initial_screenshot = _png_with_rect(width=200, height=120)
+    follow_up_screenshot = _png_with_rect(
+        width=200,
+        height=120,
+        rect=(40, 30, 70, 50),
+    )
+    mock_browser.screenshot.return_value = follow_up_screenshot
+    turn = ComputerToolTurn(
+        call_id="call_seeded_patch",
+        action_type="click",
+        parameters={"type": "click"},
+    )
+
+    session._maybe_seed_initial_keyframe(initial_screenshot)
+    batch = await session._build_follow_up_batch(call_groups=[[turn]], metadata={})
+
+    assert batch.visual_frame is not None
+    assert batch.visual_frame.kind == "patch"
+    assert session._current_keyframe is not None
+    assert session._current_keyframe.kind == "keyframe"
+
+
+def test_initial_screenshot_seeding_does_not_override_existing_keyframe(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    existing = build_keyframe(_png_with_rect(width=100, height=100), source="existing")
+    session._current_keyframe = existing
+
+    session._maybe_seed_initial_keyframe(_png_with_rect(width=100, height=100))
+
+    assert session._current_keyframe is existing
 
 
 @pytest.mark.asyncio

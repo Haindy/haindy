@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.core.types import ActionType, StepIntent, TestState, TestStatus
+from src.runtime.execution_replay_service import ReplayExecutionResult
 from tests.support_test_runner import (
     _build_test_case,
     _StubActionAgent,
@@ -16,6 +17,18 @@ from tests.support_test_runner import (
     make_case_result,
     runner_factory,
 )
+
+
+class _TraceRecorder:
+    def __init__(self) -> None:
+        self.steps: list[dict[str, object]] = []
+        self.cache_events: list[dict[str, object]] = []
+
+    def record_step(self, **kwargs: object) -> None:
+        self.steps.append(dict(kwargs))
+
+    def record_cache_event(self, event: dict[str, object]) -> None:
+        self.cache_events.append(dict(event))
 
 
 @pytest.mark.asyncio
@@ -419,6 +432,150 @@ async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
     assert result.error_message == "Login form is not visible after action"
     assert verify_mock.await_count == 1
     assert runner._current_step_data["verification_mode"] == "ai"
+
+
+@pytest.mark.asyncio
+async def test_execute_step_replay_fallback_retries_with_failure_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runner = runner_factory(monkeypatch, tmp_path)
+    plan, case, step = _build_test_case()
+
+    replay_failure_path = tmp_path / "tcTC001_step1_replay_failure.png"
+    live_after_path = tmp_path / "tcTC001_step1_after.png"
+    trace = _TraceRecorder()
+
+    runner._current_test_plan = plan
+    runner._current_test_case = case
+    runner._current_test_case_actions = {"steps": []}
+    runner._execution_history = []
+    runner._trace = trace
+
+    monkeypatch.setattr(
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        make_capture_test_step_screenshot(tmp_path),
+    )
+    monkeypatch.setattr(
+        runner._replay_service,
+        "try_execution_replay",
+        AsyncMock(
+            return_value=ReplayExecutionResult(
+                action_record={
+                    "action_id": "execution_replay_test",
+                    "action_type": "execution_replay",
+                    "description": "Replay cached actions for step",
+                    "screenshots": {
+                        "before": str(tmp_path / "tcTC001_step1_before.png"),
+                        "after": str(replay_failure_path),
+                    },
+                },
+                actions_performed=[
+                    {
+                        "success": True,
+                        "action_type": "execution_replay",
+                        "outcome": "Replayed cached actions.",
+                        "confidence": 1.0,
+                        "driver_actions": [{"type": "click", "x": 10, "y": 20}],
+                    }
+                ],
+                verification={
+                    "verdict": "FAIL",
+                    "reasoning": "Replay left the email field corrupted",
+                    "actual_result": "Duplicated email text is visible",
+                    "confidence": 0.82,
+                },
+                replay_validation_wait_spent_ms=0,
+                replay_validation_wait_cycles=0,
+                replay_validation_wait_budget_remaining_ms=30000,
+                fallback_to_cu=True,
+                fallback_screenshot_bytes=b"replay-failure-shot",
+                fallback_screenshot_path=str(replay_failure_path),
+            )
+        ),
+    )
+
+    async def _fake_interpret_step(
+        step_arg, test_case_arg, case_result_arg, use_cache=True
+    ):
+        del step_arg, test_case_arg, case_result_arg
+        assert use_cache is False
+        assert runner._artifacts.latest_screenshot_bytes == b"replay-failure-shot"
+        assert runner._artifacts.latest_screenshot_path == str(replay_failure_path)
+        return (
+            [
+                {
+                    "type": "click",
+                    "target": "Email field",
+                    "description": "Refocus the email field",
+                    "critical": True,
+                }
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(runner, "_interpret_step", _fake_interpret_step)
+
+    async def _fake_execute_action(*args, **kwargs):
+        del args, kwargs
+        runner._artifacts.update_latest_snapshot(
+            b"live-after-shot",
+            str(live_after_path),
+            "step_1_after",
+        )
+        return {
+            "success": True,
+            "action_type": "click",
+            "target": "Email field",
+            "outcome": "Refocused the email field",
+            "confidence": 0.93,
+            "error": None,
+            "driver_actions": [{"type": "click", "x": 10, "y": 20}],
+        }
+
+    monkeypatch.setattr(runner, "_execute_action", _fake_execute_action)
+
+    async def _fake_verify_expected_outcome(**kwargs):
+        assert kwargs["screenshot_before"] == b"replay-failure-shot"
+        assert kwargs["screenshot_after"] == b"live-after-shot"
+        return {
+            "verdict": "PASS",
+            "reasoning": "Recovered from the dirty replay state",
+            "actual_result": "The email field is ready for clean input.",
+            "confidence": 0.91,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+        }
+
+    monkeypatch.setattr(
+        runner,
+        "_verify_expected_outcome",
+        _fake_verify_expected_outcome,
+    )
+    store_mock = AsyncMock()
+    persist_mock = AsyncMock()
+    invalidate_coord_mock = AsyncMock()
+    monkeypatch.setattr(runner, "_store_execution_replay", store_mock)
+    monkeypatch.setattr(runner, "_persist_coordinate_cache", persist_mock)
+    monkeypatch.setattr(runner, "_invalidate_coordinate_cache", invalidate_coord_mock)
+
+    result = await runner._execute_test_step(
+        step,
+        case,
+        make_case_result(case, steps_total=len(case.steps)),
+    )
+
+    assert result.status == TestStatus.PASSED
+    assert result.screenshot_before == str(replay_failure_path)
+    assert result.screenshot_after == str(live_after_path)
+    assert runner._current_step_data["replay_fallback_retry_attempt"] == 2
+    assert runner._current_step_actions
+    assert runner._current_step_actions[0]["action_type"] == "execution_replay"
+    assert trace.steps
+    assert trace.steps[-1]["attempt"] == 2
+    store_mock.assert_awaited_once()
+    persist_mock.assert_awaited_once()
+    invalidate_coord_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

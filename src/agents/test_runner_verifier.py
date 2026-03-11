@@ -131,7 +131,6 @@ class TestRunnerVerifier:
 """
 
         prompt_text = f"""I'm executing a test case: "{test_case.name}"
-Test case description: {test_case.description or "N/A"}
 
 Previous steps in this test case:
 {chr(10).join(history_context) if history_context else "None"}
@@ -147,7 +146,9 @@ Based on all this information:
 
 IMPORTANT: The "CU agent observation" fields above are real-time descriptions captured by the executor during the action, before the final screenshot was taken. Transient UI feedback such as toast messages, snackbars, and brief success banners may have auto-dismissed by the time the screenshot was captured. If the CU agent observation describes a success message or toast, treat that as strong evidence the action succeeded even if the message is no longer visible in the screenshot.
 
-1. Did this step achieve its intended purpose? Consider the validation results and reasoning from the action execution, not just literal text matching. Look at the overall intent of the step and whether it was accomplished.
+1. Did this step achieve its intended purpose? Evaluate ONLY whether this current step achieved its stated expected result.
+   - Do NOT fail this step based on broader test-case goals or assertions assigned to earlier/later steps unless they are explicitly part of this step's expected result.
+   - If a CU agent observation includes extra details outside this step's scope, ignore those extras unless they are directly required by this step and supported by the visible evidence.
 
 2. Is this failure (if failed) a blocker that would prevent the next test case from running successfully?
    Next test case: {next_test_case.name if next_test_case else "None (last test case)"}

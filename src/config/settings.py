@@ -478,10 +478,10 @@ class Settings(BaseSettings):
         description="Log file for raw model prompts/responses",
         validation_alias=AliasChoices("MODEL_LOG_PATH", "HAINDY_MODEL_LOG_PATH"),
     )
-    max_screenshots: int = Field(
-        default=12,
+    max_screenshots: int | None = Field(
+        default=None,
         ge=1,
-        description="Cap on retained screenshots per run",
+        description="Optional cap on retained screenshots per run; unset preserves all evidence",
         validation_alias=AliasChoices("HAINDY_MAX_SCREENSHOTS"),
     )
 

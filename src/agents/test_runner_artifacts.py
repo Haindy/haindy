@@ -239,7 +239,7 @@ class TestRunnerArtifacts:
         if self._evidence is None:
             max_screenshots = getattr(self._settings, "max_screenshots", None)
             if max_screenshots is None:
-                max_screenshots = 10_000
+                return
             self._evidence = EvidenceManager(
                 path.parent,
                 max_screenshots,

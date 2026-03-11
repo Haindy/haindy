@@ -335,6 +335,7 @@ class ComputerUseSession(
         env_mode = self._normalize_environment_name(
             environment or metadata.get("environment") or self._default_environment
         )
+        self._maybe_seed_initial_keyframe(initial_screenshot)
         try:
             if self._provider == "google":
                 return await self._run_google(
@@ -424,6 +425,7 @@ class ComputerUseSession(
         env_mode = self._normalize_environment_name(
             environment or metadata.get("environment") or self._default_environment
         )
+        self._maybe_seed_initial_keyframe(initial_screenshot)
         try:
             if self._provider == "google":
                 return await self._run_google(
