@@ -59,6 +59,7 @@ class ComputerUseFollowUpBatch:
     screenshot_bytes: bytes = b""
     screenshot_base64: str = ""
     current_url: str = "desktop://"
+    interaction_mode: str = ""
     grounding_text: str | None = None
     reminder_text: str | None = None
     error_text: str | None = None
@@ -129,6 +130,7 @@ def build_follow_up_batch(
         screenshot_bytes=screenshot_bytes,
         screenshot_base64=encode_png_base64(screenshot_bytes),
         current_url=current_url or "desktop://",
+        interaction_mode=normalized_mode,
         grounding_text=build_grounding_text(calls, current_url or "desktop://"),
         reminder_text=build_reminder_text(normalized_mode),
         error_text=extract_first_error_text(calls),
@@ -185,11 +187,6 @@ def build_reminder_text(interaction_mode: str) -> str | None:
             "Reminder: Observe-only mode is active. Do not interact with the UI. "
             "Do not call click_at, type_text_at, key_combination, or drag actions. "
             "Only inspect and report findings."
-        )
-    if interaction_mode:
-        return (
-            "Reminder: Execute mode is active. Complete the requested interaction "
-            "directly without asking for confirmation."
         )
     return None
 

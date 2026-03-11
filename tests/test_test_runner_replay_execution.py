@@ -196,6 +196,93 @@ async def test_replay_verification_uses_budget_cap_and_falls_back(
 
 
 @pytest.mark.asyncio
+async def test_replay_fallback_captures_failure_screenshot_for_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runner = runner_factory(monkeypatch, tmp_path)
+    plan, case, step = _build_test_case()
+
+    runner._current_test_plan = plan
+    runner._current_step_actions = []
+    runner._current_step_data = {}
+
+    async def _fake_capture_test_step_screenshot(*, suffix: str, **kwargs):
+        test_case = kwargs["test_case"]
+        step_obj = kwargs["step"]
+        del kwargs
+        screenshot_bytes = {
+            "after": b"replay-after",
+            "replay_failure": b"replay-failure",
+        }.get(suffix, b"default")
+        return SimpleNamespace(
+            screenshot_bytes=screenshot_bytes,
+            screenshot_path=str(
+                tmp_path
+                / f"tc{test_case.test_id}_step{step_obj.step_number}_{suffix}.png"
+            ),
+        )
+
+    monkeypatch.setattr(
+        runner._artifacts,
+        "capture_test_step_screenshot",
+        _fake_capture_test_step_screenshot,
+    )
+    replay_key = make_replay_key(runner, plan, case, step)
+    monkeypatch.setattr(
+        runner._replay_service,
+        "execution_replay_key",
+        AsyncMock(return_value=replay_key),
+    )
+    monkeypatch.setattr(
+        runner._execution_replay_cache,
+        "lookup",
+        Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
+    )
+    invalidate_mock = Mock()
+    monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
+    monkeypatch.setattr(
+        "src.runtime.execution_replay_service.replay_driver_actions",
+        AsyncMock(),
+    )
+    verify_mock = AsyncMock(
+        return_value={
+            "verdict": "FAIL",
+            "reasoning": "Field contents are corrupted after replay",
+            "actual_result": "The email field contains duplicated text",
+            "confidence": 0.81,
+            "is_blocker": False,
+            "blocker_reasoning": "",
+            "request_additional_wait": False,
+            "recommended_wait_ms": 0,
+            "wait_reasoning": "",
+        }
+    )
+    monkeypatch.setattr(runner, "_verify_expected_outcome", verify_mock)
+
+    step_result = make_step_result(step)
+    result = await runner._try_execution_replay(
+        step=step,
+        test_case=case,
+        step_result=step_result,
+        screenshot_before=b"before",
+        execution_history=[],
+        next_test_case=None,
+    )
+
+    assert result is None
+    invalidate_mock.assert_called_once_with(replay_key)
+    assert step_result.status == TestStatus.FAILED
+    assert step_result.screenshot_after is not None
+    assert step_result.screenshot_after.endswith("_replay_failure.png")
+    assert len(runner._current_step_actions) == 1
+    assert runner._current_step_actions[0]["action_type"] == "execution_replay"
+    assert runner._current_step_data["execution_replay_fallback"] == {
+        "screenshot_bytes": b"replay-failure",
+        "screenshot_path": str(tmp_path / "tcTC001_step1_replay_failure.png"),
+    }
+
+
+@pytest.mark.asyncio
 async def test_replay_setup_step_uses_ai_verification(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

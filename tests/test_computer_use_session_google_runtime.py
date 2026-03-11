@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import warnings
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import src.agents.computer_use.session as cu_session_module
+from src.agents.computer_use.visual_state import VisualBounds, VisualFrame
 from tests.computer_use_session_support import make_google_client, make_session
 
 pytest_plugins = ("tests.computer_use_session_support",)
@@ -281,3 +285,229 @@ async def test_google_computer_use_non_retryable_error_does_not_retry(
 
     assert generate_content.call_count == 1
     sleep_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_suppresses_known_package_warnings(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "google"
+
+    class _Interactions:
+        async def create(self, **kwargs):
+            return {"id": "ok"}
+
+    class _AioClient:
+        @property
+        def interactions(self):
+            warnings.warn(
+                "Interactions usage is experimental and may change in future versions.",
+                UserWarning,
+                stacklevel=1,
+            )
+            warnings.warn(
+                "Async interactions client cannot use aiohttp, fallingback to httpx.",
+                UserWarning,
+                stacklevel=1,
+            )
+            return _Interactions()
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=type("GoogleClient", (), {"aio": _AioClient()})(),
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        response = await session._create_google_response(
+            {
+                "api_surface": "interactions",
+                "model": "gemini-3-flash-preview",
+                "input": [],
+                "tools": [],
+            }
+        )
+
+    assert response == {"id": "ok"}
+    assert caught == []
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_preserves_unrelated_warnings(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "google"
+
+    class _Interactions:
+        async def create(self, **kwargs):
+            warnings.warn("Unrelated interactions warning.", UserWarning, stacklevel=1)
+            return {"id": "ok"}
+
+    class _AioClient:
+        @property
+        def interactions(self):
+            warnings.warn(
+                "Interactions usage is experimental and may change in future versions.",
+                UserWarning,
+                stacklevel=1,
+            )
+            warnings.warn(
+                "Async interactions client cannot use aiohttp, fallingback to httpx.",
+                UserWarning,
+                stacklevel=1,
+            )
+            return _Interactions()
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=type("GoogleClient", (), {"aio": _AioClient()})(),
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        response = await session._create_google_response(
+            {
+                "api_surface": "interactions",
+                "model": "gemini-3-flash-preview",
+                "input": [],
+                "tools": [],
+            }
+        )
+
+    assert response == {"id": "ok"}
+    assert [str(item.message) for item in caught] == ["Unrelated interactions warning."]
+
+
+@pytest.mark.asyncio
+async def test_google_interactions_failure_logs_payload_summary(
+    mock_client, mock_browser, session_settings, caplog
+):
+    session_settings.cu_provider = "google"
+    interactions_create = AsyncMock(
+        side_effect=RuntimeError(
+            "400 INVALID_ARGUMENT. {'error': {'message': 'Invalid input received.'}}"
+        )
+    )
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=make_google_client(interactions_create_mock=interactions_create),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="src.agents.computer_use.session"):
+        with pytest.raises(RuntimeError, match="Invalid input received"):
+            await session._create_google_response(
+                {
+                    "api_surface": "interactions",
+                    "model": "gemini-3-flash-preview",
+                    "previous_interaction_id": "int_prev",
+                    "input": [
+                        {
+                            "type": "function_result",
+                            "name": "type_text_at",
+                            "call_id": "call_1",
+                            "result": {
+                                "status": "executed",
+                                "items": [
+                                    {
+                                        "type": "text",
+                                        "text": 'current_url="android://screen"',
+                                    },
+                                    {
+                                        "type": "image",
+                                        "data": "ZmFrZQ==",
+                                        "mime_type": "image/png",
+                                    },
+                                ],
+                            },
+                        }
+                    ],
+                    "tools": [{"type": "computer_use"}],
+                }
+            )
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Google Computer Use request failed"
+    )
+    assert record.payload_summary["previous_interaction_id"] == "int_prev"
+    assert record.payload_summary["input_summary"][0]["type"] == "function_result"
+    assert record.payload_summary["tool_types"] == ["computer_use"]
+
+
+@pytest.mark.asyncio
+async def test_google_cartography_logs_request_payload(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+    session._create_google_response = AsyncMock(  # type: ignore[assignment]
+        return_value={
+            "outputs": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "targets": [
+                                {
+                                    "target_id": "target_1",
+                                    "label": "Email",
+                                    "bbox": {
+                                        "x": 20,
+                                        "y": 30,
+                                        "width": 40,
+                                        "height": 20,
+                                    },
+                                    "interaction_point": {"x": 35, "y": 40},
+                                    "confidence": 0.9,
+                                }
+                            ]
+                        }
+                    ),
+                }
+            ]
+        }
+    )
+
+    await session._generate_google_cartography_map(
+        frame=VisualFrame(
+            frame_id="vk_test",
+            kind="keyframe",
+            image_bytes=b"fake_png_bytes",
+            screen_size=(100, 100),
+            bounds=VisualBounds(x=0, y=0, width=100, height=100),
+        ),
+        metadata={"target": 'Email field labeled "Email"', "step_number": 3},
+    )
+
+    entries = [
+        json.loads(line)
+        for line in session_settings.model_log_path.read_text().splitlines()
+        if line.strip()
+    ]
+    entry = next(
+        entry
+        for entry in entries
+        if entry.get("agent") == "computer_use.google.cartography"
+    )
+    assert entry["request_payload"]["payload_type"] == "cartography"
+    assert entry["request_payload"]["request"]["input"][0]["type"] == "text"
+    assert entry["request_payload"]["request"]["input"][1]["data"].startswith(
+        "<<base64:"
+    )
+    assert entry["metadata"]["target"] == 'Email field labeled "Email"'

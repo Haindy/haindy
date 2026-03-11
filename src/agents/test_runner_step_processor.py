@@ -153,6 +153,39 @@ class TestRunnerStepProcessor:
                 replay_used = True
                 return cast(StepResult, replay_result)
 
+            replay_fallback_raw = runner._current_step_data.pop(
+                "execution_replay_fallback",
+                None,
+            )
+            if isinstance(replay_fallback_raw, dict):
+                fallback_screenshot_bytes = replay_fallback_raw.get("screenshot_bytes")
+                fallback_screenshot_path_raw = replay_fallback_raw.get(
+                    "screenshot_path"
+                )
+                fallback_screenshot_path = (
+                    str(fallback_screenshot_path_raw)
+                    if fallback_screenshot_path_raw is not None
+                    else None
+                )
+                if isinstance(
+                    fallback_screenshot_bytes,
+                    (bytes, bytearray, memoryview),
+                ):
+                    fallback_screenshot = bytes(fallback_screenshot_bytes)
+                    screenshot_before = fallback_screenshot
+                    if fallback_screenshot_path:
+                        step_result.screenshot_before = fallback_screenshot_path
+                        runner._artifacts.update_latest_snapshot(
+                            fallback_screenshot,
+                            fallback_screenshot_path,
+                            f"step_{step.step_number}_replay_failure",
+                        )
+                attempt += 1
+                runner._current_step_data["replay_fallback_retry_attempt"] = attempt
+                runner._current_step_data["replay_fallback_retry_screenshot"] = (
+                    fallback_screenshot_path
+                )
+
             latest_action_results: list[dict[str, Any]] = []
             while True:
                 actions, plan_cache_hit = await runner._interpret_step(
@@ -692,7 +725,14 @@ class TestRunnerStepProcessor:
             replay_result.replay_validation_wait_budget_remaining_ms
         )
         runner._current_step_data["verification_result"] = replay_result.verification
+        runner._current_step_data["replay_verification_result"] = (
+            replay_result.verification
+        )
         if replay_result.fallback_to_cu:
+            runner._current_step_data["execution_replay_fallback"] = {
+                "screenshot_bytes": replay_result.fallback_screenshot_bytes,
+                "screenshot_path": replay_result.fallback_screenshot_path,
+            }
             return None
         return step_result
 

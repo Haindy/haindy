@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from src.agents.computer_use.common import normalize_response
+from types import SimpleNamespace
+
+from src.agents.computer_use.common import (
+    extract_assistant_text,
+    extract_google_function_call_envelopes,
+    normalize_response,
+)
 
 
 def test_normalize_response_suppresses_model_dump_warnings() -> None:
@@ -18,3 +24,37 @@ def test_normalize_response_suppresses_model_dump_warnings() -> None:
 
     assert normalize_response(response) == {"id": "resp_test"}
     assert response.calls == [{"warnings": "none"}]
+
+
+def test_normalize_response_preserves_missing_google_candidate_attributes() -> None:
+    function_call = SimpleNamespace(name="click_at", args={"x": 12, "y": 34}, id="c1")
+    text_part = SimpleNamespace(text="Done.")
+    response_candidates = [
+        SimpleNamespace(
+            content=SimpleNamespace(
+                parts=[
+                    SimpleNamespace(function_call=function_call),
+                    text_part,
+                ]
+            )
+        )
+    ]
+
+    class DummyGoogleResponse:
+        def model_dump(self, **kwargs: object) -> dict[str, object]:
+            del kwargs
+            return {"id": "resp_google", "candidates": []}
+
+        @property
+        def candidates(self) -> list[object]:
+            return response_candidates
+
+    normalized = normalize_response(DummyGoogleResponse())
+
+    envelopes = extract_google_function_call_envelopes(normalized)
+    assert normalized["candidates"] == response_candidates
+    assert len(envelopes) == 1
+    assert envelopes[0].function_call.name == "click_at"
+    assert envelopes[0].function_call.args == {"x": 12, "y": 34}
+    assert envelopes[0].function_call.id == "c1"
+    assert extract_assistant_text(normalized) == "Done."

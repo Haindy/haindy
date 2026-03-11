@@ -56,6 +56,7 @@ def test_build_follow_up_batch_groups_actions_and_renders_grounding() -> None:
         }
     ]
     assert batch.current_url == "https://example.com"
+    assert batch.interaction_mode == "observe_only"
     assert batch.screenshot_base64 == "ZnJlc2hfcG5n"
     assert batch.reminder_text is not None
     assert "Observe-only mode is active" in batch.reminder_text
@@ -98,6 +99,7 @@ def test_build_follow_up_batch_preserves_google_metadata_and_extracts_error() ->
 
     call_result = batch.calls[0]
     assert batch.current_url == "desktop://"
+    assert batch.interaction_mode == ""
     assert batch.error_text == "Execution error: click failed"
     assert call_result.provider_metadata == {
         "google_function_call_id": "google_call_5",

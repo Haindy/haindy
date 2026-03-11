@@ -3,6 +3,7 @@ Tests for HAINDY logging utilities.
 """
 
 import logging
+from datetime import datetime, timezone
 
 import pytest
 
@@ -95,3 +96,32 @@ def test_human_readable_formatter_prefers_agent_name(
     output = formatter.format(record)
 
     assert " | Action Agent | Prompt: Scroll through the article" in output
+
+
+def test_human_readable_formatter_serializes_datetime_in_structured_extra(
+    formatter: HumanReadableFormatter,
+) -> None:
+    """Formatter should not fail when structured extras contain datetimes."""
+    record = logging.LogRecord(
+        name="src.agents.computer_use.session",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=30,
+        msg="Computer Use max turns reached (google)",
+        args=(),
+        exc_info=None,
+    )
+    record.created = 0.0
+    record.last_response = {
+        "id": "resp_123",
+        "outputs": [
+            {
+                "timestamp": datetime(2026, 3, 9, 13, 0, 0, tzinfo=timezone.utc),
+            }
+        ],
+    }
+
+    output = formatter.format(record)
+
+    assert "Computer Use max turns reached (google)" in output
+    assert '"timestamp": "2026-03-09 13:00:00+00:00"' in output

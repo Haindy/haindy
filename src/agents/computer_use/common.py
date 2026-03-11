@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from types import SimpleNamespace
 from typing import Any, cast
 
 from src.core.enhanced_types import ComputerToolTurn
@@ -19,19 +20,43 @@ def normalize_response(response: Any) -> dict[str, Any]:
     """Normalize provider response objects into standard dictionaries."""
     if response is None:
         return {}
-    if hasattr(response, "model_dump"):
+
+    payload: dict[str, Any] | None = None
+    if isinstance(response, dict):
+        payload = dict(response)
+    elif hasattr(response, "model_dump"):
         try:
-            return cast(dict[str, Any], response.model_dump(warnings="none"))
+            payload = cast(dict[str, Any], response.model_dump(warnings="none"))
         except TypeError:
-            return cast(dict[str, Any], response.model_dump())
-    if hasattr(response, "to_dict"):
+            payload = cast(dict[str, Any], response.model_dump())
+    elif hasattr(response, "to_dict"):
         try:
-            return cast(dict[str, Any], response.to_dict())
+            payload = cast(dict[str, Any], response.to_dict())
         except Exception:
             pass
-    if isinstance(response, dict):
-        return response
-    raise ComputerUseExecutionError(f"Unsupported response type: {type(response)}")
+    if payload is None:
+        raise ComputerUseExecutionError(f"Unsupported response type: {type(response)}")
+
+    # Some Google SDK response objects keep candidate payloads on attributes even when
+    # model_dump()/to_dict() omits them. Preserve those fields so downstream parsers can
+    # continue handling both object-backed fixtures and SDK objects consistently.
+    if not isinstance(response, dict):
+        for key in (
+            "id",
+            "status",
+            "output",
+            "outputs",
+            "content",
+            "candidates",
+            "prompt_feedback",
+        ):
+            if not hasattr(response, key):
+                continue
+            value = getattr(response, key)
+            if key not in payload or payload[key] in (None, [], {}):
+                payload[key] = value
+
+    return payload
 
 
 def normalize_key_sequence(key: str) -> str:
@@ -147,8 +172,41 @@ def extract_google_function_call_envelopes(
 ) -> list[GoogleFunctionCallEnvelope]:
     """Extract ordered function_call parts from a selected Google candidate."""
     envelopes: list[GoogleFunctionCallEnvelope] = []
-    candidates = getattr(response_obj, "candidates", []) or []
-    if not candidates:
+    response_dict = (
+        response_obj
+        if isinstance(response_obj, dict)
+        else normalize_response(response_obj)
+    )
+
+    outputs = response_dict.get("outputs") or []
+    if isinstance(outputs, list):
+        sequence = 0
+        for output_index, output in enumerate(outputs):
+            if not isinstance(output, dict):
+                continue
+            if str(output.get("type") or "").strip().lower() != "function_call":
+                continue
+            raw_arguments = output.get("arguments") or output.get("args") or {}
+            if not isinstance(raw_arguments, dict):
+                raw_arguments = {}
+            sequence += 1
+            envelopes.append(
+                GoogleFunctionCallEnvelope(
+                    function_call=SimpleNamespace(
+                        name=output.get("name"),
+                        args=raw_arguments,
+                        id=output.get("id"),
+                    ),
+                    sequence=sequence,
+                    candidate_index=0,
+                    part_index=output_index,
+                )
+            )
+        if envelopes:
+            return envelopes
+
+    candidates = response_dict.get("candidates") or []
+    if not isinstance(candidates, list) or not candidates:
         return envelopes
 
     selected_index = candidate_index
@@ -156,16 +214,34 @@ def extract_google_function_call_envelopes(
         selected_index = 0
 
     candidate = candidates[selected_index]
-    content = getattr(candidate, "content", None)
+    if isinstance(candidate, dict):
+        content = candidate.get("content")
+    else:
+        content = getattr(candidate, "content", None)
     if not content:
         return envelopes
 
     sequence = 0
-    parts = getattr(content, "parts", []) or []
+    if isinstance(content, dict):
+        parts = content.get("parts") or []
+    else:
+        parts = getattr(content, "parts", []) or []
     for part_index, part in enumerate(parts):
-        func_call = getattr(part, "function_call", None)
+        if isinstance(part, dict):
+            func_call = part.get("function_call") or part.get("functionCall")
+        else:
+            func_call = getattr(part, "function_call", None)
         if not func_call:
             continue
+        if isinstance(func_call, dict):
+            raw_arguments = func_call.get("args") or func_call.get("arguments") or {}
+            if not isinstance(raw_arguments, dict):
+                raw_arguments = {}
+            func_call = SimpleNamespace(
+                name=func_call.get("name"),
+                args=raw_arguments,
+                id=func_call.get("id"),
+            )
         sequence += 1
         envelopes.append(
             GoogleFunctionCallEnvelope(
@@ -183,6 +259,28 @@ def extract_google_computer_calls(
 ) -> list[dict[str, Any]]:
     """Extract function/call items from a Google response."""
     calls: list[dict[str, Any]] = []
+    outputs = response_dict.get("outputs") or []
+    for output in outputs:
+        if not isinstance(output, dict):
+            continue
+        if output.get("type") != "function_call":
+            continue
+        arguments = output.get("arguments") or {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        calls.append(
+            {
+                "id": output.get("id") or output.get("name"),
+                "call_id": output.get("id") or output.get("name"),
+                "action": {
+                    "type": output.get("name"),
+                    **arguments,
+                },
+            }
+        )
+    if calls:
+        return calls
+
     output_items = response_dict.get("output", [])
     for item in output_items:
         if item.get("type") in {"function_call", "computer_call"}:
@@ -239,12 +337,22 @@ def extract_anthropic_computer_calls(
 
 def extract_assistant_text(response_dict: dict[str, Any]) -> str | None:
     """Extract assistant text output from a response."""
+    texts: list[str] = []
+
+    for output in response_dict.get("outputs") or []:
+        if not isinstance(output, dict):
+            continue
+        if output.get("type") != "text":
+            continue
+        text = output.get("text")
+        if isinstance(text, str) and text:
+            texts.append(text)
+
     messages = [
         item
         for item in response_dict.get("output", [])
         if item.get("type") == "message"
     ]
-    texts: list[str] = []
     for message in messages:
         for content in message.get("content", []):
             if content.get("type") == "output_text":
@@ -252,10 +360,21 @@ def extract_assistant_text(response_dict: dict[str, Any]) -> str | None:
     if not texts:
         candidates = response_dict.get("candidates") or []
         for candidate in candidates:
-            content = candidate.get("content") or {}
-            parts = content.get("parts") or []
+            if isinstance(candidate, dict):
+                content = candidate.get("content") or {}
+            else:
+                content = getattr(candidate, "content", None) or {}
+            if isinstance(content, dict):
+                parts = content.get("parts") or []
+            else:
+                parts = getattr(content, "parts", []) or []
             for part in parts:
-                text = part.get("text") or part.get("output_text")
+                if isinstance(part, dict):
+                    text = part.get("text") or part.get("output_text")
+                else:
+                    text = getattr(part, "text", None) or getattr(
+                        part, "output_text", None
+                    )
                 if text:
                     texts.append(text)
     if not texts:

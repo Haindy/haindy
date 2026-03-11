@@ -179,9 +179,10 @@ class ActionAgent(BaseAgent):
 
     def supports_step_scoped_validation(self) -> bool:
         """Return True when this agent can reuse one CU session across a step."""
-        return (
-            str(getattr(self.settings, "cu_provider", "")).strip().lower() == "openai"
-        )
+        return str(getattr(self.settings, "cu_provider", "")).strip().lower() in {
+            "openai",
+            "google",
+        }
 
     async def begin_step_session(
         self,
@@ -279,14 +280,31 @@ class ActionAgent(BaseAgent):
             {
                 "target": instruction.target,
                 "value": instruction.value,
+                "expected_outcome": instruction.expected_outcome,
                 "interaction_mode": interaction_mode,
+                "response_reporting_scope": self._resolve_response_reporting_scope(
+                    instruction
+                ),
                 "environment": environment,
                 "safety_identifier": safety_identifier,
             }
         )
+        app_package = str(context_lookup.get("app_package") or "").strip()
+        app_activity = str(context_lookup.get("app_activity") or "").strip()
+        if app_package:
+            metadata["app_package"] = app_package
+        if app_activity:
+            metadata["app_activity"] = app_activity
         if current_url:
             metadata["current_url"] = current_url
         return metadata, environment, safety_identifier
+
+    @staticmethod
+    def _resolve_response_reporting_scope(instruction: ActionInstruction) -> str:
+        """Classify how detailed the CU agent's final confirmation may be."""
+        if instruction.action_type in {ActionType.ASSERT, ActionType.TYPE}:
+            return "detailed"
+        return "state_only"
 
     @staticmethod
     def _format_execution_history(execution_history: list[dict[str, Any]]) -> str:
@@ -368,7 +386,6 @@ class ActionAgent(BaseAgent):
         return f"""We have finished executing one test step inside this same Computer Use conversation.
 
 Original test case: "{test_case.name}"
-Test case description: {test_case.description or "N/A"}
 
 Previous steps in this test case:
 {self._format_execution_history(execution_history)}
@@ -385,7 +402,9 @@ Do not ask for more screenshots, do not call tools, and do not restart the analy
 
 IMPORTANT:
 - The "CU agent observation" fields above are real-time descriptions captured during execution.
-- Consider the overall intent of the step, not just literal text matching.
+- Evaluate ONLY whether this current step achieved its stated expected result.
+- Do NOT fail this step based on broader test-case goals or assertions assigned to earlier/later steps unless they are explicitly part of this step's expected result.
+- If a CU agent observation includes extra details outside this step's scope, ignore those extras unless they are directly required by this step and supported by the visible evidence already in the conversation.
 - Return a final verdict for the step, not for any single sub-action.
 
 Determine:
@@ -1102,7 +1121,10 @@ Respond with JSON only:
 
         start_ts = time.perf_counter()
         try:
-            if step_session is not None and step_session.provider == "openai":
+            if step_session is not None and step_session.provider in {
+                "openai",
+                "google",
+            }:
                 session_result = await session.execute_step_action(
                     goal,
                     initial_screenshot,

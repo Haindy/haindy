@@ -76,6 +76,7 @@ class OpenAIComputerUseMixin:
             goal, environment, viewport_width, viewport_height
         )
         goal = self._apply_openai_localization_guidance(goal, environment)
+        goal = self._apply_interaction_mode_guidance(goal, metadata)
         del initial_screenshot
 
         request_payload = self._build_openai_action_request(

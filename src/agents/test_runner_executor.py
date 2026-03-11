@@ -139,6 +139,7 @@ class TestRunnerExecutor:
             state_context = (
                 request.state_context if isinstance(request.state_context, dict) else {}
             )
+            entry_setup = state_context.get("entry_setup") or {}
             automation_backend = normalize_automation_backend(
                 state_context.get("automation_backend"),
                 default=runtime_spec.automation_backend,
@@ -194,6 +195,16 @@ class TestRunnerExecutor:
                 "automation_backend": automation_backend,
                 "target_type": target_type,
                 "environment": runtime_spec.name,
+                "app_package": (
+                    state_context.get("app_package")
+                    or entry_setup.get("app_package")
+                    or ""
+                ),
+                "app_activity": (
+                    state_context.get("app_activity")
+                    or entry_setup.get("app_activity")
+                    or ""
+                ),
                 "cache_label": (
                     step.cache_label
                     or action.get("target")
