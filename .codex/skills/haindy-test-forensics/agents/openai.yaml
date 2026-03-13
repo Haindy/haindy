@@ -1,0 +1,4 @@
+interface:
+  display_name: "Haindy Test Forensics"
+  short_description: "Forensics for failed Haindy runs from data artifacts"
+  default_prompt: "Use $haindy-test-forensics to investigate the last failed HAINDY test run, reconstruct the high-level sequence of events, explain the issue, and propose likely fixes from the run artifacts in data/."
