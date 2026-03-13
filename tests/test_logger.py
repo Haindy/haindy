@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.monitoring.logger import HumanReadableFormatter
+from src.monitoring.logger import HumanReadableFormatter, get_logger, setup_logging
 
 
 @pytest.fixture()
@@ -125,3 +125,29 @@ def test_human_readable_formatter_serializes_datetime_in_structured_extra(
 
     assert "Computer Use max turns reached (google)" in output
     assert '"timestamp": "2026-03-09 13:00:00+00:00"' in output
+
+
+def test_setup_logging_honors_debug_level_for_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text-mode console logging should emit DEBUG records when configured."""
+    setup_logging(log_level="DEBUG", log_format="text", log_file=None)
+
+    logger = get_logger("tests.logger")
+    logger.debug("debug line should be visible")
+
+    captured = capsys.readouterr()
+
+    assert "debug line should be visible" in captured.out
+    assert "[DEBUG]" in captured.out
+
+
+def test_setup_logging_suppresses_noisy_third_party_debug_loggers() -> None:
+    """Third-party wire/debug loggers should stay quiet in HAINDY debug mode."""
+    setup_logging(log_level="DEBUG", log_format="text", log_file=None)
+
+    assert logging.getLogger("google.genai").getEffectiveLevel() == logging.WARNING
+    assert (
+        logging.getLogger("PIL.PngImagePlugin").getEffectiveLevel() == logging.WARNING
+    )
+    assert logging.getLogger("tests.logger").getEffectiveLevel() == logging.DEBUG

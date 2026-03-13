@@ -171,6 +171,20 @@ _MESSAGE_HIGHLIGHTS: list[tuple[str, str]] = [
     ("Run trace written", _ANSI_GREEN),
 ]
 
+_THIRD_PARTY_LOGGER_LEVELS: dict[str, int] = {
+    # Network/client internals are too noisy at DEBUG and can dump large request
+    # payload structures that do not help normal HAINDY debugging.
+    "openai": logging.WARNING,
+    "httpx": logging.WARNING,
+    "httpcore": logging.WARNING,
+    "asyncio": logging.WARNING,
+    "google": logging.WARNING,
+    "google.genai": logging.WARNING,
+    # Pillow's PNG parser emits chunk-by-chunk debug spam when root logging is DEBUG.
+    "PIL": logging.WARNING,
+    "PIL.PngImagePlugin": logging.WARNING,
+}
+
 
 class HumanReadableFormatter(logging.Formatter):
     """Render log lines in a compact human-friendly layout."""
@@ -351,10 +365,10 @@ def setup_logging(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(HumanReadableFormatter())
 
-    if format_type == "json":
-        console_handler.setLevel(numeric_level)
-    else:
-        console_handler.setLevel(max(numeric_level, logging.INFO))
+    # Honor the configured log level for both JSON and human-readable output.
+    # The previous text-mode INFO clamp made `--debug` ineffective unless the
+    # caller also switched to JSON logging.
+    console_handler.setLevel(numeric_level)
 
     # Wrap with sanitizing handler if needed
     if sanitize_logs and format_type != "json":  # JSON formatter already sanitizes
@@ -381,10 +395,9 @@ def setup_logging(
     # Set root logger level
     root_logger.setLevel(numeric_level)
 
-    # Configure specific loggers
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    # Keep noisy third-party libraries quiet even when HAINDY runs in debug mode.
+    for logger_name, logger_level in _THIRD_PARTY_LOGGER_LEVELS.items():
+        logging.getLogger(logger_name).setLevel(logger_level)
 
     # Log startup message
     logger = logging.getLogger("haindy")
