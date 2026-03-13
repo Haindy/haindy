@@ -7,134 +7,171 @@ import logging
 import shutil
 from asyncio import subprocess as aio_subprocess
 from collections.abc import Iterable, Sequence
-from typing import cast
+from typing import Any, cast
 
-from evdev import AbsInfo, UInput, ecodes
-from evdev.uinput import UInputError
+try:
+    from evdev import AbsInfo, UInput, ecodes
+    from evdev.uinput import UInputError as _ImportedUInputError
+
+    UInputError = _ImportedUInputError
+
+    _EVDEV_AVAILABLE = True
+    _EVDEV_IMPORT_ERROR: Exception | None = None
+except ImportError as exc:
+    AbsInfo = cast(Any, None)
+    UInput = cast(Any, None)
+    ecodes = cast(Any, None)
+
+    class _FallbackUInputError(RuntimeError):
+        """Fallback error type when evdev is unavailable."""
+
+    UInputError = _FallbackUInputError
+    _EVDEV_AVAILABLE = False
+    _EVDEV_IMPORT_ERROR = exc
 
 logger = logging.getLogger(__name__)
 
-# Scancode map (set 1 / Linux input) keyed by EV_KEY code. Extended (E0-prefixed)
-# scancodes are encoded as single integers, e.g., 0xE01D for right control.
-DEFAULT_SCANCODE_MAP: dict[int, int] = {
-    ecodes.KEY_ESC: 0x01,
-    ecodes.KEY_1: 0x02,
-    ecodes.KEY_2: 0x03,
-    ecodes.KEY_3: 0x04,
-    ecodes.KEY_4: 0x05,
-    ecodes.KEY_5: 0x06,
-    ecodes.KEY_6: 0x07,
-    ecodes.KEY_7: 0x08,
-    ecodes.KEY_8: 0x09,
-    ecodes.KEY_9: 0x0A,
-    ecodes.KEY_0: 0x0B,
-    ecodes.KEY_MINUS: 0x0C,
-    ecodes.KEY_EQUAL: 0x0D,
-    ecodes.KEY_BACKSPACE: 0x0E,
-    ecodes.KEY_TAB: 0x0F,
-    ecodes.KEY_Q: 0x10,
-    ecodes.KEY_W: 0x11,
-    ecodes.KEY_E: 0x12,
-    ecodes.KEY_R: 0x13,
-    ecodes.KEY_T: 0x14,
-    ecodes.KEY_Y: 0x15,
-    ecodes.KEY_U: 0x16,
-    ecodes.KEY_I: 0x17,
-    ecodes.KEY_O: 0x18,
-    ecodes.KEY_P: 0x19,
-    ecodes.KEY_LEFTBRACE: 0x1A,
-    ecodes.KEY_RIGHTBRACE: 0x1B,
-    ecodes.KEY_ENTER: 0x1C,
-    ecodes.KEY_LEFTCTRL: 0x1D,
-    ecodes.KEY_A: 0x1E,
-    ecodes.KEY_S: 0x1F,
-    ecodes.KEY_D: 0x20,
-    ecodes.KEY_F: 0x21,
-    ecodes.KEY_G: 0x22,
-    ecodes.KEY_H: 0x23,
-    ecodes.KEY_J: 0x24,
-    ecodes.KEY_K: 0x25,
-    ecodes.KEY_L: 0x26,
-    ecodes.KEY_SEMICOLON: 0x27,
-    ecodes.KEY_APOSTROPHE: 0x28,
-    ecodes.KEY_GRAVE: 0x29,
-    ecodes.KEY_LEFTSHIFT: 0x2A,
-    ecodes.KEY_BACKSLASH: 0x2B,
-    ecodes.KEY_Z: 0x2C,
-    ecodes.KEY_X: 0x2D,
-    ecodes.KEY_C: 0x2E,
-    ecodes.KEY_V: 0x2F,
-    ecodes.KEY_B: 0x30,
-    ecodes.KEY_N: 0x31,
-    ecodes.KEY_M: 0x32,
-    ecodes.KEY_COMMA: 0x33,
-    ecodes.KEY_DOT: 0x34,
-    ecodes.KEY_SLASH: 0x35,
-    ecodes.KEY_RIGHTSHIFT: 0x36,
-    ecodes.KEY_KPASTERISK: 0x37,
-    ecodes.KEY_LEFTALT: 0x38,
-    ecodes.KEY_SPACE: 0x39,
-    ecodes.KEY_CAPSLOCK: 0x3A,
-    ecodes.KEY_F1: 0x3B,
-    ecodes.KEY_F2: 0x3C,
-    ecodes.KEY_F3: 0x3D,
-    ecodes.KEY_F4: 0x3E,
-    ecodes.KEY_F5: 0x3F,
-    ecodes.KEY_F6: 0x40,
-    ecodes.KEY_F7: 0x41,
-    ecodes.KEY_F8: 0x42,
-    ecodes.KEY_F9: 0x43,
-    ecodes.KEY_F10: 0x44,
-    ecodes.KEY_NUMLOCK: 0x45,
-    ecodes.KEY_SCROLLLOCK: 0x46,
-    ecodes.KEY_KP7: 0x47,
-    ecodes.KEY_KP8: 0x48,
-    ecodes.KEY_KP9: 0x49,
-    ecodes.KEY_KPMINUS: 0x4A,
-    ecodes.KEY_KP4: 0x4B,
-    ecodes.KEY_KP5: 0x4C,
-    ecodes.KEY_KP6: 0x4D,
-    ecodes.KEY_KPPLUS: 0x4E,
-    ecodes.KEY_KP1: 0x4F,
-    ecodes.KEY_KP2: 0x50,
-    ecodes.KEY_KP3: 0x51,
-    ecodes.KEY_KP0: 0x52,
-    ecodes.KEY_KPDOT: 0x53,
-    ecodes.KEY_102ND: 0x56,
-    ecodes.KEY_F11: 0x57,
-    ecodes.KEY_F12: 0x58,
-    # Extended keys (E0-prefixed)
-    ecodes.KEY_KPENTER: 0xE01C,
-    ecodes.KEY_RIGHTCTRL: 0xE01D,
-    ecodes.KEY_KPSLASH: 0xE035,
-    ecodes.KEY_RIGHTALT: 0xE038,
-    ecodes.KEY_HOME: 0xE047,
-    ecodes.KEY_UP: 0xE048,
-    ecodes.KEY_PAGEUP: 0xE049,
-    ecodes.KEY_LEFT: 0xE04B,
-    ecodes.KEY_RIGHT: 0xE04D,
-    ecodes.KEY_END: 0xE04F,
-    ecodes.KEY_DOWN: 0xE050,
-    ecodes.KEY_PAGEDOWN: 0xE051,
-    ecodes.KEY_INSERT: 0xE052,
-    ecodes.KEY_DELETE: 0xE053,
-    ecodes.KEY_LEFTMETA: 0xE05B,
-    ecodes.KEY_RIGHTMETA: 0xE05C,
-    ecodes.KEY_MENU: 0xE05D,
-    ecodes.KEY_COMPOSE: 0xE05D,
-    ecodes.KEY_POWER: 0xE05E,
-    ecodes.KEY_SLEEP: 0xE05F,
-    ecodes.KEY_SYSRQ: 0xE037,
-    ecodes.KEY_PAUSE: 0xE11D45,
-}
 
-# Additional function key scancodes (F13–F24) follow the set 1 convention used
-# on extended keyboards. They are not always present on commodity keyboards but
-# are included for completeness.
-for idx, code in enumerate(range(13, 25), start=0):
-    attr = f"KEY_F{code}"
-    if hasattr(ecodes, attr):
-        DEFAULT_SCANCODE_MAP[getattr(ecodes, attr)] = 0x64 + idx
+def _virtual_input_backend_error() -> RuntimeError:
+    message = (
+        "Virtual input backend unavailable: the desktop input backend requires "
+        "Linux evdev or xdotool."
+    )
+    if _EVDEV_IMPORT_ERROR is None:
+        return RuntimeError(message)
+    return RuntimeError(f"{message} ({_EVDEV_IMPORT_ERROR})")
+
+
+def _build_default_scancode_map() -> dict[int, int]:
+    if not _EVDEV_AVAILABLE:
+        return {}
+
+    # Scancode map (set 1 / Linux input) keyed by EV_KEY code. Extended
+    # (E0-prefixed) scancodes are encoded as single integers, e.g., 0xE01D for
+    # right control.
+    default_scancode_map: dict[int, int] = {
+        ecodes.KEY_ESC: 0x01,
+        ecodes.KEY_1: 0x02,
+        ecodes.KEY_2: 0x03,
+        ecodes.KEY_3: 0x04,
+        ecodes.KEY_4: 0x05,
+        ecodes.KEY_5: 0x06,
+        ecodes.KEY_6: 0x07,
+        ecodes.KEY_7: 0x08,
+        ecodes.KEY_8: 0x09,
+        ecodes.KEY_9: 0x0A,
+        ecodes.KEY_0: 0x0B,
+        ecodes.KEY_MINUS: 0x0C,
+        ecodes.KEY_EQUAL: 0x0D,
+        ecodes.KEY_BACKSPACE: 0x0E,
+        ecodes.KEY_TAB: 0x0F,
+        ecodes.KEY_Q: 0x10,
+        ecodes.KEY_W: 0x11,
+        ecodes.KEY_E: 0x12,
+        ecodes.KEY_R: 0x13,
+        ecodes.KEY_T: 0x14,
+        ecodes.KEY_Y: 0x15,
+        ecodes.KEY_U: 0x16,
+        ecodes.KEY_I: 0x17,
+        ecodes.KEY_O: 0x18,
+        ecodes.KEY_P: 0x19,
+        ecodes.KEY_LEFTBRACE: 0x1A,
+        ecodes.KEY_RIGHTBRACE: 0x1B,
+        ecodes.KEY_ENTER: 0x1C,
+        ecodes.KEY_LEFTCTRL: 0x1D,
+        ecodes.KEY_A: 0x1E,
+        ecodes.KEY_S: 0x1F,
+        ecodes.KEY_D: 0x20,
+        ecodes.KEY_F: 0x21,
+        ecodes.KEY_G: 0x22,
+        ecodes.KEY_H: 0x23,
+        ecodes.KEY_J: 0x24,
+        ecodes.KEY_K: 0x25,
+        ecodes.KEY_L: 0x26,
+        ecodes.KEY_SEMICOLON: 0x27,
+        ecodes.KEY_APOSTROPHE: 0x28,
+        ecodes.KEY_GRAVE: 0x29,
+        ecodes.KEY_LEFTSHIFT: 0x2A,
+        ecodes.KEY_BACKSLASH: 0x2B,
+        ecodes.KEY_Z: 0x2C,
+        ecodes.KEY_X: 0x2D,
+        ecodes.KEY_C: 0x2E,
+        ecodes.KEY_V: 0x2F,
+        ecodes.KEY_B: 0x30,
+        ecodes.KEY_N: 0x31,
+        ecodes.KEY_M: 0x32,
+        ecodes.KEY_COMMA: 0x33,
+        ecodes.KEY_DOT: 0x34,
+        ecodes.KEY_SLASH: 0x35,
+        ecodes.KEY_RIGHTSHIFT: 0x36,
+        ecodes.KEY_KPASTERISK: 0x37,
+        ecodes.KEY_LEFTALT: 0x38,
+        ecodes.KEY_SPACE: 0x39,
+        ecodes.KEY_CAPSLOCK: 0x3A,
+        ecodes.KEY_F1: 0x3B,
+        ecodes.KEY_F2: 0x3C,
+        ecodes.KEY_F3: 0x3D,
+        ecodes.KEY_F4: 0x3E,
+        ecodes.KEY_F5: 0x3F,
+        ecodes.KEY_F6: 0x40,
+        ecodes.KEY_F7: 0x41,
+        ecodes.KEY_F8: 0x42,
+        ecodes.KEY_F9: 0x43,
+        ecodes.KEY_F10: 0x44,
+        ecodes.KEY_NUMLOCK: 0x45,
+        ecodes.KEY_SCROLLLOCK: 0x46,
+        ecodes.KEY_KP7: 0x47,
+        ecodes.KEY_KP8: 0x48,
+        ecodes.KEY_KP9: 0x49,
+        ecodes.KEY_KPMINUS: 0x4A,
+        ecodes.KEY_KP4: 0x4B,
+        ecodes.KEY_KP5: 0x4C,
+        ecodes.KEY_KP6: 0x4D,
+        ecodes.KEY_KPPLUS: 0x4E,
+        ecodes.KEY_KP1: 0x4F,
+        ecodes.KEY_KP2: 0x50,
+        ecodes.KEY_KP3: 0x51,
+        ecodes.KEY_KP0: 0x52,
+        ecodes.KEY_KPDOT: 0x53,
+        ecodes.KEY_102ND: 0x56,
+        ecodes.KEY_F11: 0x57,
+        ecodes.KEY_F12: 0x58,
+        # Extended keys (E0-prefixed)
+        ecodes.KEY_KPENTER: 0xE01C,
+        ecodes.KEY_RIGHTCTRL: 0xE01D,
+        ecodes.KEY_KPSLASH: 0xE035,
+        ecodes.KEY_RIGHTALT: 0xE038,
+        ecodes.KEY_HOME: 0xE047,
+        ecodes.KEY_UP: 0xE048,
+        ecodes.KEY_PAGEUP: 0xE049,
+        ecodes.KEY_LEFT: 0xE04B,
+        ecodes.KEY_RIGHT: 0xE04D,
+        ecodes.KEY_END: 0xE04F,
+        ecodes.KEY_DOWN: 0xE050,
+        ecodes.KEY_PAGEDOWN: 0xE051,
+        ecodes.KEY_INSERT: 0xE052,
+        ecodes.KEY_DELETE: 0xE053,
+        ecodes.KEY_LEFTMETA: 0xE05B,
+        ecodes.KEY_RIGHTMETA: 0xE05C,
+        ecodes.KEY_MENU: 0xE05D,
+        ecodes.KEY_COMPOSE: 0xE05D,
+        ecodes.KEY_POWER: 0xE05E,
+        ecodes.KEY_SLEEP: 0xE05F,
+        ecodes.KEY_SYSRQ: 0xE037,
+        ecodes.KEY_PAUSE: 0xE11D45,
+    }
+
+    # Additional function key scancodes (F13-F24) follow the set 1 convention
+    # used on extended keyboards. They are not always present on commodity
+    # keyboards but are included for completeness.
+    for idx, code in enumerate(range(13, 25), start=0):
+        attr = f"KEY_F{code}"
+        if hasattr(ecodes, attr):
+            default_scancode_map[getattr(ecodes, attr)] = 0x64 + idx
+    return default_scancode_map
+
+
+DEFAULT_SCANCODE_MAP = _build_default_scancode_map()
 
 
 class VirtualInput:
@@ -149,45 +186,56 @@ class VirtualInput:
         key_delay_ms: int = 12,
         uinput_device: UInput | None = None,
     ) -> None:
-        width, height = viewport
-        abs_caps = [
-            (ecodes.ABS_X, AbsInfo(0, 0, max(width - 1, 0), 0, 0, 0)),
-            (ecodes.ABS_Y, AbsInfo(0, 0, max(height - 1, 0), 0, 0, 0)),
-        ]
-
-        key_codes = self._keyboard_keys()
-        capabilities = cast(
-            dict[int, Sequence[int]],
-            {
-                ecodes.EV_KEY: key_codes,
-                ecodes.EV_ABS: abs_caps,
-                ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_HWHEEL],
-                ecodes.EV_MSC: [ecodes.MSC_SCAN],
-            },
-        )
-
         self._ui: UInput | None = None
         self._xdotool_binary: str | None = None
         if uinput_device is not None:
             self._ui = uinput_device
-        else:
+        elif _EVDEV_AVAILABLE:
+            width, height = viewport
+            abs_caps = [
+                (ecodes.ABS_X, AbsInfo(0, 0, max(width - 1, 0), 0, 0, 0)),
+                (ecodes.ABS_Y, AbsInfo(0, 0, max(height - 1, 0), 0, 0, 0)),
+            ]
+
+            key_codes = self._keyboard_keys()
+            capabilities = cast(
+                dict[int, Sequence[int]],
+                {
+                    ecodes.EV_KEY: key_codes,
+                    ecodes.EV_ABS: abs_caps,
+                    ecodes.EV_REL: [ecodes.REL_WHEEL, ecodes.REL_HWHEEL],
+                    ecodes.EV_MSC: [ecodes.MSC_SCAN],
+                },
+            )
             try:
                 self._ui = UInput(capabilities, name=device_name, bustype=0x03)
             except (PermissionError, OSError, UInputError) as exc:
                 xdotool_binary = shutil.which("xdotool")
                 if not xdotool_binary:
-                    raise
+                    raise _virtual_input_backend_error() from exc
                 self._xdotool_binary = xdotool_binary
                 logger.warning(
                     "uinput unavailable; falling back to xdotool input backend",
                     extra={"error": str(exc), "binary": xdotool_binary},
                 )
+        else:
+            xdotool_binary = shutil.which("xdotool")
+            if not xdotool_binary:
+                raise _virtual_input_backend_error()
+            self._xdotool_binary = xdotool_binary
+            logger.warning(
+                "evdev unavailable; falling back to xdotool input backend",
+                extra={
+                    "error": str(_EVDEV_IMPORT_ERROR) if _EVDEV_IMPORT_ERROR else None,
+                    "binary": xdotool_binary,
+                },
+            )
 
         self._viewport = viewport
         self._keyboard_layout = self._normalize_layout(keyboard_layout)
         self._emit_scancodes = emit_scancodes
         self._key_delay = max(key_delay_ms, 0) / 1000.0
-        self._scancode_map = DEFAULT_SCANCODE_MAP
+        self._scancode_map = dict(DEFAULT_SCANCODE_MAP)
         self._missing_scancodes: set[int] = set()
         logger.info(
             "Initialized virtual input device",
@@ -222,7 +270,6 @@ class VirtualInput:
         modifiers: list[str] | None = None,
     ) -> None:
         """Click at absolute coordinates, optionally holding modifier keys."""
-        code = self._button_code(button)
         x_clamped, y_clamped = self._clamp(x, y)
         if self._ui is None:
             await self._xdotool_click(
@@ -234,6 +281,7 @@ class VirtualInput:
             )
             return
 
+        code = self._button_code(button)
         modifier_codes = self._modifier_codes(modifiers)
         for mc in modifier_codes:
             self._ui.write(ecodes.EV_KEY, mc, 1)
@@ -351,10 +399,10 @@ class VirtualInput:
     def _button_code(button: str) -> int:
         normalized = (button or "left").lower()
         if normalized == "right":
-            return ecodes.BTN_RIGHT
+            return int(ecodes.BTN_RIGHT)
         if normalized == "middle":
-            return ecodes.BTN_MIDDLE
-        return ecodes.BTN_LEFT
+            return int(ecodes.BTN_MIDDLE)
+        return int(ecodes.BTN_LEFT)
 
     @staticmethod
     def _scroll_delta(pixels: int) -> int:
@@ -903,7 +951,7 @@ class VirtualInput:
         }
         alias_map = {k: v for k, v in alias_map.items() if v is not None}
         if normalized in alias_map:
-            return alias_map[normalized]
+            return int(alias_map[normalized])
 
         if normalized.startswith("kp") and normalized[2:].isdigit():
             code = getattr(ecodes, f"KEY_KP{normalized[2:]}", None)

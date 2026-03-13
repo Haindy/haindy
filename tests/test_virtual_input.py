@@ -20,14 +20,11 @@ async def test_virtual_input_falls_back_to_xdotool_when_uinput_unavailable(
 ) -> None:
     commands: list[tuple[str, ...]] = []
 
-    def _raise_uinput(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise PermissionError("/dev/uinput")
-
     async def _fake_create_subprocess_exec(*cmd, **kwargs):  # type: ignore[no-untyped-def]
         commands.append(tuple(str(part) for part in cmd))
         return _DummyProcess()
 
-    monkeypatch.setattr("src.desktop.virtual_input.UInput", _raise_uinput)
+    monkeypatch.setattr("src.desktop.virtual_input._EVDEV_AVAILABLE", False)
     monkeypatch.setattr(
         "src.desktop.virtual_input.shutil.which",
         lambda name: "/usr/bin/xdotool" if name == "xdotool" else None,
@@ -65,11 +62,10 @@ async def test_virtual_input_falls_back_to_xdotool_when_uinput_unavailable(
 def test_virtual_input_raises_without_uinput_or_xdotool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _raise_uinput(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise PermissionError("/dev/uinput")
-
-    monkeypatch.setattr("src.desktop.virtual_input.UInput", _raise_uinput)
+    monkeypatch.setattr("src.desktop.virtual_input._EVDEV_AVAILABLE", False)
     monkeypatch.setattr("src.desktop.virtual_input.shutil.which", lambda name: None)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(
+        RuntimeError, match="desktop input backend requires Linux evdev or xdotool"
+    ):
         VirtualInput(viewport=(1280, 720))
