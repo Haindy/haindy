@@ -26,6 +26,28 @@ if TYPE_CHECKING:
 class ComputerUseActionMixin:
     """Action execution helpers for provider loops."""
 
+    @staticmethod
+    def _should_invalidate_visual_context_after_action(
+        action_type: str | None,
+        environment: str,
+    ) -> bool:
+        """Return True when the next follow-up should rebuild full visual context."""
+        if environment != "mobile_adb":
+            return False
+        return action_type in {"type", "type_text_at"}
+
+    @staticmethod
+    def _mark_visual_context_invalidated(
+        turn: ComputerToolTurn,
+        metadata: dict[str, Any],
+        *,
+        reason: str,
+    ) -> None:
+        """Mark that the next follow-up must use a fresh keyframe."""
+        turn.metadata["visual_context_invalidated"] = True
+        turn.metadata["visual_context_invalidation_reason"] = reason
+        metadata["_force_keyframe_once"] = reason
+
     async def _execute_tool_action(
         self: _ComputerUseSession,
         turn: ComputerToolTurn,
@@ -400,6 +422,14 @@ class ComputerUseActionMixin:
                         )
                     await self._automation_driver.type_text(text_payload)
                     turn.status = "executed"
+                    if self._should_invalidate_visual_context_after_action(
+                        action_type, environment
+                    ):
+                        self._mark_visual_context_invalidated(
+                            turn,
+                            metadata,
+                            reason="mobile_keyboard_or_focus_reflow",
+                        )
                 elif action_type == "type_text_at":
                     text_payload = action.get("text")
                     if text_payload is None:
@@ -436,6 +466,14 @@ class ComputerUseActionMixin:
                         await self._automation_driver.press_key("enter")
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
+                    if self._should_invalidate_visual_context_after_action(
+                        action_type, environment
+                    ):
+                        self._mark_visual_context_invalidated(
+                            turn,
+                            metadata,
+                            reason="mobile_keyboard_or_focus_reflow",
+                        )
                 elif action_type == "long_press_at":
                     duration_ms = int(action.get("duration_ms") or 500)
                     if cached:

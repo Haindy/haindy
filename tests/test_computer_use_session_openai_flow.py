@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from PIL import Image
 
 import src.agents.computer_use.session as cu_session_module
+from src.agents.computer_use.visual_state import (
+    CartographyMap,
+    CartographyTarget,
+    VisualBounds,
+    build_keyframe,
+    encode_png,
+)
 from src.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     make_session,
@@ -16,6 +25,11 @@ from tests.computer_use_session_support import (
 )
 
 pytest_plugins = ("tests.computer_use_session_support",)
+
+
+def _png(*, width: int = 200, height: int = 120) -> bytes:
+    image = Image.new("RGB", (width, height), color="black")
+    return encode_png(image)
 
 
 @pytest.mark.asyncio
@@ -336,6 +350,67 @@ async def test_computer_use_session_executes_batched_actions_in_single_call(
 
 
 @pytest.mark.asyncio
+async def test_openai_mobile_type_action_forces_fresh_follow_up_before_remaining_batched_actions(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_batch_1",
+            [
+                openai_computer_call(
+                    "call_batch",
+                    [
+                        {"type": "type", "text": "openai"},
+                        {"type": "click", "x": 50, "y": 60},
+                    ],
+                )
+            ],
+        ),
+        openai_response(
+            "resp_batch_2",
+            [openai_computer_call("call_click", {"type": "click", "x": 7, "y": 8})],
+        ),
+        openai_response("resp_batch_3", [openai_message("Batch completed.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    result = await session.run(
+        goal="Type the query and continue.",
+        initial_screenshot=_png(),
+        metadata={"step_number": 8},
+        environment="mobile_adb",
+    )
+
+    assert result.terminal_status == "success"
+    assert [turn.action_type for turn in result.actions] == ["type", "click"]
+    assert result.actions[0].metadata["visual_context_invalidated"] is True
+    assert (
+        result.actions[0].metadata["visual_context_invalidation_reason"]
+        == "mobile_keyboard_or_focus_reflow"
+    )
+    mock_browser.type_text.assert_awaited_once_with("openai")
+    mock_browser.click.assert_awaited_once_with(7, 8, button="left", click_count=1)
+    assert mock_client.responses.create.await_count == 3
+
+    follow_up_after_type = mock_client.responses.create.await_args_list[1].kwargs
+    assert follow_up_after_type["previous_response_id"] == "resp_batch_1"
+    outputs = [
+        item
+        for item in follow_up_after_type["input"]
+        if item.get("type") == "computer_call_output"
+    ]
+    assert len(outputs) == 1
+    assert outputs[0]["call_id"] == "call_batch"
+
+    follow_up_after_click = mock_client.responses.create.await_args_list[2].kwargs
+    assert follow_up_after_click["previous_response_id"] == "resp_batch_2"
+
+
+@pytest.mark.asyncio
 async def test_computer_use_session_processes_multiple_computer_calls_in_one_turn(
     mock_client, mock_browser, session_settings
 ):
@@ -441,6 +516,158 @@ async def test_openai_follow_up_uses_fresh_batch_capture_and_preserves_turn_snap
     assert turn.metadata["screenshot_base64"] == "stored_snapshot"
     assert turn.metadata["current_url"] == "https://stale.example.com"
     assert len(payload["input"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_openai_follow_up_includes_cartography_guidance_when_available(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="openai",
+    )
+    screenshot = _png()
+    cartography = CartographyMap(
+        frame_id="vk_prev",
+        targets=(
+            CartographyTarget(
+                target_id="target_1",
+                label="submit button",
+                bounds=VisualBounds(x=40, y=30, width=30, height=20),
+                interaction_point=(55, 40),
+                confidence=0.98,
+            ),
+        ),
+        model="cartographer",
+        provider="openai",
+    )
+    session._current_keyframe = build_keyframe(
+        screenshot,
+        source="test",
+        cartography=cartography,
+    )
+    session._turns_since_keyframe = 1
+    mock_browser.screenshot.return_value = screenshot
+    turn = ComputerToolTurn(
+        call_id="call_snapshot",
+        action_type="click",
+        parameters={"type": "click"},
+        status="executed",
+        metadata={"x": 55, "y": 40},
+    )
+
+    payload, batch = await session._build_follow_up_request(
+        previous_response_id="resp_prev",
+        calls=[[turn]],
+        metadata={"target": "submit"},
+        model="gpt-5.4",
+    )
+
+    assert batch.cartography == cartography
+    assert batch.cartography_origin == "parent_keyframe"
+    assert len(payload["input"]) == 2
+    cartography_text = payload["input"][1]["content"][0]["text"]
+    assert "Visual cartography (full-screen coordinates" in cartography_text
+    assert '"origin":"parent_keyframe"' in cartography_text
+    assert '"label":"submit button"' in cartography_text
+    assert '"interaction_point":{"x":55,"y":40}' in cartography_text
+
+
+@pytest.mark.asyncio
+async def test_openai_targeted_follow_up_inserts_in_thread_cartography_turn(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = [
+        openai_response(
+            "resp_1",
+            [openai_computer_call("call_1", {"type": "screenshot"})],
+        ),
+        openai_response(
+            "resp_2",
+            [
+                openai_message(
+                    '{"targets":[{"target_id":"target_1","label":"login","bbox":{"x":470,"y":2100,"width":320,"height":120},"interaction_point":{"x":630,"y":2160},"confidence":0.99}]}'
+                )
+            ],
+        ),
+        openai_response("resp_3", [openai_message("Login screen is displayed.")]),
+    ]
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="openai",
+    )
+    session.begin_step_scope()
+
+    result = await session.execute_step_action(
+        goal="Go to the Login screen.",
+        initial_screenshot=_png(),
+        metadata={
+            "step_number": 1,
+            "target": "Login button on the Welcome screen",
+            "expected_outcome": "The Login screen is displayed.",
+        },
+        environment="mobile_adb",
+    )
+
+    assert result.response_ids == ["resp_1", "resp_2", "resp_3"]
+    assert mock_client.responses.create.await_count == 3
+
+    cartography_payload = mock_client.responses.create.await_args_list[1].kwargs
+    assert cartography_payload["previous_response_id"] == "resp_1"
+    assert cartography_payload["tools"] == [{"type": "computer"}]
+    assert cartography_payload["text"] == {"format": {"type": "json_object"}}
+    assert cartography_payload["input"][0]["type"] == "computer_call_output"
+    assert (
+        "Generate visual cartography"
+        in cartography_payload["input"][1]["content"][0]["text"]
+    )
+
+    continuation_payload = mock_client.responses.create.await_args_list[2].kwargs
+    assert continuation_payload["previous_response_id"] == "resp_2"
+    assert continuation_payload["tools"] == [{"type": "computer"}]
+    assert continuation_payload["input"][0]["role"] == "user"
+    continuation_text = continuation_payload["input"][0]["content"][0]["text"]
+    assert "immediately prior cartography analysis" in continuation_text
+    assert "Visual cartography (full-screen coordinates" not in continuation_text
+
+    assert session._current_keyframe is not None
+    assert session._current_keyframe.cartography is not None
+    assert session._current_keyframe.cartography.targets[0].interaction_point == (
+        630,
+        2160,
+    )
+
+
+@pytest.mark.asyncio
+async def test_openai_websocket_errors_do_not_fallback_to_http(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.openai_cu_transport = "responses_websocket"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="openai",
+    )
+    session._openai_transport = SimpleNamespace(
+        request=AsyncMock(
+            side_effect=RuntimeError(
+                'OpenAI Responses WebSocket error: {"type":"invalid_request_error","param":"input"}'
+            )
+        ),
+        close=AsyncMock(),
+    )
+
+    payload = {"model": "gpt-5.4", "input": "hello"}
+    with pytest.raises(RuntimeError, match="invalid_request_error"):
+        await session._create_response(payload)
+
+    mock_client.responses.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -170,6 +170,50 @@ async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
 
 
 @pytest.mark.asyncio
+async def test_visual_state_planner_forces_keyframe_when_requested_by_metadata():
+    screenshot = _png_with_rect(width=200, height=120)
+    previous_keyframe = build_keyframe(screenshot, source="test")
+    cartography = CartographyMap(
+        frame_id="vk_current",
+        targets=(
+            CartographyTarget(
+                target_id="target_1",
+                label="submit button",
+                bounds=VisualBounds(x=40, y=30, width=30, height=20),
+                interaction_point=(55, 40),
+                confidence=0.98,
+            ),
+        ),
+        model="test-model",
+        provider="openai",
+    )
+    planner = VisualStatePlanner(
+        visual_mode="keyframe_patch",
+        keyframe_max_turns=3,
+        patch_max_area_ratio=0.35,
+        patch_margin_ratio=0.12,
+    )
+    generate_cartography = AsyncMock(return_value=cartography)
+
+    visual_frame, current_keyframe = await planner.build_follow_up_frame(
+        screenshot_bytes=screenshot,
+        metadata={
+            "target": "submit",
+            "_force_keyframe_reason": "mobile_keyboard_or_focus_reflow",
+        },
+        action_types=["click"],
+        previous_keyframe=previous_keyframe,
+        turns_since_keyframe=1,
+        generate_cartography=generate_cartography,
+    )
+
+    assert visual_frame.kind == "keyframe"
+    assert current_keyframe.kind == "keyframe"
+    assert current_keyframe.cartography == cartography
+    generate_cartography.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_initial_screenshot_seeding_enables_patch_on_first_follow_up(
     mock_client, mock_browser, session_settings
 ) -> None:

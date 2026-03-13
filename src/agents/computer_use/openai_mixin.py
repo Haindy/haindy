@@ -18,10 +18,16 @@ from .common import (
     extract_computer_calls,
     normalize_response,
 )
-from .transports import ComputerUseTransport, OpenAIResponsesHTTPTransport
+from .transports import ComputerUseTransport
 from .turn_result import ComputerUseCallResult, ComputerUseFollowUpBatch
 from .types import ComputerUseSessionResult
-from .visual_state import CartographyMap, CartographyTarget, VisualBounds, VisualFrame
+from .visual_state import (
+    CartographyMap,
+    CartographyTarget,
+    VisualBounds,
+    VisualFrame,
+    build_keyframe,
+)
 
 logger = logging.getLogger("src.agents.computer_use.session")
 
@@ -33,6 +39,8 @@ class OpenAIComputerUseMixin:
     """OpenAI-specific request builders and execution loop."""
 
     _openai_transport: ComputerUseTransport | None
+    _current_keyframe: VisualFrame | None
+    _last_visual_frame: VisualFrame | None
 
     @staticmethod
     def _apply_openai_localization_guidance(goal: str, environment: str) -> str:
@@ -181,6 +189,7 @@ class OpenAIComputerUseMixin:
 
             completed_call_turns: list[list[ComputerToolTurn]] = []
             should_stop = False
+            should_refresh_visual_context = False
 
             for call in computer_calls:
                 call_id = str(call.get("call_id") or "")
@@ -293,18 +302,101 @@ class OpenAIComputerUseMixin:
                         should_stop = True
                         break
 
+                    if turn.metadata.get("visual_context_invalidated"):
+                        should_refresh_visual_context = True
+                        break
+
                 completed_call_turns.append(processed_turns or [turns[0]])
-                if should_stop:
+                if should_stop or should_refresh_visual_context:
                     break
 
             if should_stop:
                 break
 
-            follow_up_payload, follow_up_batch = await self._build_follow_up_request(
+            follow_up_metadata = dict(metadata)
+            follow_up_metadata["_defer_openai_cartography"] = True
+            follow_up_batch = await self._build_follow_up_batch(
+                call_groups=completed_call_turns,
+                metadata=follow_up_metadata,
+            )
+            cartography_outputs_consumed = False
+            if self._should_request_openai_cartography_turn(
+                follow_up_batch=follow_up_batch,
+                metadata=metadata,
+            ):
+                try:
+                    (
+                        cartography_payload,
+                        cartography_prompt,
+                    ) = self._build_openai_cartography_request(
+                        previous_response_id=current_response_id,
+                        follow_up_batch=follow_up_batch,
+                        metadata=metadata,
+                        model=model,
+                    )
+                    cartography_response = await self._create_response(
+                        cartography_payload
+                    )
+                    cartography_outputs_consumed = True
+                    await self._model_logger.log_call(
+                        agent="computer_use.openai.cartography",
+                        model=str(cartography_payload["model"]),
+                        prompt=cartography_prompt,
+                        request_payload=self._sanitize_payload_for_log(
+                            cartography_payload
+                        ),
+                        response=cartography_response,
+                        screenshots=(
+                            [
+                                (
+                                    "computer_use_cartography",
+                                    follow_up_batch.screenshot_bytes,
+                                )
+                            ]
+                            if follow_up_batch.screenshot_bytes
+                            else None
+                        ),
+                        metadata={"environment": environment, **metadata},
+                    )
+                    cartography_response_dict = normalize_response(cartography_response)
+                    result.response_ids.append(cartography_response_dict.get("id", ""))
+                    current_response_id = cartography_response_dict.get("id")
+                    cartography = self._parse_openai_cartography_response(
+                        response_dict=cartography_response_dict,
+                        frame=(
+                            self._current_keyframe
+                            or follow_up_batch.visual_frame
+                            or build_keyframe(
+                                follow_up_batch.screenshot_bytes,
+                                source="follow_up_capture",
+                            )
+                        ),
+                        metadata=metadata,
+                        model=str(cartography_payload["model"]),
+                    )
+                    if cartography is not None:
+                        self._apply_openai_cartography_to_follow_up_batch(
+                            follow_up_batch=follow_up_batch,
+                            cartography=cartography,
+                        )
+                except Exception:
+                    logger.warning(
+                        "OpenAI in-thread cartography generation failed",
+                        exc_info=True,
+                    )
+
+            follow_up_payload = self._build_follow_up_request_from_batch(
                 previous_response_id=current_response_id,
-                calls=completed_call_turns,
+                follow_up_batch=follow_up_batch,
                 metadata=metadata,
                 model=model,
+                include_call_outputs=not cartography_outputs_consumed,
+                include_cartography_grounding=False,
+                continuation_text=(
+                    self._build_openai_cartography_continuation_text()
+                    if cartography_outputs_consumed
+                    else None
+                ),
             )
 
             response = await self._create_response(follow_up_payload)
@@ -346,6 +438,27 @@ class OpenAIComputerUseMixin:
             call_groups=calls,
             metadata=metadata,
         )
+        payload = self._build_follow_up_request_from_batch(
+            previous_response_id=previous_response_id,
+            follow_up_batch=follow_up_batch,
+            metadata=metadata,
+            model=model,
+        )
+
+        return payload, follow_up_batch
+
+    def _build_follow_up_request_from_batch(
+        self: _ComputerUseSession,
+        *,
+        previous_response_id: str | None,
+        follow_up_batch: ComputerUseFollowUpBatch,
+        metadata: dict[str, Any],
+        model: str | None = None,
+        include_call_outputs: bool = True,
+        include_cartography_grounding: bool = True,
+        continuation_text: str | None = None,
+    ) -> dict[str, Any]:
+        """Build a follow-up payload from a precomputed batch."""
         payload: dict[str, Any] = {
             "model": model or self._openai_model,
             "previous_response_id": previous_response_id,
@@ -357,21 +470,41 @@ class OpenAIComputerUseMixin:
         if safety_identifier:
             payload["safety_identifier"] = safety_identifier
 
-        for call_result in follow_up_batch.calls:
-            payload["input"].append(
-                self._build_follow_up_item(call_result, follow_up_batch)
-            )
+        if include_call_outputs:
+            for call_result in follow_up_batch.calls:
+                payload["input"].append(
+                    self._build_follow_up_item(call_result, follow_up_batch)
+                )
+        visual_frame = follow_up_batch.visual_frame
+        include_patch_grounding = (
+            visual_frame is not None and visual_frame.kind == "patch"
+        )
+        include_cartography_grounding = (
+            include_cartography_grounding and follow_up_batch.cartography is not None
+        )
         extra_text_blocks: list[str] = []
         if (
-            follow_up_batch.visual_frame is not None
-            and follow_up_batch.visual_frame.kind == "patch"
+            include_patch_grounding
+            or include_cartography_grounding
+            or follow_up_batch.reminder_text
+            or continuation_text
         ):
             extra_text_blocks = [
                 text
                 for text in (
                     follow_up_batch.grounding_text,
-                    self._build_visual_grounding_text(follow_up_batch),
+                    (
+                        self._build_visual_grounding_text(follow_up_batch)
+                        if include_patch_grounding
+                        else None
+                    ),
+                    (
+                        self._build_cartography_grounding_text(follow_up_batch)
+                        if include_cartography_grounding
+                        else None
+                    ),
                     follow_up_batch.reminder_text,
+                    continuation_text,
                 )
                 if text
             ]
@@ -388,7 +521,7 @@ class OpenAIComputerUseMixin:
                 }
             )
 
-        return payload, follow_up_batch
+        return payload
 
     def _build_follow_up_item(
         self: _ComputerUseSession,
@@ -486,6 +619,210 @@ class OpenAIComputerUseMixin:
             "Interpret all future action coordinates in the full screenshot coordinate space, not the patch-local coordinate space."
         )
         return "\n".join(details)
+
+    @staticmethod
+    def _build_cartography_grounding_text(
+        follow_up_batch: ComputerUseFollowUpBatch,
+    ) -> str | None:
+        """Describe the available cartography map for follow-up turns."""
+        cartography = follow_up_batch.cartography
+        if cartography is None or not cartography.targets:
+            return None
+
+        payload = {
+            "origin": follow_up_batch.cartography_origin or "unknown",
+            "frame_id": cartography.frame_id,
+            "provider": cartography.provider,
+            "model": cartography.model,
+            "targets": [
+                {
+                    "target_id": target.target_id,
+                    "label": target.label,
+                    "bbox": {
+                        "x": target.bounds.x,
+                        "y": target.bounds.y,
+                        "width": target.bounds.width,
+                        "height": target.bounds.height,
+                    },
+                    "interaction_point": {
+                        "x": target.interaction_point[0],
+                        "y": target.interaction_point[1],
+                    },
+                    "confidence": round(target.confidence, 4),
+                }
+                for target in cartography.targets
+            ],
+        }
+        return (
+            "Visual cartography (full-screen coordinates; use it as target guidance "
+            "alongside the latest screenshot):\n"
+            + json.dumps(payload, separators=(",", ":"))
+        )
+
+    def _should_request_openai_cartography_turn(
+        self: _ComputerUseSession,
+        *,
+        follow_up_batch: ComputerUseFollowUpBatch,
+        metadata: dict[str, Any],
+    ) -> bool:
+        """Return True when the next OpenAI follow-up should begin with cartography."""
+        if follow_up_batch.cartography is not None:
+            return False
+        if follow_up_batch.visual_frame is None:
+            return False
+        if follow_up_batch.visual_frame.kind != "keyframe":
+            return False
+        return bool(str(metadata.get("target") or "").strip())
+
+    def _build_openai_cartography_request(
+        self: _ComputerUseSession,
+        *,
+        previous_response_id: str | None,
+        follow_up_batch: ComputerUseFollowUpBatch,
+        metadata: dict[str, Any],
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        """Build an in-thread cartography request that consumes the latest screenshot."""
+        target_text = str(metadata.get("target") or "").strip()
+        prompt = (
+            "Generate visual cartography for the current task target using the latest "
+            "screenshot already provided in this turn. Do not call tools, do not "
+            "propose actions, and return ONLY valid JSON with this shape: "
+            '{"targets":[{"target_id":"target_1","label":"visible label or short descriptor",'
+            '"bbox":{"x":0,"y":0,"width":0,"height":0},'
+            '"interaction_point":{"x":0,"y":0},"confidence":0.0}]}. '
+            f"Requested target: {target_text!r}. "
+            "Use absolute pixel coordinates in the full screenshot coordinate space. "
+            'If the target is not visible, return {"targets":[]}.'
+        )
+        payload: dict[str, Any] = {
+            "model": model or self._openai_model,
+            "previous_response_id": previous_response_id,
+            "tools": [{"type": "computer"}],
+            "input": [],
+            "text": {"format": {"type": "json_object"}},
+        }
+
+        safety_identifier = metadata.get("safety_identifier")
+        if safety_identifier:
+            payload["safety_identifier"] = safety_identifier
+
+        for call_result in follow_up_batch.calls:
+            payload["input"].append(
+                self._build_follow_up_item(call_result, follow_up_batch)
+            )
+
+        extra_text = prompt
+        if follow_up_batch.grounding_text:
+            extra_text = f"{follow_up_batch.grounding_text}\n\n{prompt}"
+        payload["input"].append(
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": extra_text}],
+            }
+        )
+        return payload, prompt
+
+    @staticmethod
+    def _build_openai_cartography_continuation_text() -> str:
+        """Return the continuation prompt used after an in-thread cartography turn."""
+        return (
+            "Continue with the current task using the latest screenshot and your "
+            "immediately prior cartography analysis. If the requested visible state "
+            "is already achieved, report success and stop. Otherwise use the "
+            "computer tool now."
+        )
+
+    def _parse_openai_cartography_response(
+        self: _ComputerUseSession,
+        *,
+        response_dict: dict[str, Any],
+        frame: VisualFrame,
+        metadata: dict[str, Any],
+        model: str,
+    ) -> CartographyMap | None:
+        """Parse a cartography response into a structured map."""
+        raw_text = extract_assistant_text(response_dict)
+        if not raw_text:
+            return None
+
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            logger.debug(
+                "OpenAI cartography response was not valid JSON",
+                extra={"response_text": raw_text},
+            )
+            return None
+
+        raw_targets = parsed.get("targets", []) if isinstance(parsed, dict) else []
+        target_text = str(metadata.get("target") or "").strip()
+        targets: list[CartographyTarget] = []
+        for index, item in enumerate(raw_targets, start=1):
+            if not isinstance(item, dict):
+                continue
+            bbox = item.get("bbox") or {}
+            point = item.get("interaction_point") or {}
+            try:
+                bounds = VisualBounds(
+                    x=int(bbox.get("x", 0)),
+                    y=int(bbox.get("y", 0)),
+                    width=int(bbox.get("width", 0)),
+                    height=int(bbox.get("height", 0)),
+                )
+                target = CartographyTarget(
+                    target_id=str(item.get("target_id") or f"target_{index}"),
+                    label=str(item.get("label") or target_text).strip() or target_text,
+                    bounds=bounds,
+                    interaction_point=(
+                        int(point.get("x", bounds.x + (bounds.width // 2))),
+                        int(point.get("y", bounds.y + (bounds.height // 2))),
+                    ),
+                    confidence=float(item.get("confidence", 0.0)),
+                )
+            except (TypeError, ValueError):
+                continue
+            if target.bounds.is_empty():
+                continue
+            targets.append(target)
+
+        return CartographyMap(
+            frame_id=frame.frame_id,
+            targets=tuple(targets),
+            model=model,
+            provider="openai",
+        )
+
+    def _apply_openai_cartography_to_follow_up_batch(
+        self: _ComputerUseSession,
+        *,
+        follow_up_batch: ComputerUseFollowUpBatch,
+        cartography: CartographyMap,
+    ) -> None:
+        """Persist in-thread cartography onto the active keyframe and batch."""
+        current_keyframe = self._current_keyframe
+        if current_keyframe is None:
+            return
+        updated_keyframe = build_keyframe(
+            current_keyframe.image_bytes,
+            source=current_keyframe.source,
+            cartography=cartography,
+        )
+        self._current_keyframe = updated_keyframe
+        if (
+            self._last_visual_frame is not None
+            and self._last_visual_frame.kind == "keyframe"
+            and self._last_visual_frame.frame_id == updated_keyframe.frame_id
+        ):
+            self._last_visual_frame = updated_keyframe
+        if (
+            follow_up_batch.visual_frame is not None
+            and follow_up_batch.visual_frame.kind == "keyframe"
+            and follow_up_batch.visual_frame.frame_id == updated_keyframe.frame_id
+        ):
+            follow_up_batch.visual_frame = updated_keyframe
+        follow_up_batch.cartography = cartography
+        follow_up_batch.cartography_origin = "current_keyframe"
 
     async def _reflect_openai_step(
         self: _ComputerUseSession,
@@ -641,55 +978,11 @@ class OpenAIComputerUseMixin:
             ],
         }
         response = await self._create_response(payload)
-        response_dict = normalize_response(response)
-        raw_text = extract_assistant_text(response_dict)
-        if not raw_text:
-            return None
-
-        try:
-            parsed = json.loads(raw_text)
-        except json.JSONDecodeError:
-            logger.debug(
-                "OpenAI cartography response was not valid JSON",
-                extra={"response_text": raw_text},
-            )
-            return None
-
-        raw_targets = parsed.get("targets", []) if isinstance(parsed, dict) else []
-        targets: list[CartographyTarget] = []
-        for index, item in enumerate(raw_targets, start=1):
-            if not isinstance(item, dict):
-                continue
-            bbox = item.get("bbox") or {}
-            point = item.get("interaction_point") or {}
-            try:
-                bounds = VisualBounds(
-                    x=int(bbox.get("x", 0)),
-                    y=int(bbox.get("y", 0)),
-                    width=int(bbox.get("width", 0)),
-                    height=int(bbox.get("height", 0)),
-                )
-                target = CartographyTarget(
-                    target_id=str(item.get("target_id") or f"target_{index}"),
-                    label=str(item.get("label") or target_text).strip() or target_text,
-                    bounds=bounds,
-                    interaction_point=(
-                        int(point.get("x", bounds.x + (bounds.width // 2))),
-                        int(point.get("y", bounds.y + (bounds.height // 2))),
-                    ),
-                    confidence=float(item.get("confidence", 0.0)),
-                )
-            except (TypeError, ValueError):
-                continue
-            if target.bounds.is_empty():
-                continue
-            targets.append(target)
-
-        return CartographyMap(
-            frame_id=frame.frame_id,
-            targets=tuple(targets),
+        return self._parse_openai_cartography_response(
+            response_dict=normalize_response(response),
+            frame=frame,
+            metadata=metadata,
             model=str(payload["model"]),
-            provider="openai",
         )
 
     @staticmethod
@@ -736,18 +1029,4 @@ class OpenAIComputerUseMixin:
         transport = getattr(self, "_openai_transport", None)
         if transport is None:
             return await self._client.responses.create(**payload)
-        try:
-            return await transport.request(payload)
-        except Exception:
-            transport_mode = str(
-                getattr(self._settings, "openai_cu_transport", "responses_websocket")
-            ).strip()
-            if transport_mode != "responses_websocket":
-                raise
-            logger.warning(
-                "OpenAI CU WebSocket transport failed; falling back to HTTP transport",
-                exc_info=True,
-            )
-            fallback_transport = OpenAIResponsesHTTPTransport(self._client)
-            self._openai_transport = fallback_transport
-            return await fallback_transport.request(payload)
+        return await transport.request(payload)

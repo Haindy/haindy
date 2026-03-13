@@ -391,11 +391,21 @@ class ComputerUseSupportMixin:
         metadata: dict[str, Any],
     ) -> ComputerUseFollowUpBatch:
         """Capture one fresh follow-up state and build the shared batch model."""
+        previous_keyframe = self._current_keyframe
         screenshot_bytes = await self._automation_driver.screenshot()
         current_url = await self._maybe_get_current_url()
         if not current_url:
             current_url = "desktop://"
         interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
+        force_keyframe_reason = str(
+            metadata.pop("_force_keyframe_once", "") or ""
+        ).strip()
+        planner_metadata = metadata
+        if force_keyframe_reason:
+            planner_metadata = {
+                **metadata,
+                "_force_keyframe_reason": force_keyframe_reason,
+            }
         action_types = [
             str(turn.action_type or "").strip().lower()
             for group in call_groups
@@ -407,12 +417,24 @@ class ComputerUseSupportMixin:
             current_keyframe,
         ) = await self._visual_state_planner.build_follow_up_frame(
             screenshot_bytes=screenshot_bytes,
-            metadata=metadata,
+            metadata=planner_metadata,
             action_types=action_types,
-            previous_keyframe=self._current_keyframe,
+            previous_keyframe=previous_keyframe,
             turns_since_keyframe=self._turns_since_keyframe,
             generate_cartography=self._generate_cartography,
         )
+        cartography = current_keyframe.cartography
+        cartography_origin: str | None = None
+        if cartography is not None:
+            cartography_origin = "current_keyframe"
+        elif (
+            visual_frame.kind == "patch"
+            and previous_keyframe is not None
+            and previous_keyframe.cartography is not None
+            and visual_frame.parent_keyframe_id == previous_keyframe.frame_id
+        ):
+            cartography = previous_keyframe.cartography
+            cartography_origin = "parent_keyframe"
         self._current_keyframe = current_keyframe
         self._last_visual_frame = visual_frame
         if visual_frame.kind == "keyframe":
@@ -425,6 +447,8 @@ class ComputerUseSupportMixin:
             current_url=current_url,
             interaction_mode=interaction_mode,
             visual_frame=visual_frame,
+            cartography=cartography,
+            cartography_origin=cartography_origin,
         )
         execute_reporting_reminder = self._build_execute_follow_up_reporting_reminder(
             metadata
@@ -446,6 +470,10 @@ class ComputerUseSupportMixin:
     ) -> CartographyMap | None:
         """Dispatch provider-owned cartography generation for a keyframe."""
         try:
+            if self._provider == "openai" and bool(
+                metadata.get("_defer_openai_cartography")
+            ):
+                return None
             if self._provider == "openai" and hasattr(
                 self, "_generate_openai_cartography_map"
             ):

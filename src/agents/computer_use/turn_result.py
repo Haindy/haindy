@@ -10,7 +10,7 @@ from typing import Any
 from src.core.enhanced_types import ComputerToolTurn
 
 from .common import encode_png_base64
-from .visual_state import VisualFrame
+from .visual_state import CartographyMap, VisualFrame
 
 _GOOGLE_PROVIDER_METADATA_KEYS = (
     "google_function_call_id",
@@ -64,6 +64,8 @@ class ComputerUseFollowUpBatch:
     reminder_text: str | None = None
     error_text: str | None = None
     visual_frame: VisualFrame | None = None
+    cartography: CartographyMap | None = None
+    cartography_origin: str | None = None
 
 
 def build_action_result(turn: ComputerToolTurn) -> ComputerUseActionResult:
@@ -121,6 +123,8 @@ def build_follow_up_batch(
     current_url: str,
     interaction_mode: str | None = None,
     visual_frame: VisualFrame | None = None,
+    cartography: CartographyMap | None = None,
+    cartography_origin: str | None = None,
 ) -> ComputerUseFollowUpBatch:
     """Build the shared follow-up batch from completed call groups and one fresh capture."""
     calls = [build_call_result(group) for group in call_groups if group]
@@ -135,6 +139,8 @@ def build_follow_up_batch(
         reminder_text=build_reminder_text(normalized_mode),
         error_text=extract_first_error_text(calls),
         visual_frame=visual_frame,
+        cartography=cartography,
+        cartography_origin=cartography_origin,
     )
 
 

@@ -217,6 +217,11 @@ class VisualStatePlanner:
         previous_keyframe: VisualFrame | None,
         turns_since_keyframe: int,
     ) -> str | None:
+        force_keyframe_reason = str(
+            metadata.get("_force_keyframe_reason") or ""
+        ).strip()
+        if force_keyframe_reason:
+            return force_keyframe_reason
         if previous_keyframe is None:
             return "missing_previous_keyframe"
         if turns_since_keyframe >= self.keyframe_max_turns:
