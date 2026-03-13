@@ -27,6 +27,10 @@ source .venv/bin/activate
 .venv/bin/pip install -e ".[dev]"
 ```
 
+The base install works on macOS and Linux. The desktop automation backend still
+targets Linux/X11, so macOS setups should use non-desktop flows unless that
+backend is ported separately.
+
 3. Install Playwright runtime:
 ```bash
 .venv/bin/playwright install chromium
