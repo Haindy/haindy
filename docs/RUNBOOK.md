@@ -5,9 +5,12 @@ This document contains instructions for running tests, demos, and common develop
 ## Environment Setup
 
 ### Initial Setup
+
+#### Shared Steps
+
 ```bash
 # Clone the repository
-git clone https://github.com/fkeegan/haindy.git
+git clone https://github.com/Haindy/haindy.git
 cd haindy
 
 # Create virtual environment
@@ -24,9 +27,26 @@ pip install -e .[dev]
 playwright install chromium
 ```
 
+#### macOS
+
+- Base installation is supported.
+- Developer checks and tests are supported.
+- The `desktop` automation backend is not supported yet because the current
+  implementation depends on Linux/X11 input and capture tooling.
+- Use macOS for development, CI-like local verification, and `--mobile` ADB runs.
+
+#### Linux
+
+- Base installation is supported.
+- The `desktop` automation backend is supported on Linux/X11 after installing
+  the runtime dependencies below.
+- Use Linux for full desktop automation runs.
+
 ### Environment Variables
+
 Create a `.env` file in the project root:
-```
+
+```text
 OPENAI_API_KEY=your-api-key-here
 HAINDY_COMPUTER_USE_MODEL=gpt-5.4
 CU_PROVIDER=google
@@ -42,8 +62,16 @@ CU_SAFETY_POLICY=auto_approve
 HAINDY_AUTOMATION_BACKEND=desktop
 ```
 
+Platform guidance:
+
+- macOS: leave `HAINDY_AUTOMATION_BACKEND` unset unless you are intentionally
+  using `mobile_adb`; the current `desktop` backend is Linux/X11-only.
+- Linux desktop runs: set `HAINDY_AUTOMATION_BACKEND=desktop`.
+
 ### Desktop Automation Dependencies (Linux/X11)
+
 Desktop automation uses OS-level input and screen capture. Install:
+
 - `ffmpeg` (x11grab) for screenshots
 - `xrandr` (x11-xserver-utils) for resolution switching
 - `/dev/uinput` permissions for soft keyboard/mouse
@@ -51,6 +79,7 @@ Desktop automation uses OS-level input and screen capture. Install:
 - `gdbus` (glib2.0) for optional GNOME screen recording
 
 Example (Ubuntu/Debian):
+
 ```bash
 sudo apt-get install ffmpeg x11-xserver-utils xclip libglib2.0-bin
 sudo modprobe uinput
@@ -59,10 +88,17 @@ sudo usermod -aG input $USER
 
 Log out/in after updating group membership.
 
+macOS note:
+
+- None of these Linux/X11 desktop dependencies apply on macOS.
+- A macOS-native desktop backend has not been implemented yet.
+
 ### Desktop Driver Configuration
+
 Use `HAINDY_AUTOMATION_BACKEND=desktop` to enable OS-level control.
 Common overrides:
-```
+
+```text
 HAINDY_AUTOMATION_BACKEND=desktop
 HAINDY_DESKTOP_RESOLUTION=1440,900
 HAINDY_DESKTOP_KEYBOARD_LAYOUT=us
@@ -72,9 +108,13 @@ HAINDY_DESKTOP_SCREENSHOT_DIR=data/screenshots/desktop
 HAINDY_DESKTOP_COORDINATE_CACHE_PATH=data/desktop_cache/coordinates.json
 ```
 
+Use this section only on Linux/X11. It does not apply to macOS yet.
+
 ### Mobile ADB Backend
+
 Use CLI `--mobile` for a hard mobile override per run. Optional defaults:
-```
+
+```text
 HAINDY_AUTOMATION_BACKEND=desktop
 HAINDY_MOBILE_DEFAULT_ADB_SERIAL=
 HAINDY_MOBILE_SCREENSHOT_DIR=data/screenshots/mobile
@@ -83,11 +123,14 @@ HAINDY_MOBILE_ADB_TIMEOUT_SECONDS=15.0
 ```
 
 For mobile context, provide either:
+
 - `adb_serial` + `app_package` (optional `app_activity`), or
 - `adb_commands` that discover/select the device and open the app.
 
 ### Caching and Trace Artifacts
+
 Backported caches and logs are stored under `data/` by default:
+
 - `data/task_plan_cache.json`
 - `data/planning_cache.json`
 - `data/situational_cache.json`
@@ -106,7 +149,8 @@ Execution replay behavior:
 - Legacy `can_be_replayed` step flags are accepted in payloads but ignored by runtime replay gating.
 
 Control replay caching with:
-```
+
+```text
 HAINDY_ENABLE_PLANNING_CACHE=true
 HAINDY_ENABLE_SITUATIONAL_CACHE=true
 HAINDY_ENABLE_EXECUTION_REPLAY_CACHE=true
