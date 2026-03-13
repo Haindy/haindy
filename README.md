@@ -44,11 +44,13 @@ source .venv/bin/activate
   runtime tools from [docs/RUNBOOK.md](/Users/fkeegan/src/haindy/haindy/docs/RUNBOOK.md).
 - Use Linux when you need the `desktop` automation backend.
 
-### Install Playwright Runtime
+### Install Backend Prerequisites
 
-```bash
-.venv/bin/playwright install chromium
-```
+- No Playwright browser runtime installation is required for the current codebase.
+- Linux desktop runs: install the Linux/X11 desktop automation dependencies from
+  [docs/RUNBOOK.md](/Users/fkeegan/src/haindy/haindy/docs/RUNBOOK.md).
+- Mobile ADB runs: ensure `adb` is installed and your Android device or emulator
+  is reachable.
 
 ### Configure Environment
 

@@ -1,7 +1,13 @@
 # HAINDY System Architecture
 
 ## Overview
-HAINDY is an autonomous QA platform that converts natural-language requirements into executable web tests. The runtime orchestrates an ensemble of AI agents, a Playwright-driven browser, OpenAI’s computer-use model, and rich observability tooling to deliver end-to-end testing without manual intervention. This document captures the overarching architecture, major subsystems, and operational flows so that contributors—human or AI—can understand how the tool is assembled.
+HAINDY is an autonomous QA platform that converts natural-language
+requirements into executable test runs. The runtime orchestrates an ensemble of
+AI agents, desktop/mobile automation drivers, OpenAI’s computer-use model, and
+rich observability tooling to deliver end-to-end testing without manual
+intervention. This document captures the overarching architecture, major
+subsystems, and operational flows so that contributors can understand how the
+tool is assembled.
 
 ## Layered Architecture
 The platform is organised into layers that isolate concerns yet communicate through typed messages and shared state.
@@ -27,7 +33,7 @@ flowchart TD
 
     subgraph Execution["Execution Backplane"]
         D1[ComputerUseSession\nsrc/agents/computer_use/session.py]
-        D2[Browser Drivers\nsrc/browser/*]
+        D2[Automation Drivers\nsrc/desktop/* + src/mobile/*]
         D3[OpenAIClient\nsrc/models/openai_client.py]
     end
 
@@ -63,7 +69,7 @@ sequenceDiagram
     participant Action as ActionAgent
     participant CU as ComputerUseSession
     participant API as OpenAI Responses
-    participant Browser as Playwright/Instrumented Driver
+    participant Driver as DesktopDriver / MobileDriver
     participant Reporter as TestReporter
 
     CLI->>Coord: initialise(requirements, flags)
@@ -74,16 +80,16 @@ sequenceDiagram
         Runner->>Action: execute_action(step_context)
         alt Step requires computer-use
             Action->>CU: run(goal, screenshot, metadata)
-            CU->>Browser: start() / screenshot()
+            CU->>Driver: start() / screenshot()
             loop computer_use turns
                 CU->>API: responses.create(...)
                 API-->>CU: computer_call output
-                CU->>Browser: click / type / press / scroll
-                Browser-->>CU: state snapshots
+                CU->>Driver: click / type / press / scroll
+                Driver-->>CU: state snapshots
             end
             CU-->>Action: EnhancedActionResult
         else Non-computer-use workflow
-            Action->>Browser: direct navigate/click/etc
+            Action->>Driver: direct driver actions
         end
         Action-->>Runner: EnhancedActionResult
         Runner->>Reporter: append_step_result(...)
@@ -98,7 +104,9 @@ sequenceDiagram
 - Parses CLI flags (`--plan`, `--berserk`, etc.) and loads configuration via `get_settings`.
 - Bootstraps logging, rate limiting, sanitization, OpenAI credentials, and debug logging directories.
 - Depending on mode, either generates plans, executes scenarios, or runs diagnostics.
-- Instantiates `WorkflowCoordinator`, `BrowserController`, `TestReporter`, and manages lifecycle (start/stop browser, persist artifacts).
+- Instantiates `WorkflowCoordinator`, `DesktopController` or `MobileController`,
+  `TestReporter`, and manages automation-driver lifecycle plus artifact
+  persistence.
 
 ### Orchestration Layer
 - **WorkflowCoordinator** (`src/orchestration/coordinator.py`): central state machine that wires agents together, enforces execution phases (planning → execution), and manages concurrency.
@@ -109,7 +117,10 @@ sequenceDiagram
 ### Agent Layer (`src/agents`)
 - **TestPlannerAgent**: interprets requirements using OpenAI Responses, producing structured `TestPlan` objects with cases and steps. Uses streaming observers for rich CLI feedback.
 - **TestRunner**: executes plan sequentially; for each step it decomposes intent into action instructions, maintains execution history, triggers action execution, performs AI-based verification, and generates bug reports.
-- **ActionAgent**: translates each planned action into concrete execution via the Computer Use workflow or manual grid-based routines. Tracks conversation history for logging, enforces interaction modes, and packages `EnhancedActionResult` objects.
+- **ActionAgent**: translates each planned action into concrete execution via the
+  Computer Use workflow and automation-driver calls. Tracks conversation history
+  for logging, enforces interaction modes, and packages
+  `EnhancedActionResult` objects.
 
 ### Computer Use Integration (`src/agents/computer_use/session.py`)
 - Wraps OpenAI’s computer-use tool, maintaining a loop of screenshot → request → computer_call execution.
@@ -118,11 +129,18 @@ sequenceDiagram
 - Applies domain allow/block lists and fail-fast safety handling; mirrors all turns into `ComputerToolTurn` records with screenshots and timing.
 - Automatically confirms “Should I proceed?” messages to keep workflows non-blocking.
 
-### Browser & Environment Abstraction (`src/browser`)
-- `PlaywrightDriver` handles Chromium startup, navigation, clicks, typing, scrolling, and screenshot capture with instrumentation hooks.
-- `InstrumentedBrowserDriver` extends the base driver to record every API call (method, parameters, duration) for action logs.
-- `BrowserController` orchestrates driver lifecycle, handles initial URL navigation, and coordinates with the coordinator.
-- Viewport, headless, timeout, and launch flags come from `ConfigSettings`.
+### Automation Backends (`src/desktop`, `src/mobile`)
+- `DesktopDriver` performs desktop automation through OS-level input, screen
+  capture, clipboard handling, and optional resolution switching.
+- `DesktopController` owns desktop-driver lifecycle and exposes high-level
+  desktop control to the coordinator.
+- `MobileDriver` performs Android automation through ADB-backed input and
+  screenshot capture.
+- `MobileController` owns mobile-driver lifecycle and exposes the same
+  automation-driver contract for mobile runs.
+- `normalize_automation_backend` selects the active backend so the coordinator
+  can run against either desktop or mobile execution without changing agent
+  logic.
 
 ### OpenAI Client Layer (`src/models/openai_client.py`)
 - Provides a resilient wrapper around OpenAI Responses and Chat Completion APIs with retry logic.
@@ -144,7 +162,8 @@ sequenceDiagram
 - Rate limiting prevents runaway API usage in failure loops.
 - Sanitizer strips secrets from logs, error messages, and stored prompts.
 - Safety identifiers and observe-only enforcement keep computer-use actions auditable and limit unintended interactions.
-- Browser runs with hardened Chromium flags (`--disable-extensions`, `--no-sandbox` where permitted) to reduce side effects.
+- Desktop runs are constrained by explicit backend selection, domain
+  allow/block lists, and fail-fast safety checks before risky actions proceed.
 
 ### Data & Artifact Layout
 - `test_scenarios/` – curated requirement documents and prompts for regression.
@@ -174,7 +193,9 @@ stateDiagram-v2
 - **Adding Agents**: register with `MessageBus`, define message subscriptions, and wire into `WorkflowCoordinator`. `StateManager` can persist agent-specific metadata in `TestState`.
 - **Custom Actions**: extend `ActionAgent` workflows or add new grid workflows; ensure Computer Use payloads are enriched with the new metadata and update tests under `tests/test_computer_use_session.py`.
 - **Reporter Plugins**: hook into `TestReporter` to push artefacts to bespoke sinks (e.g., dashboards, Slack) or augment HTML generation.
-- **Browser Variants**: implement the `BrowserDriver` interface; swap in via settings to run against different engines or remote grids.
+- **Automation Backends**: extend the shared automation-driver interface to add
+  new desktop or mobile execution environments without changing planner or
+  coordinator contracts.
 
 ## Error Handling & Resilience
 - Computer-use fail-fast safety stops execution if OpenAI flags potentially unsafe actions.
@@ -183,4 +204,9 @@ stateDiagram-v2
 - Coordinated logging and structured artefacts simplify post-mortem analysis—it is always possible to trace a bug report back to the exact computer-use turn and screenshot.
 
 ## Summary
-HAINDY fuses orchestration, AI planning, and browser automation into a layered system. The coordinator and message bus keep agents loosely coupled; the Action Agent and Computer Use session enforce safe, deterministic interactions; monitoring components guarantee traceability. Developers can extend the system by adding agents, refining prompts, or swapping execution backends while relying on the established architecture.
+HAINDY fuses orchestration, AI planning, and automation-driver execution into a
+layered system. The coordinator and message bus keep agents loosely coupled; the
+Action Agent and Computer Use session enforce safe, deterministic interactions;
+monitoring components guarantee traceability. Developers can extend the system
+by adding agents, refining prompts, or swapping execution backends while
+relying on the established architecture.

@@ -22,9 +22,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.lock
 pip install -e .[dev]
-
-# Install Playwright browsers
-playwright install chromium
 ```
 
 #### macOS
@@ -34,6 +31,7 @@ playwright install chromium
 - The `desktop` automation backend is not supported yet because the current
   implementation depends on Linux/X11 input and capture tooling.
 - Use macOS for development, CI-like local verification, and `--mobile` ADB runs.
+- No Playwright browser runtime installation is required.
 
 #### Linux
 
@@ -41,6 +39,7 @@ playwright install chromium
 - The `desktop` automation backend is supported on Linux/X11 after installing
   the runtime dependencies below.
 - Use Linux for full desktop automation runs.
+- No Playwright browser runtime installation is required.
 
 ### Environment Variables
 
@@ -382,7 +381,9 @@ gh pr create --title "Phase X: Description" --body "Summary of changes..."
 
 2. **Test Failures**
    - Check environment variables are set
-   - Ensure Playwright browsers are installed: `playwright install chromium`
+   - Verify backend prerequisites for your chosen mode:
+     Linux desktop runs need the Linux/X11 tools below, and `--mobile` runs
+     need a working `adb` installation and device connection
 
 3. **Coverage Below Threshold**
    - Run specific test file with coverage: `python -m pytest tests/test_file.py --cov=src.module`
