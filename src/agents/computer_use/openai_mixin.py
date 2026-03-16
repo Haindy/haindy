@@ -326,6 +326,7 @@ class OpenAIComputerUseMixin:
                 metadata={"environment": environment, **metadata},
             )
             result.final_visual_frame = follow_up_batch.visual_frame
+            result.final_artifact_frame = follow_up_batch.artifact_frame
             response_dict = normalize_response(response)
             result.response_ids.append(response_dict.get("id", ""))
             current_response_id = response_dict.get("id")

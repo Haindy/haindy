@@ -113,12 +113,20 @@ async def test_visual_state_planner_uses_target_aware_patch_when_cartography_mat
     )
 
     assert plan.visual_frame.kind == "patch"
+    assert plan.artifact_frame.kind == "patch"
     assert plan.visual_frame.target_bounds == VisualBounds(
         x=40,
         y=30,
         width=30,
         height=20,
     )
+    assert plan.artifact_frame.target_bounds == VisualBounds(
+        x=40,
+        y=30,
+        width=30,
+        height=20,
+    )
+    assert plan.artifact_frame.diff_bounds is None
     assert plan.current_keyframe.kind == "keyframe"
     assert plan.current_keyframe.cartography == cartography
     assert plan.request_localization is False
@@ -173,6 +181,48 @@ async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
     assert record.visual_frame_kind == "patch"
     assert record.matched_target_label == "email"
     assert record.cartography_labels == ["email"]
+
+
+@pytest.mark.asyncio
+async def test_visual_state_planner_keeps_diff_only_patch_out_of_artifacts() -> None:
+    previous_screenshot = _png_with_rect(width=400, height=240)
+    current_screenshot = _png_with_rect(
+        width=400,
+        height=240,
+        rect=(80, 60, 120, 100),
+    )
+    previous_keyframe = build_keyframe(
+        previous_screenshot,
+        source="test",
+        cartography=CartographyMap(frame_id="vk_prev"),
+    )
+    planner = VisualStatePlanner(
+        visual_mode="keyframe_patch",
+        keyframe_max_turns=3,
+        patch_max_area_ratio=0.35,
+        patch_margin_ratio=0.12,
+    )
+
+    plan = await planner.build_follow_up_frame(
+        screenshot_bytes=current_screenshot,
+        metadata={},
+        action_types=["type"],
+        previous_keyframe=previous_keyframe,
+        turns_since_keyframe=1,
+        turns_since_cartography_refresh=1,
+        cartography=previous_keyframe.cartography,
+    )
+
+    assert plan.visual_frame.kind == "patch"
+    assert plan.visual_frame.diff_bounds == VisualBounds(
+        x=80,
+        y=60,
+        width=40,
+        height=40,
+    )
+    assert plan.artifact_frame.kind == "keyframe"
+    assert plan.artifact_frame.bounds == plan.current_keyframe.bounds
+    assert plan.artifact_frame.image_bytes == current_screenshot
 
 
 @pytest.mark.asyncio

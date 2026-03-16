@@ -37,6 +37,7 @@ class VisualPlanResult:
     """Planned visual follow-up state for one provider turn."""
 
     visual_frame: VisualFrame
+    artifact_frame: VisualFrame
     current_keyframe: VisualFrame
     request_localization: bool = False
     localization_reason: str | None = None
@@ -86,6 +87,7 @@ class VisualStatePlanner:
             source="follow_up_capture",
             cartography=carried_cartography,
         )
+        artifact_frame = current_full
 
         if self.visual_mode != "keyframe_patch":
             self._log_visual_decision(
@@ -105,10 +107,17 @@ class VisualStatePlanner:
             )
             return VisualPlanResult(
                 visual_frame=current_full,
+                artifact_frame=artifact_frame,
                 current_keyframe=current_full,
                 request_localization=localization_reason is not None,
                 localization_reason=localization_reason,
             )
+
+        artifact_frame = self._build_artifact_frame(
+            screenshot_bytes=screenshot_bytes,
+            current_full=current_full,
+            matched_target=matched_target if localization_reason is None else None,
+        )
 
         force_keyframe_reason = self._resolve_keyframe_requirement(
             metadata=metadata,
@@ -135,6 +144,7 @@ class VisualStatePlanner:
             )
             return VisualPlanResult(
                 visual_frame=current_full,
+                artifact_frame=artifact_frame,
                 current_keyframe=current_full,
                 request_localization=localization_reason is not None,
                 localization_reason=localization_reason,
@@ -167,6 +177,7 @@ class VisualStatePlanner:
             )
             return VisualPlanResult(
                 visual_frame=current_full,
+                artifact_frame=artifact_frame,
                 current_keyframe=current_full,
             )
 
@@ -196,6 +207,7 @@ class VisualStatePlanner:
             )
             return VisualPlanResult(
                 visual_frame=current_full,
+                artifact_frame=artifact_frame,
                 current_keyframe=current_full,
             )
 
@@ -226,7 +238,36 @@ class VisualStatePlanner:
         )
         return VisualPlanResult(
             visual_frame=patch,
+            artifact_frame=artifact_frame,
             current_keyframe=current_full,
+        )
+
+    def _build_artifact_frame(
+        self,
+        *,
+        screenshot_bytes: bytes,
+        current_full: VisualFrame,
+        matched_target: CartographyTarget | None,
+    ) -> VisualFrame:
+        """Return the frame that should be persisted as evidence."""
+        if matched_target is None:
+            return current_full
+
+        expanded = expand_bounds(
+            matched_target.bounds,
+            screen_size=current_full.screen_size,
+            margin_ratio=self.patch_margin_ratio,
+        )
+        if expanded == current_full.bounds:
+            return current_full
+
+        return build_patch(
+            screenshot_bytes,
+            source_frame=current_full,
+            bounds=expanded,
+            diff_bounds=None,
+            target_bounds=matched_target.bounds,
+            source="artifact_target_patch",
         )
 
     def _resolve_keyframe_requirement(

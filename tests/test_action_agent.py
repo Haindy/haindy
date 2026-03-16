@@ -2,10 +2,13 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from src.agents.action_agent import ActionAgent
+from src.agents.computer_use.types import ComputerUseSessionResult
+from src.agents.computer_use.visual_state import VisualBounds, VisualFrame
 from src.core.enhanced_types import (
     EnhancedActionResult,
     ExecutionResult,
@@ -231,3 +234,72 @@ async def test_execute_action_delegates_to_computer_workflow(
 
     result = await agent.execute_action(step, {})
     assert result is expected
+
+
+@pytest.mark.asyncio
+async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings(monkeypatch)
+    monkeypatch.setattr("src.agents.action_agent.get_debug_logger", lambda: None)
+
+    visual_patch = VisualFrame(
+        frame_id="patch_1",
+        kind="patch",
+        image_bytes=b"model_patch_png",
+        screen_size=(1280, 720),
+        bounds=VisualBounds(x=80, y=120, width=220, height=160),
+        parent_keyframe_id="keyframe_0",
+        diff_bounds=VisualBounds(x=90, y=130, width=40, height=20),
+    )
+    artifact_frame = VisualFrame(
+        frame_id="keyframe_1",
+        kind="keyframe",
+        image_bytes=b"artifact_full_png",
+        screen_size=(1280, 720),
+        bounds=VisualBounds(x=0, y=0, width=1280, height=720),
+    )
+
+    class _FakeSession:
+        async def run(self, *_args, **_kwargs):
+            return ComputerUseSessionResult(
+                final_output="Done",
+                final_visual_frame=visual_patch,
+                final_artifact_frame=artifact_frame,
+            )
+
+    agent = ActionAgent(
+        automation_driver=SimpleNamespace(
+            get_page_url=AsyncMock(return_value="https://example.com"),
+            get_page_title=AsyncMock(return_value="Example"),
+            get_viewport_size=AsyncMock(return_value=(1280, 720)),
+        )
+    )
+    monkeypatch.setattr(
+        agent, "_new_computer_use_session", lambda *_args, **_kwargs: _FakeSession()
+    )
+
+    step = TestStep(
+        step_number=5,
+        description="Type into the email field",
+        action="type into email field",
+        expected_result="The text appears in the email field",
+        action_instruction=ActionInstruction(
+            action_type=ActionType.TYPE,
+            description="Type email",
+            target="Email",
+            value="user@example.com",
+            expected_outcome="The text appears in the email field",
+        ),
+    )
+
+    result = await agent.execute_action(
+        step,
+        {"environment": "desktop"},
+        screenshot=b"initial_png",
+    )
+
+    assert result.environment_state_after is not None
+    assert result.environment_state_after.screenshot == b"artifact_full_png"
+    assert result.environment_state_after.frame_kind == "keyframe"
+    assert result.environment_state_after.patch_bounds is None

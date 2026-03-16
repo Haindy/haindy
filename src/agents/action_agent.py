@@ -1073,10 +1073,11 @@ Respond with JSON only:
 
         duration_ms = (time.perf_counter() - start_ts) * 1000
 
+        artifact_frame = (
+            session_result.final_artifact_frame or session_result.final_visual_frame
+        )
         after_screenshot = (
-            session_result.final_visual_frame.image_bytes
-            if session_result.final_visual_frame is not None
-            else None
+            artifact_frame.image_bytes if artifact_frame is not None else None
         )
         if after_screenshot is None:
             after_screenshot = await self.automation_driver.screenshot()
@@ -1085,7 +1086,7 @@ Respond with JSON only:
             debug_logger,
             test_step.step_number,
             "after",
-            visual_frame=session_result.final_visual_frame,
+            visual_frame=artifact_frame,
         )
 
         failing_action = next(

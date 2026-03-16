@@ -575,6 +575,7 @@ class ComputerUseSupportMixin:
             current_url=current_url,
             interaction_mode=interaction_mode,
             visual_frame=plan.visual_frame,
+            artifact_frame=plan.artifact_frame,
         )
         follow_up_batch.request_localization = plan.request_localization
         follow_up_batch.localization_reason = plan.localization_reason

@@ -406,6 +406,7 @@ class GoogleComputerUseMixin:
                             model=model,
                         )
                         result.final_visual_frame = follow_up_batch.visual_frame
+                        result.final_artifact_frame = follow_up_batch.artifact_frame
                         current_interaction_id = (
                             response_dict.get("id") or current_interaction_id
                         )
@@ -474,6 +475,7 @@ class GoogleComputerUseMixin:
                             model=model,
                         )
                         result.final_visual_frame = follow_up_batch.visual_frame
+                        result.final_artifact_frame = follow_up_batch.artifact_frame
                         current_interaction_id = (
                             response_dict.get("id") or current_interaction_id
                         )
@@ -546,6 +548,7 @@ class GoogleComputerUseMixin:
                     model=model,
                 )
                 result.final_visual_frame = follow_up_batch.visual_frame
+                result.final_artifact_frame = follow_up_batch.artifact_frame
                 current_interaction_id = (
                     response_dict.get("id") or current_interaction_id
                 )
