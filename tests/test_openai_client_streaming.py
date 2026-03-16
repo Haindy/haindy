@@ -115,7 +115,7 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         output_text="hello world",
         usage=usage,
         status="completed",
-        model="gpt-5.2",
+        model="gpt-5.4",
     )
     delta_event = SimpleNamespace(type="response.output_text.delta", delta="hello")
     events = [
@@ -142,7 +142,7 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         lambda self, text, encoder: len(text),
     )
 
-    client = OpenAIClient(model="gpt-5.2", api_key="test-key")
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
 
     observer = RecordingObserver()
     result = await client._call_responses_api_streaming(
@@ -187,7 +187,7 @@ def test_ensure_json_keyword_appends_input_message_when_missing(monkeypatch) -> 
     monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
     monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
 
-    client = OpenAIClient(model="gpt-5.2", api_key="test-key")
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     input_items = [
         {"role": "user", "content": [{"type": "input_text", "text": "Plan it"}]}
     ]
@@ -214,7 +214,7 @@ def test_ensure_json_keyword_appends_input_even_if_only_instructions_mention_jso
     monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
     monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
 
-    client = OpenAIClient(model="gpt-5.2", api_key="test-key")
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     input_items: list[dict[str, Any]] = []
     instructions = client._ensure_json_keyword_for_response_format(
         instructions="Return JSON only.",
@@ -235,7 +235,7 @@ def test_ensure_json_keyword_keeps_existing_input_json_reference(monkeypatch) ->
     monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
     monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
 
-    client = OpenAIClient(model="gpt-5.2", api_key="test-key")
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     input_items = [
         {
             "role": "user",
@@ -260,7 +260,7 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
         output_text="{}",
         usage=usage,
         status="completed",
-        model="gpt-5.2",
+        model="gpt-5.4",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
 
@@ -274,7 +274,7 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
     monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
     monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
 
-    client = OpenAIClient(model="gpt-5.2", api_key="test-key")
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     result = await client._call_responses_api(
         final_messages=[{"role": "user", "content": "Assess context."}],
         temperature=0.0,

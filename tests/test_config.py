@@ -28,7 +28,7 @@ class TestSettings:
     def test_action_agent_model_overrides_are_ignored(self):
         settings = load_settings(
             {
-                "HAINDY_ACTION_AGENT_MODEL": "gpt-5.2",
+                "HAINDY_ACTION_AGENT_MODEL": "gpt-5.4",
                 "HAINDY_ACTION_AGENT_REASONING_LEVEL": "high",
                 "HAINDY_ACTION_AGENT_MODALITIES": "text,vision",
             }
@@ -41,7 +41,7 @@ class TestSettings:
 
     def test_default_openai_model(self):
         settings = Settings()
-        assert settings.openai_model == "gpt-5.2"
+        assert settings.openai_model == "gpt-5.4"
 
     def test_default_openai_computer_use_model(self):
         settings = load_settings({})
@@ -128,24 +128,28 @@ class TestSettings:
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".env").write_text(
-            "HAINDY_CU_PROVIDER=anthropic\nHAINDY_OPENAI_MODEL=gpt-5.2\n",
+            "HAINDY_CU_PROVIDER=anthropic\nHAINDY_OPENAI_MODEL=gpt-5.4\n",
             encoding="utf-8",
         )
         settings = load_settings()
         assert settings.cu_provider == "anthropic"
-        assert settings.openai_model == "gpt-5.2"
+        assert settings.openai_model == "gpt-5.4"
+
+    def test_openai_model_rejects_legacy_non_cu_value(self):
+        with pytest.raises(ValueError, match="Unsupported OpenAI model 'gpt-5.2'"):
+            load_settings({"HAINDY_OPENAI_MODEL": "gpt-5.2"})
 
     @pytest.mark.parametrize(
         "level",
         ["none", "minimal", "low", "medium", "high", "xhigh"],
     )
     def test_reasoning_level_accepts_supported_values(self, level):
-        config = AgentModelConfig(model="gpt-5.2", reasoning_level=level)
+        config = AgentModelConfig(model="gpt-5.4", reasoning_level=level)
         assert config.reasoning_level == level
 
     def test_reasoning_level_rejects_unsupported_value(self):
         with pytest.raises(ValueError):
-            AgentModelConfig(model="gpt-5.2", reasoning_level="ultra")
+            AgentModelConfig(model="gpt-5.4", reasoning_level="ultra")
 
 
 class TestConfigManager:

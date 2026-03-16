@@ -14,7 +14,7 @@ class BaseAgent(Agent):
     def __init__(
         self,
         name: str,
-        model: str = "gpt-5.2",
+        model: str = "gpt-5.4",
         system_prompt: str | None = None,
         temperature: float = 0.7,
         reasoning_level: str = "medium",

@@ -27,7 +27,7 @@ async def test_verify_expected_outcome_scopes_prompt_to_current_step() -> None:
             }
         ),
         _model_logger=SimpleNamespace(log_call=AsyncMock()),
-        model="gpt-5.2",
+        model="gpt-5.4",
     )
     verifier = TestRunnerVerifier(runner)
     test_case = TestCase(

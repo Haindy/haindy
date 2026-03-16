@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 
 from src.config.settings import get_settings
 
-SUPPORTED_OPENAI_MODEL = "gpt-5.2"
+SUPPORTED_OPENAI_MODEL = "gpt-5.4"
 
 
 class ResponseStreamObserver(Protocol):
@@ -40,7 +40,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "gpt-5.2",
+        model: str = "gpt-5.4",
         api_key: str | None = None,
         max_retries: int = 3,
         reasoning_level: str = "medium",
