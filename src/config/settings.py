@@ -28,7 +28,7 @@ AGENT_ENV_PREFIX: dict[str, str] = {
     "test_runner": "HAINDY_TEST_RUNNER",
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
-SUPPORTED_OPENAI_MODEL = "gpt-5.2"
+SUPPORTED_OPENAI_MODEL = "gpt-5.4"
 SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.4"
 LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
 
@@ -167,22 +167,22 @@ class AgentModelConfig(BaseModel):
 
 DEFAULT_AGENT_MODELS: dict[str, AgentModelConfig] = {
     "scope_triage": AgentModelConfig(
-        model="gpt-5.2",
+        model="gpt-5.4",
         temperature=0.15,
         reasoning_level="high",
     ),
     "test_planner": AgentModelConfig(
-        model="gpt-5.2",
+        model="gpt-5.4",
         temperature=0.35,
         reasoning_level="high",
     ),
     "test_runner": AgentModelConfig(
-        model="gpt-5.2",
+        model="gpt-5.4",
         temperature=0.55,
         reasoning_level="medium",
     ),
     "situational_agent": AgentModelConfig(
-        model="gpt-5.2",
+        model="gpt-5.4",
         temperature=0.1,
         reasoning_level="high",
     ),
@@ -300,7 +300,7 @@ class Settings(BaseModel):
 
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
-    openai_model: str = Field(default="gpt-5.2", description="Default OpenAI model")
+    openai_model: str = Field(default="gpt-5.4", description="Default OpenAI model")
     openai_max_retries: int = Field(
         default=3, ge=1, description="Maximum API retry attempts"
     )
