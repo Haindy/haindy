@@ -106,6 +106,7 @@ class ComputerUseSession(
     _current_keyframe: VisualFrame | None
     _last_visual_frame: VisualFrame | None
     _turns_since_keyframe: int
+    _turns_since_cartography_refresh: int
     _openai_previous_response_id: str | None
     _google_previous_interaction_id: str | None
     _google_turn_index: int
@@ -239,6 +240,7 @@ class ComputerUseSession(
         self._current_keyframe = None
         self._last_visual_frame = None
         self._turns_since_keyframe = 0
+        self._turns_since_cartography_refresh = 0
         self._openai_previous_response_id = None
         self._google_previous_interaction_id = None
         self._google_turn_index = 0
@@ -280,6 +282,7 @@ class ComputerUseSession(
         self._current_keyframe = None
         self._last_visual_frame = None
         self._turns_since_keyframe = 0
+        self._turns_since_cartography_refresh = 0
         self._openai_previous_response_id = None
         self._google_previous_interaction_id = None
         self._google_turn_index = 0
@@ -296,6 +299,7 @@ class ComputerUseSession(
         self._current_keyframe = None
         self._last_visual_frame = None
         self._turns_since_keyframe = 0
+        self._turns_since_cartography_refresh = 0
         self._openai_previous_response_id = None
         self._google_previous_interaction_id = None
         self._google_turn_index = 0

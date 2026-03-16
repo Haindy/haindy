@@ -121,6 +121,7 @@ class ComputerUseSessionResult:
     terminal_failure_reason: str | None = None
     terminal_failure_code: str | None = None
     final_visual_frame: VisualFrame | None = None
+    final_artifact_frame: VisualFrame | None = None
 
 
 @dataclass(frozen=True)

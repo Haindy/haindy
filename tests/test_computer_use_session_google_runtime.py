@@ -8,9 +8,10 @@ import warnings
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from PIL import Image
 
 import src.agents.computer_use.session as cu_session_module
-from src.agents.computer_use.visual_state import VisualBounds, VisualFrame
+from src.agents.computer_use.visual_state import encode_png
 from tests.computer_use_session_support import make_google_client, make_session
 
 pytest_plugins = ("tests.computer_use_session_support",)
@@ -445,7 +446,7 @@ async def test_google_interactions_failure_logs_payload_summary(
 
 
 @pytest.mark.asyncio
-async def test_google_cartography_logs_request_payload(
+async def test_google_runtime_stores_in_session_localization_from_response(
     mock_client, mock_browser, session_settings
 ):
     session_settings.cu_provider = "google"
@@ -458,56 +459,49 @@ async def test_google_cartography_logs_request_payload(
     )
     session._create_google_response = AsyncMock(  # type: ignore[assignment]
         return_value={
+            "id": "resp_google_localize",
             "outputs": [
                 {
                     "type": "text",
-                    "text": json.dumps(
-                        {
-                            "targets": [
-                                {
-                                    "target_id": "target_1",
-                                    "label": "Email",
-                                    "bbox": {
-                                        "x": 20,
-                                        "y": 30,
-                                        "width": 40,
-                                        "height": 20,
-                                    },
-                                    "interaction_point": {"x": 35, "y": 40},
-                                    "confidence": 0.9,
-                                }
-                            ]
-                        }
+                    "text": (
+                        "Located the target.\n"
+                        "<haindy_cartography>"
+                        + json.dumps(
+                            {
+                                "targets": [
+                                    {
+                                        "target_id": "target_1",
+                                        "label": "Email",
+                                        "bbox": {
+                                            "x": 20,
+                                            "y": 30,
+                                            "width": 40,
+                                            "height": 20,
+                                        },
+                                        "interaction_point": {"x": 35, "y": 40},
+                                        "confidence": 0.9,
+                                    }
+                                ]
+                            }
+                        )
+                        + "</haindy_cartography>"
                     ),
                 }
-            ]
+            ],
         }
     )
+    image = Image.new("RGB", (100, 100), color="black")
+    screenshot = encode_png(image)
 
-    await session._generate_google_cartography_map(
-        frame=VisualFrame(
-            frame_id="vk_test",
-            kind="keyframe",
-            image_bytes=b"fake_png_bytes",
-            screen_size=(100, 100),
-            bounds=VisualBounds(x=0, y=0, width=100, height=100),
-        ),
+    session.begin_step_scope()
+
+    result = await session.execute_step_action(
+        goal="Open the Email field.",
+        initial_screenshot=screenshot,
         metadata={"target": 'Email field labeled "Email"', "step_number": 3},
     )
 
-    entries = [
-        json.loads(line)
-        for line in session_settings.model_log_path.read_text().splitlines()
-        if line.strip()
-    ]
-    entry = next(
-        entry
-        for entry in entries
-        if entry.get("agent") == "computer_use.google.cartography"
-    )
-    assert entry["request_payload"]["payload_type"] == "cartography"
-    assert entry["request_payload"]["request"]["input"][0]["type"] == "text"
-    assert entry["request_payload"]["request"]["input"][1]["data"].startswith(
-        "<<base64:"
-    )
-    assert entry["metadata"]["target"] == 'Email field labeled "Email"'
+    assert result.final_output == "Located the target."
+    assert session._current_keyframe is not None
+    assert session._current_keyframe.cartography is not None
+    assert session._current_keyframe.cartography.targets[0].label == "Email"

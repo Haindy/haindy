@@ -1,9 +1,10 @@
-"""Visual-state selection and cartography orchestration for Computer Use."""
+"""Visual-state selection using session-owned cartography state."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from .visual_state import (
@@ -18,10 +19,6 @@ from .visual_state import (
     union_bounds,
 )
 
-CartographyGenerator = Callable[
-    [VisualFrame, dict[str, Any]], Awaitable[CartographyMap | None]
-]
-
 logger = logging.getLogger("src.agents.computer_use.session")
 
 _KEYFRAME_ACTIONS = {
@@ -35,8 +32,19 @@ _KEYFRAME_ACTIONS = {
 }
 
 
+@dataclass(frozen=True)
+class VisualPlanResult:
+    """Planned visual follow-up state for one provider turn."""
+
+    visual_frame: VisualFrame
+    artifact_frame: VisualFrame
+    current_keyframe: VisualFrame
+    request_localization: bool = False
+    localization_reason: str | None = None
+
+
 class VisualStatePlanner:
-    """Select keyframes versus patches and invoke provider-owned cartography."""
+    """Select keyframes versus patches using session-local cartography."""
 
     def __init__(
         self,
@@ -59,21 +67,29 @@ class VisualStatePlanner:
         action_types: Sequence[str],
         previous_keyframe: VisualFrame | None,
         turns_since_keyframe: int,
-        generate_cartography: CartographyGenerator,
-    ) -> tuple[VisualFrame, VisualFrame]:
+        turns_since_cartography_refresh: int,
+        cartography: CartographyMap | None,
+    ) -> VisualPlanResult:
         """Return the frame to send plus the current full keyframe state."""
-        current_full = build_keyframe(screenshot_bytes, source="follow_up_capture")
         target_text = str(metadata.get("target") or "").strip()
         interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
+        matched_target = self._match_target(cartography, metadata)
+        localization_reason = self._resolve_localization_requirement(
+            metadata=metadata,
+            action_types=action_types,
+            cartography=cartography,
+            matched_target=matched_target,
+            turns_since_cartography_refresh=turns_since_cartography_refresh,
+        )
+        carried_cartography = None if localization_reason else cartography
+        current_full = build_keyframe(
+            screenshot_bytes,
+            source="follow_up_capture",
+            cartography=carried_cartography,
+        )
+        artifact_frame = current_full
 
         if self.visual_mode != "keyframe_patch":
-            cartography = await generate_cartography(current_full, metadata)
-            if cartography is not None:
-                current_full = build_keyframe(
-                    screenshot_bytes,
-                    source="follow_up_capture",
-                    cartography=cartography,
-                )
             self._log_visual_decision(
                 decision="visual_mode_disabled",
                 metadata=metadata,
@@ -84,26 +100,35 @@ class VisualStatePlanner:
                 returned_frame=current_full,
                 current_keyframe=current_full,
                 turns_since_keyframe=turns_since_keyframe,
-                cartography=cartography,
+                cartography=carried_cartography,
+                matched_target=matched_target,
+                request_localization=localization_reason is not None,
+                localization_reason=localization_reason,
             )
-            return current_full, current_full
+            return VisualPlanResult(
+                visual_frame=current_full,
+                artifact_frame=artifact_frame,
+                current_keyframe=current_full,
+                request_localization=localization_reason is not None,
+                localization_reason=localization_reason,
+            )
+
+        artifact_frame = self._build_artifact_frame(
+            screenshot_bytes=screenshot_bytes,
+            current_full=current_full,
+            matched_target=matched_target if localization_reason is None else None,
+        )
 
         force_keyframe_reason = self._resolve_keyframe_requirement(
             metadata=metadata,
             action_types=action_types,
             previous_keyframe=previous_keyframe,
             turns_since_keyframe=turns_since_keyframe,
+            cartography=carried_cartography,
         )
-        if force_keyframe_reason is not None:
-            cartography = await generate_cartography(current_full, metadata)
-            if cartography is not None:
-                current_full = build_keyframe(
-                    screenshot_bytes,
-                    source="follow_up_capture",
-                    cartography=cartography,
-                )
+        if force_keyframe_reason is not None or localization_reason is not None:
             self._log_visual_decision(
-                decision=force_keyframe_reason,
+                decision=force_keyframe_reason or "cartography_refresh_requested",
                 metadata=metadata,
                 action_types=action_types,
                 interaction_mode=interaction_mode,
@@ -112,28 +137,30 @@ class VisualStatePlanner:
                 returned_frame=current_full,
                 current_keyframe=current_full,
                 turns_since_keyframe=turns_since_keyframe,
-                cartography=cartography,
+                cartography=carried_cartography,
+                matched_target=matched_target,
+                request_localization=localization_reason is not None,
+                localization_reason=localization_reason,
             )
-            return current_full, current_full
+            return VisualPlanResult(
+                visual_frame=current_full,
+                artifact_frame=artifact_frame,
+                current_keyframe=current_full,
+                request_localization=localization_reason is not None,
+                localization_reason=localization_reason,
+            )
 
         assert previous_keyframe is not None
 
         diff_bounds = compute_diff_bounds(
-            previous_keyframe.image_bytes, screenshot_bytes
+            previous_keyframe.image_bytes,
+            screenshot_bytes,
         )
-        matched_target = self._match_target(previous_keyframe.cartography, metadata)
         target_bounds = matched_target.bounds if matched_target is not None else None
         selected_bounds = union_bounds(
             [bound for bound in (diff_bounds, target_bounds) if bound is not None]
         )
         if selected_bounds is None:
-            cartography = await generate_cartography(current_full, metadata)
-            if cartography is not None:
-                current_full = build_keyframe(
-                    screenshot_bytes,
-                    source="follow_up_capture",
-                    cartography=cartography,
-                )
             self._log_visual_decision(
                 decision="missing_diff_and_target_bounds",
                 metadata=metadata,
@@ -146,9 +173,13 @@ class VisualStatePlanner:
                 turns_since_keyframe=turns_since_keyframe,
                 diff_bounds=diff_bounds,
                 matched_target=matched_target,
-                cartography=cartography,
+                cartography=carried_cartography,
             )
-            return current_full, current_full
+            return VisualPlanResult(
+                visual_frame=current_full,
+                artifact_frame=artifact_frame,
+                current_keyframe=current_full,
+            )
 
         expanded = expand_bounds(
             selected_bounds,
@@ -157,13 +188,6 @@ class VisualStatePlanner:
         )
         patch_area_ratio = expanded.area / float(max(current_full.bounds.area, 1))
         if patch_area_ratio > self.patch_max_area_ratio:
-            cartography = await generate_cartography(current_full, metadata)
-            if cartography is not None:
-                current_full = build_keyframe(
-                    screenshot_bytes,
-                    source="follow_up_capture",
-                    cartography=cartography,
-                )
             self._log_visual_decision(
                 decision="patch_area_ratio_exceeded",
                 metadata=metadata,
@@ -179,9 +203,13 @@ class VisualStatePlanner:
                 selected_bounds=selected_bounds,
                 expanded_bounds=expanded,
                 patch_area_ratio=patch_area_ratio,
-                cartography=cartography,
+                cartography=carried_cartography,
             )
-            return current_full, current_full
+            return VisualPlanResult(
+                visual_frame=current_full,
+                artifact_frame=artifact_frame,
+                current_keyframe=current_full,
+            )
 
         patch = build_patch(
             screenshot_bytes,
@@ -206,8 +234,41 @@ class VisualStatePlanner:
             selected_bounds=selected_bounds,
             expanded_bounds=expanded,
             patch_area_ratio=patch_area_ratio,
+            cartography=carried_cartography,
         )
-        return patch, current_full
+        return VisualPlanResult(
+            visual_frame=patch,
+            artifact_frame=artifact_frame,
+            current_keyframe=current_full,
+        )
+
+    def _build_artifact_frame(
+        self,
+        *,
+        screenshot_bytes: bytes,
+        current_full: VisualFrame,
+        matched_target: CartographyTarget | None,
+    ) -> VisualFrame:
+        """Return the frame that should be persisted as evidence."""
+        if matched_target is None:
+            return current_full
+
+        expanded = expand_bounds(
+            matched_target.bounds,
+            screen_size=current_full.screen_size,
+            margin_ratio=self.patch_margin_ratio,
+        )
+        if expanded == current_full.bounds:
+            return current_full
+
+        return build_patch(
+            screenshot_bytes,
+            source_frame=current_full,
+            bounds=expanded,
+            diff_bounds=None,
+            target_bounds=matched_target.bounds,
+            source="artifact_target_patch",
+        )
 
     def _resolve_keyframe_requirement(
         self,
@@ -216,11 +277,14 @@ class VisualStatePlanner:
         action_types: Sequence[str],
         previous_keyframe: VisualFrame | None,
         turns_since_keyframe: int,
+        cartography: CartographyMap | None,
     ) -> str | None:
         if previous_keyframe is None:
             return "missing_previous_keyframe"
         if turns_since_keyframe >= self.keyframe_max_turns:
             return "keyframe_refresh_interval"
+        if cartography is None:
+            return "missing_session_cartography"
         if (
             str(metadata.get("interaction_mode") or "").strip().lower()
             == "observe_only"
@@ -231,6 +295,31 @@ class VisualStatePlanner:
             for action_type in action_types
         ):
             return "action_requires_keyframe"
+        return None
+
+    def _resolve_localization_requirement(
+        self,
+        *,
+        metadata: dict[str, Any],
+        action_types: Sequence[str],
+        cartography: CartographyMap | None,
+        matched_target: CartographyTarget | None,
+        turns_since_cartography_refresh: int,
+    ) -> str | None:
+        target_text = str(metadata.get("target") or "").strip()
+        if not target_text:
+            return None
+        if cartography is None:
+            return "missing_session_cartography"
+        if turns_since_cartography_refresh >= self.keyframe_max_turns:
+            return "cartography_refresh_interval"
+        if any(
+            str(action_type or "").strip().lower() in _KEYFRAME_ACTIONS
+            for action_type in action_types
+        ):
+            return "navigation_or_major_transition"
+        if matched_target is None:
+            return "target_map_untrusted"
         return None
 
     @staticmethod
@@ -274,6 +363,8 @@ class VisualStatePlanner:
         expanded_bounds: VisualBounds | None = None,
         patch_area_ratio: float | None = None,
         cartography: CartographyMap | None = None,
+        request_localization: bool = False,
+        localization_reason: str | None = None,
     ) -> None:
         previous_cartography = (
             previous_keyframe.cartography if previous_keyframe is not None else None
@@ -304,8 +395,13 @@ class VisualStatePlanner:
                 "previous_has_cartography": bool(
                     previous_cartography is not None and previous_cartography.targets
                 ),
+                "has_session_cartography": bool(
+                    effective_cartography is not None and effective_cartography.targets
+                ),
                 "cartography_target_count": len(labels),
                 "cartography_labels": labels or None,
+                "cartography_refresh_requested": request_localization,
+                "cartography_refresh_reason": localization_reason,
                 "matched_target_label": (
                     matched_target.label if matched_target is not None else None
                 ),
@@ -326,4 +422,4 @@ class VisualStatePlanner:
         )
 
 
-__all__ = ["CartographyGenerator", "VisualStatePlanner"]
+__all__ = ["VisualPlanResult", "VisualStatePlanner"]

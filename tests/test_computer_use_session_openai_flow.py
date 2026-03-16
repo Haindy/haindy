@@ -444,6 +444,40 @@ async def test_openai_follow_up_uses_fresh_batch_capture_and_preserves_turn_snap
 
 
 @pytest.mark.asyncio
+async def test_openai_follow_up_requests_in_loop_localization_on_full_keyframe(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="openai",
+    )
+    turn = ComputerToolTurn(
+        call_id="call_localize",
+        action_type="click",
+        parameters={"type": "click"},
+        status="executed",
+    )
+
+    payload, batch = await session._build_follow_up_request(
+        previous_response_id="resp_prev",
+        calls=[[turn]],
+        metadata={"target": "Email"},
+        model="gpt-5.4",
+    )
+
+    assert batch.request_localization is True
+    assert batch.localization_reason == "missing_session_cartography"
+    assert len(payload["input"]) == 2
+    assert payload["input"][1]["role"] == "user"
+    assert (
+        "Refresh the session cartography now"
+        in payload["input"][1]["content"][0]["text"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_openai_step_actions_reuse_previous_response_chain(
     mock_client, mock_browser, session_settings
 ):

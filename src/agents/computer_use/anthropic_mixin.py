@@ -63,7 +63,13 @@ class AnthropicComputerUseMixin:
         goal = self._wrap_goal_for_mobile(
             goal, environment, viewport_width, viewport_height
         )
+        goal = self._apply_interaction_mode_guidance(goal, metadata)
+        goal = self._apply_localization_protocol_guidance(goal, metadata)
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
+        self._prime_initial_visual_state_for_request(
+            screenshot,
+            source="initial_screenshot",
+        )
 
         request_payload = self._build_anthropic_initial_request(
             goal=goal,
@@ -102,7 +108,12 @@ class AnthropicComputerUseMixin:
 
         while True:
             calls = extract_anthropic_computer_calls(response_dict)
-            assistant_text = extract_assistant_text(response_dict)
+            assistant_text = self._consume_localization_response(
+                extract_assistant_text(response_dict),
+                metadata=metadata,
+                provider="anthropic",
+                model=model,
+            )
             if assistant_text:
                 result.final_output = assistant_text
                 last_assistant_text = assistant_text
@@ -428,6 +439,12 @@ class AnthropicComputerUseMixin:
             extra_content.append(
                 {"type": "text", "text": follow_up_batch.reminder_text}
             )
+        localization_prompt = self._build_follow_up_localization_prompt(
+            follow_up_batch,
+            metadata,
+        )
+        if localization_prompt:
+            extra_content.append({"type": "text", "text": localization_prompt})
 
         messages: list[dict[str, Any]] = list(history_messages)
         assistant_content = previous_response.get("content") or []

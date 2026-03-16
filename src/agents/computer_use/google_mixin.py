@@ -34,7 +34,6 @@ from .types import (
     GoogleFunctionCallEnvelope,
     _strip_bytes,
 )
-from .visual_state import CartographyMap, CartographyTarget, VisualBounds, VisualFrame
 
 logger = logging.getLogger("src.agents.computer_use.session")
 
@@ -152,6 +151,7 @@ class GoogleComputerUseMixin:
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
         goal = self._apply_interaction_mode_guidance(goal, metadata)
+        goal = self._apply_localization_protocol_guidance(goal, metadata)
         wrapped_goal = (
             self._wrap_goal_for_google(goal, environment)
             if previous_interaction_id is None
@@ -165,6 +165,15 @@ class GoogleComputerUseMixin:
         )
         if include_screenshot and request_screenshot is None:
             request_screenshot = await self._automation_driver.screenshot()
+        if include_screenshot:
+            self._prime_initial_visual_state_for_request(
+                request_screenshot,
+                source=(
+                    "initial_screenshot"
+                    if previous_interaction_id is None
+                    else "continuation_screenshot"
+                ),
+            )
         request_payload, logged_screenshot = self._build_google_initial_request(
             goal=wrapped_goal,
             screenshot_bytes=request_screenshot,
@@ -220,7 +229,12 @@ class GoogleComputerUseMixin:
 
         while True:
             call_envelopes = extract_google_function_call_envelopes(response_dict)
-            assistant_text = extract_assistant_text(response_dict)
+            assistant_text = self._consume_localization_response(
+                extract_assistant_text(response_dict),
+                metadata=metadata,
+                provider="google",
+                model=model,
+            )
             if assistant_text:
                 result.final_output = assistant_text
                 last_assistant_text = assistant_text
@@ -392,6 +406,7 @@ class GoogleComputerUseMixin:
                             model=model,
                         )
                         result.final_visual_frame = follow_up_batch.visual_frame
+                        result.final_artifact_frame = follow_up_batch.artifact_frame
                         current_interaction_id = (
                             response_dict.get("id") or current_interaction_id
                         )
@@ -460,6 +475,7 @@ class GoogleComputerUseMixin:
                             model=model,
                         )
                         result.final_visual_frame = follow_up_batch.visual_frame
+                        result.final_artifact_frame = follow_up_batch.artifact_frame
                         current_interaction_id = (
                             response_dict.get("id") or current_interaction_id
                         )
@@ -532,6 +548,7 @@ class GoogleComputerUseMixin:
                     model=model,
                 )
                 result.final_visual_frame = follow_up_batch.visual_frame
+                result.final_artifact_frame = follow_up_batch.artifact_frame
                 current_interaction_id = (
                     response_dict.get("id") or current_interaction_id
                 )
@@ -761,6 +778,7 @@ class GoogleComputerUseMixin:
         follow_up_context_text = self._build_google_follow_up_context_text(
             follow_up_batch=follow_up_batch,
             current_url=effective_current_url,
+            metadata=metadata,
         )
         input_items: list[dict[str, Any]] = []
         for call_result in follow_up_batch.calls:
@@ -958,9 +976,16 @@ class GoogleComputerUseMixin:
         *,
         follow_up_batch: Any,
         current_url: str,
+        metadata: dict[str, Any],
     ) -> str | None:
         """Render shared follow-up guidance appended after function_result items."""
         blocks: list[str] = []
+        localization_prompt = self._build_follow_up_localization_prompt(
+            follow_up_batch,
+            metadata,
+        )
+        if localization_prompt:
+            blocks.append(localization_prompt)
         visual_grounding = self._build_google_visual_grounding_text(follow_up_batch)
         if visual_grounding:
             blocks.append(visual_grounding)
@@ -1077,176 +1102,6 @@ class GoogleComputerUseMixin:
             "response_dict": response_dict,
             "raw_text": extract_assistant_text(response_dict) or "",
         }
-
-    async def _generate_google_cartography_map(
-        self: _ComputerUseSession,
-        frame: VisualFrame,
-        metadata: dict[str, Any],
-    ) -> CartographyMap | None:
-        """Generate a lightweight target map for the current keyframe."""
-        target_text = str(metadata.get("target") or "").strip()
-        if not target_text:
-            return None
-
-        prompt = (
-            "You are generating a strictly visual cartography map for a computer-use "
-            "agent. Look only at the screenshot. Do not infer DOM or hidden state. "
-            "Find the best visible interactable target matching the requested target "
-            f"description: {target_text!r}. "
-            "Return ONLY valid JSON with this shape: "
-            '{"targets":[{"target_id":"target_1","label":"visible label or short descriptor",'
-            '"bbox":{"x":0,"y":0,"width":0,"height":0},'
-            '"interaction_point":{"x":0,"y":0},"confidence":0.0}]}. '
-            "Use absolute pixel coordinates in the screenshot coordinate space. "
-            'If the target is not visible, return {"targets":[]}.'
-        )
-        payload = {
-            "api_surface": "interactions",
-            "model": getattr(self._settings, "cu_cartography_model", "").strip()
-            or self._google_model,
-            "input": [
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image",
-                    "data": base64.b64encode(frame.image_bytes).decode("utf-8"),
-                    "mime_type": "image/png",
-                    "resolution": "high",
-                },
-            ],
-            "response_mime_type": "application/json",
-            "response_format": {
-                "type": "object",
-                "properties": {
-                    "targets": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "target_id": {"type": "string"},
-                                "label": {"type": "string"},
-                                "bbox": {
-                                    "type": "object",
-                                    "properties": {
-                                        "x": {"type": "integer"},
-                                        "y": {"type": "integer"},
-                                        "width": {"type": "integer"},
-                                        "height": {"type": "integer"},
-                                    },
-                                    "required": ["x", "y", "width", "height"],
-                                },
-                                "interaction_point": {
-                                    "type": "object",
-                                    "properties": {
-                                        "x": {"type": "integer"},
-                                        "y": {"type": "integer"},
-                                    },
-                                    "required": ["x", "y"],
-                                },
-                                "confidence": {"type": "number"},
-                            },
-                            "required": [
-                                "target_id",
-                                "label",
-                                "bbox",
-                                "interaction_point",
-                                "confidence",
-                            ],
-                        },
-                    }
-                },
-                "required": ["targets"],
-            },
-        }
-        response = await self._create_google_response(payload)
-        await self._model_logger.log_call(
-            agent="computer_use.google.cartography",
-            model=str(payload["model"]),
-            prompt=prompt,
-            request_payload={
-                "provider": "google",
-                "payload_type": "cartography",
-                "api_surface": "interactions",
-                "request": self._sanitize_google_payload_for_log(payload),
-            },
-            response=response,
-            screenshots=[("computer_use_cartography", frame.image_bytes)],
-            metadata={
-                "target": target_text,
-                "frame_id": frame.frame_id,
-                "frame_kind": frame.kind,
-                "step_number": metadata.get("step_number"),
-            },
-        )
-        response_dict = normalize_response(response)
-        raw_text = extract_assistant_text(response_dict)
-        if not raw_text:
-            logger.info(
-                "Google cartography returned no text content",
-                extra={
-                    "target": target_text,
-                    "frame_id": frame.frame_id,
-                    "frame_kind": frame.kind,
-                    "step_number": metadata.get("step_number"),
-                },
-            )
-            return None
-
-        try:
-            parsed = json.loads(raw_text)
-        except json.JSONDecodeError:
-            logger.debug(
-                "Google cartography response was not valid JSON",
-                extra={"response_text": raw_text},
-            )
-            return None
-
-        raw_targets = parsed.get("targets", []) if isinstance(parsed, dict) else []
-        targets: list[CartographyTarget] = []
-        for index, item in enumerate(raw_targets, start=1):
-            if not isinstance(item, dict):
-                continue
-            bbox = item.get("bbox") or {}
-            point = item.get("interaction_point") or {}
-            try:
-                bounds = VisualBounds(
-                    x=int(bbox.get("x", 0)),
-                    y=int(bbox.get("y", 0)),
-                    width=int(bbox.get("width", 0)),
-                    height=int(bbox.get("height", 0)),
-                )
-                target = CartographyTarget(
-                    target_id=str(item.get("target_id") or f"target_{index}"),
-                    label=str(item.get("label") or target_text).strip() or target_text,
-                    bounds=bounds,
-                    interaction_point=(
-                        int(point.get("x", bounds.x + (bounds.width // 2))),
-                        int(point.get("y", bounds.y + (bounds.height // 2))),
-                    ),
-                    confidence=float(item.get("confidence", 0.0)),
-                )
-            except (TypeError, ValueError):
-                continue
-            if target.bounds.is_empty():
-                continue
-            targets.append(target)
-
-        logger.info(
-            "Google cartography generated targets",
-            extra={
-                "target": target_text,
-                "frame_id": frame.frame_id,
-                "frame_kind": frame.kind,
-                "step_number": metadata.get("step_number"),
-                "cartography_target_count": len(targets),
-                "cartography_labels": [target.label for target in targets] or None,
-            },
-        )
-        return CartographyMap(
-            frame_id=frame.frame_id,
-            targets=tuple(targets),
-            model=str(payload["model"]),
-            provider="google",
-        )
 
     def _build_google_generate_config(
         self: _ComputerUseSession, environment: str

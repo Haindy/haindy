@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock
 
 import pytest
 from PIL import Image, ImageDraw
@@ -11,6 +10,8 @@ from PIL import Image, ImageDraw
 from src.agents.computer_use.common import denormalize_coordinates
 from src.agents.computer_use.visual_pipeline import VisualStatePlanner
 from src.agents.computer_use.visual_state import (
+    CARTOGRAPHY_BLOCK_END,
+    CARTOGRAPHY_BLOCK_START,
     CartographyMap,
     CartographyTarget,
     VisualBounds,
@@ -101,21 +102,34 @@ async def test_visual_state_planner_uses_target_aware_patch_when_cartography_mat
         patch_max_area_ratio=0.35,
         patch_margin_ratio=0.12,
     )
-    generate_cartography = AsyncMock(return_value=None)
-
-    visual_frame, current_keyframe = await planner.build_follow_up_frame(
+    plan = await planner.build_follow_up_frame(
         screenshot_bytes=screenshot,
         metadata={"target": "submit"},
         action_types=["click_at"],
         previous_keyframe=previous_keyframe,
         turns_since_keyframe=1,
-        generate_cartography=generate_cartography,
+        turns_since_cartography_refresh=1,
+        cartography=cartography,
     )
 
-    assert visual_frame.kind == "patch"
-    assert visual_frame.target_bounds == VisualBounds(x=40, y=30, width=30, height=20)
-    assert current_keyframe.kind == "keyframe"
-    generate_cartography.assert_not_awaited()
+    assert plan.visual_frame.kind == "patch"
+    assert plan.artifact_frame.kind == "patch"
+    assert plan.visual_frame.target_bounds == VisualBounds(
+        x=40,
+        y=30,
+        width=30,
+        height=20,
+    )
+    assert plan.artifact_frame.target_bounds == VisualBounds(
+        x=40,
+        y=30,
+        width=30,
+        height=20,
+    )
+    assert plan.artifact_frame.diff_bounds is None
+    assert plan.current_keyframe.kind == "keyframe"
+    assert plan.current_keyframe.cartography == cartography
+    assert plan.request_localization is False
 
 
 @pytest.mark.asyncio
@@ -146,7 +160,6 @@ async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
         patch_max_area_ratio=0.35,
         patch_margin_ratio=0.12,
     )
-    generate_cartography = AsyncMock(return_value=None)
 
     with caplog.at_level(logging.INFO, logger="src.agents.computer_use.session"):
         await planner.build_follow_up_frame(
@@ -155,7 +168,8 @@ async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
             action_types=["click_at"],
             previous_keyframe=previous_keyframe,
             turns_since_keyframe=1,
-            generate_cartography=generate_cartography,
+            turns_since_cartography_refresh=1,
+            cartography=cartography,
         )
 
     record = next(
@@ -170,7 +184,49 @@ async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_initial_screenshot_seeding_enables_patch_on_first_follow_up(
+async def test_visual_state_planner_keeps_diff_only_patch_out_of_artifacts() -> None:
+    previous_screenshot = _png_with_rect(width=400, height=240)
+    current_screenshot = _png_with_rect(
+        width=400,
+        height=240,
+        rect=(80, 60, 120, 100),
+    )
+    previous_keyframe = build_keyframe(
+        previous_screenshot,
+        source="test",
+        cartography=CartographyMap(frame_id="vk_prev"),
+    )
+    planner = VisualStatePlanner(
+        visual_mode="keyframe_patch",
+        keyframe_max_turns=3,
+        patch_max_area_ratio=0.35,
+        patch_margin_ratio=0.12,
+    )
+
+    plan = await planner.build_follow_up_frame(
+        screenshot_bytes=current_screenshot,
+        metadata={},
+        action_types=["type"],
+        previous_keyframe=previous_keyframe,
+        turns_since_keyframe=1,
+        turns_since_cartography_refresh=1,
+        cartography=previous_keyframe.cartography,
+    )
+
+    assert plan.visual_frame.kind == "patch"
+    assert plan.visual_frame.diff_bounds == VisualBounds(
+        x=80,
+        y=60,
+        width=40,
+        height=40,
+    )
+    assert plan.artifact_frame.kind == "keyframe"
+    assert plan.artifact_frame.bounds == plan.current_keyframe.bounds
+    assert plan.artifact_frame.image_bytes == current_screenshot
+
+
+@pytest.mark.asyncio
+async def test_initial_screenshot_seeding_keeps_keyframe_until_localization_exists(
     mock_client, mock_browser, session_settings
 ) -> None:
     session = make_session(
@@ -192,12 +248,102 @@ async def test_initial_screenshot_seeding_enables_patch_on_first_follow_up(
     )
 
     session._maybe_seed_initial_keyframe(initial_screenshot)
-    batch = await session._build_follow_up_batch(call_groups=[[turn]], metadata={})
+    batch = await session._build_follow_up_batch(
+        call_groups=[[turn]],
+        metadata={"target": "submit"},
+    )
+
+    assert batch.visual_frame is not None
+    assert batch.visual_frame.kind == "keyframe"
+    assert batch.request_localization is True
+    assert batch.localization_reason == "missing_session_cartography"
+    assert session._current_keyframe is not None
+    assert session._current_keyframe.kind == "keyframe"
+
+
+@pytest.mark.asyncio
+async def test_follow_up_batch_preserves_cartography_across_patch_turns(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    initial_screenshot = _png_with_rect(width=200, height=120)
+    follow_up_screenshot = _png_with_rect(
+        width=200,
+        height=120,
+        rect=(40, 30, 70, 50),
+    )
+    cartography = CartographyMap(
+        frame_id="vk_prev",
+        targets=(
+            CartographyTarget(
+                target_id="target_1",
+                label="submit button",
+                bounds=VisualBounds(x=40, y=30, width=30, height=20),
+                interaction_point=(55, 40),
+                confidence=0.98,
+            ),
+        ),
+    )
+    session._current_keyframe = build_keyframe(
+        initial_screenshot,
+        source="initial_screenshot",
+        cartography=cartography,
+    )
+    mock_browser.screenshot.return_value = follow_up_screenshot
+    turn = ComputerToolTurn(
+        call_id="call_seeded_patch",
+        action_type="click",
+        parameters={"type": "click"},
+    )
+
+    batch = await session._build_follow_up_batch(
+        call_groups=[[turn]],
+        metadata={"target": "submit"},
+    )
 
     assert batch.visual_frame is not None
     assert batch.visual_frame.kind == "patch"
     assert session._current_keyframe is not None
-    assert session._current_keyframe.kind == "keyframe"
+    assert session._current_keyframe.cartography == cartography
+    assert batch.request_localization is False
+
+
+def test_consume_localization_response_updates_session_keyframe_and_strips_block(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    frame = build_keyframe(_png_with_rect(width=200, height=120), source="test")
+    session._current_keyframe = frame
+    session._last_visual_frame = frame
+    session._turns_since_cartography_refresh = 4
+
+    text = (
+        "Clicked.\n\n"
+        f"{CARTOGRAPHY_BLOCK_START}"
+        '{"targets":[{"target_id":"target_1","label":"Email","bbox":{"x":20,"y":30,"width":40,"height":20},"interaction_point":{"x":35,"y":40},"confidence":0.9}]}'
+        f"{CARTOGRAPHY_BLOCK_END}"
+    )
+
+    cleaned = session._consume_localization_response(
+        text,
+        metadata={"target": "Email"},
+        provider="openai",
+        model="gpt-5.4",
+    )
+
+    assert cleaned == "Clicked."
+    assert session._current_keyframe is not None
+    assert session._current_keyframe.cartography is not None
+    assert session._current_keyframe.cartography.targets[0].label == "Email"
+    assert session._turns_since_cartography_refresh == 0
 
 
 def test_initial_screenshot_seeding_does_not_override_existing_keyframe(

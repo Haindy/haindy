@@ -64,6 +64,9 @@ class ComputerUseFollowUpBatch:
     reminder_text: str | None = None
     error_text: str | None = None
     visual_frame: VisualFrame | None = None
+    artifact_frame: VisualFrame | None = None
+    request_localization: bool = False
+    localization_reason: str | None = None
 
 
 def build_action_result(turn: ComputerToolTurn) -> ComputerUseActionResult:
@@ -121,6 +124,7 @@ def build_follow_up_batch(
     current_url: str,
     interaction_mode: str | None = None,
     visual_frame: VisualFrame | None = None,
+    artifact_frame: VisualFrame | None = None,
 ) -> ComputerUseFollowUpBatch:
     """Build the shared follow-up batch from completed call groups and one fresh capture."""
     calls = [build_call_result(group) for group in call_groups if group]
@@ -135,6 +139,7 @@ def build_follow_up_batch(
         reminder_text=build_reminder_text(normalized_mode),
         error_text=extract_first_error_text(calls),
         visual_frame=visual_frame,
+        artifact_frame=artifact_frame,
     )
 
 

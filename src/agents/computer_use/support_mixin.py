@@ -25,7 +25,15 @@ from .common import (
 from .turn_result import ComputerUseFollowUpBatch, build_follow_up_batch
 from .types import ComputerUseExecutionError, ComputerUseSessionResult
 from .visual_pipeline import VisualStatePlanner
-from .visual_state import CartographyMap, VisualFrame, build_keyframe
+from .visual_state import (
+    CARTOGRAPHY_BLOCK_END,
+    CARTOGRAPHY_BLOCK_START,
+    VisualFrame,
+    attach_cartography,
+    build_keyframe,
+    extract_cartography_payload,
+    parse_cartography_payload,
+)
 
 logger = logging.getLogger("src.agents.computer_use.session")
 
@@ -51,6 +59,7 @@ class ComputerUseSupportMixin:
     _last_visual_frame: VisualFrame | None
     _visual_state_planner: VisualStatePlanner
     _turns_since_keyframe: int
+    _turns_since_cartography_refresh: int
 
     def _update_loop_history(
         self: _ComputerUseSession,
@@ -204,6 +213,7 @@ class ComputerUseSupportMixin:
             source="initial_screenshot",
         )
         self._turns_since_keyframe = 0
+        self._turns_since_cartography_refresh = 0
         logger.info(
             "Computer Use seeded initial keyframe",
             extra={
@@ -384,6 +394,143 @@ class ComputerUseSupportMixin:
             "Do not quote exact field values or other on-screen text unless the task explicitly asks for that text."
         )
 
+    def _prime_initial_visual_state_for_request(
+        self: _ComputerUseSession,
+        screenshot_bytes: bytes | None,
+        *,
+        source: str,
+    ) -> None:
+        """Record the full-frame screenshot that the provider is about to see."""
+        if screenshot_bytes is None:
+            return
+        if self._current_keyframe is None:
+            self._current_keyframe = build_keyframe(
+                screenshot_bytes,
+                source=source,
+            )
+        self._last_visual_frame = self._current_keyframe
+
+    @staticmethod
+    def _build_localization_protocol_text(target_text: str) -> str:
+        """Return the shared in-session localization protocol."""
+        return (
+            "LOCALIZATION MAP RULES:\n"
+            f"- When you have a full-screen reference screenshot, append exactly one cartography block at the end of your reply for the current target {target_text!r}.\n"
+            f"- Use this exact wrapper: {CARTOGRAPHY_BLOCK_START}"
+            '{"targets":[{"target_id":"target_1","label":"visible label or short descriptor","bbox":{"x":0,"y":0,"width":0,"height":0},"interaction_point":{"x":0,"y":0},"confidence":0.0}]}'
+            f"{CARTOGRAPHY_BLOCK_END}\n"
+            "- Use only elements actually visible in the screenshot.\n"
+            "- Use absolute full-screen pixel coordinates.\n"
+            '- If the target is not visible, return {"targets":[]}.\n'
+            "- Do not emit a cartography block for cropped patch screenshots."
+        )
+
+    @classmethod
+    def _apply_localization_protocol_guidance(
+        cls,
+        goal: str,
+        metadata: dict[str, Any],
+    ) -> str:
+        """Append the shared localization protocol when the step has a target."""
+        target_text = str(metadata.get("target") or "").strip()
+        if not target_text:
+            return goal
+        guidance = cls._build_localization_protocol_text(target_text)
+        if guidance in goal:
+            return goal
+        return f"{goal}\n\n{guidance}"
+
+    @classmethod
+    def _build_follow_up_localization_prompt(
+        cls,
+        follow_up_batch: ComputerUseFollowUpBatch,
+        metadata: dict[str, Any],
+    ) -> str | None:
+        """Return a refresh prompt when the session needs a new target map."""
+        if not follow_up_batch.request_localization:
+            return None
+        target_text = str(metadata.get("target") or "").strip()
+        if not target_text:
+            return None
+        reason = str(follow_up_batch.localization_reason or "").strip() or "refresh"
+        return (
+            "This screenshot is a full-screen reference. Refresh the session cartography "
+            f"now because: {reason}.\n"
+            f"{cls._build_localization_protocol_text(target_text)}"
+        )
+
+    def _consume_localization_response(
+        self: _ComputerUseSession,
+        assistant_text: str | None,
+        *,
+        metadata: dict[str, Any],
+        provider: str,
+        model: str | None,
+    ) -> str | None:
+        """Extract session-local cartography from assistant text and persist it."""
+        cleaned_text, payload_text = extract_cartography_payload(assistant_text)
+        if payload_text is None:
+            return cleaned_text
+
+        frame = self._last_visual_frame
+        if frame is None or frame.kind != "keyframe":
+            logger.debug(
+                "Ignoring cartography block without an active keyframe",
+                extra={"provider": provider},
+            )
+            return cleaned_text
+
+        target_text = str(metadata.get("target") or "").strip()
+        if not target_text:
+            logger.debug(
+                "Ignoring cartography block without a target description",
+                extra={"provider": provider, "frame_id": frame.frame_id},
+            )
+            return cleaned_text
+
+        cartography = parse_cartography_payload(
+            payload_text,
+            frame=frame,
+            provider=provider,
+            model=model,
+            fallback_label=target_text,
+        )
+        if cartography is None:
+            logger.debug(
+                "Ignoring invalid cartography payload",
+                extra={"provider": provider, "frame_id": frame.frame_id},
+            )
+            return cleaned_text
+
+        updated_frame = attach_cartography(frame, cartography)
+        if (
+            self._current_keyframe is not None
+            and self._current_keyframe.frame_id == frame.frame_id
+        ):
+            self._current_keyframe = updated_frame
+        if (
+            self._last_visual_frame is not None
+            and self._last_visual_frame.frame_id == frame.frame_id
+        ):
+            self._last_visual_frame = updated_frame
+        self._turns_since_cartography_refresh = 0
+        logger.info(
+            "Computer Use cartography refreshed in-session",
+            extra={
+                "provider": provider,
+                "model": model,
+                "frame_id": frame.frame_id,
+                "target": target_text,
+                "cartography_target_count": len(cartography.targets),
+                "cartography_labels": [
+                    target.label for target in cartography.targets if target.label
+                ]
+                or None,
+                "step_number": metadata.get("step_number"),
+            },
+        )
+        return cleaned_text
+
     async def _build_follow_up_batch(
         self: _ComputerUseSession,
         *,
@@ -402,30 +549,46 @@ class ComputerUseSupportMixin:
             for turn in group
             if turn.action_type
         ]
-        (
-            visual_frame,
-            current_keyframe,
-        ) = await self._visual_state_planner.build_follow_up_frame(
+        plan = await self._visual_state_planner.build_follow_up_frame(
             screenshot_bytes=screenshot_bytes,
             metadata=metadata,
             action_types=action_types,
             previous_keyframe=self._current_keyframe,
             turns_since_keyframe=self._turns_since_keyframe,
-            generate_cartography=self._generate_cartography,
+            turns_since_cartography_refresh=self._turns_since_cartography_refresh,
+            cartography=(
+                self._current_keyframe.cartography
+                if self._current_keyframe is not None
+                else None
+            ),
         )
-        self._current_keyframe = current_keyframe
-        self._last_visual_frame = visual_frame
-        if visual_frame.kind == "keyframe":
+        self._current_keyframe = plan.current_keyframe
+        self._last_visual_frame = plan.visual_frame
+        if plan.visual_frame.kind == "keyframe":
             self._turns_since_keyframe = 0
         else:
             self._turns_since_keyframe += 1
+        self._turns_since_cartography_refresh += 1
         follow_up_batch = build_follow_up_batch(
             call_groups,
-            screenshot_bytes=visual_frame.image_bytes,
+            screenshot_bytes=plan.visual_frame.image_bytes,
             current_url=current_url,
             interaction_mode=interaction_mode,
-            visual_frame=visual_frame,
+            visual_frame=plan.visual_frame,
+            artifact_frame=plan.artifact_frame,
         )
+        follow_up_batch.request_localization = plan.request_localization
+        follow_up_batch.localization_reason = plan.localization_reason
+        if plan.request_localization:
+            logger.info(
+                "Computer Use cartography refresh requested",
+                extra={
+                    "provider": self._provider,
+                    "reason": plan.localization_reason,
+                    "frame_id": plan.current_keyframe.frame_id,
+                    "step_number": metadata.get("step_number"),
+                },
+            )
         execute_reporting_reminder = self._build_execute_follow_up_reporting_reminder(
             metadata
         )
@@ -438,31 +601,6 @@ class ComputerUseSupportMixin:
             else:
                 follow_up_batch.reminder_text = execute_reporting_reminder
         return follow_up_batch
-
-    async def _generate_cartography(
-        self: _ComputerUseSession,
-        frame: VisualFrame,
-        metadata: dict[str, Any],
-    ) -> CartographyMap | None:
-        """Dispatch provider-owned cartography generation for a keyframe."""
-        try:
-            if self._provider == "openai" and hasattr(
-                self, "_generate_openai_cartography_map"
-            ):
-                return await self._generate_openai_cartography_map(frame, metadata)
-            if self._provider == "google" and hasattr(
-                self, "_generate_google_cartography_map"
-            ):
-                result = await self._generate_google_cartography_map(frame, metadata)
-                return cast(CartographyMap | None, result)
-            if self._provider == "anthropic" and hasattr(
-                self, "_generate_anthropic_cartography_map"
-            ):
-                result = await self._generate_anthropic_cartography_map(frame, metadata)
-                return cast(CartographyMap | None, result)
-        except Exception:
-            logger.warning("Cartography generation failed", exc_info=True)
-        return None
 
     async def _build_confirmation_request(
         self: _ComputerUseSession,

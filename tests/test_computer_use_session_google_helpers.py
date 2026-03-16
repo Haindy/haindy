@@ -379,6 +379,41 @@ async def test_google_follow_up_preserves_observe_only_reminder_text(
 
 
 @pytest.mark.asyncio
+async def test_google_follow_up_requests_in_loop_localization_on_full_keyframe(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+    turn = ComputerToolTurn(
+        call_id="call_google_localize",
+        action_type="click_at",
+        parameters={"x": 120, "y": 340},
+        status="executed",
+        pending_safety_checks=[],
+    )
+
+    payload, batch, _ = await session._build_google_follow_up_request(
+        goal="Tap the button.",
+        previous_interaction_id="int_prev",
+        turns=[turn],
+        metadata={"target": "Email"},
+        environment="desktop",
+        model="gemini-3-flash-preview",
+    )
+
+    assert batch.request_localization is True
+    assert batch.localization_reason == "missing_session_cartography"
+    texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
+    assert any("Refresh the session cartography now" in text for text in texts)
+
+
+@pytest.mark.asyncio
 async def test_google_follow_up_includes_state_only_reporting_reminder(
     mock_client, mock_browser, session_settings
 ) -> None:
