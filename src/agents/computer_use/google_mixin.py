@@ -1586,7 +1586,8 @@ class GoogleComputerUseMixin:
         if vertex_project:
             if not vertex_location:
                 raise ComputerUseExecutionError(
-                    "VERTEX_LOCATION is required when VERTEX_PROJECT is configured."
+                    "HAINDY_VERTEX_LOCATION is required when "
+                    "HAINDY_VERTEX_PROJECT is configured."
                 )
             try:
                 vertex_kwargs: dict[str, Any] = {
@@ -1596,7 +1597,9 @@ class GoogleComputerUseMixin:
                 }
                 if vertex_api_key:
                     logger.warning(
-                        "Ignoring VERTEX_API_KEY because VERTEX_PROJECT is configured; using Vertex project/location mode."
+                        "Ignoring HAINDY_VERTEX_API_KEY because "
+                        "HAINDY_VERTEX_PROJECT is configured; using Vertex "
+                        "project/location mode."
                     )
                 self._google_client = session_module.genai.Client(**vertex_kwargs)
                 logger.info(
@@ -1614,7 +1617,9 @@ class GoogleComputerUseMixin:
 
         if not vertex_api_key:
             raise ComputerUseExecutionError(
-                "Google CU provider requires either VERTEX_PROJECT+VERTEX_LOCATION or VERTEX_API_KEY."
+                "Google CU provider requires either "
+                "HAINDY_VERTEX_PROJECT+HAINDY_VERTEX_LOCATION or "
+                "HAINDY_VERTEX_API_KEY."
             )
         self._google_client = session_module.genai.Client(api_key=vertex_api_key)
         logger.debug("Initialized Google CU client in API key mode")

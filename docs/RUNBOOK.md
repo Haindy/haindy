@@ -46,18 +46,18 @@ pip install -e .[dev]
 Create a `.env` file in the project root:
 
 ```text
-OPENAI_API_KEY=your-api-key-here
+HAINDY_OPENAI_API_KEY=your-api-key-here
 HAINDY_COMPUTER_USE_MODEL=gpt-5.4
-CU_PROVIDER=google
-GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
-ANTHROPIC_API_KEY=your-anthropic-api-key
-ANTHROPIC_CU_MODEL=claude-sonnet-4-6
-ANTHROPIC_CU_BETA=computer-use-2025-11-24
-ANTHROPIC_CU_MAX_TOKENS=16384
-VERTEX_API_KEY=your-vertex-api-key
-VERTEX_PROJECT=your-vertex-project
-VERTEX_LOCATION=us-central1
-CU_SAFETY_POLICY=auto_approve
+HAINDY_CU_PROVIDER=google
+HAINDY_GOOGLE_CU_MODEL=gemini-2.5-computer-use-preview-10-2025
+HAINDY_ANTHROPIC_API_KEY=your-anthropic-api-key
+HAINDY_ANTHROPIC_CU_MODEL=claude-sonnet-4-6
+HAINDY_ANTHROPIC_CU_BETA=computer-use-2025-11-24
+HAINDY_ANTHROPIC_CU_MAX_TOKENS=16384
+HAINDY_VERTEX_API_KEY=your-vertex-api-key
+HAINDY_VERTEX_PROJECT=your-vertex-project
+HAINDY_VERTEX_LOCATION=us-central1
+HAINDY_CU_SAFETY_POLICY=auto_approve
 HAINDY_AUTOMATION_BACKEND=desktop
 ```
 
@@ -157,7 +157,7 @@ HAINDY_TASK_PLAN_CACHE_PATH=data/task_plan_cache.json
 HAINDY_PLANNING_CACHE_PATH=data/planning_cache.json
 HAINDY_SITUATIONAL_CACHE_PATH=data/situational_cache.json
 HAINDY_EXECUTION_REPLAY_CACHE_PATH=data/execution_replay_cache.json
-MODEL_LOG_PATH=data/model_logs/model_calls.jsonl
+HAINDY_MODEL_LOG_PATH=data/model_logs/model_calls.jsonl
 ```
 
 ## Running Tests
@@ -270,19 +270,19 @@ python -m src.main --plan requirements.md --timeout 3600
 python -m src.main --plan requirements.md --output custom_reports/
 
 # Google Computer Use example
-export CU_PROVIDER=google
+export HAINDY_CU_PROVIDER=google
 export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 
 # OpenAI Computer Use example
-export CU_PROVIDER=openai
+export HAINDY_CU_PROVIDER=openai
 export HAINDY_COMPUTER_USE_MODEL=gpt-5.4
 export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 
 # Anthropic Computer Use example
-export CU_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=your-anthropic-api-key
+export HAINDY_CU_PROVIDER=anthropic
+export HAINDY_ANTHROPIC_API_KEY=your-anthropic-api-key
 export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 ```

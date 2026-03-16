@@ -130,7 +130,7 @@ async def test_computer_use_session_anthropic_requires_api_key(
 
     with pytest.raises(
         ComputerUseExecutionError,
-        match="Anthropic CU provider requires ANTHROPIC_API_KEY",
+        match="Anthropic CU provider requires HAINDY_ANTHROPIC_API_KEY",
     ):
         await session.run(
             goal="Observe",

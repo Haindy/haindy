@@ -68,9 +68,7 @@ class OpenAIClient:
         )
 
         if not self.api_key:
-            raise ValueError(
-                "OpenAI API key not provided. Set OPENAI_API_KEY environment variable."
-            )
+            raise ValueError("OpenAI API key not provided. Set HAINDY_OPENAI_API_KEY.")
 
         if model != SUPPORTED_OPENAI_MODEL:
             raise ValueError(

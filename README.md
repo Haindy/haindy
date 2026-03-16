@@ -60,16 +60,18 @@ cp .env.example .env
 
 Minimum required settings:
 
-- `OPENAI_API_KEY` (used by orchestration)
-- `CU_PROVIDER=openai`, `CU_PROVIDER=google`, or `CU_PROVIDER=anthropic`
+- `HAINDY_OPENAI_API_KEY` (used by orchestration)
+- `HAINDY_CU_PROVIDER=openai`, `HAINDY_CU_PROVIDER=google`, or
+  `HAINDY_CU_PROVIDER=anthropic`
 
 Provider-specific:
 
 - OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (default `gpt-5.4`)
-- Google computer-use: `GOOGLE_CU_MODEL` and Vertex credentials/settings (see `.env.example`)
-- Anthropic computer-use: `ANTHROPIC_API_KEY`, optional
-  `ANTHROPIC_CU_MODEL` (default `claude-sonnet-4-6`), optional
-  `ANTHROPIC_CU_MAX_TOKENS` (default `16384`)
+- Google computer-use: `HAINDY_GOOGLE_CU_MODEL` and Vertex credentials/settings
+  (see `.env.example`)
+- Anthropic computer-use: `HAINDY_ANTHROPIC_API_KEY`, optional
+  `HAINDY_ANTHROPIC_CU_MODEL` (default `claude-sonnet-4-6`), optional
+  `HAINDY_ANTHROPIC_CU_MAX_TOKENS` (default `16384`)
 
 Platform notes:
 

@@ -492,7 +492,7 @@ class AnthropicComputerUseMixin:
         ).strip()
         if not anthropic_api_key:
             raise ComputerUseExecutionError(
-                "Anthropic CU provider requires ANTHROPIC_API_KEY."
+                "Anthropic CU provider requires HAINDY_ANTHROPIC_API_KEY."
             )
 
         self._anthropic_client = session_module._AsyncAnthropic(

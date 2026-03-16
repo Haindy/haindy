@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from src.config.settings import AgentModelConfig, ConfigManager, Settings
+from src.config.settings import (
+    AgentModelConfig,
+    ConfigManager,
+    Settings,
+    load_settings,
+)
 
 
 class TestSettings:
@@ -29,7 +34,7 @@ class TestSettings:
         assert settings.openai_model == "gpt-5.2"
 
     def test_default_openai_computer_use_model(self):
-        settings = Settings(_env_file=None)
+        settings = load_settings({})
         assert settings.computer_use_model == "gpt-5.4"
 
     @pytest.mark.parametrize(
@@ -43,72 +48,82 @@ class TestSettings:
             ("invalid", "desktop"),
         ],
     )
-    def test_automation_backend_aliases(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        backend: str,
-        expected: str,
-    ):
-        monkeypatch.setenv("HAINDY_AUTOMATION_BACKEND", backend)
-        settings = Settings(_env_file=None)
+    def test_automation_backend_loader(self, backend: str, expected: str):
+        settings = load_settings({"HAINDY_AUTOMATION_BACKEND": backend})
         assert settings.automation_backend == expected
 
-    def test_cu_provider_accepts_anthropic(self, monkeypatch):
-        monkeypatch.setenv("CU_PROVIDER", "anthropic")
-        settings = Settings(cu_provider="anthropic")
+    def test_cu_provider_accepts_exact_env_name(self):
+        settings = load_settings({"HAINDY_CU_PROVIDER": "anthropic"})
         assert settings.cu_provider == "anthropic"
 
+    def test_legacy_cu_provider_env_name_is_ignored(self):
+        settings = load_settings({"CU_PROVIDER": "anthropic"})
+        assert settings.cu_provider == "google"
+
     def test_default_anthropic_computer_use_model(self):
-        settings = Settings(_env_file=None)
+        settings = load_settings({})
         assert settings.anthropic_cu_model == "claude-sonnet-4-6"
 
     def test_default_anthropic_computer_use_max_tokens(self):
-        settings = Settings(_env_file=None)
+        settings = load_settings({})
         assert settings.anthropic_cu_max_tokens == 16384
 
-    def test_openai_computer_use_rejects_legacy_preview_model(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        monkeypatch.setenv("CU_PROVIDER", "openai")
-        monkeypatch.setenv("HAINDY_COMPUTER_USE_MODEL", "computer-use-preview")
+    def test_openai_computer_use_rejects_legacy_preview_model(self):
         with pytest.raises(ValueError, match="computer-use-preview"):
-            Settings(_env_file=None)
+            load_settings(
+                {
+                    "HAINDY_CU_PROVIDER": "openai",
+                    "HAINDY_COMPUTER_USE_MODEL": "computer-use-preview",
+                }
+            )
 
     def test_default_computer_action_timeout(self):
-        settings = Settings(_env_file=None)
+        settings = load_settings({})
         assert settings.actions_computer_tool_action_timeout_ms == 600000
 
     def test_planning_cache_defaults(self):
-        settings = Settings(_env_file=None)
+        settings = load_settings({})
         assert settings.enable_planning_cache is True
         assert settings.planning_cache_path == Path("data/planning_cache.json")
 
-    def test_planning_cache_env_alias(self, monkeypatch):
-        monkeypatch.setenv("HAINDY_ENABLE_PLANNING_CACHE", "false")
-        monkeypatch.setenv(
-            "HAINDY_PLANNING_CACHE_PATH",
-            "tmp/planning_cache_override.json",
+    def test_planning_cache_env_loader(self):
+        settings = load_settings(
+            {
+                "HAINDY_ENABLE_PLANNING_CACHE": "false",
+                "HAINDY_PLANNING_CACHE_PATH": "tmp/planning_cache_override.json",
+            }
         )
-        settings = Settings(_env_file=None)
         assert settings.enable_planning_cache is False
         assert settings.planning_cache_path == Path("tmp/planning_cache_override.json")
 
     def test_situational_cache_defaults(self):
-        settings = Settings(_env_file=None)
+        settings = load_settings({})
         assert settings.enable_situational_cache is True
         assert settings.situational_cache_path == Path("data/situational_cache.json")
 
-    def test_situational_cache_env_alias(self, monkeypatch):
-        monkeypatch.setenv("HAINDY_ENABLE_SITUATIONAL_CACHE", "false")
-        monkeypatch.setenv(
-            "HAINDY_SITUATIONAL_CACHE_PATH",
-            "tmp/situational_cache_override.json",
+    def test_situational_cache_env_loader(self):
+        settings = load_settings(
+            {
+                "HAINDY_ENABLE_SITUATIONAL_CACHE": "false",
+                "HAINDY_SITUATIONAL_CACHE_PATH": "tmp/situational_cache_override.json",
+            }
         )
-        settings = Settings(_env_file=None)
         assert settings.enable_situational_cache is False
         assert settings.situational_cache_path == Path(
             "tmp/situational_cache_override.json"
         )
+
+    def test_load_settings_reads_dotenv(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text(
+            "HAINDY_CU_PROVIDER=anthropic\nHAINDY_OPENAI_MODEL=gpt-5.2\n",
+            encoding="utf-8",
+        )
+        settings = load_settings()
+        assert settings.cu_provider == "anthropic"
+        assert settings.openai_model == "gpt-5.2"
 
     @pytest.mark.parametrize(
         "level",
