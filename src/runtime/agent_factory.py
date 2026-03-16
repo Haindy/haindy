@@ -79,7 +79,6 @@ class AgentFactory:
         action_agent = ActionAgent(
             name="ActionAgent",
             automation_driver=automation_driver,
-            **self._agent_kwargs("action_agent"),
         )
         test_runner = TestRunner(
             name="TestRunner",

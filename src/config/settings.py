@@ -26,7 +26,6 @@ AGENT_ENV_PREFIX: dict[str, str] = {
     "scope_triage": "HAINDY_SCOPE_TRIAGE",
     "test_planner": "HAINDY_TEST_PLANNER",
     "test_runner": "HAINDY_TEST_RUNNER",
-    "action_agent": "HAINDY_ACTION_AGENT",
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
 SUPPORTED_OPENAI_MODEL = "gpt-5.2"
@@ -181,12 +180,6 @@ DEFAULT_AGENT_MODELS: dict[str, AgentModelConfig] = {
         model="gpt-5.2",
         temperature=0.55,
         reasoning_level="medium",
-    ),
-    "action_agent": AgentModelConfig(
-        model="gpt-5.2",
-        temperature=0.25,
-        reasoning_level="low",
-        modalities={"text", "vision"},
     ),
     "situational_agent": AgentModelConfig(
         model="gpt-5.2",

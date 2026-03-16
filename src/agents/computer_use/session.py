@@ -76,7 +76,7 @@ class ComputerUseSession(
     _GOOGLE_PROMPT_SAFETY_RETRY_DELAYS_SECONDS: tuple[float, ...] = (0.25, 0.75)
     _GOOGLE_PROMPT_SAFETY_RETRY_JITTER_SECONDS: tuple[float, float] = (0.05, 0.2)
 
-    _client: AsyncOpenAI
+    _client: AsyncOpenAI | None
     _automation_driver: AutomationDriver
     _settings: Settings
     _debug_logger: DebugLogger | None
@@ -114,7 +114,7 @@ class ComputerUseSession(
 
     def __init__(
         self,
-        client: AsyncOpenAI,
+        client: AsyncOpenAI | None,
         automation_driver: AutomationDriver,
         settings: Settings,
         debug_logger: DebugLogger | None = None,
@@ -247,13 +247,18 @@ class ComputerUseSession(
 
     def _build_openai_transport(self) -> ComputerUseTransport:
         """Build the transport used for OpenAI computer-use requests."""
+        client = self._client
+        if client is None:
+            raise ValueError(
+                "OpenAI client is required for OpenAI Computer Use sessions."
+            )
         transport_mode = str(
             getattr(self._settings, "openai_cu_transport", "responses_websocket")
         ).strip()
         if transport_mode == "responses_http":
-            return OpenAIResponsesHTTPTransport(self._client)
+            return OpenAIResponsesHTTPTransport(client)
         return OpenAIResponsesWebSocketTransport(
-            client=self._client,
+            client=client,
             timeout_seconds=float(self._settings.openai_request_timeout_seconds),
         )
 

@@ -25,6 +25,16 @@ class TestSettings:
         settings = Settings()
         assert "situational_agent" in settings.agent_models
 
+    def test_action_agent_model_overrides_are_ignored(self):
+        settings = load_settings(
+            {
+                "HAINDY_ACTION_AGENT_MODEL": "gpt-5.2",
+                "HAINDY_ACTION_AGENT_REASONING_LEVEL": "high",
+                "HAINDY_ACTION_AGENT_MODALITIES": "text,vision",
+            }
+        )
+        assert "action_agent" not in settings.agent_models
+
     def test_invalid_log_level_raises(self):
         with pytest.raises(ValueError):
             Settings(log_level="invalid")

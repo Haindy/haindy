@@ -7,25 +7,28 @@ import logging
 import shutil
 from asyncio import subprocess as aio_subprocess
 from collections.abc import Iterable, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from evdev import UInput as EvdevUInput
+
+_AbsInfoCtor: Any
+_UInputCtor: Any
+_UInputErrorType: type[Exception]
 
 try:
-    from evdev import AbsInfo, UInput, ecodes
-    from evdev.uinput import UInputError as _ImportedUInputError
-
-    UInputError = _ImportedUInputError
+    from evdev import AbsInfo as _AbsInfoCtor
+    from evdev import UInput as _UInputCtor
+    from evdev import ecodes
+    from evdev.uinput import UInputError as _UInputErrorType
 
     _EVDEV_AVAILABLE = True
     _EVDEV_IMPORT_ERROR: Exception | None = None
 except ImportError as exc:
-    AbsInfo = cast(Any, None)
-    UInput = cast(Any, None)
+    _AbsInfoCtor = None
+    _UInputCtor = None
     ecodes = cast(Any, None)
-
-    class _FallbackUInputError(RuntimeError):
-        """Fallback error type when evdev is unavailable."""
-
-    UInputError = _FallbackUInputError
+    _UInputErrorType = RuntimeError
     _EVDEV_AVAILABLE = False
     _EVDEV_IMPORT_ERROR = exc
 
@@ -184,17 +187,17 @@ class VirtualInput:
         keyboard_layout: str = "us",
         emit_scancodes: bool = True,
         key_delay_ms: int = 12,
-        uinput_device: UInput | None = None,
+        uinput_device: EvdevUInput | None = None,
     ) -> None:
-        self._ui: UInput | None = None
+        self._ui: EvdevUInput | None = None
         self._xdotool_binary: str | None = None
         if uinput_device is not None:
             self._ui = uinput_device
         elif _EVDEV_AVAILABLE:
             width, height = viewport
             abs_caps = [
-                (ecodes.ABS_X, AbsInfo(0, 0, max(width - 1, 0), 0, 0, 0)),
-                (ecodes.ABS_Y, AbsInfo(0, 0, max(height - 1, 0), 0, 0, 0)),
+                (ecodes.ABS_X, _AbsInfoCtor(0, 0, max(width - 1, 0), 0, 0, 0)),
+                (ecodes.ABS_Y, _AbsInfoCtor(0, 0, max(height - 1, 0), 0, 0, 0)),
             ]
 
             key_codes = self._keyboard_keys()
@@ -208,8 +211,8 @@ class VirtualInput:
                 },
             )
             try:
-                self._ui = UInput(capabilities, name=device_name, bustype=0x03)
-            except (PermissionError, OSError, UInputError) as exc:
+                self._ui = _UInputCtor(capabilities, name=device_name, bustype=0x03)
+            except (PermissionError, OSError, _UInputErrorType) as exc:
                 xdotool_binary = shutil.which("xdotool")
                 if not xdotool_binary:
                     raise _virtual_input_backend_error() from exc
@@ -949,9 +952,9 @@ class VirtualInput:
             "kpmultiply": ecodes.KEY_KPASTERISK,
             "kpdot": ecodes.KEY_KPDOT,
         }
-        alias_map = {k: v for k, v in alias_map.items() if v is not None}
+        alias_map = {k: int(v) for k, v in alias_map.items() if v is not None}
         if normalized in alias_map:
-            return int(alias_map[normalized])
+            return alias_map[normalized]
 
         if normalized.startswith("kp") and normalized[2:].isdigit():
             code = getattr(ecodes, f"KEY_KP{normalized[2:]}", None)

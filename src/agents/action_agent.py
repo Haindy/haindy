@@ -7,11 +7,11 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any
 
-from src.agents.base_agent import BaseAgent
+from openai import AsyncOpenAI
+
 from src.agents.computer_use import ComputerUseExecutionError, ComputerUseSession
-from src.config.agent_prompts import ACTION_AGENT_SYSTEM_PROMPT
 from src.config.settings import get_settings
 from src.core.enhanced_types import (
     AIAnalysis,
@@ -64,118 +64,43 @@ class StepSessionValidationResult:
     response_ids: list[str] = field(default_factory=list)
 
 
-class ActionAgent(BaseAgent):
+class ActionAgent:
     """Executes test actions through the desktop Computer Use session."""
 
     def __init__(
         self,
         name: str = "ActionAgent",
         automation_driver: AutomationDriver | None = None,
-        **kwargs: Any,
     ) -> None:
-        super().__init__(name=name, **kwargs)
-        self.system_prompt = ACTION_AGENT_SYSTEM_PROMPT
+        self.name = name
         self.automation_driver = automation_driver
 
         settings = get_settings()
         self.settings = settings
         self._coordinate_cache = CoordinateCache(settings.desktop_coordinate_cache_path)
         self._computer_use_model = getattr(settings, "computer_use_model", None)
+        self._openai_client: AsyncOpenAI | None = None
 
         self.conversation_history: list[dict[str, Any]] = []
-
-    async def call_openai_with_debug(
-        self,
-        messages: list[dict[str, Any]],
-        action_type: str,
-        step_number: int | None = None,
-        temperature: float | None = None,
-        response_format: dict[str, Any] | None = None,
-        screenshot_path: str | None = None,
-        reasoning_level: str | None = None,
-    ) -> dict[str, Any]:
-        """Conversation-aware OpenAI API call with debug logging."""
-        debug_logger = get_debug_logger()
-
-        for msg in messages:
-            self.conversation_history.append(msg)
-
-        full_messages = self._build_conversation_messages()
-        prompt_text = self._extract_prompt_text(messages)
-
-        response = await self.call_openai(
-            messages=full_messages,
-            response_format=response_format,
-            temperature=temperature or self.temperature,
-            reasoning_level=reasoning_level or self.reasoning_level,
-            modalities=self.modalities,
-        )
-
-        assistant_message = {
-            "role": "assistant",
-            "content": response.get("content", ""),
-        }
-        self.conversation_history.append(assistant_message)
-
-        if debug_logger:
-            debug_logger.log_ai_interaction(
-                agent_name=self.name,
-                action_type=action_type,
-                prompt=prompt_text,
-                response=response.get("content", ""),
-                screenshot_path=screenshot_path,
-                additional_context={
-                    "step_number": step_number,
-                    "temperature": temperature,
-                    "response_format": response_format,
-                    "reasoning_level": reasoning_level or self.reasoning_level,
-                    "conversation_length": len(self.conversation_history),
-                },
-            )
-
-        return cast(dict[str, Any], response)
-
-    def _build_conversation_messages(self) -> list[dict[str, Any]]:
-        """Return a bounded conversation window."""
-        if not self.conversation_history:
-            return []
-
-        max_messages = 20
-        if len(self.conversation_history) > max_messages:
-            logger.debug(
-                "Truncating conversation history",
-                extra={
-                    "total_messages": len(self.conversation_history),
-                    "kept_messages": max_messages,
-                },
-            )
-        return list(self.conversation_history[-max_messages:])
-
-    def _extract_prompt_text(self, messages: list[dict[str, Any]]) -> str:
-        """Extract user text content for debug logging."""
-        prompt_text = ""
-        for msg in messages:
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                prompt_text += content
-                continue
-            if not isinstance(content, list):
-                continue
-            for item in content:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("type") == "text":
-                    prompt_text += item.get("text", "")
-                elif item.get("type") == "image_url":
-                    prompt_text += " [IMAGE INCLUDED]"
-        return prompt_text
 
     def reset_conversation(self) -> None:
         """Reset conversation history for a new action."""
         self.conversation_history = []
         logger.debug("Conversation history reset for new action")
+
+    def _get_openai_client(self) -> AsyncOpenAI:
+        """Lazily create an OpenAI client when the CU provider needs one."""
+        if self._openai_client is None:
+            api_key = str(getattr(self.settings, "openai_api_key", "") or "").strip()
+            if not api_key:
+                raise ValueError(
+                    "OpenAI API key not provided. Set HAINDY_OPENAI_API_KEY."
+                )
+            self._openai_client = AsyncOpenAI(
+                api_key=api_key,
+                max_retries=int(getattr(self.settings, "openai_max_retries", 3)),
+            )
+        return self._openai_client
 
     def supports_step_scoped_validation(self) -> bool:
         """Return True when this agent can reuse one CU session across a step."""
@@ -678,11 +603,9 @@ Respond with JSON only:
         if not self.automation_driver:
             raise ComputerUseExecutionError("Automation driver is not available.")
 
-        model_override = (
-            self._computer_use_model
-            if getattr(self.settings, "cu_provider", "") == "openai"
-            else None
-        )
+        provider = str(getattr(self.settings, "cu_provider", "")).strip().lower()
+        model_override = self._computer_use_model if provider == "openai" else None
+        client = self._get_openai_client() if provider == "openai" else None
 
         cache = self._coordinate_cache
         if hasattr(self.automation_driver, "coordinate_cache"):
@@ -696,7 +619,7 @@ Respond with JSON only:
             )
 
         return ComputerUseSession(
-            client=self.client.client,
+            client=client,
             automation_driver=self.automation_driver,
             settings=self.settings,
             debug_logger=debug_logger,
