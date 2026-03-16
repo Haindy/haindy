@@ -64,6 +64,8 @@ class ComputerUseFollowUpBatch:
     reminder_text: str | None = None
     error_text: str | None = None
     visual_frame: VisualFrame | None = None
+    request_localization: bool = False
+    localization_reason: str | None = None
 
 
 def build_action_result(turn: ComputerToolTurn) -> ComputerUseActionResult:

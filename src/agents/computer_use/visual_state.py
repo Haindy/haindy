@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Literal, cast
 
@@ -15,6 +16,8 @@ FrameKind = Literal["keyframe", "patch"]
 
 _MIN_PATCH_MARGIN_PX = 24
 _MAX_PATCH_MARGIN_PX = 160
+CARTOGRAPHY_BLOCK_START = "<haindy_cartography>"
+CARTOGRAPHY_BLOCK_END = "</haindy_cartography>"
 
 
 @dataclass(frozen=True)
@@ -262,12 +265,116 @@ def build_patch(
     )
 
 
+def attach_cartography(
+    frame: VisualFrame,
+    cartography: CartographyMap | None,
+) -> VisualFrame:
+    """Return a frame copy with updated cartography metadata."""
+    return replace(frame, cartography=cartography)
+
+
+def extract_cartography_payload(
+    text: str | None,
+) -> tuple[str | None, str | None]:
+    """Strip a cartography block from assistant text and return its JSON payload."""
+    normalized = str(text or "").strip()
+    if not normalized:
+        return None, None
+
+    start = normalized.rfind(CARTOGRAPHY_BLOCK_START)
+    end = normalized.rfind(CARTOGRAPHY_BLOCK_END)
+    if start < 0 or end < start:
+        return normalized, None
+
+    payload = normalized[start + len(CARTOGRAPHY_BLOCK_START) : end].strip()
+    leading = normalized[:start].rstrip()
+    trailing = normalized[end + len(CARTOGRAPHY_BLOCK_END) :].lstrip()
+    cleaned = "\n".join(part for part in (leading, trailing) if part).strip()
+    return cleaned or None, payload or None
+
+
+def parse_cartography_payload(
+    payload_text: str,
+    *,
+    frame: VisualFrame,
+    provider: str,
+    model: str | None,
+    fallback_label: str,
+) -> CartographyMap | None:
+    """Parse a session-local cartography payload into a structured map."""
+    try:
+        parsed = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    raw_targets = parsed.get("targets", [])
+    if not isinstance(raw_targets, list):
+        raw_targets = []
+
+    width, height = frame.screen_size
+    targets: list[CartographyTarget] = []
+    for index, item in enumerate(raw_targets, start=1):
+        if not isinstance(item, dict):
+            continue
+        bbox = item.get("bbox") or {}
+        point = item.get("interaction_point") or {}
+        if not isinstance(bbox, dict):
+            bbox = {}
+        if not isinstance(point, dict):
+            point = {}
+        try:
+            bounds = clamp_bounds(
+                VisualBounds(
+                    x=int(bbox.get("x", 0)),
+                    y=int(bbox.get("y", 0)),
+                    width=int(bbox.get("width", 0)),
+                    height=int(bbox.get("height", 0)),
+                ),
+                width,
+                height,
+            )
+            interaction_point = (
+                max(0, min(int(point.get("x", bounds.x + (bounds.width // 2))), width)),
+                max(
+                    0,
+                    min(int(point.get("y", bounds.y + (bounds.height // 2))), height),
+                ),
+            )
+            confidence = float(item.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if bounds.is_empty():
+            continue
+        label = str(item.get("label") or fallback_label).strip() or fallback_label
+        targets.append(
+            CartographyTarget(
+                target_id=str(item.get("target_id") or f"target_{index}"),
+                label=label,
+                bounds=bounds,
+                interaction_point=interaction_point,
+                confidence=confidence,
+            )
+        )
+
+    return CartographyMap(
+        frame_id=frame.frame_id,
+        targets=tuple(targets),
+        model=str(model or "").strip() or None,
+        provider=provider,
+    )
+
+
 __all__ = [
+    "CARTOGRAPHY_BLOCK_END",
+    "CARTOGRAPHY_BLOCK_START",
     "CartographyMap",
     "CartographyTarget",
     "FrameKind",
     "VisualBounds",
     "VisualFrame",
+    "attach_cartography",
     "build_keyframe",
     "build_patch",
     "clamp_bounds",
@@ -277,7 +384,9 @@ __all__ = [
     "decode_png",
     "encode_png",
     "expand_bounds",
+    "extract_cartography_payload",
     "frame_id_for_bytes",
     "full_bounds",
+    "parse_cartography_payload",
     "union_bounds",
 ]
