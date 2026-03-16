@@ -6,7 +6,8 @@ import argparse
 import asyncio
 import contextlib
 import sys
-from datetime import datetime
+import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.agents import ScopeTriageAgent, SituationalAgent, TestPlannerAgent
+from src.auth import (
+    CODEX_OAUTH_REDIRECT_URI,
+    CodexOAuthClient,
+    OAuthCallbackCapture,
+    OpenAIAuthManager,
+)
 from src.config.settings import Settings, get_settings
 from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.desktop.controller import DesktopController
@@ -47,10 +54,13 @@ Examples:
   # Full desktop-first execution (required)
   python -m src.main --plan requirements.md --context execution_context.txt
 
+  # Login with OpenAI Codex OAuth
+  python -m src.main --codex-auth login
+
   # Berserk mode
   python -m src.main --berserk --plan requirements.md --context execution_context.txt
 
-  # Test your OpenAI API configuration
+  # Test your active OpenAI auth configuration
   python -m src.main --test-api
         """,
     )
@@ -65,12 +75,17 @@ Examples:
     input_group.add_argument(
         "--test-api",
         action="store_true",
-        help="Test OpenAI API key configuration",
+        help="Test the active non-CU OpenAI auth configuration",
     )
     input_group.add_argument(
         "--version",
         action="store_true",
         help="Show version information",
+    )
+    input_group.add_argument(
+        "--codex-auth",
+        choices=["login", "logout", "status"],
+        help="Manage OpenAI Codex OAuth credentials for non-CU OpenAI requests",
     )
 
     parser.add_argument(
@@ -174,6 +189,8 @@ async def run_test(
     settings = get_settings()
 
     try:
+        _ensure_openai_cu_api_key_for_runtime(settings)
+
         test_run_id = get_run_id()
         if test_run_id == "unknown":
             test_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -547,6 +564,7 @@ async def test_api_connection() -> int:
     try:
         from src.models.openai_client import OpenAIClient
 
+        auth_status = OpenAIAuthManager().get_status()
         client = OpenAIClient()
         response = await client.call(
             messages=[
@@ -559,6 +577,9 @@ async def test_api_connection() -> int:
         if "API test successful" in response["content"]:
             console.print("[green]✓ OpenAI API connection successful![/green]")
             console.print(f"[dim]Model: {response['model']}[/dim]")
+            console.print(
+                f"[dim]Auth mode: {auth_status.active_mode.replace('_', ' ')}[/dim]"
+            )
             return 0
         console.print("[red]✗ Unexpected API response[/red]")
         return 1
@@ -595,6 +616,129 @@ async def read_context_file(file_path: Path) -> str:
     return content
 
 
+def _ensure_openai_cu_api_key_for_runtime(settings: Settings) -> None:
+    """Reject OpenAI computer-use runs when no API key is configured."""
+    provider = str(getattr(settings, "cu_provider", "")).strip().lower()
+    api_key = str(getattr(settings, "openai_api_key", "") or "").strip()
+    if provider == "openai" and not api_key:
+        raise ValueError(
+            "OpenAI computer-use requires HAINDY_OPENAI_API_KEY. Codex OAuth only "
+            "applies to non-CU OpenAI requests."
+        )
+
+
+def _format_optional_timestamp(value: datetime | None) -> str:
+    """Format an optional timestamp for CLI output."""
+    if value is None:
+        return "n/a"
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _open_browser(url: str) -> bool:
+    """Open a URL in the user's browser."""
+    return webbrowser.open(url)
+
+
+async def _handle_codex_auth_command(command: str) -> int:
+    """Execute a Codex OAuth CLI command."""
+    auth_manager = OpenAIAuthManager()
+
+    if command == "status":
+        status = auth_manager.get_status()
+        console.print("\n[bold cyan]OpenAI Auth Status[/bold cyan]")
+        console.print(f"Active mode: [green]{status.active_mode}[/green]")
+        console.print(
+            f"Codex OAuth: {'connected' if status.oauth_connected else 'not connected'}"
+        )
+        if status.oauth_account_label:
+            console.print(f"Account: [dim]{status.oauth_account_label}[/dim]")
+        if status.oauth_connected:
+            console.print(
+                f"Expires: [dim]{_format_optional_timestamp(status.oauth_expires_at)}[/dim]"
+            )
+            if status.oauth_expired:
+                console.print("[yellow]Stored OAuth session is expired.[/yellow]")
+        console.print(
+            f"API key configured: {'yes' if status.api_key_available else 'no'}"
+        )
+        return 0
+
+    if command == "logout":
+        auth_manager.clear_oauth_credentials()
+        status = auth_manager.get_status()
+        console.print("[green]Codex OAuth session cleared.[/green]")
+        console.print(f"[dim]Active mode: {status.active_mode}[/dim]")
+        return 0
+
+    return await _login_with_codex_oauth(auth_manager)
+
+
+async def _login_with_codex_oauth(auth_manager: OpenAIAuthManager) -> int:
+    """Run the interactive browser-based Codex OAuth login flow."""
+    oauth_client = CodexOAuthClient()
+    pkce = oauth_client.generate_pkce()
+    authorize_url = oauth_client.build_authorize_url(
+        pkce.state,
+        pkce.code_challenge,
+    )
+    callback_capture = OAuthCallbackCapture(CODEX_OAUTH_REDIRECT_URI)
+    redirect_url: str | None = None
+    callback_listening = False
+
+    try:
+        await callback_capture.start()
+        callback_listening = True
+    except OSError as exc:
+        console.print(
+            f"[yellow]Callback listener unavailable ({exc}). Falling back to manual redirect capture.[/yellow]"
+        )
+
+    console.print("\n[bold cyan]OpenAI Codex OAuth Login[/bold cyan]")
+    console.print("[dim]Opening the authorization URL in your browser...[/dim]")
+    opened = _open_browser(authorize_url)
+    if not opened:
+        console.print("[yellow]Browser open failed. Open this URL manually:[/yellow]")
+        console.print(authorize_url)
+
+    try:
+        if callback_listening:
+            console.print("[dim]Waiting for the localhost callback...[/dim]")
+            redirect_url = await callback_capture.wait_for_redirect(timeout_seconds=120)
+            if redirect_url is None:
+                console.print(
+                    "[yellow]No callback received within 120 seconds. Falling back to manual redirect capture.[/yellow]"
+                )
+    finally:
+        await callback_capture.close()
+
+    if not redirect_url:
+        console.print(
+            "[dim]After authorizing, paste the final redirect URL below.[/dim]"
+        )
+        redirect_url = console.input("Redirect URL: ").strip()
+        if not redirect_url:
+            console.print("[red]No redirect URL provided.[/red]")
+            return 1
+
+    try:
+        code, state = oauth_client.parse_redirect_url(redirect_url)
+        if state != pkce.state:
+            raise ValueError("OAuth callback state mismatch.")
+        token = await oauth_client.exchange_authorization_code(code, pkce.code_verifier)
+        credentials = auth_manager.save_oauth_token_bundle(token)
+    except Exception as exc:
+        console.print(f"[red]Codex OAuth login failed: {exc}[/red]")
+        return 1
+
+    console.print("[green]Codex OAuth login successful.[/green]")
+    if credentials.account_label:
+        console.print(f"[dim]Account: {credentials.account_label}[/dim]")
+    console.print(
+        f"[dim]Expires: {_format_optional_timestamp(credentials.expires_at)}[/dim]"
+    )
+    return 0
+
+
 async def async_main(args: list[str] | None = None) -> int:
     """Async main entrypoint."""
     parser = create_parser()
@@ -620,6 +764,9 @@ async def async_main(args: list[str] | None = None) -> int:
     # Initialize security components for side effects / parity with existing flow
     RateLimiter()
     DataSanitizer()
+
+    if parsed_args.codex_auth:
+        return await _handle_codex_auth_command(parsed_args.codex_auth)
 
     if not parsed_args.plan:
         parser.print_help()

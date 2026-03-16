@@ -60,13 +60,25 @@ cp .env.example .env
 
 Minimum required settings:
 
-- `HAINDY_OPENAI_API_KEY` (used by orchestration)
+- `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and for OpenAI computer-use
 - `HAINDY_CU_PROVIDER=openai`, `HAINDY_CU_PROVIDER=google`, or
   `HAINDY_CU_PROVIDER=anthropic`
 
+OpenAI auth modes:
+
+- Default non-CU OpenAI auth uses `HAINDY_OPENAI_API_KEY`.
+- `--codex-auth login` stores a local encrypted Codex OAuth session and makes
+  non-CU OpenAI requests use OAuth instead of the API key.
+- `--codex-auth logout` removes the stored OAuth session and reverts non-CU
+  OpenAI requests to API-key auth.
+- `--codex-auth status` shows the active non-CU OpenAI auth mode.
+- Stored Codex OAuth credentials live outside the repo in the user state
+  directory.
+
 Provider-specific:
 
-- OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (default `gpt-5.4`)
+- OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (default `gpt-5.4`) and
+  `HAINDY_OPENAI_API_KEY`. Codex OAuth does not apply to CU runs.
 - Google computer-use: `HAINDY_GOOGLE_CU_MODEL` and Vertex credentials/settings
   (see `.env.example`)
 - Anthropic computer-use: `HAINDY_ANTHROPIC_API_KEY`, optional
@@ -114,6 +126,14 @@ Optional debug logging:
   --plan <plan_file> \
   --context <context_file> \
   --debug
+```
+
+Codex OAuth login:
+
+```bash
+.venv/bin/python -m src.main --codex-auth login
+.venv/bin/python -m src.main --codex-auth status
+.venv/bin/python -m src.main --codex-auth logout
 ```
 
 ## Developer checks

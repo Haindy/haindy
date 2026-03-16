@@ -61,6 +61,19 @@ HAINDY_CU_SAFETY_POLICY=auto_approve
 HAINDY_AUTOMATION_BACKEND=desktop
 ```
 
+OpenAI auth notes:
+
+- Non-CU OpenAI calls use `HAINDY_OPENAI_API_KEY` by default.
+- `python -m src.main --codex-auth login` stores a local encrypted Codex OAuth
+  session in the user state directory and makes non-CU OpenAI calls prefer
+  OAuth over the API key.
+- `python -m src.main --codex-auth logout` removes the stored OAuth session and
+  reverts non-CU OpenAI calls to API-key auth.
+- `python -m src.main --codex-auth status` prints the current non-CU OpenAI
+  auth mode and stored session metadata.
+- OpenAI computer-use still requires `HAINDY_OPENAI_API_KEY` even when Codex
+  OAuth is connected.
+
 Platform guidance:
 
 - macOS: leave `HAINDY_AUTOMATION_BACKEND` unset unless you are intentionally
@@ -277,8 +290,14 @@ python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
 # OpenAI Computer Use example
 export HAINDY_CU_PROVIDER=openai
 export HAINDY_COMPUTER_USE_MODEL=gpt-5.4
+export HAINDY_OPENAI_API_KEY=your-openai-api-key
 export HAINDY_AUTOMATION_BACKEND=desktop
 python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
+
+# Codex OAuth login for non-CU OpenAI requests
+python -m src.main --codex-auth login
+python -m src.main --codex-auth status
+python -m src.main --codex-auth logout
 
 # Anthropic Computer Use example
 export HAINDY_CU_PROVIDER=anthropic
