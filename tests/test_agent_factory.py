@@ -80,6 +80,9 @@ def test_factory_creates_runtime_bundle_and_wires_action_agent(monkeypatch) -> N
     bundle = factory.create_runtime_agents(automation_driver=driver)
 
     assert bundle.action_agent.kwargs["automation_driver"] is driver
+    assert "model" not in bundle.action_agent.kwargs
+    assert "reasoning_level" not in bundle.action_agent.kwargs
+    assert "modalities" not in bundle.action_agent.kwargs
     assert bundle.test_runner.kwargs["automation_driver"] is driver
     assert bundle.test_runner.kwargs["action_agent"] is bundle.action_agent
     assert bundle.as_dict()["action_agent"] is bundle.action_agent

@@ -144,6 +144,36 @@ def test_build_step_validation_prompt_scopes_verdict_to_current_step(
     assert "Do NOT fail this step based on broader test-case goals" in prompt
 
 
+def test_new_computer_use_session_skips_openai_client_for_google(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.agents.action_agent.get_settings",
+        lambda: SimpleNamespace(
+            desktop_coordinate_cache_path=Path(
+                "data/desktop_cache/test_coordinates.json"
+            ),
+            computer_use_model="gpt-5.4",
+            cu_provider="google",
+        ),
+    )
+
+    captured: dict[str, object] = {}
+
+    class _FakeSession:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+            self.provider = "google"
+
+    monkeypatch.setattr("src.agents.action_agent.ComputerUseSession", _FakeSession)
+
+    agent = ActionAgent(automation_driver=object())
+
+    agent._new_computer_use_session(debug_logger=None, environment="desktop")
+
+    assert captured["client"] is None
+
+
 @pytest.mark.asyncio
 async def test_execute_action_routes_skip_navigation_without_driver(
     monkeypatch: pytest.MonkeyPatch,

@@ -20,7 +20,7 @@ from .common import (
 )
 from .transports import ComputerUseTransport, OpenAIResponsesHTTPTransport
 from .turn_result import ComputerUseCallResult, ComputerUseFollowUpBatch
-from .types import ComputerUseSessionResult
+from .types import ComputerUseExecutionError, ComputerUseSessionResult
 from .visual_state import CartographyMap, CartographyTarget, VisualBounds, VisualFrame
 
 logger = logging.getLogger("src.agents.computer_use.session")
@@ -733,9 +733,14 @@ class OpenAIComputerUseMixin:
         logger.debug(
             "Calling OpenAI Responses API", extra={"model": payload.get("model")}
         )
+        client = self._client
+        if client is None:
+            raise ComputerUseExecutionError(
+                "OpenAI client is not configured for this Computer Use session."
+            )
         transport = getattr(self, "_openai_transport", None)
         if transport is None:
-            return await self._client.responses.create(**payload)
+            return await client.responses.create(**payload)
         try:
             return await transport.request(payload)
         except Exception:
@@ -748,6 +753,6 @@ class OpenAIComputerUseMixin:
                 "OpenAI CU WebSocket transport failed; falling back to HTTP transport",
                 exc_info=True,
             )
-            fallback_transport = OpenAIResponsesHTTPTransport(self._client)
+            fallback_transport = OpenAIResponsesHTTPTransport(client)
             self._openai_transport = fallback_transport
             return await fallback_transport.request(payload)
