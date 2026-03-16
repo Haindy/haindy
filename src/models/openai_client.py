@@ -1,15 +1,22 @@
 """OpenAI API client wrapper for the HAINDY framework."""
 
+from __future__ import annotations
+
 import inspect
 import json
 import logging
 import math
 from collections.abc import Sequence
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 import openai
 from openai import AsyncOpenAI
 
+from src.auth import (
+    CODEX_SYSTEM_INSTRUCTIONS,
+    OpenAIAuthManager,
+    ResolvedOpenAIAuth,
+)
 from src.config.settings import get_settings
 
 SUPPORTED_OPENAI_MODEL = "gpt-5.4"
@@ -46,6 +53,7 @@ class OpenAIClient:
         reasoning_level: str = "medium",
         modalities: set[str] | None = None,
         request_timeout: float | None = None,
+        auth_manager: OpenAIAuthManager | None = None,
     ) -> None:
         """
         Initialize OpenAI client.
@@ -60,15 +68,18 @@ class OpenAIClient:
         self.modalities = modalities or {"text"}
         self.logger = logging.getLogger("openai_client")
         self._token_encoder_cache: dict[str, Any] = {}
+        self._client: AsyncOpenAI | None = None
+        self._client_signature: tuple[Any, ...] | None = None
+        self._resolved_auth: ResolvedOpenAIAuth | None = None
 
         settings = get_settings()
+        self._settings = settings
         self.api_key = api_key or settings.openai_api_key
+        self._api_key_override = api_key
+        self._auth_manager = auth_manager or OpenAIAuthManager(settings=settings)
         self.request_timeout = request_timeout or float(
             settings.openai_request_timeout_seconds
         )
-
-        if not self.api_key:
-            raise ValueError("OpenAI API key not provided. Set HAINDY_OPENAI_API_KEY.")
 
         if model != SUPPORTED_OPENAI_MODEL:
             raise ValueError(
@@ -76,11 +87,6 @@ class OpenAIClient:
                 f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
             )
         self.model = model
-
-        self.client = AsyncOpenAI(
-            api_key=self.api_key,
-            max_retries=self.max_retries,
-        )
 
     async def call(
         self,
@@ -92,7 +98,7 @@ class OpenAIClient:
         reasoning_level: str | None = None,
         modalities: set[str] | None = None,
         stream: bool = False,
-        stream_observer: Optional["ResponseStreamObserver"] = None,
+        stream_observer: ResponseStreamObserver | None = None,
     ) -> dict[str, Any]:
         """Make a call to the OpenAI API."""
 
@@ -105,9 +111,10 @@ class OpenAIClient:
             f"OpenAI API call: model={self.model}, "
             f"messages={len(final_messages)}, temperature={temperature}"
         )
+        auth = await self._resolve_auth()
 
         try:
-            if stream or stream_observer is not None:
+            if stream or stream_observer is not None or auth.mode == "codex_oauth":
                 try:
                     return await self._call_responses_api_streaming(
                         final_messages=final_messages,
@@ -119,6 +126,8 @@ class OpenAIClient:
                         observer=stream_observer,
                     )
                 except Exception:
+                    if auth.mode == "codex_oauth":
+                        raise
                     self.logger.warning(
                         "Streaming responses call failed; falling back to standard execution",
                         exc_info=True,
@@ -135,6 +144,17 @@ class OpenAIClient:
 
         except openai.APIError as e:
             self.logger.error(f"OpenAI API error: {e}")
+            if (
+                self._resolved_auth is not None
+                and self._resolved_auth.mode == "codex_oauth"
+                and isinstance(
+                    e, (openai.AuthenticationError, openai.PermissionDeniedError)
+                )
+            ):
+                raise RuntimeError(
+                    "OpenAI Codex OAuth authentication failed. Re-run "
+                    "--codex-auth login or --codex-auth logout."
+                ) from e
             raise
         except Exception as e:
             self.logger.error(f"Unexpected error calling OpenAI: {e}")
@@ -277,6 +297,11 @@ class OpenAIClient:
         instructions, input_items = self._prepare_responses_input(
             final_messages, system_prompt
         )
+        auth = await self._resolve_auth()
+        instructions = self._apply_codex_instruction_defaults(
+            instructions=instructions,
+            auth=auth,
+        )
         instructions = self._ensure_json_keyword_for_response_format(
             instructions=instructions,
             input_items=input_items,
@@ -290,6 +315,8 @@ class OpenAIClient:
 
         if instructions:
             kwargs["instructions"] = instructions
+        if auth.mode == "codex_oauth":
+            kwargs["store"] = False
 
         if max_tokens:
             kwargs["max_output_tokens"] = max_tokens
@@ -304,7 +331,8 @@ class OpenAIClient:
         if self._supports_responses_temperature(reasoning_level or "medium"):
             kwargs["temperature"] = temperature
 
-        response = await self.client.responses.create(
+        client = await self._get_client(auth)
+        response = await client.responses.create(
             timeout=self.request_timeout,
             **kwargs,
         )
@@ -355,6 +383,11 @@ class OpenAIClient:
         instructions, input_items = self._prepare_responses_input(
             final_messages, system_prompt
         )
+        auth = await self._resolve_auth()
+        instructions = self._apply_codex_instruction_defaults(
+            instructions=instructions,
+            auth=auth,
+        )
         instructions = self._ensure_json_keyword_for_response_format(
             instructions=instructions,
             input_items=input_items,
@@ -368,6 +401,8 @@ class OpenAIClient:
 
         if instructions:
             kwargs["instructions"] = instructions
+        if auth.mode == "codex_oauth":
+            kwargs["store"] = False
 
         if max_tokens:
             kwargs["max_output_tokens"] = max_tokens
@@ -390,9 +425,10 @@ class OpenAIClient:
         await self._dispatch_observer(observer, "on_stream_start")
 
         final_response: Any = None
+        client = await self._get_client(auth)
 
         try:
-            async with self.client.responses.stream(
+            async with client.responses.stream(
                 timeout=self.request_timeout,
                 **kwargs,
             ) as stream:
@@ -505,11 +541,11 @@ class OpenAIClient:
             role = message.get("role", "user")
             content = message.get("content", "")
 
-            if role == "system":
+            if role in {"system", "developer"}:
                 text = content if isinstance(content, str) else str(content)
                 if instructions:
                     if text.strip() and text.strip() != instructions.strip():
-                        instructions = f"{instructions}\n{text}"
+                        instructions = f"{instructions}\n\n{text}"
                 else:
                     instructions = text
                 continue
@@ -523,6 +559,60 @@ class OpenAIClient:
             )
 
         return instructions, input_items
+
+    async def _resolve_auth(self) -> ResolvedOpenAIAuth:
+        auth = await self._auth_manager.resolve_openai_auth(
+            api_key_override=self._api_key_override
+        )
+        self._resolved_auth = auth
+        return auth
+
+    async def _get_client(self, auth: ResolvedOpenAIAuth) -> AsyncOpenAI:
+        signature = (
+            auth.mode,
+            auth.base_url or "",
+            tuple(sorted(auth.default_headers.items())),
+        )
+        if self._client is not None and self._client_signature == signature:
+            return self._client
+
+        kwargs: dict[str, Any] = {
+            "max_retries": self.max_retries,
+        }
+
+        if auth.mode == "codex_oauth":
+            kwargs["api_key"] = self._oauth_token_provider
+            kwargs["base_url"] = auth.base_url
+            kwargs["default_headers"] = auth.default_headers
+        else:
+            kwargs["api_key"] = auth.token
+
+        self._client = AsyncOpenAI(**kwargs)
+        self._client_signature = signature
+        return self._client
+
+    async def _oauth_token_provider(self) -> str:
+        auth = await self._auth_manager.resolve_openai_auth(
+            api_key_override=self._api_key_override
+        )
+        if auth.mode != "codex_oauth":
+            raise RuntimeError(
+                "Codex OAuth session is no longer active. Recreate the OpenAI client."
+            )
+        self._resolved_auth = auth
+        return auth.token
+
+    def _apply_codex_instruction_defaults(
+        self,
+        *,
+        instructions: str | None,
+        auth: ResolvedOpenAIAuth,
+    ) -> str | None:
+        if auth.mode != "codex_oauth":
+            return instructions
+        if instructions and instructions.strip():
+            return instructions
+        return CODEX_SYSTEM_INSTRUCTIONS
 
     def _convert_content_for_role(
         self, role: str, content: Any

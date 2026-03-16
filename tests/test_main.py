@@ -1,12 +1,16 @@
 """Tests for desktop-first CLI interface."""
 
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.main import (
     _create_coordinator_stack,
+    _handle_codex_auth_command,
+    _login_with_codex_oauth,
     async_main,
     create_parser,
     read_context_file,
@@ -24,12 +28,14 @@ class TestCLIParser:
         assert "mobile" in actions
         assert "test_api" in actions
         assert "version" in actions
+        assert "codex_auth" in actions
 
     def test_mutually_exclusive_inputs(self) -> None:
         parser = create_parser()
         parser.parse_args(["--plan", "test.md", "--context", "ctx.txt"])
         parser.parse_args(["--test-api"])
         parser.parse_args(["--version"])
+        parser.parse_args(["--codex-auth", "status"])
 
         with pytest.raises(SystemExit):
             parser.parse_args(["--plan", "test.md", "--test-api"])
@@ -97,6 +103,17 @@ class TestMainFlow:
         assert result == 0
         kwargs = mock_run.call_args.kwargs
         assert kwargs["automation_backend"] == "mobile_adb"
+
+    @pytest.mark.asyncio
+    async def test_codex_auth_command_dispatches_without_plan(self) -> None:
+        with patch(
+            "src.main._handle_codex_auth_command",
+            new=AsyncMock(return_value=0),
+        ) as mock_auth:
+            result = await async_main(["--codex-auth", "status"])
+
+        assert result == 0
+        mock_auth.assert_awaited_once_with("status")
 
 
 @pytest.mark.asyncio
@@ -178,6 +195,105 @@ async def test_run_test_mobile_backend_rejects_non_mobile_assessment() -> None:
         )
 
     assert result == 1
+
+
+@pytest.mark.asyncio
+async def test_run_test_rejects_openai_cu_without_api_key(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.main.get_settings",
+        lambda: SimpleNamespace(
+            cu_provider="openai",
+            openai_api_key="",
+        ),
+    )
+
+    result = await run_test(
+        requirements="Test requirement",
+        context_text="desktop context",
+        timeout=1,
+    )
+
+    assert result == 1
+
+
+@pytest.mark.asyncio
+async def test_codex_auth_logout_clears_credentials() -> None:
+    manager = SimpleNamespace(
+        clear_oauth_credentials=lambda: None,
+        get_status=lambda: SimpleNamespace(active_mode="api_key"),
+    )
+
+    with patch("src.main.OpenAIAuthManager", return_value=manager):
+        result = await _handle_codex_auth_command("logout")
+
+    assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_codex_auth_login_uses_manual_redirect_fallback(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeOAuthClient:
+        def generate_pkce(self):
+            return SimpleNamespace(
+                state="state-1",
+                code_verifier="verifier-1",
+                code_challenge="challenge-1",
+            )
+
+        def build_authorize_url(self, state: str, code_challenge: str) -> str:
+            assert state == "state-1"
+            assert code_challenge == "challenge-1"
+            return "https://auth.example.test/start"
+
+        def parse_redirect_url(self, redirect_url: str) -> tuple[str, str]:
+            captured["redirect_url"] = redirect_url
+            return ("code-1", "state-1")
+
+        async def exchange_authorization_code(
+            self, code: str, code_verifier: str
+        ) -> SimpleNamespace:
+            assert code == "code-1"
+            assert code_verifier == "verifier-1"
+            return SimpleNamespace(
+                access_token="access",
+                refresh_token="refresh",
+                id_token="id",
+                expires_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+
+    class FakeCapture:
+        def __init__(self, redirect_uri: str) -> None:
+            self.redirect_uri = redirect_uri
+
+        async def start(self) -> None:
+            raise OSError("port busy")
+
+        async def wait_for_redirect(self, timeout_seconds: float) -> str | None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    manager = SimpleNamespace(
+        save_oauth_token_bundle=lambda token: SimpleNamespace(
+            account_label="user@example.com",
+            expires_at=token.expires_at,
+        )
+    )
+
+    monkeypatch.setattr("src.main.CodexOAuthClient", FakeOAuthClient)
+    monkeypatch.setattr("src.main.OAuthCallbackCapture", FakeCapture)
+    monkeypatch.setattr("src.main._open_browser", lambda url: True)
+    monkeypatch.setattr(
+        "src.main.console.input",
+        lambda prompt: "http://localhost:1455/auth/callback?code=code-1&state=state-1",
+    )
+
+    result = await _login_with_codex_oauth(manager)
+
+    assert result == 0
+    assert captured["redirect_url"].endswith("code=code-1&state=state-1")
 
 
 @pytest.mark.asyncio

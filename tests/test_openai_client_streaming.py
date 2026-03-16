@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from src.auth import CODEX_SYSTEM_INSTRUCTIONS
+from src.auth.manager import ResolvedOpenAIAuth
 from src.models.openai_client import OpenAIClient, ResponseStreamObserver
 
 
@@ -106,6 +109,18 @@ class FakeAsyncOpenAI:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         # events injected later by monkeypatching instance attribute
         self.responses: FakeResponses | None = None
+
+
+class StubAuthManager:
+    """Simple auth manager stub for client tests."""
+
+    def __init__(self, auth: ResolvedOpenAIAuth) -> None:
+        self._auth = auth
+
+    async def resolve_openai_auth(
+        self, api_key_override: str | None = None
+    ) -> ResolvedOpenAIAuth:
+        return self._auth
 
 
 @pytest.mark.asyncio
@@ -294,3 +309,162 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
         if isinstance(content, dict) and isinstance(content.get("text"), str)
     ]
     assert any("json" in text.lower() for text in input_texts)
+
+
+@pytest.mark.asyncio
+async def test_codex_mode_uses_codex_base_url_headers_and_store_false(
+    monkeypatch,
+) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text="hello",
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    fake_responses = FakeCreateResponses(final_response=final_response)
+    captured_client_kwargs: dict[str, Any] = {}
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        captured_client_kwargs.update(kwargs)
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_request_timeout_seconds=30,
+    )
+    auth = ResolvedOpenAIAuth(
+        mode="codex_oauth",
+        token="oauth-token",
+        base_url="https://chatgpt.com/backend-api/codex",
+        default_headers={
+            "OpenAI-Beta": "responses=experimental",
+            "originator": "pi",
+            "chatgpt-account-id": "acct_123",
+        },
+    )
+
+    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+
+    client = OpenAIClient(
+        model="gpt-5.4",
+        auth_manager=StubAuthManager(auth),
+    )
+
+    response = await client._call_responses_api(
+        final_messages=[
+            {"role": "system", "content": "Follow the system rules."},
+            {"role": "user", "content": "Say hello"},
+        ],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=None,
+        reasoning_level=None,
+        system_prompt=None,
+    )
+
+    assert response["content"] == "hello"
+    assert captured_client_kwargs["base_url"] == auth.base_url
+    assert captured_client_kwargs["default_headers"] == auth.default_headers
+    assert fake_responses.last_kwargs is not None
+    assert fake_responses.last_kwargs["store"] is False
+    assert fake_responses.last_kwargs["instructions"] == "Follow the system rules."
+    assert fake_responses.last_kwargs["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Say hello"}],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_codex_mode_defaults_instructions_when_missing(monkeypatch) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text="hello",
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    fake_responses = FakeCreateResponses(final_response=final_response)
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_request_timeout_seconds=30,
+    )
+    auth = ResolvedOpenAIAuth(
+        mode="codex_oauth",
+        token="oauth-token",
+        base_url="https://chatgpt.com/backend-api/codex",
+        default_headers={},
+    )
+
+    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+
+    client = OpenAIClient(
+        model="gpt-5.4",
+        auth_manager=StubAuthManager(auth),
+    )
+
+    await client._call_responses_api(
+        final_messages=[{"role": "user", "content": "Say hello"}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=None,
+        reasoning_level=None,
+        system_prompt=None,
+    )
+
+    assert fake_responses.last_kwargs is not None
+    assert fake_responses.last_kwargs["instructions"] == CODEX_SYSTEM_INSTRUCTIONS
+
+
+@pytest.mark.asyncio
+async def test_codex_call_uses_streaming_path_even_when_stream_false(
+    monkeypatch,
+) -> None:
+    dummy_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_request_timeout_seconds=30,
+    )
+    auth = ResolvedOpenAIAuth(
+        mode="codex_oauth",
+        token="oauth-token",
+        base_url="https://chatgpt.com/backend-api/codex",
+        default_headers={},
+    )
+
+    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    client = OpenAIClient(
+        model="gpt-5.4",
+        auth_manager=StubAuthManager(auth),
+    )
+
+    streaming_mock = AsyncMock(
+        return_value={
+            "content": "streamed",
+            "usage": {},
+            "model": "gpt-5.4",
+            "finish_reason": "completed",
+        }
+    )
+    standard_mock = AsyncMock()
+    monkeypatch.setattr(client, "_call_responses_api_streaming", streaming_mock)
+    monkeypatch.setattr(client, "_call_responses_api", standard_mock)
+
+    result = await client.call(
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    assert result["content"] == "streamed"
+    streaming_mock.assert_awaited_once()
+    standard_mock.assert_not_called()
