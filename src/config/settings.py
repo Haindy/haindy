@@ -1,13 +1,21 @@
 """Configuration management for the HAINDY framework."""
 
+import json
 import os
+from collections.abc import Callable, Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import dotenv_values
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from src.core.interfaces import ConfigProvider
 from src.runtime.environment import (
@@ -35,6 +43,91 @@ ALLOWED_REASONING_LEVELS: set[str] = {
 }
 ALLOWED_OPENAI_CU_TRANSPORTS: set[str] = {"responses_websocket", "responses_http"}
 ALLOWED_CU_VISUAL_MODES: set[str] = {"keyframe_patch", "legacy_full_frame"}
+
+SETTINGS_ENV_VARS: dict[str, str] = {
+    "openai_api_key": "HAINDY_OPENAI_API_KEY",
+    "openai_model": "HAINDY_OPENAI_MODEL",
+    "openai_max_retries": "HAINDY_OPENAI_MAX_RETRIES",
+    "openai_request_timeout_seconds": "HAINDY_OPENAI_REQUEST_TIMEOUT_SECONDS",
+    "automation_backend": "HAINDY_AUTOMATION_BACKEND",
+    "desktop_prefer_resolution": "HAINDY_DESKTOP_RESOLUTION",
+    "desktop_keyboard_layout": "HAINDY_DESKTOP_KEYBOARD_LAYOUT",
+    "desktop_enable_keyboard_scancodes": "HAINDY_DESKTOP_KEYBOARD_SCANCODES",
+    "desktop_keyboard_key_delay_ms": "HAINDY_DESKTOP_KEY_DELAY_MS",
+    "desktop_enable_resolution_switch": "HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH",
+    "desktop_screenshot_dir": "HAINDY_DESKTOP_SCREENSHOT_DIR",
+    "desktop_coordinate_cache_path": "HAINDY_DESKTOP_COORDINATE_CACHE_PATH",
+    "task_plan_cache_path": "HAINDY_TASK_PLAN_CACHE_PATH",
+    "enable_planning_cache": "HAINDY_ENABLE_PLANNING_CACHE",
+    "planning_cache_path": "HAINDY_PLANNING_CACHE_PATH",
+    "enable_situational_cache": "HAINDY_ENABLE_SITUATIONAL_CACHE",
+    "situational_cache_path": "HAINDY_SITUATIONAL_CACHE_PATH",
+    "enable_execution_replay_cache": "HAINDY_ENABLE_EXECUTION_REPLAY_CACHE",
+    "execution_replay_cache_path": "HAINDY_EXECUTION_REPLAY_CACHE_PATH",
+    "desktop_display": "HAINDY_DESKTOP_DISPLAY",
+    "desktop_clipboard_timeout_seconds": "HAINDY_DESKTOP_CLIPBOARD_TIMEOUT_SECONDS",
+    "desktop_clipboard_hold_seconds": "HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS",
+    "mobile_screenshot_dir": "HAINDY_MOBILE_SCREENSHOT_DIR",
+    "mobile_coordinate_cache_path": "HAINDY_MOBILE_COORDINATE_CACHE_PATH",
+    "mobile_default_adb_serial": "HAINDY_MOBILE_DEFAULT_ADB_SERIAL",
+    "mobile_adb_timeout_seconds": "HAINDY_MOBILE_ADB_TIMEOUT_SECONDS",
+    "enable_screen_recording": "HAINDY_ENABLE_SCREEN_RECORDING",
+    "screen_recording_output_dir": "HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
+    "screen_recording_framerate": "HAINDY_SCREEN_RECORDING_FRAMERATE",
+    "screen_recording_draw_cursor": "HAINDY_SCREEN_RECORDING_DRAW_CURSOR",
+    "screen_recording_prefix": "HAINDY_SCREEN_RECORDING_PREFIX",
+    "max_test_steps": "HAINDY_MAX_TEST_STEPS",
+    "step_timeout": "HAINDY_STEP_TIMEOUT",
+    "max_retries_per_step": "HAINDY_MAX_RETRIES_PER_STEP",
+    "screenshot_quality": "HAINDY_SCREENSHOT_QUALITY",
+    "computer_use_model": "HAINDY_COMPUTER_USE_MODEL",
+    "cu_provider": "HAINDY_CU_PROVIDER",
+    "google_cu_model": "HAINDY_GOOGLE_CU_MODEL",
+    "anthropic_api_key": "HAINDY_ANTHROPIC_API_KEY",
+    "anthropic_cu_model": "HAINDY_ANTHROPIC_CU_MODEL",
+    "anthropic_cu_beta": "HAINDY_ANTHROPIC_CU_BETA",
+    "anthropic_cu_max_tokens": "HAINDY_ANTHROPIC_CU_MAX_TOKENS",
+    "vertex_api_key": "HAINDY_VERTEX_API_KEY",
+    "vertex_project": "HAINDY_VERTEX_PROJECT",
+    "vertex_location": "HAINDY_VERTEX_LOCATION",
+    "cu_safety_policy": "HAINDY_CU_SAFETY_POLICY",
+    "openai_cu_transport": "HAINDY_OPENAI_CU_TRANSPORT",
+    "cu_visual_mode": "HAINDY_CU_VISUAL_MODE",
+    "cu_cartography_model": "HAINDY_CU_CARTOGRAPHY_MODEL",
+    "cu_keyframe_max_turns": "HAINDY_CU_KEYFRAME_MAX_TURNS",
+    "cu_patch_max_area_ratio": "HAINDY_CU_PATCH_MAX_AREA_RATIO",
+    "cu_patch_margin_ratio": "HAINDY_CU_PATCH_MARGIN_RATIO",
+    "actions_computer_tool_max_turns": "HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS",
+    "actions_computer_tool_loop_detection_window": "HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW",
+    "actions_computer_tool_action_timeout_ms": "HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS",
+    "actions_computer_tool_stabilization_wait_ms": "HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS",
+    "actions_computer_tool_fail_fast_on_safety": "HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
+    "actions_computer_tool_allowed_domains": "HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS",
+    "actions_computer_tool_blocked_domains": "HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS",
+    "scroll_turn_multiplier": "HAINDY_SCROLL_TURN_MULTIPLIER",
+    "scroll_default_magnitude": "HAINDY_SCROLL_DEFAULT_MAGNITUDE",
+    "scroll_max_magnitude": "HAINDY_SCROLL_MAX_MAGNITUDE",
+    "log_level": "HAINDY_LOG_LEVEL",
+    "log_format": "HAINDY_LOG_FORMAT",
+    "log_file": "HAINDY_LOG_FILE",
+    "model_log_path": "HAINDY_MODEL_LOG_PATH",
+    "max_screenshots": "HAINDY_MAX_SCREENSHOTS",
+    "data_dir": "HAINDY_DATA_DIR",
+    "reports_dir": "HAINDY_REPORTS_DIR",
+    "screenshots_dir": "HAINDY_SCREENSHOTS_DIR",
+    "cache_dir": "HAINDY_CACHE_DIR",
+    "rate_limit_enabled": "HAINDY_RATE_LIMIT_ENABLED",
+    "rate_limit_requests_per_minute": "HAINDY_RATE_LIMIT_REQUESTS_PER_MINUTE",
+    "sanitize_screenshots": "HAINDY_SANITIZE_SCREENSHOTS",
+    "debug_mode": "HAINDY_DEBUG_MODE",
+    "save_agent_conversations": "HAINDY_SAVE_AGENT_CONVERSATIONS",
+}
+
+OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
+LIST_FIELDS = {
+    "actions_computer_tool_allowed_domains",
+    "actions_computer_tool_blocked_domains",
+}
 
 
 class AgentModelConfig(BaseModel):
@@ -103,15 +196,114 @@ DEFAULT_AGENT_MODELS: dict[str, AgentModelConfig] = {
 }
 
 
-class Settings(BaseSettings):
+def _parse_resolution_env(raw: str) -> tuple[int, int]:
+    text = raw.strip()
+    if not text:
+        raise ValueError("Resolution value cannot be empty")
+    if text[0] in "[(" and text[-1] in "])":
+        try:
+            decoded = json.loads(text.replace("(", "[").replace(")", "]"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid resolution value: {raw}") from exc
+        if isinstance(decoded, list) and len(decoded) == 2:
+            return int(decoded[0]), int(decoded[1])
+        raise ValueError(f"Invalid resolution value: {raw}")
+
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if len(parts) == 2 and all(part.lstrip("-").isdigit() for part in parts):
+        return int(parts[0]), int(parts[1])
+    raise ValueError(f"Invalid resolution value: {raw}")
+
+
+def _parse_string_list_env(raw: str) -> list[str]:
+    text = raw.strip()
+    if not text:
+        return []
+    if text[0] == "[" and text[-1] == "]":
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid list value: {raw}") from exc
+        if not isinstance(decoded, list):
+            raise ValueError(f"Invalid list value: {raw}")
+        return [str(item).strip() for item in decoded if str(item).strip()]
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def _optional_string_value(raw: str) -> str | None:
+    value = raw.strip()
+    return value or None
+
+
+def _parse_env_field(field_name: str, raw: str) -> Any:
+    parser: Callable[[str], Any] | None = None
+    if field_name == "desktop_prefer_resolution":
+        parser = _parse_resolution_env
+    elif field_name in LIST_FIELDS:
+        parser = _parse_string_list_env
+    elif field_name in OPTIONAL_STRING_FIELDS:
+        parser = _optional_string_value
+
+    if parser is not None:
+        return parser(raw)
+
+    annotation = Settings.model_fields[field_name].annotation
+    return TypeAdapter(annotation).validate_python(raw)
+
+
+def _merge_runtime_env() -> dict[str, str]:
+    env_values = {
+        key: value for key, value in dotenv_values(".env").items() if value is not None
+    }
+    env_values.update(os.environ)
+    return env_values
+
+
+def _build_agent_models(env: Mapping[str, str]) -> dict[str, AgentModelConfig]:
+    configured_models: dict[str, AgentModelConfig] = {}
+
+    for agent_name, prefix in AGENT_ENV_PREFIX.items():
+        config_payload = DEFAULT_AGENT_MODELS[agent_name].model_dump()
+
+        model_override = env.get(f"{prefix}_MODEL")
+        if model_override:
+            config_payload["model"] = model_override
+
+        reasoning_override = env.get(f"{prefix}_REASONING_LEVEL")
+        if reasoning_override:
+            config_payload["reasoning_level"] = reasoning_override.lower()
+
+        modalities_override = env.get(f"{prefix}_MODALITIES")
+        if modalities_override is not None:
+            config_payload["modalities"] = set(
+                _parse_string_list_env(modalities_override)
+            )
+
+        configured_models[agent_name] = AgentModelConfig(**config_payload)
+
+    return configured_models
+
+
+def load_settings(env: Mapping[str, str] | None = None) -> "Settings":
+    """Load settings from exact environment variable names only."""
+
+    raw_env = _merge_runtime_env() if env is None else dict(env)
+    payload: dict[str, Any] = {}
+
+    for field_name, env_name in SETTINGS_ENV_VARS.items():
+        raw_value = raw_env.get(env_name)
+        if raw_value is None:
+            continue
+        payload[field_name] = _parse_env_field(field_name, raw_value)
+
+    payload["agent_models"] = _build_agent_models(raw_env)
+    return Settings(**payload)
+
+
+class Settings(BaseModel):
     """Application settings with environment variable support."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    model_config = ConfigDict(extra="forbid")
 
     # OpenAI Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
@@ -133,142 +325,115 @@ class Settings(BaseSettings):
     automation_backend: str = Field(
         default="desktop",
         description="Automation backend to use (desktop or mobile_adb)",
-        validation_alias=AliasChoices("HAINDY_AUTOMATION_BACKEND"),
     )
     desktop_prefer_resolution: tuple[int, int] = Field(
         default=(1920, 1080),
         description="Preferred resolution for desktop sessions",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_RESOLUTION"),
     )
     desktop_keyboard_layout: str = Field(
         default="us",
         description="Keyboard layout for desktop automation (us, es)",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_KEYBOARD_LAYOUT"),
     )
     desktop_enable_keyboard_scancodes: bool = Field(
         default=True,
         description="Emit MSC_SCAN scancodes for key events",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_KEYBOARD_SCANCODES"),
     )
     desktop_keyboard_key_delay_ms: int = Field(
         default=12,
         ge=0,
         description="Delay between key events when sending combos",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_KEY_DELAY_MS"),
     )
     desktop_enable_resolution_switch: bool = Field(
         default=True,
         description="Allow resolution downshift for desktop runs",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH"),
     )
     desktop_screenshot_dir: Path = Field(
         default=Path("data/screenshots/desktop"),
         description="Directory for desktop screenshots",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_SCREENSHOT_DIR"),
     )
     desktop_coordinate_cache_path: Path = Field(
         default=Path("data/desktop_cache/coordinates.json"),
         description="Coordinate cache path for desktop actions",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_COORDINATE_CACHE_PATH"),
     )
     task_plan_cache_path: Path = Field(
         default=Path("data/task_plan_cache.json"),
         description="Task planning cache path",
-        validation_alias=AliasChoices("HAINDY_TASK_PLAN_CACHE_PATH"),
     )
     enable_planning_cache: bool = Field(
         default=True,
         description="Enable caching for scope triage and test plan generation",
-        validation_alias=AliasChoices("HAINDY_ENABLE_PLANNING_CACHE"),
     )
     planning_cache_path: Path = Field(
         default=Path("data/planning_cache.json"),
         description="Scope triage and test planning cache path",
-        validation_alias=AliasChoices("HAINDY_PLANNING_CACHE_PATH"),
     )
     enable_situational_cache: bool = Field(
         default=True,
         description="Enable caching for situational execution-context validation",
-        validation_alias=AliasChoices("HAINDY_ENABLE_SITUATIONAL_CACHE"),
     )
     situational_cache_path: Path = Field(
         default=Path("data/situational_cache.json"),
         description="Situational execution-context cache path",
-        validation_alias=AliasChoices("HAINDY_SITUATIONAL_CACHE_PATH"),
     )
     enable_execution_replay_cache: bool = Field(
         default=True,
         description="Enable execution replay cache (record/replay driver actions per step)",
-        validation_alias=AliasChoices("HAINDY_ENABLE_EXECUTION_REPLAY_CACHE"),
     )
     execution_replay_cache_path: Path = Field(
         default=Path("data/execution_replay_cache.json"),
         description="Execution replay cache path",
-        validation_alias=AliasChoices("HAINDY_EXECUTION_REPLAY_CACHE_PATH"),
     )
     desktop_display: str | None = Field(
         default=None,
         description="X11 display override for desktop capture",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_DISPLAY"),
     )
     desktop_clipboard_timeout_seconds: float = Field(
         default=3.0,
         ge=0.5,
         description="Timeout for desktop clipboard reads",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_CLIPBOARD_TIMEOUT_SECONDS"),
     )
     desktop_clipboard_hold_seconds: float = Field(
         default=15.0,
         ge=0.5,
         description="Max time to hold clipboard owner process",
-        validation_alias=AliasChoices("HAINDY_DESKTOP_CLIPBOARD_HOLD_SECONDS"),
     )
     mobile_screenshot_dir: Path = Field(
         default=Path("data/screenshots/mobile"),
         description="Directory for mobile screenshots",
-        validation_alias=AliasChoices("HAINDY_MOBILE_SCREENSHOT_DIR"),
     )
     mobile_coordinate_cache_path: Path = Field(
         default=Path("data/mobile_cache/coordinates.json"),
         description="Coordinate cache path for mobile actions",
-        validation_alias=AliasChoices("HAINDY_MOBILE_COORDINATE_CACHE_PATH"),
     )
     mobile_default_adb_serial: str = Field(
         default="",
         description="Default Android device serial for mobile ADB runs",
-        validation_alias=AliasChoices("HAINDY_MOBILE_DEFAULT_ADB_SERIAL"),
     )
     mobile_adb_timeout_seconds: float = Field(
         default=15.0,
         ge=0.5,
         description="Timeout in seconds for individual ADB commands",
-        validation_alias=AliasChoices("HAINDY_MOBILE_ADB_TIMEOUT_SECONDS"),
     )
     enable_screen_recording: bool = Field(
         default=False,
         description="Enable GNOME desktop screen recording during test execution",
-        validation_alias=AliasChoices("HAINDY_ENABLE_SCREEN_RECORDING"),
     )
     screen_recording_output_dir: Path = Field(
         default=Path("reports/recordings"),
         description="Directory for optional desktop screen recordings",
-        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_OUTPUT_DIR"),
     )
     screen_recording_framerate: int = Field(
         default=30,
         ge=1,
         description="Framerate for GNOME desktop screen recordings",
-        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_FRAMERATE"),
     )
     screen_recording_draw_cursor: bool = Field(
         default=True,
         description="Draw cursor in GNOME desktop screen recordings",
-        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_DRAW_CURSOR"),
     )
     screen_recording_prefix: str = Field(
         default="haindy-agent",
         description="Filename prefix for desktop screen recordings",
-        validation_alias=AliasChoices("HAINDY_SCREEN_RECORDING_PREFIX"),
     )
 
     # Execution Configuration
@@ -297,170 +462,126 @@ class Settings(BaseSettings):
     computer_use_model: str = Field(
         default=SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
         description="OpenAI model for computer-use execution",
-        validation_alias=AliasChoices(
-            "HAINDY_COMPUTER_USE_MODEL", "COMPUTER_USE_MODEL"
-        ),
     )
     cu_provider: str = Field(
         default="google",
         description="Computer-use provider to run actions (openai, google, or anthropic)",
-        validation_alias=AliasChoices("CU_PROVIDER", "HAINDY_CU_PROVIDER"),
     )
     google_cu_model: str = Field(
         default="gemini-2.5-computer-use-preview-10-2025",
         description="Google Gemini computer-use model name",
-        validation_alias=AliasChoices("GOOGLE_CU_MODEL", "HAINDY_GOOGLE_CU_MODEL"),
     )
     anthropic_api_key: str = Field(
         default="",
         description="Anthropic API key for Claude computer-use",
-        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "HAINDY_ANTHROPIC_API_KEY"),
     )
     anthropic_cu_model: str = Field(
         default="claude-sonnet-4-6",
         description="Anthropic Claude computer-use model name",
-        validation_alias=AliasChoices(
-            "ANTHROPIC_CU_MODEL", "HAINDY_ANTHROPIC_CU_MODEL"
-        ),
     )
     anthropic_cu_beta: str = Field(
         default="computer-use-2025-11-24",
         description="Anthropic beta flag for computer-use tool availability",
-        validation_alias=AliasChoices("ANTHROPIC_CU_BETA", "HAINDY_ANTHROPIC_CU_BETA"),
     )
     anthropic_cu_max_tokens: int = Field(
         default=16384,
         ge=256,
         description="Max output tokens for Anthropic computer-use requests",
-        validation_alias=AliasChoices(
-            "ANTHROPIC_CU_MAX_TOKENS", "HAINDY_ANTHROPIC_CU_MAX_TOKENS"
-        ),
     )
     vertex_api_key: str = Field(
         default="",
         description="API key for Google Vertex computer-use",
-        validation_alias=AliasChoices("VERTEX_API_KEY", "HAINDY_VERTEX_API_KEY"),
     )
     vertex_project: str = Field(
         default="",
         description="Vertex project for Google computer-use runs",
-        validation_alias=AliasChoices("VERTEX_PROJECT", "HAINDY_VERTEX_PROJECT"),
     )
     vertex_location: str = Field(
         default="us-central1",
         description="Vertex location for Google computer-use runs",
-        validation_alias=AliasChoices("VERTEX_LOCATION", "HAINDY_VERTEX_LOCATION"),
     )
     cu_safety_policy: str = Field(
         default="auto_approve",
         description="Handling for provider safety confirmations (auto_approve, auto_deny, error)",
-        validation_alias=AliasChoices("CU_SAFETY_POLICY", "HAINDY_CU_SAFETY_POLICY"),
     )
     openai_cu_transport: str = Field(
         default="responses_websocket",
         description="Transport for OpenAI computer-use requests",
-        validation_alias=AliasChoices(
-            "HAINDY_OPENAI_CU_TRANSPORT",
-            "OPENAI_CU_TRANSPORT",
-        ),
     )
     cu_visual_mode: str = Field(
         default="keyframe_patch",
         description="Visual-state strategy for computer-use follow-up screenshots",
-        validation_alias=AliasChoices(
-            "HAINDY_CU_VISUAL_MODE",
-            "CU_VISUAL_MODE",
-        ),
     )
     cu_cartography_model: str = Field(
         default="",
         description="Optional override model for provider-owned cartography generation",
-        validation_alias=AliasChoices(
-            "HAINDY_CU_CARTOGRAPHY_MODEL",
-            "CU_CARTOGRAPHY_MODEL",
-        ),
     )
     cu_keyframe_max_turns: int = Field(
         default=3,
         ge=1,
         description="Maximum turns to reuse a keyframe before forcing a refresh",
-        validation_alias=AliasChoices("HAINDY_CU_KEYFRAME_MAX_TURNS"),
     )
     cu_patch_max_area_ratio: float = Field(
         default=0.35,
         ge=0.01,
         le=1.0,
         description="Maximum full-frame area ratio allowed for patch-mode follow-ups",
-        validation_alias=AliasChoices("HAINDY_CU_PATCH_MAX_AREA_RATIO"),
     )
     cu_patch_margin_ratio: float = Field(
         default=0.12,
         ge=0.0,
         le=1.0,
         description="Margin ratio to expand patch crops around the target/delta union",
-        validation_alias=AliasChoices("HAINDY_CU_PATCH_MARGIN_RATIO"),
     )
     actions_computer_tool_max_turns: int = Field(
         default=12,
         ge=1,
         description="Maximum tool turns per action when using Computer Use",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS"),
     )
     actions_computer_tool_loop_detection_window: int = Field(
         default=4,
         ge=2,
         description="Repeated identical turns (with identical screenshots) before flagging a loop",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW"),
     )
     actions_computer_tool_action_timeout_ms: int = Field(
         default=600000,
         ge=500,
         description="Timeout in milliseconds for executing a single computer action",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS"),
     )
     actions_computer_tool_stabilization_wait_ms: int = Field(
         default=1000,
         ge=0,
         le=1000,
         description="Delay after executing an action before capturing the next screenshot",
-        validation_alias=AliasChoices(
-            "HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS"
-        ),
     )
     actions_computer_tool_fail_fast_on_safety: bool = Field(
         default=True,
         description=(
             "Abort immediately on pending safety checks before cu_safety_policy is applied"
         ),
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST"),
     )
     actions_computer_tool_allowed_domains: list[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool is permitted to interact with",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS"),
     )
     actions_computer_tool_blocked_domains: list[str] = Field(
         default_factory=list,
         description="Domains the Computer Use tool must never interact with",
-        validation_alias=AliasChoices("HAINDY_ACTIONS_COMPUTER_TOOL_BLOCKED_DOMAINS"),
     )
     scroll_turn_multiplier: float = Field(
         default=3.0,
         ge=1.0,
         description="Multiplier for extra scroll turns before max-turn enforcement",
-        validation_alias=AliasChoices("HAINDY_SCROLL_TURN_MULTIPLIER"),
     )
     scroll_default_magnitude: int = Field(
         default=450,
         ge=1,
         description="Default scroll magnitude (pixels) when not specified",
-        validation_alias=AliasChoices("HAINDY_SCROLL_DEFAULT_MAGNITUDE"),
     )
     scroll_max_magnitude: int = Field(
         default=600,
         ge=1,
         description="Maximum per-scroll magnitude/pixel delta",
-        validation_alias=AliasChoices("HAINDY_SCROLL_MAX_MAGNITUDE"),
     )
 
     # Logging Configuration
@@ -476,13 +597,11 @@ class Settings(BaseSettings):
     model_log_path: Path = Field(
         default=Path("data/model_logs/model_calls.jsonl"),
         description="Log file for raw model prompts/responses",
-        validation_alias=AliasChoices("MODEL_LOG_PATH", "HAINDY_MODEL_LOG_PATH"),
     )
     max_screenshots: int | None = Field(
         default=None,
         ge=1,
         description="Optional cap on retained screenshots per run; unset preserves all evidence",
-        validation_alias=AliasChoices("HAINDY_MAX_SCREENSHOTS"),
     )
 
     # Storage Configuration
@@ -662,42 +781,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def populate_agent_models(self) -> "Settings":
-        """Populate agent model configurations from defaults and environment."""
-        env = os.environ
-
+        """Populate agent model configurations from defaults and explicit input."""
         configured_models: dict[str, AgentModelConfig] = {}
-        openai_model_env_set = "OPENAI_MODEL" in env
 
-        # Preserve user supplied mapping while ensuring defaults exist
         existing_models = self.agent_models.copy()
 
-        for agent_name, prefix in AGENT_ENV_PREFIX.items():
-            base_config = existing_models.get(
-                agent_name, DEFAULT_AGENT_MODELS[agent_name]
-            )
-            config_payload = base_config.model_dump()
+        for agent_name, default_config in DEFAULT_AGENT_MODELS.items():
+            if agent_name in existing_models:
+                configured_models[agent_name] = existing_models[agent_name]
+            else:
+                configured_models[agent_name] = default_config.model_copy(deep=True)
 
-            model_override = env.get(f"{prefix}_MODEL")
-            if model_override:
-                config_payload["model"] = model_override
-            elif openai_model_env_set:
-                config_payload["model"] = self.openai_model
-
-            reasoning_override = env.get(f"{prefix}_REASONING_LEVEL")
-            if reasoning_override:
-                config_payload["reasoning_level"] = reasoning_override.lower()
-
-            modalities_override = env.get(f"{prefix}_MODALITIES")
-            if modalities_override:
-                config_payload["modalities"] = {
-                    modality.strip().lower()
-                    for modality in modalities_override.split(",")
-                    if modality.strip()
-                }
-
-            configured_models[agent_name] = AgentModelConfig(**config_payload)
-
-        # Include any extra agent configs supplied directly
         for agent_name, config in existing_models.items():
             if agent_name not in configured_models:
                 configured_models[agent_name] = config
@@ -751,12 +845,7 @@ class ConfigManager(ConfigProvider):
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    # Load .env file if it exists
-    env_file = Path(".env")
-    if env_file.exists():
-        load_dotenv(env_file)
-
-    settings = Settings()
+    settings = load_settings()
     settings.create_directories()
     return settings
 
