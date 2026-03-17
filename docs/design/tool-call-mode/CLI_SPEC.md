@@ -7,8 +7,8 @@ haindy <subcommand> [options]
 ```
 
 All tool call mode subcommands are grouped under two top-level subcommands:
-- `session` - manage sessions
-- Direct action subcommands: `act`, `step`, `test`, `explore`
+- `session` - manage sessions and session variables
+- Direct action subcommands: `act`, `test`
 
 The active session is resolved in order:
 1. Explicit `--session <id>` flag on the command
@@ -31,7 +31,7 @@ The active session is resolved in order:
 
 ### `haindy session new`
 
-Start a new session. Spawns the daemon process, initializes the device/browser connection, and returns the session ID.
+Start a new session. Spawns the daemon process, initializes the device connection, and returns the session ID.
 
 ```
 haindy session new [--android | --desktop] [options]
@@ -44,7 +44,7 @@ haindy session new [--android | --desktop] [options]
 | `--android` | | Use Android ADB backend. Mutually exclusive with `--desktop`. |
 | `--android-serial <serial>` | | Target a specific Android device or emulator by ADB serial (e.g. `emulator-5554`). Optional; uses the only connected device if omitted. |
 | `--android-app <package>` | | Android package name to launch on session start (e.g. `com.example.app`). Optional. |
-| `--desktop` | | Use the desktop backend (X11 screen capture + OS-level input). Mutually exclusive with `--android`. Default if neither specified and no env config. |
+| `--desktop` | | Use the desktop backend (computer use: OS screen capture + AI-driven input). Mutually exclusive with `--android`. Default if neither specified and no env config. |
 | `--url <url>` | | URL to open on session start (desktop only). Optional. |
 | `--idle-timeout <seconds>` | 1800 | Kill daemon after this many seconds without a command. |
 
@@ -56,7 +56,8 @@ haindy session new [--android | --desktop] [options]
   "command": "session",
   "status": "success",
   "response": "Session started with Android ADB backend. Device found: Pixel 7 (emulator-5554).",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_001.png"
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_001.png",
+  "meta": {"exit_reason": "completed", "duration_ms": 1823, "actions_taken": 0}
 }
 ```
 
@@ -70,7 +71,7 @@ export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
 
 ### `haindy session close`
 
-Terminate the session daemon and release the device/browser connection.
+Terminate the session daemon and release the device connection.
 
 ```
 haindy session close [--session <id>]
@@ -84,7 +85,8 @@ haindy session close [--session <id>]
   "command": "session",
   "status": "success",
   "response": "Session closed. 14 steps were executed during this session.",
-  "screenshot_path": null
+  "screenshot_path": null,
+  "meta": {"exit_reason": "completed", "duration_ms": 43, "actions_taken": 0}
 }
 ```
 
@@ -107,6 +109,7 @@ haindy session list
   "status": "success",
   "response": "2 active sessions found.",
   "screenshot_path": null,
+  "meta": {"exit_reason": "completed", "duration_ms": 12, "actions_taken": 0},
   "sessions": [
     {
       "session_id": "a3f9c2d1-...",
@@ -136,8 +139,89 @@ haindy session status [--session <id>]
   "session_id": "a3f9c2d1-...",
   "command": "session",
   "status": "success",
-  "response": "Session is active. Last command was 'step' 23 seconds ago. Device is on the home screen.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_007.png"
+  "response": "Session is active. Last command was 'act' 23 seconds ago. Device is on the home screen.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_007.png",
+  "meta": {"exit_reason": "completed", "duration_ms": 891, "actions_taken": 1}
+}
+```
+
+---
+
+### `haindy session set`
+
+Store a named variable in the session. The variable can be referenced as `$NAME` in any subsequent command string. The daemon interpolates all `$NAME` tokens before passing the instruction to agents.
+
+```
+haindy session set <NAME> <VALUE> [--secret] [--session <id>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--secret` | Mark the variable as secret. Secret values are stored in daemon memory only (not written to session.json or logs). Any `response` field that would echo the value back replaces it with `[redacted]`. |
+
+**Examples:**
+
+```bash
+haindy session set USERNAME alice@example.com
+haindy session set PASSWORD hunter2 --secret
+haindy session set BASE_URL https://staging.example.com
+
+# Then use in commands:
+haindy act "type '$USERNAME' into the email field"
+haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears"
+haindy act "navigate to $BASE_URL/login"
+```
+
+**Stdout:**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "session",
+  "status": "success",
+  "response": "Variable PASSWORD set (secret).",
+  "screenshot_path": null,
+  "meta": {"exit_reason": "completed", "duration_ms": 3, "actions_taken": 0}
+}
+```
+
+---
+
+### `haindy session unset`
+
+Remove a named variable from the session.
+
+```
+haindy session unset <NAME> [--session <id>]
+```
+
+---
+
+### `haindy session vars`
+
+List all variable names defined in the session. Secret variable values are not shown.
+
+```
+haindy session vars [--session <id>]
+```
+
+**Stdout:**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "session",
+  "status": "success",
+  "response": "3 variables defined: USERNAME, PASSWORD (secret), BASE_URL.",
+  "screenshot_path": null,
+  "meta": {"exit_reason": "completed", "duration_ms": 2, "actions_taken": 0},
+  "vars": {
+    "USERNAME": "alice@example.com",
+    "PASSWORD": "[secret]",
+    "BASE_URL": "https://staging.example.com"
+  }
 }
 ```
 
@@ -155,7 +239,7 @@ All action subcommands share this behavior:
 
 ### `haindy act`
 
-Execute a single direct interaction on the device or browser. No outcome validation is performed. Maps directly to the Action Agent.
+Execute a single direct interaction on the device. No outcome validation is performed. Maps directly to the Action Agent.
 
 ```
 haindy act "<instruction>" [--session <id>]
@@ -182,7 +266,8 @@ haindy act "press the back button"
   "command": "act",
   "status": "success",
   "response": "Tapped the Login button. The button had the text 'Log In' and was located in the center of the screen.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_003.png"
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_003.png",
+  "meta": {"exit_reason": "completed", "duration_ms": 1243, "actions_taken": 1}
 }
 ```
 
@@ -194,65 +279,12 @@ haindy act "press the back button"
   "command": "act",
   "status": "failure",
   "response": "Could not find a Login button on the current screen. The screen shows an empty loading state with a spinner. The app may not have finished loading.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_003.png"
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_003.png",
+  "meta": {"exit_reason": "element_not_found", "duration_ms": 987, "actions_taken": 0}
 }
 ```
 
-**When to use:** When the coding agent knows the exact interaction and does not need Haindy to verify an outcome. For example, navigating to a known URL, tapping a clearly visible element, or typing into a focused field.
-
----
-
-### `haindy step`
-
-Execute a natural language step: interpret the instruction into one or more actions, execute them, and validate the expected outcome. Maps to the Test Runner operating on a single step.
-
-```
-haindy step "<instruction>" [--session <id>] [--max-actions <n>]
-```
-
-**Argument:**
-
-`<instruction>` - A natural language step that includes both the action and the expected result. The Test Runner will interpret this, drive the Action Agent, and verify the outcome.
-
-**Flags:**
-
-| Flag | Default | Description |
-|---|---|---|
-| `--max-actions <n>` | 10 | Maximum number of Action Agent calls the Test Runner may make to complete this step. |
-
-**Examples:**
-
-```bash
-haindy step "tap the Login button and verify the user is taken to the dashboard"
-haindy step "enter 'user@example.com' in the email field and 'hunter2' in the password field, then submit the form"
-haindy step "verify that the error message 'Invalid credentials' is visible on screen"
-```
-
-**Stdout on success:**
-
-```json
-{
-  "session_id": "a3f9c2d1-...",
-  "command": "step",
-  "status": "success",
-  "response": "Step completed. Tapped 'Log In', entered credentials, submitted the form. The dashboard screen appeared with the header 'Welcome back, Alice'.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_006.png"
-}
-```
-
-**Stdout on failure:**
-
-```json
-{
-  "session_id": "a3f9c2d1-...",
-  "command": "step",
-  "status": "failure",
-  "response": "Step failed. Submitted the login form but the dashboard did not appear. Instead, an error banner shows 'Your account has been suspended'. Expected the dashboard screen but observed an account suspension message.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_006.png"
-}
-```
-
-**When to use:** When the coding agent wants to describe an interaction and a pass/fail outcome without writing out every individual action. The Test Runner handles multi-action sequences and retries automatically.
+**When to use:** When the coding agent knows the exact interaction and does not need Haindy to verify an outcome. For example, tapping a clearly visible element or typing into a focused field. Use `test` for anything that requires outcome validation.
 
 ---
 
@@ -293,7 +325,8 @@ haindy test "attempt to sign in with an incorrect password three times and verif
   "steps_total": 6,
   "steps_passed": 6,
   "steps_failed": 0,
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_012.png"
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_012.png",
+  "meta": {"exit_reason": "completed", "duration_ms": 18420, "actions_taken": 14}
 }
 ```
 
@@ -308,23 +341,22 @@ haindy test "attempt to sign in with an incorrect password three times and verif
   "steps_total": 6,
   "steps_passed": 3,
   "steps_failed": 1,
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_009.png"
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_009.png",
+  "meta": {"exit_reason": "assertion_failed", "duration_ms": 11230, "actions_taken": 9}
 }
 ```
 
 Note: `test` adds `steps_total`, `steps_passed`, and `steps_failed` fields to the standard envelope.
 
-**When to use:** When the coding agent wants to validate a complete user journey end-to-end with structured pass/fail semantics. Appropriate after implementing a feature to verify it works holistically.
+**When to use:** For anything that requires outcome validation - single interactions with expected results, multi-step journeys, regression checks, and open-ended scenarios. This is the primary command in tool call mode.
 
 ---
 
 ### `haindy explore` (v2 - not available in v1)
 
-> **Not implemented in v1.** `explore` requires live-screen situational assessment, which is a v2 capability. Use `test` in the meantime - it accepts open-ended scenario descriptions and handles multi-step planning.
+> **Not implemented in v1.** Use `test` for open-ended goals in the meantime - it accepts natural language scenarios and plans them automatically.
 
-Open-ended goal execution. The Situational Agent assesses the current device state by taking a screenshot and reasoning about it, the Test Planner builds a short exploratory plan, and the Test Runner executes it. The coding agent provides a goal without needing to know the exact starting state or the specific steps.
-
-This command is blocked on extending the Situational Agent from text-context gating to live-screen assessment.
+Blocked on: extending the Situational Agent from text-context gating to live-screen assessment (screenshot in, device state description out).
 
 **Planned interface:**
 
@@ -332,13 +364,7 @@ This command is blocked on extending the Situational Agent from text-context gat
 haindy explore "<goal>" [--session <id>] [--max-steps <n>]
 ```
 
-**Planned examples:**
-
-```bash
-haindy explore "sign in as user@example.com with password hunter2"
-haindy explore "find out if the checkout flow accepts a coupon code and what happens when an expired code is entered"
-haindy explore "navigate to the account deletion flow and describe what confirmation steps are required"
-```
+**Intended use case:** When the coding agent does not know the current device state and cannot write a `test` scenario without first knowing what screen it is on. `explore` will take a screenshot, assess the situation, build a mini-plan, and execute it autonomously.
 
 ---
 
@@ -369,11 +395,16 @@ haindy explore "navigate to the account deletion flow and describe what confirma
 
 ```json
 {
-  "session_id": "string (UUID)",
-  "command": "act | step | test | explore | session",
+  "session_id": "string (UUID) | null",
+  "command": "act | test | session",
   "status": "success | failure | error",
   "response": "string (natural language, always present)",
-  "screenshot_path": "string (absolute path) | null"
+  "screenshot_path": "string (absolute path) | null",
+  "meta": {
+    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | agent_error | device_error | element_not_found",
+    "duration_ms": "integer",
+    "actions_taken": "integer"
+  }
 }
 ```
 
@@ -403,6 +434,16 @@ haindy explore "navigate to the account deletion flow and describe what confirma
 }
 ```
 
+### Extended fields for `session vars`
+
+```json
+{
+  "vars": {
+    "<NAME>": "string value | \"[secret]\""
+  }
+}
+```
+
 ### Error envelope (when Haindy itself fails)
 
 ```json
@@ -411,7 +452,8 @@ haindy explore "navigate to the account deletion flow and describe what confirma
   "command": "string",
   "status": "error",
   "response": "Haindy encountered an internal error. The daemon process may have crashed. Details: <exception message>.",
-  "screenshot_path": null
+  "screenshot_path": null,
+  "meta": {"exit_reason": "agent_error", "duration_ms": 0, "actions_taken": 0}
 }
 ```
 
@@ -419,4 +461,4 @@ haindy explore "navigate to the account deletion flow and describe what confirma
 
 ## Contract Stability Guarantee
 
-The top-level fields (`session_id`, `command`, `status`, `response`, `screenshot_path`) are stable. New fields may be added in minor versions. Fields will not be removed or renamed without a major version bump. Skills and agents should only depend on these five core fields unless they explicitly opt into extended fields.
+The top-level fields (`session_id`, `command`, `status`, `response`, `screenshot_path`, `meta`) are stable. New fields may be added in minor versions. Fields will not be removed or renamed without a major version bump. Skills and agents should only depend on these core fields unless they explicitly opt into extended fields.
