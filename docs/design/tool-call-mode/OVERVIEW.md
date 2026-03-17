@@ -89,7 +89,7 @@ flowchart TD
 
 **Session Daemon**: A long-running Python process spawned by `haindy session new`. Owns the device connection for the lifetime of the session. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON.
 
-**Action Agent**: Receives a natural language instruction, takes a screenshot via computer use, identifies the target element, and executes a single interaction (tap, click, type, scroll). Returns immediately with the result.
+**Action Agent**: Receives a natural language instruction, takes a screenshot via computer use, and either executes a single interaction (tap, click, type, scroll) or, for `session status`, observes the current screen and returns a natural-language description without taking action. Returns immediately with the result.
 
 **Test Runner**: Drives the Action Agent through a sequence of structured steps produced by the Test Planner, validating each step's expected outcome. Returns a pass/fail with a summary.
 
@@ -128,7 +128,7 @@ Every command returns a single JSON object on stdout:
   "response": "Natural language description of what happened. Always present. Especially detailed on failure.",
   "screenshot_path": "/absolute/path/to/latest/screenshot.png",
   "meta": {
-    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | agent_error | device_error | session_busy",
+    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | command_timeout | agent_error | device_error | session_busy",
     "duration_ms": 4821,
     "actions_taken": 7
   }
@@ -142,7 +142,7 @@ Every command returns a single JSON object on stdout:
 | `status` | Yes | Machine-readable signal. `error` means Haindy itself failed (bug/crash), `failure` means the action or assertion failed. |
 | `response` | Yes | Human-readable. On success: what happened. On failure: what was expected vs. what was observed. |
 | `screenshot_path` | Yes (when session active) | Absolute path to the latest screenshot. `null` if screenshot could not be taken or command has no device context. |
-| `meta.exit_reason` | Yes | Why the command terminated. Distinguishes `assertion_failed` from `element_not_found` from `session_busy` from `agent_error` etc. |
+| `meta.exit_reason` | Yes | Why the command terminated. Distinguishes `assertion_failed` from `element_not_found` from `command_timeout` from `session_busy` from `agent_error` etc. |
 | `meta.duration_ms` | Yes | Wall-clock time for the command in milliseconds. |
 | `meta.actions_taken` | Yes | Number of atomic device operations performed to satisfy the command. A fresh screenshot taken for `session status` counts as 1. Startup or teardown bookkeeping for `session new` and `session close` does not. |
 
@@ -182,4 +182,4 @@ Exit codes mirror status: 0 for `success`, 1 for `failure` or `error`.
 | **act** | A single direct device interaction with no outcome validation. |
 | **test** | A scenario description run through the Test Planner and Test Runner, returning structured pass/fail. |
 | **explore** | (v2) An open-ended goal handled by the full agent stack including live-screen situational assessment. |
-| **exit_reason** | The `meta` field explaining why a command terminated: `completed`, `assertion_failed`, `max_steps_reached`, `max_actions_reached`, `element_not_found`, `agent_error`, `device_error`, or `session_busy`. |
+| **exit_reason** | The `meta` field explaining why a command terminated: `completed`, `assertion_failed`, `max_steps_reached`, `max_actions_reached`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, or `session_busy`. |

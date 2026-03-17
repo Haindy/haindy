@@ -75,8 +75,14 @@ haindy test "open the app and verify the dashboard appears" --session <SESSION_I
 Terminate the session daemon and release the device connection.
 
 ```
-haindy session close [--session <id>]
+haindy session close --session <id> [--force]
 ```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--force` | Force-close the session immediately instead of waiting for an in-progress command to finish. Intended for stuck or timed-out sessions. |
 
 **Stdout:**
 
@@ -95,7 +101,7 @@ haindy session close [--session <id>]
 
 ### `haindy session list`
 
-List all active sessions on this machine.
+List all live sessions on this machine. Stale daemon artifacts are ignored.
 
 ```
 haindy session list
@@ -127,11 +133,17 @@ haindy session list
 
 ### `haindy session status`
 
-Return the current state of an active session, including the latest screenshot.
+Return the current state of an active session, including the latest screenshot. Handled by the Action Agent in observe-only mode.
 
 ```
-haindy session status [--session <id>]
+haindy session status --session <id> [--timeout <seconds>]
 ```
+
+**Flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for describing the current screen before Haindy returns `meta.exit_reason: command_timeout`. |
 
 **Stdout:**
 
@@ -152,11 +164,11 @@ haindy session status [--session <id>]
 
 ### `haindy session set`
 
-Store a named variable in the session. The variable can be referenced as `$NAME` in any subsequent command string. The daemon interpolates all `$NAME` tokens before passing the instruction to agents.
+Store a named variable in the session. The variable can be referenced as `$NAME` in any subsequent command string. The daemon interpolates matching `$NAME` tokens before passing the final instruction string to agents.
 
 ```
-haindy session set <NAME> <VALUE> [--secret] [--session <id>]
-haindy session set <NAME> --value-file <path> [--secret] [--session <id>]
+haindy session set <NAME> <VALUE> [--secret] --session <id>
+haindy session set <NAME> --value-file <path> [--secret] --session <id>
 ```
 
 **Flags:**
@@ -167,6 +179,13 @@ haindy session set <NAME> --value-file <path> [--secret] [--session <id>]
 | `--value-file <path>` | Read the variable value from a file instead of the command line. Useful for secrets, long JSON payloads, and values that should not appear in shell history. |
 
 Note: `--secret` protects the value after Haindy receives it. Shells expand environment variables before `haindy` starts, so `haindy session set PASSWORD "$TEST_PASSWORD" --secret` is still passing the resolved value on the command line. If the value is sensitive, prefer `--value-file` over command-line input.
+
+**Interpolation rules:**
+
+- Substitution is exact text replacement of `$NAME` with the stored value.
+- Only variables that exist in the session are substituted. Unknown `$NAME` tokens are left unchanged in the instruction string.
+- `$$` is treated as a literal `$`.
+- No shell-style parsing is performed after substitution. Quotes, whitespace, and newlines remain part of the final instruction string and are passed to the model as-is.
 
 **Examples:**
 
@@ -202,7 +221,7 @@ haindy act "navigate to $BASE_URL/login" --session <SESSION_ID>
 Remove a named variable from the session.
 
 ```
-haindy session unset <NAME> [--session <id>]
+haindy session unset <NAME> --session <id>
 ```
 
 ---
@@ -212,7 +231,7 @@ haindy session unset <NAME> [--session <id>]
 List all variable names defined in the session. Secret variable values are not shown.
 
 ```
-haindy session vars [--session <id>]
+haindy session vars --session <id>
 ```
 
 **Stdout:**
@@ -239,6 +258,7 @@ haindy session vars [--session <id>]
 
 All action subcommands share this behavior:
 - Require an explicit `--session <id>`.
+- Support `--timeout <seconds>`. If the timeout is reached, the command ends with `meta.exit_reason: command_timeout`.
 - Return a single JSON object on stdout (the standard envelope, see OVERVIEW.md).
 - Exit 0 on `success`, exit 1 on `failure` or `error`.
 - Always capture a screenshot after the command completes and include `screenshot_path`.
@@ -250,12 +270,18 @@ All action subcommands share this behavior:
 Execute a single direct interaction on the device. No outcome validation is performed. Maps directly to the Action Agent.
 
 ```
-haindy act "<instruction>" [--session <id>]
+haindy act "<instruction>" --session <id> [--timeout <seconds>]
 ```
 
 **Argument:**
 
 `<instruction>` - A natural language description of the single action to perform.
+
+**Flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for the command before Haindy stops execution and returns `meta.exit_reason: command_timeout`. |
 
 **Examples:**
 
@@ -301,7 +327,7 @@ haindy act "press the back button" --session <SESSION_ID>
 Run a full test scenario. The Test Planner generates a structured plan from the description, then the Test Runner executes each step and validates outcomes. Maps to Test Planner + Test Runner.
 
 ```
-haindy test "<scenario>" [--session <id>] [--max-steps <n>]
+haindy test "<scenario>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 ```
 
 **Argument:**
@@ -313,6 +339,7 @@ haindy test "<scenario>" [--session <id>] [--max-steps <n>]
 | Flag | Default | Description |
 |---|---|---|
 | `--max-steps <n>` | 20 | Maximum number of steps the Test Runner may execute. |
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for the command before Haindy stops execution and returns `meta.exit_reason: command_timeout`. |
 
 **Examples:**
 
@@ -369,7 +396,7 @@ Blocked on: extending the Situational Agent from text-context gating to live-scr
 **Planned interface:**
 
 ```
-haindy explore "<goal>" [--session <id>] [--max-steps <n>]
+haindy explore "<goal>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 ```
 
 **Intended use case:** When the coding agent does not know the current device state and cannot write a `test` scenario without first knowing what screen it is on. `explore` will take a screenshot, assess the situation, build a mini-plan, and execute it autonomously.
@@ -408,7 +435,7 @@ haindy explore "<goal>" [--session <id>] [--max-steps <n>]
   "response": "string (natural language, always present)",
   "screenshot_path": "string (absolute path) | null",
   "meta": {
-    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | agent_error | device_error | session_busy",
+    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | command_timeout | agent_error | device_error | session_busy",
     "duration_ms": "integer",
     "actions_taken": "integer"
   }

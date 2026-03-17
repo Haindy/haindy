@@ -81,7 +81,7 @@ Every command returns JSON. The agent must read `status`, `response`, and `meta.
   "response": "What happened in natural language.",
   "screenshot_path": "/absolute/path/to/screenshot.png",
   "meta": {
-    "exit_reason": "completed|assertion_failed|max_steps_reached|element_not_found|agent_error|device_error|session_busy",
+    "exit_reason": "completed|assertion_failed|max_steps_reached|element_not_found|command_timeout|agent_error|device_error|session_busy",
     "duration_ms": 1243,
     "actions_taken": 3
   }
@@ -126,6 +126,7 @@ On `status: failure`, read `response` carefully - it describes what was observed
 - `assertion_failed` - the action executed but the expected outcome did not occur. Adjust the `test` scenario or investigate the app state with `session status`.
 - `element_not_found` - the target was not visible. The app may still be loading, or the screen state is unexpected. Use `session status` to see the current screen.
 - `max_steps_reached` - Haindy ran out of steps without completing. Use `--max-steps` to allow more, or break the scenario into smaller `test` calls.
+- `command_timeout` - Haindy hit the command time limit. Retry with a larger `--timeout` or break the scenario into smaller commands.
 - `agent_error` or `device_error` - internal failure. Check `response` for details.
 
 Do not retry the same `act` instruction more than twice. If a direct action is not working, switch to `test` with an explicit expected outcome to get more diagnostic information.
