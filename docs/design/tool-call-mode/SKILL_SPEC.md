@@ -37,10 +37,10 @@ A one-paragraph summary. The agent needs to know Haindy is an external testing a
 ### 2. Session Setup
 
 ```bash
-# Start a session (Android)
-haindy session new --android
+# Start a session (Android only)
+haindy session new --android [--android-serial <SERIAL>] [--android-app <PACKAGE>]
 
-# Start a session (desktop)
+# Start a session (desktop after the target app/site is already running)
 haindy session new --desktop
 
 # Read `session_id` from the JSON response, then pass it explicitly:
@@ -56,6 +56,14 @@ haindy session close --session <SESSION_ID>
 ```
 
 Rule: Prefer explicit `--session <SESSION_ID>` in coding-agent and tool-runner workflows.
+
+Rule: For web projects, make sure the site or dev server is already running before you start a desktop session. If a browser is not already open, instruct Haindy to open one and navigate to the URL like a human would. Prefer a maximized browser window.
+
+Rule: For native desktop app projects, make sure the app is already running before you start a desktop session. If needed, instruct Haindy to bring the app to the foreground using normal desktop UI actions. Prefer a maximized app window when possible.
+
+Rule: For mobile, only Android is supported in v1. Start the session against a device or emulator that ADB can reach, and pass `--android-serial` / `--android-app` when needed.
+
+Rule: Desktop sessions may downshift resolution for speed and token savings. Maximizing the target browser or app window helps keep screenshots focused on the app instead of surrounding desktop noise.
 
 Rule: Use `haindy session set --secret` for credentials and tokens. Prefer `--value-file` when the value is sensitive, because shell-expanded env vars still become command-line input before Haindy can redact them. Secret values are never echoed in responses or written to logs after Haindy receives them.
 
@@ -214,13 +222,20 @@ through its CLI and receive structured JSON results.
 
 ## Session setup
 
-    haindy session new --android
-    # or for desktop:
+    haindy session new --android [--android-serial <SERIAL>] [--android-app <PACKAGE>]
+    # or for desktop after the target app/site is already running:
     haindy session new --desktop
 
 Read `session_id` from the JSON response and pass it explicitly:
 
     haindy session status --session <SESSION_ID>
+
+Desktop/web startup rules:
+
+- For web projects, make sure the site or dev server is already running before starting the desktop session.
+- If a browser is not open, instruct Haindy to open one and navigate to the URL like a human would.
+- For native desktop apps, make sure the app is already running before starting the desktop session, then instruct Haindy to bring it to the foreground if needed.
+- Prefer a maximized browser or app window when possible. Desktop sessions may run at a reduced resolution for speed and token savings.
 
 Store credentials before using them in commands:
 

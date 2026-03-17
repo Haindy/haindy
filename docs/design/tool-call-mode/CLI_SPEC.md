@@ -31,6 +31,8 @@ Commands that operate on an existing session require an explicit `--session <id>
 
 Start a new session. Spawns the daemon process, initializes the device connection, and returns the session ID.
 
+For desktop sessions, tool call mode does not own project startup. The coding agent is responsible for making sure the target site or native desktop app is already running before or around session start; Haindy owns the UI interaction after that point.
+
 ```
 haindy session new [--android | --desktop] [options]
 ```
@@ -67,6 +69,13 @@ haindy session new --android
 haindy session status --session <SESSION_ID>
 haindy test "open the app and verify the dashboard appears" --session <SESSION_ID>
 ```
+
+**Desktop startup guidance:**
+
+- Web project: make sure the site or dev server is already running before `haindy session new --desktop`. If a browser is not open yet, instruct Haindy to open one and navigate to the URL like a human would. Prefer a maximized browser window.
+- Native desktop app: make sure the app is already running before `haindy session new --desktop`. If needed, instruct Haindy to bring it to the foreground using normal desktop UI actions. Prefer a maximized app window when possible.
+- Android mobile: start the session against a device or emulator that ADB can reach, and pass `--android-serial` / `--android-app` when needed.
+- Desktop sessions may downshift resolution for speed and token savings, so maximizing the target browser or app window helps keep screenshots focused on the app instead of surrounding desktop noise.
 
 ---
 
