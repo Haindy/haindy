@@ -2,10 +2,10 @@
 
 ## Why a Daemon
 
-The Playwright browser and ADB device connection are expensive to initialize (1-5 seconds each). In tool call mode, a coding agent may issue dozens of commands in sequence. Re-initializing the device connection on every CLI invocation would make each `haindy act` call unacceptably slow and would break stateful navigation (page/app state is lost on each reconnect).
+The ADB device connection and desktop computer-use runtime are expensive to initialize (1-5 seconds each). In tool call mode, a coding agent may issue dozens of commands in sequence. Re-initializing the device connection on every CLI invocation would make each `haindy act` call unacceptably slow and would break stateful navigation (app/page state is lost on each reconnect).
 
 The session daemon is a long-running Python process that:
-- Owns a single device/browser connection for the lifetime of the session
+- Owns a single device connection for the lifetime of the session
 - Listens on a Unix domain socket for commands from CLI clients
 - Dispatches commands to the appropriate Haindy agents
 - Keeps agent instances warm between calls (no re-instantiation overhead)
@@ -20,7 +20,7 @@ stateDiagram-v2
     [*] --> Spawning : haindy session new
 
     Spawning --> Initializing : daemon process started
-    Initializing --> Ready : device/browser connected
+    Initializing --> Ready : device connected
 
     Ready --> Executing : command received
     Executing --> Ready : command complete (response sent)
@@ -44,13 +44,13 @@ sequenceDiagram
     participant CLI as haindy CLI
     participant FS as Filesystem (~/.haindy)
     participant D as Session Daemon
-    participant DEV as Device/Browser
+    participant DEV as Device
 
     CA->>CLI: haindy session new --android
     CLI->>FS: Create sessions/<uuid>/
     CLI->>D: Spawn daemon process (detached)
     D->>FS: Write daemon.pid
-    D->>DEV: Initialize ADB / Playwright connection
+    D->>DEV: Initialize ADB / CU runtime connection
     DEV-->>D: Connection ready
     D->>DEV: Take initial screenshot
     DEV-->>D: screenshot_001.png
@@ -73,7 +73,7 @@ sequenceDiagram
     participant CLI as haindy CLI
     participant D as Session Daemon
     participant AA as Action Agent
-    participant DEV as Device/Browser
+    participant DEV as Device
 
     CA->>CLI: haindy act "tap the Login button"
     CLI->>D: Connect to daemon.sock
@@ -88,90 +88,56 @@ sequenceDiagram
     DEV-->>AA: result_screen.png
     AA-->>D: ActionResult(status, description)
     D->>FS: Save screenshot as step_NNN.png
-    D-->>CLI: JSON response
-    CLI-->>CA: {"status": "success", "response": "...", "screenshot_path": "..."}
+    D-->>CLI: JSON response (with meta)
+    CLI-->>CA: {"status": "success", "response": "...", "meta": {...}}
 ```
 
 ---
 
-## Command Dispatch Sequence: `step`
+## Command Dispatch Sequence: `test`
 
 ```mermaid
 sequenceDiagram
     participant CA as Coding Agent
     participant CLI as haindy CLI
     participant D as Session Daemon
-    participant TR as Test Runner
-    participant AA as Action Agent
-    participant DEV as Device/Browser
-
-    CA->>CLI: haindy step "tap login and verify welcome screen"
-    CLI->>D: {command: "step", instruction: "..."}
-    D->>TR: run_step(instruction)
-
-    loop Action loop (max N iterations)
-        TR->>DEV: Take screenshot
-        DEV-->>TR: screen.png
-        TR->>TR: Interpret next action from instruction + current screen
-        TR->>AA: execute(next_action)
-        AA->>DEV: Perform action
-        DEV-->>AA: Done
-        AA-->>TR: ActionResult
-        TR->>TR: Evaluate: outcome achieved?
-        alt Outcome achieved
-            TR-->>D: StepResult(passed, description)
-        else Max actions reached
-            TR-->>D: StepResult(failed, "Max actions reached. Last state: ...")
-        end
-    end
-
-    D->>FS: Save final screenshot
-    D-->>CLI: JSON response
-    CLI-->>CA: {"status": "success|failure", "response": "..."}
-```
-
----
-
-## Command Dispatch Sequence: `explore`
-
-```mermaid
-sequenceDiagram
-    participant CA as Coding Agent
-    participant CLI as haindy CLI
-    participant D as Session Daemon
-    participant SIT as Situational Agent
     participant TP as Test Planner
     participant TR as Test Runner
     participant AA as Action Agent
-    participant DEV as Device/Browser
+    participant DEV as Device
 
-    CA->>CLI: haindy explore "sign in as alice@example.com"
-    CLI->>D: {command: "explore", goal: "..."}
-
-    D->>DEV: Take screenshot
-    DEV-->>D: current_screen.png
-
-    D->>SIT: assess(goal, current_screen)
-    SIT-->>D: Assessment(context, starting_state_description)
-
-    D->>TP: plan(goal, assessment)
-    TP-->>D: MiniTestPlan(steps[])
-
+    CA->>CLI: haindy test "sign in and verify dashboard"
+    CLI->>D: {command: "test", instruction: "..."}
+    D->>TP: plan(instruction)
+    TP-->>D: TestPlan(steps[])
     D->>TR: execute_plan(plan)
 
     loop For each step in plan
-        TR->>AA: execute step actions
-        AA->>DEV: Perform actions
+        TR->>DEV: Take screenshot
+        DEV-->>TR: screen.png
+        TR->>AA: execute(step.action_instruction)
+        AA->>DEV: Perform action
         DEV-->>AA: Done
-        AA-->>TR: Results
-        TR->>TR: Verify step outcome
+        AA-->>TR: ActionResult
+        TR->>TR: Verify step expected outcome
+        alt Step passed
+            TR->>TR: Advance to next step
+        else Step failed
+            TR-->>D: PlanResult(failed, failed_step_summary)
+        end
     end
 
     TR-->>D: PlanResult(status, summary)
     D->>FS: Save final screenshot
-    D-->>CLI: JSON response
-    CLI-->>CA: {"status": "success|failure", "response": "..."}
+    D-->>CLI: JSON response (with meta)
+    CLI-->>CA: {"status": "success|failure", "response": "...", "meta": {...}}
 ```
+
+---
+
+## Command Dispatch Sequence: `explore` (v2 - not yet implemented)
+
+Placeholder for the v2 `explore` command. Requires live-screen situational assessment: the Situational Agent will take a screenshot, describe the current device state, and feed that into the Test Planner before execution begins. The sequence will be similar to `test` with a Situational Agent assessment step prepended.
 
 ---
 
@@ -183,13 +149,14 @@ Communication between the CLI client and daemon uses newline-delimited JSON over
 
 ```json
 {
-  "command": "act | step | test | explore | session_status | session_close",
-  "instruction": "string (for act/step/test/explore)",
-  "goal": "string (alias for instruction in explore)",
+  "command": "act | test | session_status | session_close | session_set | session_unset | session_vars",
+  "instruction": "string (for act/test)",
   "options": {
-    "max_actions": 10,
     "max_steps": 20
-  }
+  },
+  "var_name": "string (for session_set/session_unset)",
+  "var_value": "string (for session_set)",
+  "var_secret": "boolean (for session_set)"
 }
 ```
 
@@ -235,7 +202,7 @@ If the daemon exits unexpectedly (crash, OOM, SIGKILL), the session directory an
 
 `haindy session close` sends a `session_close` command over the socket. The daemon:
 1. Finishes any in-progress command
-2. Closes the device/browser connection
+2. Closes the device connection
 3. Writes a final summary to `session.json`
 4. Removes `daemon.sock`
 5. Exits
