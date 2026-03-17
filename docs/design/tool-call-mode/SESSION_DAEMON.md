@@ -1,4 +1,4 @@
-# Haindy Agentic Mode - Session Daemon Design
+# Haindy Tool Call Mode - Session Daemon Design
 
 ## Why a Daemon
 
@@ -58,7 +58,7 @@ sequenceDiagram
     D->>FS: Open daemon.sock (Unix socket)
     D-->>CLI: Ready signal (via readiness pipe)
     CLI-->>CA: {"session_id": "...", "status": "success", ...}
-    CA->>CA: export HAINDY_SESSION=...
+    CA->>CA: Store session_id for later commands
 ```
 
 **Readiness pipe**: The daemon inherits a write-end file descriptor from the CLI process. When the socket is open and the device is ready, it writes a single byte to signal readiness. The CLI blocks on the read-end until it receives this signal or a startup timeout fires (default: 30s). This avoids polling and race conditions.
@@ -91,6 +91,8 @@ sequenceDiagram
     D-->>CLI: JSON response (with meta)
     CLI-->>CA: {"status": "success", "response": "...", "meta": {...}}
 ```
+
+`session status` is also handled by the Action Agent, but in observe-only mode: it captures the current screen and returns a natural-language description without executing any device interaction.
 
 ---
 
@@ -152,7 +154,9 @@ Communication between the CLI client and daemon uses newline-delimited JSON over
   "command": "act | test | session_status | session_close | session_set | session_unset | session_vars",
   "instruction": "string (for act/test)",
   "options": {
-    "max_steps": 20
+    "max_steps": 20,
+    "timeout_seconds": 300,
+    "force": false
   },
   "var_name": "string (for session_set/session_unset)",
   "var_value": "string (for session_set)",
@@ -174,7 +178,8 @@ If the daemon crashes mid-command, the socket connection is closed before a resp
   "command": "...",
   "status": "error",
   "response": "Haindy daemon connection lost mid-command. The daemon may have crashed. Check ~/.haindy/sessions/<id>/logs/daemon.log.",
-  "screenshot_path": null
+  "screenshot_path": null,
+  "meta": {"exit_reason": "agent_error", "duration_ms": 0, "actions_taken": 0}
 }
 ```
 
@@ -196,7 +201,24 @@ The daemon tracks the last command time. If no command is received within `--idl
 
 ### Crash recovery
 
-If the daemon exits unexpectedly (crash, OOM, SIGKILL), the session directory and socket file remain on disk. Subsequent CLI calls detect that the socket path exists but the connection is refused (daemon is gone) and return a `status: error` response with guidance to run `haindy session close <id>` to clean up.
+If the daemon exits unexpectedly (crash, OOM, SIGKILL), the session directory and socket file may remain on disk. `haindy session new` opportunistically cleans up stale session artifacts from dead daemons before creating a new session. `haindy session list` reports only live sessions.
+
+### Command timeout
+
+Every daemon-handled command is bounded by a wall-clock timeout. The caller may set it explicitly with `--timeout <seconds>`; otherwise the daemon uses the command default (300s for `test`, `act`, and `session status`).
+
+If the timeout is reached, the daemon stops the command and returns:
+
+```json
+{
+  "session_id": "...",
+  "command": "...",
+  "status": "error",
+  "response": "Command timed out before completion. The session is still alive and can accept another command.",
+  "screenshot_path": "/absolute/path/to/latest/screenshot.png",
+  "meta": {"exit_reason": "command_timeout", "duration_ms": 300000, "actions_taken": 4}
+}
+```
 
 ### Clean shutdown
 
@@ -206,6 +228,8 @@ If the daemon exits unexpectedly (crash, OOM, SIGKILL), the session directory an
 3. Writes a final summary to `session.json`
 4. Removes `daemon.sock`
 5. Exits
+
+`haindy session close --force` skips the graceful wait and terminates the daemon immediately. Use this to recover a stuck session after a timeout or other non-responsive state.
 
 ---
 
@@ -234,8 +258,12 @@ The daemon is single-threaded per session. It processes one command at a time. I
 
 ```json
 {
+  "session_id": "...",
+  "command": "...",
   "status": "error",
-  "response": "Session is busy executing a previous command. Retry when the current command completes."
+  "response": "Session is busy executing a previous command. Retry when the current command completes.",
+  "screenshot_path": null,
+  "meta": {"exit_reason": "session_busy", "duration_ms": 0, "actions_taken": 0}
 }
 ```
 

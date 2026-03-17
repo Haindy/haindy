@@ -1,4 +1,4 @@
-# Haindy Agentic Mode - CLI Specification
+# Haindy Tool Call Mode - CLI Specification
 
 ## Invocation
 
@@ -10,10 +10,8 @@ All tool call mode subcommands are grouped under two top-level subcommands:
 - `session` - manage sessions and session variables
 - Direct action subcommands: `act`, `test`
 
-The active session is resolved in order:
-1. Explicit `--session <id>` flag on the command
-2. `HAINDY_SESSION` environment variable
-3. Error if neither is set
+Commands that operate on an existing session require an explicit `--session <id>` flag.
+`haindy session new` does not take `--session` because it creates the session.
 
 ---
 
@@ -21,7 +19,7 @@ The active session is resolved in order:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--session <id>` | `$HAINDY_SESSION` | Session ID override. Ignored for `session new`. |
+| `--session <id>` | none | Required for commands that operate on an existing session. Ignored for `session new`. |
 | `--json` | Enabled by default in tool call mode | Emit JSON on stdout. Always on for tool call mode; flag exists for scripting clarity. |
 | `--debug` | off | Emit verbose daemon logs to stderr (does not affect stdout JSON). |
 
@@ -32,6 +30,8 @@ The active session is resolved in order:
 ### `haindy session new`
 
 Start a new session. Spawns the daemon process, initializes the device connection, and returns the session ID.
+
+For desktop sessions, tool call mode does not own project startup. The coding agent is responsible for making sure the target site or native desktop app is already running before or around session start; Haindy owns the UI interaction after that point.
 
 ```
 haindy session new [--android | --desktop] [options]
@@ -61,11 +61,21 @@ haindy session new [--android | --desktop] [options]
 }
 ```
 
-**Recommended usage in a skill:**
+**Recommended usage in a skill or tool runner:**
 
 ```bash
-export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
+haindy session new --android
+# Read `session_id` from the JSON response, then pass it explicitly:
+haindy session status --session <SESSION_ID>
+haindy test "open the app and verify the dashboard appears" --session <SESSION_ID>
 ```
+
+**Desktop startup guidance:**
+
+- Web project: make sure the site or dev server is already running before `haindy session new --desktop`. If a browser is not open yet, instruct Haindy to open one and navigate to the URL like a human would. Prefer a maximized browser window.
+- Native desktop app: make sure the app is already running before `haindy session new --desktop`. If needed, instruct Haindy to bring it to the foreground using normal desktop UI actions. Prefer a maximized app window when possible.
+- Android mobile: start the session against a device or emulator that ADB can reach, and pass `--android-serial` / `--android-app` when needed.
+- Desktop sessions may downshift resolution for speed and token savings, so maximizing the target browser or app window helps keep screenshots focused on the app instead of surrounding desktop noise.
 
 ---
 
@@ -74,8 +84,14 @@ export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
 Terminate the session daemon and release the device connection.
 
 ```
-haindy session close [--session <id>]
+haindy session close --session <id> [--force]
 ```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--force` | Force-close the session immediately instead of waiting for an in-progress command to finish. Intended for stuck or timed-out sessions. |
 
 **Stdout:**
 
@@ -94,7 +110,7 @@ haindy session close [--session <id>]
 
 ### `haindy session list`
 
-List all active sessions on this machine.
+List all live sessions on this machine. Stale daemon artifacts are ignored.
 
 ```
 haindy session list
@@ -126,11 +142,17 @@ haindy session list
 
 ### `haindy session status`
 
-Return the current state of an active session, including the latest screenshot.
+Return the current state of an active session, including the latest screenshot. Handled by the Action Agent in observe-only mode.
 
 ```
-haindy session status [--session <id>]
+haindy session status --session <id> [--timeout <seconds>]
 ```
+
+**Flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for describing the current screen before Haindy returns `meta.exit_reason: command_timeout`. |
 
 **Stdout:**
 
@@ -145,14 +167,17 @@ haindy session status [--session <id>]
 }
 ```
 
+`actions_taken` is `1` here because `session status` actively captures a fresh screenshot to describe the current screen.
+
 ---
 
 ### `haindy session set`
 
-Store a named variable in the session. The variable can be referenced as `$NAME` in any subsequent command string. The daemon interpolates all `$NAME` tokens before passing the instruction to agents.
+Store a named variable in the session. The variable can be referenced as `$NAME` in any subsequent command string. The daemon interpolates matching `$NAME` tokens before passing the final instruction string to agents.
 
 ```
-haindy session set <NAME> <VALUE> [--secret] [--session <id>]
+haindy session set <NAME> <VALUE> [--secret] --session <id>
+haindy session set <NAME> --value-file <path> [--secret] --session <id>
 ```
 
 **Flags:**
@@ -160,18 +185,29 @@ haindy session set <NAME> <VALUE> [--secret] [--session <id>]
 | Flag | Description |
 |---|---|
 | `--secret` | Mark the variable as secret. Secret values are stored in daemon memory only (not written to session.json or logs). Any `response` field that would echo the value back replaces it with `[redacted]`. |
+| `--value-file <path>` | Read the variable value from a file instead of the command line. Useful for secrets, long JSON payloads, and values that should not appear in shell history. |
+
+Note: `--secret` protects the value after Haindy receives it. Shells expand environment variables before `haindy` starts, so `haindy session set PASSWORD "$TEST_PASSWORD" --secret` is still passing the resolved value on the command line. If the value is sensitive, prefer `--value-file` over command-line input.
+
+**Interpolation rules:**
+
+- Substitution is exact text replacement of `$NAME` with the stored value.
+- Only variables that exist in the session are substituted. Unknown `$NAME` tokens are left unchanged in the instruction string.
+- `$$` is treated as a literal `$`.
+- No shell-style parsing is performed after substitution. Quotes, whitespace, and newlines remain part of the final instruction string and are passed to the model as-is.
 
 **Examples:**
 
 ```bash
-haindy session set USERNAME alice@example.com
-haindy session set PASSWORD hunter2 --secret
-haindy session set BASE_URL https://staging.example.com
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD "$TEST_PASSWORD" --secret --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
+haindy session set BASE_URL https://staging.example.com --session <SESSION_ID>
 
 # Then use in commands:
-haindy act "type '$USERNAME' into the email field"
-haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears"
-haindy act "navigate to $BASE_URL/login"
+haindy act "type '$USERNAME' into the email field" --session <SESSION_ID>
+haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears" --session <SESSION_ID>
+haindy act "navigate to $BASE_URL/login" --session <SESSION_ID>
 ```
 
 **Stdout:**
@@ -194,7 +230,7 @@ haindy act "navigate to $BASE_URL/login"
 Remove a named variable from the session.
 
 ```
-haindy session unset <NAME> [--session <id>]
+haindy session unset <NAME> --session <id>
 ```
 
 ---
@@ -204,7 +240,7 @@ haindy session unset <NAME> [--session <id>]
 List all variable names defined in the session. Secret variable values are not shown.
 
 ```
-haindy session vars [--session <id>]
+haindy session vars --session <id>
 ```
 
 **Stdout:**
@@ -230,7 +266,8 @@ haindy session vars [--session <id>]
 ## Action Subcommands
 
 All action subcommands share this behavior:
-- Require an active session (via `HAINDY_SESSION` or `--session`).
+- Require an explicit `--session <id>`.
+- Support `--timeout <seconds>`. If the timeout is reached, the command ends with `meta.exit_reason: command_timeout`.
 - Return a single JSON object on stdout (the standard envelope, see OVERVIEW.md).
 - Exit 0 on `success`, exit 1 on `failure` or `error`.
 - Always capture a screenshot after the command completes and include `screenshot_path`.
@@ -242,20 +279,26 @@ All action subcommands share this behavior:
 Execute a single direct interaction on the device. No outcome validation is performed. Maps directly to the Action Agent.
 
 ```
-haindy act "<instruction>" [--session <id>]
+haindy act "<instruction>" --session <id> [--timeout <seconds>]
 ```
 
 **Argument:**
 
 `<instruction>` - A natural language description of the single action to perform.
 
+**Flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for the command before Haindy stops execution and returns `meta.exit_reason: command_timeout`. |
+
 **Examples:**
 
 ```bash
-haindy act "tap the Login button"
-haindy act "type 'hunter2' into the password field"
-haindy act "scroll down until the Terms section is visible"
-haindy act "press the back button"
+haindy act "tap the Login button" --session <SESSION_ID>
+haindy act "type 'hunter2' into the password field" --session <SESSION_ID>
+haindy act "scroll down until the Terms section is visible" --session <SESSION_ID>
+haindy act "press the back button" --session <SESSION_ID>
 ```
 
 **Stdout on success:**
@@ -293,7 +336,7 @@ haindy act "press the back button"
 Run a full test scenario. The Test Planner generates a structured plan from the description, then the Test Runner executes each step and validates outcomes. Maps to Test Planner + Test Runner.
 
 ```
-haindy test "<scenario>" [--session <id>] [--max-steps <n>]
+haindy test "<scenario>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 ```
 
 **Argument:**
@@ -305,13 +348,14 @@ haindy test "<scenario>" [--session <id>] [--max-steps <n>]
 | Flag | Default | Description |
 |---|---|---|
 | `--max-steps <n>` | 20 | Maximum number of steps the Test Runner may execute. |
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for the command before Haindy stops execution and returns `meta.exit_reason: command_timeout`. |
 
 **Examples:**
 
 ```bash
-haindy test "sign in with user@example.com and password hunter2, navigate to Settings, change the display name to 'Bob', save, and verify the new name appears in the profile header"
+haindy test "sign in with user@example.com and password hunter2, navigate to Settings, change the display name to 'Bob', save, and verify the new name appears in the profile header" --session <SESSION_ID>
 
-haindy test "attempt to sign in with an incorrect password three times and verify that the account lockout screen appears after the third attempt"
+haindy test "attempt to sign in with an incorrect password three times and verify that the account lockout screen appears after the third attempt" --session <SESSION_ID>
 ```
 
 **Stdout on success:**
@@ -361,7 +405,7 @@ Blocked on: extending the Situational Agent from text-context gating to live-scr
 **Planned interface:**
 
 ```
-haindy explore "<goal>" [--session <id>] [--max-steps <n>]
+haindy explore "<goal>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 ```
 
 **Intended use case:** When the coding agent does not know the current device state and cannot write a `test` scenario without first knowing what screen it is on. `explore` will take a screenshot, assess the situation, build a mini-plan, and execute it autonomously.
@@ -372,7 +416,6 @@ haindy explore "<goal>" [--session <id>] [--max-steps <n>]
 
 | Variable | Description |
 |---|---|
-| `HAINDY_SESSION` | Active session ID. Set this after `session new` to avoid passing `--session` on every call. |
 | `HAINDY_HOME` | Override the base directory (default: `~/.haindy`). Useful in CI. |
 | `HAINDY_BACKEND` | Default backend for new sessions: `desktop` or `android`. Overridden by `--android`/`--desktop`. |
 
@@ -401,12 +444,14 @@ haindy explore "<goal>" [--session <id>] [--max-steps <n>]
   "response": "string (natural language, always present)",
   "screenshot_path": "string (absolute path) | null",
   "meta": {
-    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | agent_error | device_error | element_not_found",
+    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | command_timeout | agent_error | device_error | session_busy",
     "duration_ms": "integer",
     "actions_taken": "integer"
   }
 }
 ```
+
+`actions_taken` counts device operations performed to satisfy the command. A fresh screenshot taken for `session status` counts as 1. Session startup and shutdown bookkeeping does not.
 
 ### Extended fields for `test`
 
