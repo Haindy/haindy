@@ -53,7 +53,7 @@ flowchart TD
 
     subgraph DEVICE ["Device / Browser"]
         ADB[Android via ADB]
-        PW[Desktop via Playwright]
+        DT[Desktop via X11/OS-level input]
     end
 
     CA -->|subcommand + args| CLI
@@ -81,15 +81,15 @@ flowchart TD
 
 **CLI client** (`haindy <subcommand>`): Thin wrapper. Locates the session daemon socket from `HAINDY_SESSION` env var or positional session ID, sends the command over IPC, waits for the JSON response, prints to stdout, exits with code 0 (success) or 1 (failure/error).
 
-**Session Daemon**: A long-running Python process spawned by `haindy session new`. Owns the device/browser connection. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON.
+**Session Daemon**: A long-running Python process spawned by `haindy session new`. Owns the device or desktop connection. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON.
 
 **Action Agent**: Receives a natural language instruction, takes a screenshot, identifies the target element, and executes a single interaction (tap, click, type, scroll). Returns immediately with the result.
 
 **Test Runner**: Interprets a step as a sequence of actions plus an expected outcome. Drives the Action Agent in a loop until the expected result is achieved or the step fails. Returns a pass/fail with explanation.
 
-**Test Planner**: Accepts a high-level objective and produces a structured sequence of steps. Used by `test` and `explore` commands.
+**Test Planner**: Accepts a high-level objective and produces a structured sequence of steps. Used by the `test` command.
 
-**Situational Agent**: Assesses the current device/browser state and prepares the entrypoint (navigates to the right URL, launches the right app, etc.). Used by `explore` to handle unknown starting conditions.
+**Situational Agent**: Assesses context and prepares the entrypoint (navigates to the right URL, launches the right app, etc.). Currently operates on text context, not live screen state. Full live-screen situational assessment is planned for v2 as part of the `explore` command.
 
 ---
 
@@ -98,17 +98,17 @@ flowchart TD
 Each command maps to a different level of the agent stack:
 
 ```
-explore  ──►  Situational Agent + Test Planner + Test Runner + Action Agent
-test     ──►  Test Planner + Test Runner + Action Agent
-step     ──►  Test Runner + Action Agent
-act      ──►  Action Agent only
+[v2] explore  ──►  Situational Agent + Test Planner + Test Runner + Action Agent
+     test     ──►  Test Planner + Test Runner + Action Agent
+     step     ──►  Test Runner + Action Agent
+     act      ──►  Action Agent only
 ```
 
 The coding agent should pick the lowest level that gives it what it needs:
 - Use `act` when the exact interaction is known and no validation is needed.
 - Use `step` when a natural language action + expected result is sufficient.
 - Use `test` when a multi-step scenario needs to be planned and validated end-to-end.
-- Use `explore` when the starting state is unknown or the goal is open-ended.
+- `explore` is planned for v2. Use `test` for open-ended scenarios in v1.
 
 ---
 
@@ -164,9 +164,9 @@ Exit codes mirror status: 0 for `success`, 1 for `failure` or `error`.
 | **Coding agent** | An AI coding assistant (Codex, Claude Code, etc.) using Haindy as a tool. |
 | **Session** | A persistent connection to a device or browser, identified by a UUID. |
 | **Session daemon** | The background process that owns the device connection and dispatches commands. |
-| **Skill** | A Claude Code skill (prompt fragment) that teaches the coding agent how to use `haindy` in tool call mode. |
+| **Skill** | A context-injection file that teaches a coding agent how to use `haindy` in tool call mode. Placed per-agent (e.g. `.claude/skills/` for Claude Code). |
 | **IPC** | Inter-process communication between CLI client and daemon, over a Unix domain socket. |
 | **act** | A single direct device interaction with no outcome validation. |
 | **step** | A natural language instruction + expected outcome, interpreted and validated by the Test Runner. |
 | **test** | A full test scenario run through the Planner and Runner. |
-| **explore** | An open-ended goal handled by the full agent stack including the Situational Agent. |
+| **explore** | (v2) An open-ended goal handled by the full agent stack including live-screen situational assessment. |

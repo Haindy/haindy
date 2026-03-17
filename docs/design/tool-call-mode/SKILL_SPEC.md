@@ -1,8 +1,8 @@
-# Haindy Agentic Mode - Skill Specification
+# Haindy Tool Call Mode - Skill Specification
 
 ## Purpose
 
-A Claude Code skill is a prompt fragment loaded into a coding agent's context on demand. This document specifies the design, content, and teaching goals of the `haindy` skill.
+A skill (or context injection file) is a prompt fragment loaded into a coding agent's context on demand. This document specifies the design, content, and teaching goals of the `haindy` skill.
 
 The skill serves two purposes:
 1. Teach the coding agent the complete `haindy` CLI interface so it can use it correctly without being trained on it.
@@ -12,7 +12,15 @@ The skill serves two purposes:
 
 ## Skill Placement
 
-The skill file lives at `.claude/skills/haindy.md` in the project. Coding agents load it with `/haindy` or when instructed to use Haindy for testing.
+The skill file content is agent-agnostic. Placement depends on the coding agent being used:
+
+| Agent | Placement |
+|---|---|
+| Claude Code | `.claude/skills/haindy.md` - loaded with `/haindy` |
+| Codex | Inject as a system prompt addition or project context file per Codex conventions |
+| Other agents | Load into context per that agent's context injection mechanism |
+
+The canonical skill content lives at `docs/design/tool-call-mode/SKILL_SPEC.md` (this file). Agent-specific wrappers are derived from it.
 
 ---
 
@@ -24,7 +32,7 @@ The skill teaches the following in order:
 
 A one-paragraph summary. The agent needs to know Haindy is an external testing agent that controls a real device or browser, not a mock or simulation.
 
-> Haindy is an autonomous testing agent that controls a real Android device (via ADB) or a desktop browser (via Playwright). You issue natural language commands through its CLI and receive structured JSON results. Haindy runs as a background session daemon that keeps the device connection alive between your commands.
+> Haindy is an autonomous testing agent that controls a real Android device (via ADB) or a desktop environment (via OS-level screen capture and input). You issue natural language commands through its CLI and receive structured JSON results. Haindy runs as a background session daemon that keeps the device connection alive between your commands.
 
 ### 2. Session Setup
 
@@ -47,10 +55,9 @@ Rule: Always set `HAINDY_SESSION` immediately after `session new`. All subsequen
 ### 3. Command Reference (compact)
 
 ```
-haindy act    "<single action>"          # direct interaction, no validation
+haindy act    "<single action>"            # direct interaction, no validation
 haindy step   "<action + expected result>" # action + outcome validation
-haindy test   "<full scenario>"          # planned multi-step test
-haindy explore "<open-ended goal>"       # situational assessment + auto-plan
+haindy test   "<full scenario>"            # planned multi-step test
 ```
 
 ### 4. The JSON Response
@@ -80,7 +87,6 @@ This is the most important section. Agents tend to under-use `step` and `test` w
 | You know the exact UI element and action, no validation needed | `act` |
 | You want to perform an interaction AND verify an outcome | `step` |
 | You want to validate a complete user journey | `test` |
-| You don't know the current app state or want open-ended exploration | `explore` |
 | You just want to see what's on screen | `session status` |
 
 Rule: **Prefer `step` over `act` when you care about the result.** `act` does not validate anything. If you use `act` to tap Login and the app crashes, Haindy will still return `success` because the tap executed.
@@ -92,7 +98,7 @@ On `status: failure`, the `response` field always describes what was observed vs
 - Check `screenshot_path` if visual context is needed
 - Decide whether to retry the same command, adjust the instruction, or escalate to a different abstraction level
 
-Do not retry the same `act` instruction more than twice. If a tap is failing, use `step` with explicit expected outcome to get more diagnostic information. If a `step` is failing, use `explore` to let Haindy assess the situation from scratch.
+Do not retry the same `act` instruction more than twice. If a tap is failing, use `step` with an explicit expected outcome to get more diagnostic information. If a `step` is failing, use `test` with a broader description to let Haindy plan a recovery path.
 
 ### 7. Worked Example
 
@@ -106,10 +112,10 @@ export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
 haindy session status
 # response: "Device is on the home screen of the Android launcher."
 
-# 3. Navigate to the app
-haindy explore "open the Acme app and sign in as alice@example.com with password hunter2"
+# 3. Navigate to the app and sign in
+haindy test "open the Acme app, sign in as alice@example.com with password hunter2, and verify the dashboard is shown"
 # status: success
-# response: "Found Acme app icon on home screen, launched it, signed in. Dashboard is visible."
+# response: "Test passed in 3 steps. Found Acme app, signed in, dashboard confirmed."
 
 # 4. Validate a specific feature
 haindy step "tap on 'My Orders' and verify that a list of past orders is shown"
@@ -166,8 +172,8 @@ The actual skill file to place at `.claude/skills/haindy.md`:
 # Using Haindy for device/browser testing
 
 Haindy is an autonomous testing agent that controls a real Android device (via ADB)
-or a desktop browser (via Playwright). You issue natural language commands through
-its CLI and receive structured JSON results.
+or a desktop environment (via OS-level screen capture and input). You issue natural
+language commands through its CLI and receive structured JSON results.
 
 ## Session setup
 
@@ -187,7 +193,6 @@ Close the session when done:
     haindy act    "<instruction>"    # single device interaction, no validation
     haindy step   "<instruction>"    # action + outcome validation
     haindy test   "<scenario>"       # full planned multi-step test
-    haindy explore "<goal>"          # situational assessment + auto-plan + execute
     haindy session status            # see current screen state
 
 ## JSON response (always)
@@ -208,14 +213,13 @@ Close the session when done:
 
 - Use `act` only when you know the exact action and do not care about the outcome.
 - Use `step` when you want to perform an interaction AND verify a result. Prefer step over act.
-- Use `test` for full multi-step user journeys that need structured pass/fail.
-- Use `explore` when the current device state is unknown or the goal is open-ended.
+- Use `test` for full multi-step user journeys, open-ended scenarios, or when you need structured pass/fail.
 - Use `session status` to orient before issuing commands to an unfamiliar screen.
 
 ## On failure
 
 Read `response` carefully. It describes the gap between expected and observed.
-Do not retry the same `act` more than twice. Escalate to `step` or `explore`
+Do not retry the same `act` more than twice. Escalate to `step` or `test`
 if a direct action is not working - they provide more diagnostic context.
 ```
 

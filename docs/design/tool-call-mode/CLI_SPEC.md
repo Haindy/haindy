@@ -11,8 +11,8 @@ All tool call mode subcommands are grouped under two top-level subcommands:
 - Direct action subcommands: `act`, `step`, `test`, `explore`
 
 The active session is resolved in order:
-1. `HAINDY_SESSION` environment variable
-2. Explicit `--session <id>` flag on the command
+1. Explicit `--session <id>` flag on the command
+2. `HAINDY_SESSION` environment variable
 3. Error if neither is set
 
 ---
@@ -44,7 +44,7 @@ haindy session new [--android | --desktop] [options]
 | `--android` | | Use Android ADB backend. Mutually exclusive with `--desktop`. |
 | `--android-serial <serial>` | | Target a specific Android device or emulator by ADB serial (e.g. `emulator-5554`). Optional; uses the only connected device if omitted. |
 | `--android-app <package>` | | Android package name to launch on session start (e.g. `com.example.app`). Optional. |
-| `--desktop` | | Use Playwright/Chromium backend. Mutually exclusive with `--android`. Default if neither specified and no env config. |
+| `--desktop` | | Use the desktop backend (X11 screen capture + OS-level input). Mutually exclusive with `--android`. Default if neither specified and no env config. |
 | `--url <url>` | | URL to open on session start (desktop only). Optional. |
 | `--idle-timeout <seconds>` | 1800 | Kill daemon after this many seconds without a command. |
 
@@ -83,7 +83,8 @@ haindy session close [--session <id>]
   "session_id": "a3f9c2d1-...",
   "command": "session",
   "status": "success",
-  "response": "Session closed. 14 steps were executed during this session."
+  "response": "Session closed. 14 steps were executed during this session.",
+  "screenshot_path": null
 }
 ```
 
@@ -101,8 +102,11 @@ haindy session list
 
 ```json
 {
+  "session_id": null,
   "command": "session",
   "status": "success",
+  "response": "2 active sessions found.",
+  "screenshot_path": null,
   "sessions": [
     {
       "session_id": "a3f9c2d1-...",
@@ -314,57 +318,27 @@ Note: `test` adds `steps_total`, `steps_passed`, and `steps_failed` fields to th
 
 ---
 
-### `haindy explore`
+### `haindy explore` (v2 - not available in v1)
 
-Open-ended goal execution. The Situational Agent assesses the current device state, the Test Planner builds a short exploratory plan, and the Test Runner executes it. The coding agent provides a goal without needing to know the exact starting state or the specific steps.
+> **Not implemented in v1.** `explore` requires live-screen situational assessment, which is a v2 capability. Use `test` in the meantime - it accepts open-ended scenario descriptions and handles multi-step planning.
+
+Open-ended goal execution. The Situational Agent assesses the current device state by taking a screenshot and reasoning about it, the Test Planner builds a short exploratory plan, and the Test Runner executes it. The coding agent provides a goal without needing to know the exact starting state or the specific steps.
+
+This command is blocked on extending the Situational Agent from text-context gating to live-screen assessment.
+
+**Planned interface:**
 
 ```
 haindy explore "<goal>" [--session <id>] [--max-steps <n>]
 ```
 
-**Argument:**
-
-`<goal>` - A high-level goal described in natural language. May include credentials, target features, or constraints.
-
-**Flags:**
-
-| Flag | Default | Description |
-|---|---|---|
-| `--max-steps <n>` | 15 | Maximum number of steps the agent may take to achieve the goal. |
-
-**Examples:**
+**Planned examples:**
 
 ```bash
 haindy explore "sign in as user@example.com with password hunter2"
 haindy explore "find out if the checkout flow accepts a coupon code and what happens when an expired code is entered"
 haindy explore "navigate to the account deletion flow and describe what confirmation steps are required"
 ```
-
-**Stdout on success:**
-
-```json
-{
-  "session_id": "a3f9c2d1-...",
-  "command": "explore",
-  "status": "success",
-  "response": "Goal achieved in 4 steps. The app was on the home screen. Navigated to the sign-in page, entered credentials, and successfully signed in. The dashboard is now visible showing 'Welcome, Alice'.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_004.png"
-}
-```
-
-**Stdout on failure:**
-
-```json
-{
-  "session_id": "a3f9c2d1-...",
-  "command": "explore",
-  "status": "failure",
-  "response": "Goal not fully achieved. Found the coupon code field at checkout and entered 'EXPIRED2023'. The app showed the message 'This coupon has expired' and did not apply the discount. The checkout flow continued normally after dismissing the error. Partial result: the UI handles expired codes gracefully with a clear error message.",
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_008.png"
-}
-```
-
-**When to use:** When the coding agent does not know the exact state of the device or exactly how many steps are needed. Also appropriate for investigative tasks where the outcome is a description rather than a pass/fail.
 
 ---
 
