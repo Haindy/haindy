@@ -7,7 +7,7 @@ in logs, screenshots, and test outputs.
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -66,6 +66,7 @@ class DataSanitizer:
         self.patterns: list[SensitiveDataPattern] = []
         self.rules: list[SanitizationRule] = []
         self.custom_sanitizers: dict[str, Callable[..., Any]] = {}
+        self.literal_redactions: list[str] = []
         self._setup_default_patterns()
         self._setup_default_rules()
 
@@ -282,6 +283,14 @@ class DataSanitizer:
         """Add a custom sanitization function."""
         self.custom_sanitizers[name] = func
 
+    def set_literal_redactions(self, values: Iterable[str]) -> None:
+        """Replace runtime-provided exact-match redactions."""
+
+        unique_values = {
+            str(value) for value in values if isinstance(value, str) and value
+        }
+        self.literal_redactions = sorted(unique_values, key=len, reverse=True)
+
     def sanitize_string(
         self, text: str, patterns: list[SensitiveDataPattern] | None = None
     ) -> str:
@@ -313,6 +322,10 @@ class DataSanitizer:
         # Apply redactions
         for match, pattern in all_matches:
             result = self._apply_redaction(result, match, pattern)
+
+        if self.literal_redactions:
+            for secret in self.literal_redactions:
+                result = result.replace(secret, "[redacted]")
 
         return result
 
@@ -478,6 +491,12 @@ def sanitize_string(text: str) -> str:
 def sanitize_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Sanitize a dictionary using default rules."""
     return _default_sanitizer.sanitize_dict(data)
+
+
+def set_literal_redactions(values: Iterable[str]) -> None:
+    """Update the default sanitizer with runtime-provided exact-match redactions."""
+
+    _default_sanitizer.set_literal_redactions(values)
 
 
 def mask_sensitive_data(text: str, start_chars: int = 4, end_chars: int = 4) -> str:

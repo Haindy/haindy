@@ -226,6 +226,8 @@ class EnhancedActionResult(BaseModel):
         default_factory=list,
         description="OpenAI response IDs involved in this action loop",
     )
+    terminal_failure_code: str | None = None
+    terminal_failure_reason: str | None = None
     cache_label: str | None = None
     cache_action: str | None = None
     cache_hit: bool = False
@@ -298,6 +300,8 @@ class EnhancedActionResult(BaseModel):
             "safety_events": [event.model_dump() for event in self.safety_events],
             "final_model_output": self.final_model_output,
             "response_ids": self.response_ids,
+            "terminal_failure_code": self.terminal_failure_code,
+            "terminal_failure_reason": self.terminal_failure_reason,
         }
 
 

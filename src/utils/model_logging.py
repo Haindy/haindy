@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from src.runtime.evidence import EvidenceManager
+from src.security.sanitizer import sanitize_dict, sanitize_string
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,19 @@ def _sanitize_for_json(value: Any, *, _seen: set[int] | None = None) -> Any:
     return str(value)
 
 
+def _redact_sensitive(value: Any) -> Any:
+    """Recursively sanitize strings inside JSON-safe values."""
+
+    if isinstance(value, str):
+        return sanitize_string(value)
+    if isinstance(value, dict):
+        sanitized_dict = sanitize_dict({str(key): item for key, item in value.items()})
+        return {key: _redact_sensitive(item) for key, item in sanitized_dict.items()}
+    if isinstance(value, list):
+        return [_redact_sensitive(item) for item in value]
+    return value
+
+
 class ModelCallLogger:
     """Append-only logger for model inputs/outputs with optional screenshots."""
 
@@ -146,12 +160,14 @@ class ModelCallLogger:
             "run_id": get_run_id(),
             "agent": agent,
             "model": model,
-            "prompt": prompt,
-            "request_payload": _sanitize_for_json(request_payload),
+            "prompt": sanitize_string(prompt),
+            "request_payload": _redact_sensitive(_sanitize_for_json(request_payload)),
             "prompt_has_screenshot": bool(screenshot_entries),
             "attached_screenshots": screenshot_entries,
-            "response": _sanitize_for_json(_normalize_response_obj(response)),
-            "metadata": _sanitize_for_json(metadata or {}),
+            "response": _redact_sensitive(
+                _sanitize_for_json(_normalize_response_obj(response))
+            ),
+            "metadata": _redact_sensitive(_sanitize_for_json(metadata or {})),
         }
         if screenshot_errors:
             entry["metadata"]["screenshot_errors"] = screenshot_errors
@@ -163,7 +179,7 @@ class ModelCallLogger:
                 "timestamp": entry.get("timestamp"),
                 "agent": agent,
                 "model": model,
-                "prompt": prompt,
+                "prompt": sanitize_string(prompt),
                 "prompt_has_screenshot": bool(screenshot_entries),
                 "attached_screenshots": screenshot_entries,
                 "serialization_error": str(exc),

@@ -156,6 +156,39 @@ class TestRunner(BaseAgent):
             model_logger=self._model_logger,
         )
 
+    def _create_run_trace(self) -> RunTraceWriter:
+        """Create a fresh trace writer for one execution."""
+        run_id = get_run_id()
+        if run_id == "unknown":
+            run_id = (
+                datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                + "_"
+                + uuid4().hex[:8]
+            )
+        return RunTraceWriter(run_id)
+
+    def _reset_execution_state(self) -> None:
+        """Reset run-scoped state so the runner can be reused safely."""
+        self._current_test_plan = None
+        self._current_test_case = None
+        self._current_test_step = None
+        self._test_state = None
+        self._test_report = None
+        self._initial_url = None
+        self._execution_history = []
+        self._artifacts.reset()
+        self._interpreter = None
+        self._executor = None
+        self._current_test_case_actions = None
+        self._current_step_actions = None
+        self._current_step_data = {}
+        self._action_storage = {
+            "test_plan_id": None,
+            "test_run_timestamp": None,
+            "test_cases": [],
+        }
+        self._trace = self._create_run_trace()
+
     async def _ensure_initial_screenshot(self) -> None:
         """Capture and cache the initial environment screenshot."""
         await self._artifacts.ensure_initial_screenshot()
@@ -204,6 +237,7 @@ class TestRunner(BaseAgent):
         )
 
         # Initialize execution
+        self._reset_execution_state()
         self._current_test_plan = test_plan
         self._initial_url = initial_url
         self._test_state = test_state
@@ -221,11 +255,8 @@ class TestRunner(BaseAgent):
                 self._coordinate_cache_path_for_environment(self._environment)
             )
         self._artifacts.set_automation_driver(self.automation_driver)
-        self._artifacts.reset()
         self._replay_service.set_automation_driver(self.automation_driver)
         self._replay_service.set_coordinate_cache(self._coordinate_cache)
-        self._interpreter = None
-        self._executor = None
 
         # Initialize action storage for this test run
         self._action_storage = {

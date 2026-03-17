@@ -20,6 +20,7 @@ from .sanitizer import (
     mask_sensitive_data,
     sanitize_dict,
     sanitize_string,
+    set_literal_redactions,
 )
 
 __all__ = [
@@ -36,5 +37,6 @@ __all__ = [
     "RedactionMethod",
     "sanitize_dict",
     "sanitize_string",
+    "set_literal_redactions",
     "mask_sensitive_data",
 ]

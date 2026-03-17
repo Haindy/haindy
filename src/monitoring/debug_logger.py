@@ -10,29 +10,54 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.security.sanitizer import sanitize_dict, sanitize_string
+
 logger = logging.getLogger(__name__)
 
 
 class DebugLogger:
     """Enhanced debug logger for AI interactions and screenshots."""
 
-    def __init__(self, test_run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        test_run_id: str | None = None,
+        *,
+        debug_dir: Path | None = None,
+        reports_dir: Path | None = None,
+        ai_log_path: Path | None = None,
+    ) -> None:
         """
         Initialize debug logger.
 
         Args:
             test_run_id: Unique identifier for the test run
+            debug_dir: Optional override for screenshot/debug artifact directory
+            reports_dir: Optional override for reports directory
+            ai_log_path: Optional override for the AI interactions JSONL file
         """
         self.test_run_id = test_run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.debug_dir = Path("debug_screenshots") / self.test_run_id
-        self.reports_dir = Path("reports") / self.test_run_id
+        self.debug_dir = (
+            Path(debug_dir)
+            if debug_dir is not None
+            else Path("debug_screenshots") / self.test_run_id
+        )
+        self.reports_dir = (
+            Path(reports_dir)
+            if reports_dir is not None
+            else Path("reports") / self.test_run_id
+        )
 
         # Create directories
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize AI interaction log
-        self.ai_log_path = self.debug_dir / "ai_interactions.jsonl"
+        self.ai_log_path = (
+            Path(ai_log_path)
+            if ai_log_path is not None
+            else self.debug_dir / "ai_interactions.jsonl"
+        )
+        self.ai_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.screenshot_counter = 0
 
         logger.info(f"Debug logger initialized for test run: {self.test_run_id}")
@@ -59,15 +84,18 @@ class DebugLogger:
             screenshot_path: Path to associated screenshot if any
             additional_context: Additional context information
         """
+        sanitized_prompt = sanitize_string(prompt)
+        sanitized_response = sanitize_string(response)
+        sanitized_context = sanitize_dict(additional_context or {})
         interaction = {
             "timestamp": datetime.now().isoformat(),
             "test_run_id": self.test_run_id,
             "agent": agent_name,
             "action_type": action_type,
-            "prompt": prompt,
-            "response": response,
+            "prompt": sanitized_prompt,
+            "response": sanitized_response,
             "screenshot": screenshot_path,
-            "context": additional_context or {},
+            "context": sanitized_context,
         }
 
         # Write to JSONL file
@@ -78,8 +106,8 @@ class DebugLogger:
         base_extra: dict[str, Any] = {
             "agent_name": agent_name,
         }
-        if additional_context:
-            base_extra.update(additional_context)
+        if sanitized_context:
+            base_extra.update(sanitized_context)
 
         response_ids = base_extra.pop("response_ids", None)
         base_extra.pop("failed_action_count", None)
@@ -87,8 +115,16 @@ class DebugLogger:
         base_extra.pop("terminal_status", None)
         base_extra.pop("terminal_failure_code", None)
 
-        truncated_prompt = f"{prompt[:200]}..." if len(prompt) > 200 else prompt
-        truncated_response = f"{response[:200]}..." if len(response) > 200 else response
+        truncated_prompt = (
+            f"{sanitized_prompt[:200]}..."
+            if len(sanitized_prompt) > 200
+            else sanitized_prompt
+        )
+        truncated_response = (
+            f"{sanitized_response[:200]}..."
+            if len(sanitized_response) > 200
+            else sanitized_response
+        )
 
         logger.debug("Action: %s", action_type, extra=dict(base_extra))
         logger.info("Prompt: %s", truncated_prompt, extra=dict(base_extra))
@@ -224,8 +260,19 @@ def set_debug_logger(debug_logger: DebugLogger) -> None:
     _debug_logger = debug_logger
 
 
-def initialize_debug_logger(test_run_id: str | None = None) -> DebugLogger:
+def initialize_debug_logger(
+    test_run_id: str | None = None,
+    *,
+    debug_dir: Path | None = None,
+    reports_dir: Path | None = None,
+    ai_log_path: Path | None = None,
+) -> DebugLogger:
     """Initialize and return a new debug logger."""
-    logger = DebugLogger(test_run_id)
+    logger = DebugLogger(
+        test_run_id,
+        debug_dir=debug_dir,
+        reports_dir=reports_dir,
+        ai_log_path=ai_log_path,
+    )
     set_debug_logger(logger)
     return logger
