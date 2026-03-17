@@ -156,7 +156,6 @@ generated_test_plans/
 screenshots/
 debug_screenshots/
 *.log
-examples/demo_output/
 demo_journals/
 
 # Playwright
