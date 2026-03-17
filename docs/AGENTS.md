@@ -2,7 +2,6 @@
 
 ## Map
 
-- `RUNBOOK.md`: environment and operational notes.
 - `design/`: architecture and design docs.
 - `issues/`: audits, backlogs, and investigation notes.
 - `phases/`: phase-by-phase implementation records.
@@ -12,6 +11,6 @@
 
 ## Rules
 
-- Prefer current code, `RUNBOOK.md`, and phase docs over old plans.
+- Prefer current code and design documents over old plans.
 - Treat files under `completed/` as historical reference only; they may not fully match the current codebase.
 - When a plan is implemented, move it into that topic's `completed/` folder instead of overwriting its history.
