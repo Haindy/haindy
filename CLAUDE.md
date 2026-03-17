@@ -8,136 +8,130 @@
 
 ## Project Overview
 
-HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows on web applications. The system employs four specialized AI agents coordinating together to plan, execute, and evaluate tests.
-
-## Implementation Plan
-
-**Important**: The comprehensive implementation plan with phase tracking and technical details is at `docs/HAINDY_PLAN.md`. This includes:
-- MVP goals and success criteria
-- Detailed tech stack decisions
-- Multi-agent architecture design
-- Implementation phases with progress tracking
-- Post-MVP roadmap
+HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows. The system coordinates specialized AI agents to plan, execute, and report on tests against desktop (Linux/X11), web, and mobile (Android ADB) targets using computer-use AI APIs.
 
 ## Development Runbook
 
-**Important**: Before running tests or demos, refer to the comprehensive runbook at `docs/RUNBOOK.md` for detailed instructions on:
-- Environment setup
-- Running tests for specific phases
-- Executing demo scripts
-- Code quality checks
-- Troubleshooting common issues
+Before running tests or demos, refer to `docs/RUNBOOK.md` for environment setup, OS dependencies, and troubleshooting.
 
 ## Commands
 
-### Building
+### Setup
 ```bash
-# Project setup (planned tech stack)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .  # Will use pyproject.toml once created
+python3 -m venv .venv
+source .venv/bin/activate
+.venv/bin/pip install -r requirements.lock
+.venv/bin/pip install -e ".[dev]"
+cp .env.example .env  # then fill in API keys
 ```
 
-### Dependencies Installation
+### Running
 ```bash
-# Core dependencies (as per plan)
-pip install playwright openai rich
-playwright install chromium
+# Standard run (both flags required)
+python -m src.main --plan <requirements_file> --context <context_file>
+
+# Mobile ADB backend
+python -m src.main --mobile --plan <plan> --context <context>
+
+# Debug mode
+python -m src.main --plan <plan> --context <context> --debug
+
+# OAuth auth management
+python -m src.main --codex-auth login|logout|status
+
+# API connectivity test
+python -m src.main --test-api
 ```
 
 ### Testing
 ```bash
-# Unit tests (once implemented)
-pytest tests/
-
-# Integration tests
-pytest tests/integration/
-
-# Run specific requirement file
-python -m src.main --plan test_scenarios/wikipedia_search_simple.txt
+.venv/bin/pytest
+.venv/bin/pytest -m "not slow"
+.venv/bin/pytest --cov=src
 ```
 
-### Linting and Code Quality
+### Code Quality
 ```bash
-# Pre-commit hooks (to be configured)
-pre-commit install
-pre-commit run --all-files
-
-# Code formatting
-black src/ tests/
-isort src/ tests/
-
-# Type checking
-mypy src/
+.venv/bin/ruff check .
+.venv/bin/ruff format .
+.venv/bin/mypy src
 ```
 
-### Development Commands
-```bash
-# Run in development mode with verbose logging
-python -m src.main --debug --verbose
+## Architecture
 
-# Generate test execution report
-python -m src.monitoring.reporter --input data/test_run_123.jsonl --output reports/
-```
-
-## High-Level Architecture
-
-### Core Components
-
-1. **Multi-Agent System**
-   - **Test Planner Agent**: Analyzes requirements/PRDs and creates structured test plans
-   - **Test Runner Agent**: Orchestrates test execution and decides next steps
-   - **Action Agent**: Converts screenshots and instructions to grid-based coordinates
-   - **Evaluator Agent**: Assesses screenshot results against expected outcomes
-
-2. **Browser Automation Layer**
-   - Playwright-Python wrapper for Chromium
-   - Adaptive grid overlay system (initially 60×60 with refinement) for reliable cross-application interaction
-   - WebSocket/CDP communication for native browser control
-
-3. **Orchestration Framework**
-   - Agent coordination and communication
-   - State management for test execution
-   - Workflow orchestration between agents
-
-4. **Core Infrastructure**
-   - Error handling and recovery mechanisms
-   - Security layer (rate limiting, sensitive data protection)
-   - Monitoring and reporting system
-   - Configuration management
-
-### Architecture Flow
+### Agent Pipeline
 
 ```
-Human Input (Requirements/PRD)
-    ↓
-Test Planner Agent
-    ↓
-Test Runner Agent ←→ [Coordination Loop]
-    ↓                      ↑
-Action Agent              |
-    ↓                      |
-Browser Driver            |
-    ↓                      |
-Evaluator Agent ----------
-    ↓
-Test Report Generation
+User Input (requirements file + context file)
+    |
+    v
+ScopeTriageAgent          normalize requirements, extract scope/exclusions/ambiguities
+    |
+    v
+TestPlannerAgent          requirements -> structured TestPlan (cases + steps)
+    |
+    v
+SituationalAgent          validate context adequacy; determine setup instructions
+    |
+    v
+WorkflowCoordinator
+    |
+    v
+TestRunner                iterate TestPlan -> TestCase -> TestStep
+    |
+    v
+ActionAgent               execute each step via computer-use session
+    |
+    v
+ComputerUseSession        OpenAI / Google / Anthropic provider loop
+    |
+    v
+Automation Driver         desktop (X11/uinput) | mobile (ADB) | browser (legacy)
+    |
+    v
+Report Generation         HTML report + JSONL execution log
 ```
 
-### Key Design Principles
+### Key Source Locations
 
-1. **Agent Specialization**: Each AI agent has a focused role and expertise domain
-2. **Coordinated Intelligence**: Agents collaborate while maintaining independent decision-making
-3. **Fail-Fast with Recovery**: Agent-level validation with cross-agent verification
-4. **Observable by Default**: Every agent communication and decision is traceable
-5. **Human-Interpretable**: All outputs (plans, actions, results) are understandable
-6. **Modular & Extensible**: Easy to add new agent types or replace existing ones
+| Path | Purpose |
+|------|---------|
+| `src/main.py` | CLI entrypoint |
+| `src/agents/` | All agent implementations |
+| `src/agents/computer_use/session.py` | Multi-provider computer-use orchestrator |
+| `src/orchestration/coordinator.py` | Multi-agent workflow coordinator |
+| `src/desktop/` | Linux/X11 automation (uinput, ffmpeg, xrandr) |
+| `src/mobile/` | Android ADB automation |
+| `src/runtime/` | Execution context, caches, replay |
+| `src/config/settings.py` | Pydantic settings, all env vars |
+| `src/core/types.py` | Core types: TestPlan, TestCase, TestStep, ActionType |
+| `src/monitoring/` | JSONL logging, HTML report generation |
+
+### Computer-Use Providers
+
+The system supports three AI providers for computer-use (configured via `HAINDY_CU_PROVIDER`):
+- `openai` - OpenAI computer-use (default)
+- `google` - Google Gemini via Vertex AI
+- `anthropic` - Anthropic Claude computer-use
+
+### Automation Backends
+
+Configured via `HAINDY_AUTOMATION_BACKEND`:
+- `desktop` - Linux/X11 via uinput; requires OS dependencies from `docs/RUNBOOK.md`
+- `mobile_adb` - Android via ADB; requires `adb` in PATH
+- unset - browser/planning mode only
 
 ### Technology Stack
 
-- **Language**: Python 3.10+
-- **Browser Automation**: Playwright-Python (Chromium)
-- **AI Models**: OpenAI GPT-4o mini (4 instances for multi-agent system)
-- **Grid System**: Adaptive grid overlay with coordinate mapping and refinement
-- **Logging**: JSONL format with rich console output
-- **Packaging**: setuptools with pyproject.toml
+- **Python 3.10+**, asyncio throughout
+- **AI**: `openai`, `google-genai`, `anthropic` (computer-use APIs)
+- **Automation**: `evdev`/uinput (desktop), ADB (mobile)
+- **Data**: `pydantic` v2, `pillow`, `numpy`, `jinja2`, `jsonlines`
+- **Dev**: `ruff`, `mypy`, `pytest`, `pytest-asyncio`
+
+## Shared Contracts
+
+When changing these areas, update all affected files together:
+
+- **Backend names/aliases/defaults**: `src/runtime/environment.py`, `src/config/settings.py`, `.env.example`, `README.md`, tests
+- **Env vars/cache paths/provider settings**: `src/config/settings.py`, `.env.example`, `README.md`, `docs/RUNBOOK.md`, tests
