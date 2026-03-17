@@ -1,4 +1,4 @@
-# Haindy Agentic Mode - CLI Specification
+# Haindy Tool Call Mode - CLI Specification
 
 ## Invocation
 
@@ -10,10 +10,8 @@ All tool call mode subcommands are grouped under two top-level subcommands:
 - `session` - manage sessions and session variables
 - Direct action subcommands: `act`, `test`
 
-The active session is resolved in order:
-1. Explicit `--session <id>` flag on the command
-2. `HAINDY_SESSION` environment variable
-3. Error if neither is set
+Commands that operate on an existing session require an explicit `--session <id>` flag.
+`haindy session new` does not take `--session` because it creates the session.
 
 ---
 
@@ -21,7 +19,7 @@ The active session is resolved in order:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--session <id>` | `$HAINDY_SESSION` | Session ID override. Ignored for `session new`. |
+| `--session <id>` | none | Required for commands that operate on an existing session. Ignored for `session new`. |
 | `--json` | Enabled by default in tool call mode | Emit JSON on stdout. Always on for tool call mode; flag exists for scripting clarity. |
 | `--debug` | off | Emit verbose daemon logs to stderr (does not affect stdout JSON). |
 
@@ -61,10 +59,13 @@ haindy session new [--android | --desktop] [options]
 }
 ```
 
-**Recommended usage in a skill:**
+**Recommended usage in a skill or tool runner:**
 
 ```bash
-export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
+haindy session new --android
+# Read `session_id` from the JSON response, then pass it explicitly:
+haindy session status --session <SESSION_ID>
+haindy test "open the app and verify the dashboard appears" --session <SESSION_ID>
 ```
 
 ---
@@ -145,6 +146,8 @@ haindy session status [--session <id>]
 }
 ```
 
+`actions_taken` is `1` here because `session status` actively captures a fresh screenshot to describe the current screen.
+
 ---
 
 ### `haindy session set`
@@ -153,6 +156,7 @@ Store a named variable in the session. The variable can be referenced as `$NAME`
 
 ```
 haindy session set <NAME> <VALUE> [--secret] [--session <id>]
+haindy session set <NAME> --value-file <path> [--secret] [--session <id>]
 ```
 
 **Flags:**
@@ -160,18 +164,22 @@ haindy session set <NAME> <VALUE> [--secret] [--session <id>]
 | Flag | Description |
 |---|---|
 | `--secret` | Mark the variable as secret. Secret values are stored in daemon memory only (not written to session.json or logs). Any `response` field that would echo the value back replaces it with `[redacted]`. |
+| `--value-file <path>` | Read the variable value from a file instead of the command line. Useful for secrets, long JSON payloads, and values that should not appear in shell history. |
+
+Note: `--secret` protects the value after Haindy receives it. Shells expand environment variables before `haindy` starts, so `haindy session set PASSWORD "$TEST_PASSWORD" --secret` is still passing the resolved value on the command line. If the value is sensitive, prefer `--value-file` over command-line input.
 
 **Examples:**
 
 ```bash
-haindy session set USERNAME alice@example.com
-haindy session set PASSWORD hunter2 --secret
-haindy session set BASE_URL https://staging.example.com
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD "$TEST_PASSWORD" --secret --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
+haindy session set BASE_URL https://staging.example.com --session <SESSION_ID>
 
 # Then use in commands:
-haindy act "type '$USERNAME' into the email field"
-haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears"
-haindy act "navigate to $BASE_URL/login"
+haindy act "type '$USERNAME' into the email field" --session <SESSION_ID>
+haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears" --session <SESSION_ID>
+haindy act "navigate to $BASE_URL/login" --session <SESSION_ID>
 ```
 
 **Stdout:**
@@ -230,7 +238,7 @@ haindy session vars [--session <id>]
 ## Action Subcommands
 
 All action subcommands share this behavior:
-- Require an active session (via `HAINDY_SESSION` or `--session`).
+- Require an explicit `--session <id>`.
 - Return a single JSON object on stdout (the standard envelope, see OVERVIEW.md).
 - Exit 0 on `success`, exit 1 on `failure` or `error`.
 - Always capture a screenshot after the command completes and include `screenshot_path`.
@@ -252,10 +260,10 @@ haindy act "<instruction>" [--session <id>]
 **Examples:**
 
 ```bash
-haindy act "tap the Login button"
-haindy act "type 'hunter2' into the password field"
-haindy act "scroll down until the Terms section is visible"
-haindy act "press the back button"
+haindy act "tap the Login button" --session <SESSION_ID>
+haindy act "type 'hunter2' into the password field" --session <SESSION_ID>
+haindy act "scroll down until the Terms section is visible" --session <SESSION_ID>
+haindy act "press the back button" --session <SESSION_ID>
 ```
 
 **Stdout on success:**
@@ -309,9 +317,9 @@ haindy test "<scenario>" [--session <id>] [--max-steps <n>]
 **Examples:**
 
 ```bash
-haindy test "sign in with user@example.com and password hunter2, navigate to Settings, change the display name to 'Bob', save, and verify the new name appears in the profile header"
+haindy test "sign in with user@example.com and password hunter2, navigate to Settings, change the display name to 'Bob', save, and verify the new name appears in the profile header" --session <SESSION_ID>
 
-haindy test "attempt to sign in with an incorrect password three times and verify that the account lockout screen appears after the third attempt"
+haindy test "attempt to sign in with an incorrect password three times and verify that the account lockout screen appears after the third attempt" --session <SESSION_ID>
 ```
 
 **Stdout on success:**
@@ -372,7 +380,6 @@ haindy explore "<goal>" [--session <id>] [--max-steps <n>]
 
 | Variable | Description |
 |---|---|
-| `HAINDY_SESSION` | Active session ID. Set this after `session new` to avoid passing `--session` on every call. |
 | `HAINDY_HOME` | Override the base directory (default: `~/.haindy`). Useful in CI. |
 | `HAINDY_BACKEND` | Default backend for new sessions: `desktop` or `android`. Overridden by `--android`/`--desktop`. |
 
@@ -401,12 +408,14 @@ haindy explore "<goal>" [--session <id>] [--max-steps <n>]
   "response": "string (natural language, always present)",
   "screenshot_path": "string (absolute path) | null",
   "meta": {
-    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | agent_error | device_error | element_not_found",
+    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | agent_error | device_error | session_busy",
     "duration_ms": "integer",
     "actions_taken": "integer"
   }
 }
 ```
+
+`actions_taken` counts device operations performed to satisfy the command. A fresh screenshot taken for `session status` counts as 1. Session startup and shutdown bookkeeping does not.
 
 ### Extended fields for `test`
 

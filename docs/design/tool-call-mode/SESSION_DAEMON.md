@@ -1,4 +1,4 @@
-# Haindy Agentic Mode - Session Daemon Design
+# Haindy Tool Call Mode - Session Daemon Design
 
 ## Why a Daemon
 
@@ -58,7 +58,7 @@ sequenceDiagram
     D->>FS: Open daemon.sock (Unix socket)
     D-->>CLI: Ready signal (via readiness pipe)
     CLI-->>CA: {"session_id": "...", "status": "success", ...}
-    CA->>CA: export HAINDY_SESSION=...
+    CA->>CA: Store session_id for later commands
 ```
 
 **Readiness pipe**: The daemon inherits a write-end file descriptor from the CLI process. When the socket is open and the device is ready, it writes a single byte to signal readiness. The CLI blocks on the read-end until it receives this signal or a startup timeout fires (default: 30s). This avoids polling and race conditions.
@@ -174,7 +174,8 @@ If the daemon crashes mid-command, the socket connection is closed before a resp
   "command": "...",
   "status": "error",
   "response": "Haindy daemon connection lost mid-command. The daemon may have crashed. Check ~/.haindy/sessions/<id>/logs/daemon.log.",
-  "screenshot_path": null
+  "screenshot_path": null,
+  "meta": {"exit_reason": "agent_error", "duration_ms": 0, "actions_taken": 0}
 }
 ```
 
@@ -234,8 +235,12 @@ The daemon is single-threaded per session. It processes one command at a time. I
 
 ```json
 {
+  "session_id": "...",
+  "command": "...",
   "status": "error",
-  "response": "Session is busy executing a previous command. Retry when the current command completes."
+  "response": "Session is busy executing a previous command. Retry when the current command completes.",
+  "screenshot_path": null,
+  "meta": {"exit_reason": "session_busy", "duration_ms": 0, "actions_taken": 0}
 }
 ```
 

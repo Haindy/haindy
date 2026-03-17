@@ -38,33 +38,35 @@ A one-paragraph summary. The agent needs to know Haindy is an external testing a
 
 ```bash
 # Start a session (Android)
-export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
+haindy session new --android
 
 # Start a session (desktop)
-export HAINDY_SESSION=$(haindy session new --desktop | jq -r .session_id)
+haindy session new --desktop
 
-# Store credentials as session variables (use --secret for sensitive values)
-haindy session set USERNAME alice@example.com
-haindy session set PASSWORD hunter2 --secret
+# Read `session_id` from the JSON response, then pass it explicitly:
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD "$TEST_PASSWORD" --secret --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 
 # Check current screen
-haindy session status
+haindy session status --session <SESSION_ID>
 
 # End the session when done
-haindy session close
+haindy session close --session <SESSION_ID>
 ```
 
-Rule: Always set `HAINDY_SESSION` immediately after `session new`. All subsequent commands use it automatically.
+Rule: Prefer explicit `--session <SESSION_ID>` in coding-agent and tool-runner workflows.
 
-Rule: Use `haindy session set --secret` for credentials and tokens. Secret values are never echoed in responses or written to logs.
+Rule: Use `haindy session set --secret` for credentials and tokens. Prefer `--value-file` when the value is sensitive, because shell-expanded env vars still become command-line input before Haindy can redact them. Secret values are never echoed in responses or written to logs after Haindy receives them.
 
 ### 3. Command Reference (compact)
 
 ```
-haindy act  "<single action>"  # direct device interaction, no validation
-haindy test "<scenario>"       # planned multi-step test with pass/fail
-haindy session status          # take screenshot and describe current screen state
-haindy session set <NAME> <VALUE> [--secret]  # store a session variable
+haindy act  "<single action>" --session <SESSION_ID>  # direct device interaction, no validation
+haindy test "<scenario>" --session <SESSION_ID>       # planned multi-step test with pass/fail
+haindy session status --session <SESSION_ID>          # take screenshot and describe current screen state
+haindy session set <NAME> <VALUE> [--secret] --session <SESSION_ID>  # store a session variable
+haindy session set <NAME> --value-file <path> [--secret] --session <SESSION_ID>  # read a variable value from a file
 ```
 
 ### 4. The JSON Response
@@ -79,7 +81,7 @@ Every command returns JSON. The agent must read `status`, `response`, and `meta.
   "response": "What happened in natural language.",
   "screenshot_path": "/absolute/path/to/screenshot.png",
   "meta": {
-    "exit_reason": "completed|assertion_failed|max_steps_reached|agent_error|device_error|element_not_found",
+    "exit_reason": "completed|assertion_failed|max_steps_reached|element_not_found|agent_error|device_error|session_busy",
     "duration_ms": 1243,
     "actions_taken": 3
   }
@@ -106,12 +108,13 @@ Rule: **Prefer `test` over `act` when you care about the result.** `act` does no
 Session variables let you store values once and reference them by name in subsequent commands:
 
 ```bash
-haindy session set USERNAME alice@example.com
-haindy session set PASSWORD hunter2 --secret
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD "$TEST_PASSWORD" --secret --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 
 # Reference with $NAME in any instruction string
-haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears"
-haindy act "type '$USERNAME' into the email field"
+haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears" --session <SESSION_ID>
+haindy act "type '$USERNAME' into the email field" --session <SESSION_ID>
 ```
 
 The daemon interpolates `$NAME` tokens before passing the instruction to agents. Secret variables appear as `[redacted]` in any response text.
@@ -130,46 +133,45 @@ Do not retry the same `act` instruction more than twice. If a direct action is n
 ### 8. Worked Example
 
 ```bash
-# 1. Start session and set credentials
-export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
-haindy session set USERNAME alice@example.com
-haindy session set PASSWORD hunter2 --secret
+# 1. Start session and capture `session_id` from the JSON response
+haindy session new --android
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 
 # 2. Check what we're looking at
-haindy session status
+haindy session status --session <SESSION_ID>
 # response: "Device is on the home screen of the Android launcher."
 
 # 3. Sign in and reach the dashboard
-haindy test "open the Acme app, sign in with $USERNAME and $PASSWORD, and verify the dashboard is shown"
+haindy test "open the Acme app, sign in with $USERNAME and $PASSWORD, and verify the dashboard is shown" --session <SESSION_ID>
 # status: success
 # response: "Test passed in 3 steps. App opened, credentials entered, dashboard confirmed."
 
 # 4. Validate a specific feature
-haindy test "tap on 'My Orders' and verify that a list of past orders is shown"
+haindy test "tap on 'My Orders' and verify that a list of past orders is shown" --session <SESSION_ID>
 # status: success
 
 # 5. Run a regression test
-haindy test "add item 'Blue Widget' to cart, proceed to checkout, enter shipping address '123 Main St', and verify the order summary shows the correct item and address"
+haindy test "add item 'Blue Widget' to cart, proceed to checkout, enter shipping address '123 Main St', and verify the order summary shows the correct item and address" --session <SESSION_ID>
 # status: failure
 # meta.exit_reason: assertion_failed
 # response: "Failed at step 3. Items added to cart and checkout reached. Entering '123 Main St' showed a validation error: 'Please enter a valid street address with apartment number'. The field requires a more specific format."
 
 # 6. Close session
-haindy session close
+haindy session close --session <SESSION_ID>
 ```
 
 ### 9. CI / Non-Interactive Use
 
-In CI pipelines, skip `export` and pass `--session` explicitly:
+In CI pipelines, have the caller capture `.session_id` from the JSON response of `session new`, then pass it explicitly:
 
 ```bash
-SESSION=$(haindy session new --android | jq -r .session_id)
-haindy session set USERNAME "$CI_TEST_USER" --session "$SESSION"
-haindy session set PASSWORD "$CI_TEST_PASS" --secret --session "$SESSION"
-RESULT=$(haindy test "complete onboarding flow" --session "$SESSION")
-haindy session close --session "$SESSION"
-echo "$RESULT" | jq .status
-echo "$RESULT" | jq -r .meta.exit_reason
+haindy session new --android
+# Caller stores the returned .session_id as <SESSION_ID>
+haindy session set USERNAME "$CI_TEST_USER" --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/ci_test_pass --secret --session <SESSION_ID>
+haindy test "complete onboarding flow" --session <SESSION_ID>
+haindy session close --session <SESSION_ID>
 ```
 
 ---
@@ -211,25 +213,30 @@ through its CLI and receive structured JSON results.
 
 ## Session setup
 
-    export HAINDY_SESSION=$(haindy session new --android | jq -r .session_id)
+    haindy session new --android
     # or for desktop:
-    export HAINDY_SESSION=$(haindy session new --desktop | jq -r .session_id)
+    haindy session new --desktop
+
+Read `session_id` from the JSON response and pass it explicitly:
+
+    haindy session status --session <SESSION_ID>
 
 Store credentials before using them in commands:
 
-    haindy session set USERNAME alice@example.com
-    haindy session set PASSWORD hunter2 --secret
+    haindy session set USERNAME alice@example.com --session <SESSION_ID>
+    haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 
 Close the session when done:
 
-    haindy session close
+    haindy session close --session <SESSION_ID>
 
 ## Commands
 
-    haindy act  "<instruction>"   # single device interaction, no validation
-    haindy test "<scenario>"      # planned multi-step test with pass/fail
-    haindy session status         # take screenshot and describe current screen state
-    haindy session set <N> <V> [--secret]  # store a session variable
+    haindy act  "<instruction>" --session <SESSION_ID>   # single device interaction, no validation
+    haindy test "<scenario>" --session <SESSION_ID>      # planned multi-step test with pass/fail
+    haindy session status --session <SESSION_ID>         # take screenshot and describe current screen state
+    haindy session set <N> <V> [--secret] --session <SESSION_ID>  # store a session variable
+    haindy session set <N> --value-file <path> [--secret] --session <SESSION_ID>  # read a variable value from a file
 
 Reference session variables with $NAME in any instruction string.
 
@@ -248,7 +255,7 @@ Reference session variables with $NAME in any instruction string.
 - status: failure -> read response for what was observed vs. expected
 - status: error   -> Haindy internal failure, read response for diagnostics
 - meta.exit_reason -> why it ended: completed, assertion_failed, max_steps_reached,
-                      element_not_found, agent_error, device_error
+                      element_not_found, agent_error, device_error, session_busy
 
 ## Choosing the right command
 
@@ -262,6 +269,7 @@ Read `response` and `meta.exit_reason` before retrying.
 - assertion_failed: action worked but expected outcome did not appear.
 - element_not_found: target not visible; check screen state first.
 - max_steps_reached: increase --max-steps or split into smaller test calls.
+- session_busy: another command is already running; wait and retry.
 Do not retry the same `act` more than twice. Switch to `test` for better diagnostics.
 ```
 
