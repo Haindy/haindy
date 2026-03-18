@@ -58,3 +58,30 @@ def test_normalize_response_preserves_missing_google_candidate_attributes() -> N
     assert envelopes[0].function_call.args == {"x": 12, "y": 34}
     assert envelopes[0].function_call.id == "c1"
     assert extract_assistant_text(normalized) == "Done."
+
+
+def test_extract_assistant_text_prefers_last_meaningful_text_block() -> None:
+    response = {
+        "outputs": [
+            {"type": "text", "text": "60"},
+            {"type": "text", "text": "The Schedule screen is now visible."},
+        ]
+    }
+
+    assert extract_assistant_text(response) == "The Schedule screen is now visible."
+
+
+def test_extract_assistant_text_preserves_json_payloads() -> None:
+    response = {
+        "outputs": [
+            {
+                "type": "text",
+                "text": '{"verdict":"PASS","reasoning":"Step passed","confidence":0.9}',
+            }
+        ]
+    }
+
+    assert (
+        extract_assistant_text(response)
+        == '{"verdict":"PASS","reasoning":"Step passed","confidence":0.9}'
+    )

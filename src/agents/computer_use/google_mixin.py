@@ -878,7 +878,13 @@ class GoogleComputerUseMixin:
         """Build shared summary/image items appended after function_result blocks."""
         items: list[dict[str, Any]] = []
         call_texts: list[str] = []
+        interaction_mode = str(follow_up_batch.interaction_mode or "").strip().lower()
         for call_result in follow_up_batch.calls:
+            if not self._should_include_google_follow_up_call_text(
+                call_result=call_result,
+                interaction_mode=interaction_mode,
+            ):
+                continue
             action_result = (
                 call_result.actions[0]
                 if call_result.actions
@@ -904,6 +910,23 @@ class GoogleComputerUseMixin:
             }
         )
         return items
+
+    @staticmethod
+    def _should_include_google_follow_up_call_text(
+        *,
+        call_result: Any,
+        interaction_mode: str,
+    ) -> bool:
+        """Keep rich follow-up summaries only for non-routine Google turns."""
+        if interaction_mode == "observe_only":
+            return False
+        if getattr(call_result, "requires_safety_acknowledgement", False):
+            return True
+        actions = getattr(call_result, "actions", []) or []
+        return any(
+            str(getattr(action, "status", "") or "").strip().lower() != "executed"
+            for action in actions
+        )
 
     @staticmethod
     def _build_google_follow_up_call_text(
@@ -989,22 +1012,13 @@ class GoogleComputerUseMixin:
         visual_grounding = self._build_google_visual_grounding_text(follow_up_batch)
         if visual_grounding:
             blocks.append(visual_grounding)
-        reminder_text = ""
+        error_text = str(follow_up_batch.error_text or "").strip()
+        if error_text:
+            blocks.append(error_text)
         if follow_up_batch.interaction_mode == "observe_only":
             reminder_text = str(follow_up_batch.reminder_text or "").strip()
-        elif follow_up_batch.interaction_mode:
-            reminder_parts = [
-                "If the requested outcome is already visible in this screenshot, "
-                "stop and confirm success."
-            ]
-            execute_reporting_reminder = str(
-                follow_up_batch.reminder_text or ""
-            ).strip()
-            if execute_reporting_reminder:
-                reminder_parts.append(execute_reporting_reminder)
-            reminder_text = "\n".join(reminder_parts)
-        if reminder_text:
-            blocks.append(reminder_text)
+            if reminder_text:
+                blocks.append(reminder_text)
         if not blocks:
             return None
         return "\n\n".join(blocks)
