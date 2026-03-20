@@ -1213,6 +1213,8 @@ Respond with JSON only:
             safety_events=session_result.safety_events,
             final_model_output=session_result.final_output,
             response_ids=session_result.response_ids,
+            terminal_failure_code=session_result.terminal_failure_code,
+            terminal_failure_reason=session_result.terminal_failure_reason,
             cache_label=cache_label,
             cache_action=cache_action if cache_label else None,
             cache_hit=cache_hit,
@@ -1263,3 +1265,93 @@ Respond with JSON only:
                 exc_info=True,
             )
             raise
+
+    @staticmethod
+    def _infer_tool_mode_action_type(instruction: str) -> ActionType:
+        """Infer a coarse action type for free-form tool-mode instructions."""
+        normalized = str(instruction or "").strip().lower()
+        if normalized.startswith(("type ", "enter ", "fill ", "input ")):
+            return ActionType.TYPE
+        if normalized.startswith(("scroll ", "swipe ")):
+            return ActionType.SCROLL_TO_ELEMENT
+        if normalized.startswith(("press ", "hit ")):
+            return ActionType.KEY_PRESS
+        if normalized.startswith(("open ", "go to ", "navigate ")):
+            return ActionType.NAVIGATE
+        if normalized.startswith(("wait ", "pause ")):
+            return ActionType.WAIT
+        return ActionType.CLICK
+
+    @classmethod
+    def _build_tool_mode_step(
+        cls,
+        instruction: str,
+        *,
+        observe_only: bool = False,
+    ) -> TestStep:
+        """Build a synthetic test step for direct tool-call mode execution."""
+        normalized_instruction = str(instruction or "").strip()
+        if observe_only:
+            action_type = ActionType.ASSERT
+            expected_result = "The current visible screen state is described without taking any action."
+            computer_use_prompt = (
+                "Observe the current screen only. Do not interact. "
+                "Describe the visible state, the likely screen or app context, "
+                "and any obvious blockers or prompts."
+            )
+        else:
+            action_type = cls._infer_tool_mode_action_type(normalized_instruction)
+            expected_result = "The requested direct action completes."
+            computer_use_prompt = (
+                "Perform exactly one direct action based on the instruction below. "
+                "Use the provided screenshot for context. After the primary action "
+                "completes or fails, stop immediately without validating broader outcomes.\n\n"
+                f"Instruction: {normalized_instruction}"
+            )
+
+        description = (
+            "Describe the current screen state."
+            if observe_only
+            else normalized_instruction
+        )
+        return TestStep(
+            step_number=1,
+            description=description,
+            action=description,
+            expected_result=expected_result,
+            action_instruction=ActionInstruction(
+                action_type=action_type,
+                description=description,
+                expected_outcome=expected_result,
+                computer_use_prompt=computer_use_prompt,
+            ),
+        )
+
+    async def execute_tool_instruction(
+        self,
+        instruction: str,
+        *,
+        test_context: dict[str, Any] | None = None,
+        screenshot: bytes | None = None,
+    ) -> EnhancedActionResult:
+        """Execute one direct free-form tool-call instruction."""
+        step = self._build_tool_mode_step(instruction, observe_only=False)
+        return await self.execute_action(
+            step,
+            test_context=test_context or {},
+            screenshot=screenshot,
+        )
+
+    async def observe_current_screen(
+        self,
+        *,
+        test_context: dict[str, Any] | None = None,
+        screenshot: bytes | None = None,
+    ) -> EnhancedActionResult:
+        """Describe the current screen without interacting."""
+        step = self._build_tool_mode_step("", observe_only=True)
+        return await self.execute_action(
+            step,
+            test_context=test_context or {},
+            screenshot=screenshot,
+        )

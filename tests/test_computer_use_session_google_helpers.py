@@ -157,6 +157,7 @@ async def test_google_follow_up_adds_safety_acknowledgement_and_call_id(
     assert function_result["result"]["url"] == "https://example.com"
     text_items = [item for item in payload["input"] if item["type"] == "text"]
     image_items = [item for item in payload["input"] if item["type"] == "image"]
+    assert len(text_items) == 1
     assert 'google_function_call_id="call_google_1"' in text_items[0]["text"]
     assert image_items[-1]["mime_type"] == "image/png"
 
@@ -198,13 +199,7 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
     function_result = payload["input"][0]
     assert function_result["call_id"] == "google_turn_1_call_2"
     assert function_result["result"]["url"] == "https://example.com"
-    call_text = next(
-        item["text"] for item in payload["input"] if item["type"] == "text"
-    )
-    assert 'call_id="google_turn_1_call_2"' in call_text
-    assert "google_function_call_sequence=2" in call_text
-    assert 'google_correlation_mode="sequence_fallback"' in call_text
-    assert 'google_function_call_fallback_id="google_turn_1_call_2"' in call_text
+    assert not any(item["type"] == "text" for item in payload["input"])
 
 
 @pytest.mark.asyncio
@@ -305,7 +300,7 @@ async def test_google_follow_up_preserves_rich_grounding_fields(
 
 
 @pytest.mark.asyncio
-async def test_google_follow_up_omits_execute_mode_reminder_text(
+async def test_google_follow_up_execute_mode_uses_minimal_payload(
     mock_client, mock_browser, session_settings
 ) -> None:
     session_settings.cu_provider = "google"
@@ -335,13 +330,7 @@ async def test_google_follow_up_omits_execute_mode_reminder_text(
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
 
-    assert len(texts) == 2
-    assert not any("Execute mode is active" in text for text in texts)
-    assert sum("call_id=" in text for text in texts) == 1
-    assert any(
-        "If the requested outcome is already visible in this screenshot" in text
-        for text in texts
-    )
+    assert texts == []
 
 
 @pytest.mark.asyncio
@@ -375,6 +364,7 @@ async def test_google_follow_up_preserves_observe_only_reminder_text(
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
 
+    assert len(texts) == 1
     assert any("Observe-only mode is active" in text for text in texts)
 
 
@@ -414,7 +404,7 @@ async def test_google_follow_up_requests_in_loop_localization_on_full_keyframe(
 
 
 @pytest.mark.asyncio
-async def test_google_follow_up_includes_state_only_reporting_reminder(
+async def test_google_follow_up_execute_mode_ignores_state_only_reporting_reminder(
     mock_client, mock_browser, session_settings
 ) -> None:
     session_settings.cu_provider = "google"
@@ -447,14 +437,7 @@ async def test_google_follow_up_includes_state_only_reporting_reminder(
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
 
-    assert any(
-        "If the requested outcome is already visible in this screenshot" in text
-        for text in texts
-    )
-    assert any(
-        "Do not quote exact field values or other on-screen text" in text
-        for text in texts
-    )
+    assert texts == []
 
 
 @pytest.mark.asyncio
@@ -501,11 +484,9 @@ async def test_google_follow_up_attaches_shared_context_only_to_first_result(
     text_items = [item["text"] for item in payload["input"] if item["type"] == "text"]
 
     assert len(function_results) == 2
-    assert len(text_items) == 2
-    assert 'call_id="call_google_a"' in text_items[0]
-    assert 'call_id="call_google_b"' in text_items[0]
-    assert "Observe-only mode is active" in text_items[1]
-    assert "call_id=" not in text_items[1]
+    assert len(text_items) == 1
+    assert "Observe-only mode is active" in text_items[0]
+    assert "call_id=" not in text_items[0]
 
 
 def test_wrap_goal_for_google_mobile_strips_preexisting_mobile_wrapper(

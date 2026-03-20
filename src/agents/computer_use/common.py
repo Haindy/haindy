@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -386,8 +387,46 @@ def extract_assistant_text(response_dict: dict[str, Any]) -> str | None:
             text = content.get("text")
             if isinstance(text, str) and text:
                 texts.append(text)
-    combined = "\n".join(texts).strip()
-    return combined or None
+    return _select_preferred_assistant_text(texts)
+
+
+def _select_preferred_assistant_text(texts: list[str]) -> str | None:
+    """Prefer the final meaningful assistant text block over prefixed fragments."""
+    candidates = [
+        text.strip() for text in texts if isinstance(text, str) and text.strip()
+    ]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    for text in reversed(candidates):
+        if _looks_like_json_payload(text) or _looks_like_natural_language(text):
+            return text
+
+    return candidates[-1]
+
+
+def _looks_like_json_payload(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("{") or stripped.startswith("[")
+
+
+def _looks_like_natural_language(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.lower() in {"ok", "done", "success", "completed", "failed", "error"}:
+        return True
+
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", stripped)
+    if not words:
+        return False
+    if len(words) >= 2:
+        return True
+    if any(char.isspace() for char in stripped):
+        return True
+    return stripped.endswith((".", "!", "?"))
 
 
 def _inject_context_metadata(turn: ComputerToolTurn, metadata: dict[str, Any]) -> None:

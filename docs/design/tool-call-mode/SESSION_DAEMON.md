@@ -19,7 +19,7 @@ The session daemon is a long-running Python process that:
 stateDiagram-v2
     [*] --> Spawning : haindy session new
 
-    Spawning --> Initializing : daemon process started
+    Spawning --> Initializing : independently launched daemon started
     Initializing --> Ready : device connected
 
     Ready --> Executing : command received
@@ -48,7 +48,7 @@ sequenceDiagram
 
     CA->>CLI: haindy session new --android
     CLI->>FS: Create sessions/<uuid>/
-    CLI->>D: Spawn daemon process (detached)
+    CLI->>D: Launch daemon through double-fork helper
     D->>FS: Write daemon.pid
     D->>DEV: Initialize ADB / CU runtime connection
     DEV-->>D: Connection ready
@@ -189,9 +189,18 @@ If the daemon crashes mid-command, the socket connection is closed before a resp
 
 ### Spawning
 
-The CLI spawns the daemon with `subprocess` using `start_new_session=True` so it is detached from the CLI's process group. The daemon receives:
+The CLI launches the daemon through a narrow double-fork helper so the long-lived
+session process is not tied to the lifetime of the `session new` client
+process. The launcher:
+
+- resolves the canonical HAINDY CLI entrypoint (`haindy` when installed, otherwise `python -m src.main`)
+- creates the readiness pipe and passes its write end through `HAINDY_READINESS_FD`
+- performs `fork`, `setsid()`, and a second `fork`
+- redirects stdin/stdout/stderr to `/dev/null`
+- `exec`s the hidden `__tool_call_daemon` entrypoint in the grandchild
+
+The daemon receives:
 - `--session-id <uuid>` - its own session ID
-- `--session-dir <path>` - base directory for this session
 - `--backend <android|desktop>` - device backend to initialize
 - A file descriptor number for the readiness pipe (via env var `HAINDY_READINESS_FD`)
 
@@ -202,6 +211,11 @@ The daemon tracks the last command time. If no command is received within `--idl
 ### Crash recovery
 
 If the daemon exits unexpectedly (crash, OOM, SIGKILL), the session directory and socket file may remain on disk. `haindy session new` opportunistically cleans up stale session artifacts from dead daemons before creating a new session. `haindy session list` reports only live sessions.
+
+The daemon also records explicit shutdown notes for externally delivered
+termination signals such as `SIGTERM` and `SIGHUP`, so wrapper-related process
+death is visible in `session.json` and `logs/daemon.log` instead of appearing as
+a silent disappearance.
 
 ### Command timeout
 
@@ -230,6 +244,17 @@ If the timeout is reached, the daemon stops the command and returns:
 5. Exits
 
 `haindy session close --force` skips the graceful wait and terminates the daemon immediately. Use this to recover a stuck session after a timeout or other non-responsive state.
+
+### Foreground fallback
+
+The hidden daemon entrypoint remains available for local debugging, integration
+tests, and hostile wrappers that kill all detached descendants:
+
+```bash
+python -m src.main __tool_call_daemon --session-id <SESSION_ID> --backend desktop
+```
+
+This is an operational fallback, not the primary V1 path.
 
 ---
 

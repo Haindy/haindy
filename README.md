@@ -1,139 +1,133 @@
 # HAINDY
 
-Desktop-first autonomous testing agent that turns requirements into
-executable test runs.
+Desktop-first autonomous testing agent with two operating modes:
+
+- Standard mode: batch planning and execution from `--plan` plus `--context`
+- Tool-call mode: session-based JSON CLI for coding agents
 
 ## Quick project map
 
-- `src/main.py`: CLI entrypoint
-- `src/agents/`: orchestrator/planner/runner/action agents
-- `src/agents/computer_use/session.py`: computer-use action loop
-- `src/config/settings.py`: configuration and env handling
-- `tests/`: test suite
-- `test_scenarios/`: sample inputs
-- `docs/RUNBOOK.md`: operational setup notes
-- `docs/plans/`: implementation plans
+- `src/main.py`: shared CLI entrypoint
+- `src/tool_call_mode/`: tool-call CLI, daemon, IPC, runtime, and session state helpers
+- `src/agents/`: planner, runner, action, and situational agents
+- `src/desktop/`: Linux/X11 desktop automation
+- `src/mobile/`: Android ADB automation
+- `src/config/settings.py`: env-backed runtime configuration
+- `docs/design/tool-call-mode/`: tool-call mode design docs
+- `docs/RUNBOOK.md`: setup and operational notes
+- `.agents/skills/haindy/SKILL.md`: bundled skill for agent workflows
 
 ## Setup
 
-### Create and Activate a Virtual Environment
+### 1. Create and activate a virtual environment
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### Install Dependencies
+### 2. Install dependencies
 
 ```bash
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e ".[dev]"
 ```
 
-### macOS
+After the editable install, activating `.venv` exposes `haindy` on `PATH`.
+If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
+`python -m src.main ...` remains available as an internal/dev fallback.
 
-- Base dependency installation is supported.
-- Developer checks are supported.
-- The Linux desktop automation backend is not supported on macOS yet.
-- Use macOS for development, tests, planning, and mobile ADB flows.
+### 3. Install backend prerequisites
 
-### Linux
+- Linux/X11 desktop automation: install the runtime tools in [docs/RUNBOOK.md](docs/RUNBOOK.md)
+- Android automation: ensure `adb` is installed and the target device or emulator is reachable
+- macOS is fine for development and tests, but the `desktop` backend is Linux/X11-only today
 
-- Base dependency installation is supported.
-- Desktop automation is supported on Linux/X11 after installing the extra
-  runtime tools from [docs/RUNBOOK.md](/Users/fkeegan/src/haindy/haindy/docs/RUNBOOK.md).
-- Use Linux when you need the `desktop` automation backend.
-
-### Install Backend Prerequisites
-
-- No Playwright browser runtime installation is required for the current codebase.
-- Linux desktop runs: install the Linux/X11 desktop automation dependencies from
-  [docs/RUNBOOK.md](/Users/fkeegan/src/haindy/haindy/docs/RUNBOOK.md).
-- Mobile ADB runs: ensure `adb` is installed and your Android device or emulator
-  is reachable.
-
-### Configure Environment
+### 4. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Minimum required settings:
+Important settings:
 
-- `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and for OpenAI computer-use
-- `HAINDY_CU_PROVIDER=openai`, `HAINDY_CU_PROVIDER=google`, or
-  `HAINDY_CU_PROVIDER=anthropic`
+- `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
+- `HAINDY_CU_PROVIDER=openai|google|anthropic`
+- `HAINDY_AUTOMATION_BACKEND=desktop|mobile_adb` to set the default backend
+- `HAINDY_HOME` to override the tool-call session home (default: `~/.haindy`)
 
 OpenAI auth modes:
 
-- Default non-CU OpenAI auth uses `HAINDY_OPENAI_API_KEY`.
-- `--codex-auth login` stores a local encrypted Codex OAuth session and makes
-  non-CU OpenAI requests use OAuth instead of the API key.
-- `--codex-auth logout` removes the stored OAuth session and reverts non-CU
-  OpenAI requests to API-key auth.
-- `--codex-auth status` shows the active non-CU OpenAI auth mode.
-- Stored Codex OAuth credentials live outside the repo in the user state
-  directory.
+- Default non-CU OpenAI auth uses `HAINDY_OPENAI_API_KEY`
+- `--codex-auth login` stores a local encrypted Codex OAuth session for non-CU OpenAI requests
+- `--codex-auth status` shows the active non-CU OpenAI auth mode
+- `--codex-auth logout` clears the stored OAuth session
 
-Provider-specific:
-
-- OpenAI computer-use: `HAINDY_COMPUTER_USE_MODEL` (default `gpt-5.4`) and
-  `HAINDY_OPENAI_API_KEY`. Codex OAuth does not apply to CU runs.
-- Google computer-use: `HAINDY_GOOGLE_CU_MODEL` and Vertex credentials/settings
-  (see `.env.example`)
-- Anthropic computer-use: `HAINDY_ANTHROPIC_API_KEY`, optional
-  `HAINDY_ANTHROPIC_CU_MODEL` (default `claude-sonnet-4-6`), optional
-  `HAINDY_ANTHROPIC_CU_MAX_TOKENS` (default `16384`)
-
-Platform notes:
-
-- macOS: do not rely on `HAINDY_AUTOMATION_BACKEND=desktop`; that backend is
-  Linux/X11-only today.
-- Linux: set `HAINDY_AUTOMATION_BACKEND=desktop` when running desktop automation.
-
-## Run
+## Standard mode
 
 Plan and context files are both required:
 
 ```bash
-.venv/bin/python -m src.main \
+haindy \
   --plan test_scenarios/wikipedia_search_simple.txt \
   --context test_scenarios/wikipedia_search_simple.txt
 ```
 
-Mobile ADB backend (hard override):
+Force the mobile backend:
 
 ```bash
-.venv/bin/python -m src.main \
+haindy \
   --mobile \
   --plan <plan_file> \
-  --context <mobile_context_file>
+  --context <context_file>
 ```
-
-For `--mobile` runs, context should provide either:
-
-- `adb_serial` + `app_package` (optional `app_activity`), or
-- explicit `adb_commands` that discover/select device and open the target app.
-
-Desktop backend note:
-
-- Linux/X11 only at the moment. On macOS, use developer/test flows or `--mobile`.
 
 Optional debug logging:
 
 ```bash
-.venv/bin/python -m src.main \
+haindy \
   --plan <plan_file> \
   --context <context_file> \
   --debug
 ```
 
-Codex OAuth login:
+## Tool-call mode
+
+Tool-call mode is a separate runtime for coding agents. Every command prints exactly one JSON object to stdout. Session state, screenshots, and daemon logs live under `~/.haindy/sessions/<id>/` unless `HAINDY_HOME` overrides the root.
+
+Start a session:
 
 ```bash
-.venv/bin/python -m src.main --codex-auth login
-.venv/bin/python -m src.main --codex-auth status
-.venv/bin/python -m src.main --codex-auth logout
+haindy session new --desktop
+haindy session new --android --android-serial emulator-5554
+```
+
+Use the returned `session_id` explicitly:
+
+```bash
+haindy session status --session <SESSION_ID>
+haindy act "tap the Login button" --session <SESSION_ID>
+haindy test "sign in and verify the dashboard appears" --session <SESSION_ID>
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session close --session <SESSION_ID>
+```
+
+Tool-call mode guidance:
+
+- Prefer `test` over `act` whenever outcome validation matters
+- Use `session set --value-file ... --secret` for sensitive values
+- Desktop sessions assume the target site or app is already running
+- Desktop `session new --url ...` is intentionally deferred from V1
+- `explore` is V2 work and is not part of the current CLI surface
+- `session new` now launches the daemon independently, so later commands should keep working after the original CLI process exits
+- If a wrapper still kills the entire process container or cgroup, fall back to a long-lived shell and run `python -m src.main __tool_call_daemon ...` for debugging
+
+## Codex OAuth
+
+```bash
+haindy --codex-auth login
+haindy --codex-auth status
+haindy --codex-auth logout
 ```
 
 ## Developer checks

@@ -75,6 +75,7 @@ class TestPlannerAgent(BaseAgent):
         curated_scope: str | None = None,
         ambiguous_points: list[str] | None = None,
         stream_observer: ResponseStreamObserver | None = None,
+        persist: bool = True,
     ) -> TestPlan:
         """
         Create a structured test plan from requirements.
@@ -121,7 +122,8 @@ class TestPlannerAgent(BaseAgent):
         test_plan = self._parse_test_plan_response(response)
 
         # Save test plan permanently
-        self._save_test_plan(test_plan)
+        if persist:
+            self._save_test_plan(test_plan)
 
         # Calculate total steps
         total_steps = sum(len(tc.steps) for tc in test_plan.test_cases)
@@ -145,6 +147,42 @@ class TestPlannerAgent(BaseAgent):
         )
 
         return test_plan
+
+    async def create_tool_mode_test_plan(
+        self,
+        scenario: str,
+        *,
+        max_steps: int,
+        context: dict[str, Any] | None = None,
+        stream_observer: ResponseStreamObserver | None = None,
+    ) -> TestPlan:
+        """Create a single-scenario test plan for tool-call mode."""
+        logger.info(
+            "Creating tool-mode test plan",
+            extra={
+                "scenario_length": len(scenario),
+                "max_steps": max_steps,
+                "has_context": context is not None,
+            },
+        )
+
+        user_message = self._build_tool_mode_requirements_message(
+            scenario=scenario,
+            max_steps=max_steps,
+            context=context,
+        )
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+        response = await self._get_completion(
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.25,
+            stream_observer=stream_observer,
+        )
+        test_plan = self._parse_test_plan_response(response)
+        return self._normalize_tool_mode_plan(test_plan, max_steps=max_steps)
 
     def _build_requirements_message(
         self,
@@ -264,6 +302,61 @@ IMPORTANT:
         )
 
         return "\n".join(message_parts)
+
+    def _build_tool_mode_requirements_message(
+        self,
+        *,
+        scenario: str,
+        max_steps: int,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Build a compact single-scenario planning prompt for tool-call mode."""
+        message_parts = [
+            "Create a UI test plan for exactly one scenario.",
+            "Return exactly one test case.",
+            f"Keep the total executable steps across setup, main, and cleanup at or under {max_steps}.",
+            "Do not create multiple alternative cases, regression bundles, or follow-up scenarios.",
+            "",
+            "Scenario:",
+            scenario,
+        ]
+
+        if context:
+            message_parts.append("")
+            message_parts.append("Execution Context:")
+            for key, value in context.items():
+                message_parts.append(f"- {key}: {value}")
+
+        message_parts.append(
+            """\n\nProvide the test plan in the same JSON format used for normal planning.
+
+Additional tool-mode rules:
+- Exactly one item in "test_cases"
+- Use concise step descriptions suitable for immediate execution
+- Do not exceed the provided step budget
+- If the scenario is already a single validation, keep the plan small rather than inventing extra coverage"""
+        )
+        return "\n".join(message_parts)
+
+    @staticmethod
+    def _normalize_tool_mode_plan(test_plan: TestPlan, *, max_steps: int) -> TestPlan:
+        """Clamp planning output to the single-scenario tool-call shape."""
+        if not test_plan.test_cases:
+            raise ValueError("Tool-call planning returned no test cases.")
+
+        primary_case = test_plan.test_cases[0]
+        test_plan.test_cases = [primary_case]
+        test_plan.steps = [
+            *primary_case.setup_steps,
+            *primary_case.steps,
+            *primary_case.cleanup_steps,
+        ]
+        total_steps = len(test_plan.steps)
+        if total_steps > max_steps:
+            raise ValueError(
+                f"Tool-call planning exceeded max_steps={max_steps} with {total_steps} steps."
+            )
+        return test_plan
 
     def _parse_test_plan_response(self, response: dict[str, Any]) -> TestPlan:
         """Parse the AI response into a TestPlan object."""

@@ -115,6 +115,46 @@ class TestMainFlow:
         assert result == 0
         mock_auth.assert_awaited_once_with("status")
 
+    @pytest.mark.asyncio
+    async def test_tool_call_cli_commands_dispatch_before_legacy_parser(self) -> None:
+        with patch(
+            "src.main.run_tool_call_cli",
+            new=AsyncMock(return_value=0),
+        ) as mock_tool_call:
+            result = await async_main(["session", "list"])
+
+        assert result == 0
+        mock_tool_call.assert_awaited_once_with(["session", "list"])
+
+    @pytest.mark.asyncio
+    async def test_tool_call_daemon_commands_dispatch_before_legacy_parser(
+        self,
+    ) -> None:
+        with patch(
+            "src.main.run_tool_call_daemon_cli",
+            new=AsyncMock(return_value=0),
+        ) as mock_daemon:
+            result = await async_main(
+                [
+                    "__tool_call_daemon",
+                    "--session-id",
+                    "abc123",
+                    "--backend",
+                    "desktop",
+                ]
+            )
+
+        assert result == 0
+        mock_daemon.assert_awaited_once_with(
+            [
+                "__tool_call_daemon",
+                "--session-id",
+                "abc123",
+                "--backend",
+                "desktop",
+            ]
+        )
+
 
 @pytest.mark.asyncio
 async def test_run_test_blocks_on_insufficient_context() -> None:

@@ -39,6 +39,12 @@ from src.runtime.environment import normalize_automation_backend
 from src.runtime.execution_context_builder import build_execution_context_bundle
 from src.security.rate_limiter import RateLimiter
 from src.security.sanitizer import DataSanitizer
+from src.tool_call_mode.cli import (
+    is_tool_call_command,
+    run_tool_call_cli,
+    run_tool_call_daemon_cli,
+)
+from src.tool_call_mode.launcher import public_cli_program_name
 
 console = Console()
 logger = get_logger("main")
@@ -46,22 +52,26 @@ logger = get_logger("main")
 
 def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser."""
+    cli_name = public_cli_program_name()
     parser = argparse.ArgumentParser(
         description="HAINDY - Autonomous AI Testing Agent v0.1.0",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
   # Full desktop-first execution (required)
-  python -m src.main --plan requirements.md --context execution_context.txt
+  {cli_name} --plan requirements.md --context execution_context.txt
 
   # Login with OpenAI Codex OAuth
-  python -m src.main --codex-auth login
+  {cli_name} --codex-auth login
 
   # Berserk mode
-  python -m src.main --berserk --plan requirements.md --context execution_context.txt
+  {cli_name} --berserk --plan requirements.md --context execution_context.txt
 
   # Test your active OpenAI auth configuration
-  python -m src.main --test-api
+  {cli_name} --test-api
+
+Fallback:
+  python -m src.main --plan requirements.md --context execution_context.txt
         """,
     )
 
@@ -741,8 +751,14 @@ async def _login_with_codex_oauth(auth_manager: OpenAIAuthManager) -> int:
 
 async def async_main(args: list[str] | None = None) -> int:
     """Async main entrypoint."""
+    argv = list(args) if args is not None else sys.argv[1:]
+    if is_tool_call_command(argv):
+        if argv and argv[0] == "__tool_call_daemon":
+            return await run_tool_call_daemon_cli(argv)
+        return await run_tool_call_cli(argv)
+
     parser = create_parser()
-    parsed_args = parser.parse_args(args)
+    parsed_args = parser.parse_args(argv)
 
     if parsed_args.version:
         return show_version()

@@ -120,6 +120,7 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "sanitize_screenshots": "HAINDY_SANITIZE_SCREENSHOTS",
     "debug_mode": "HAINDY_DEBUG_MODE",
     "save_agent_conversations": "HAINDY_SAVE_AGENT_CONVERSATIONS",
+    "haindy_home": "HAINDY_HOME",
 }
 
 OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
@@ -621,6 +622,10 @@ class Settings(BaseModel):
     save_agent_conversations: bool = Field(
         default=True, description="Save agent conversation logs"
     )
+    haindy_home: Path = Field(
+        default=Path("~/.haindy"),
+        description="Home directory for tool-call mode session state",
+    )
 
     @field_validator("log_level")
     def validate_log_level(cls, v: str) -> str:
@@ -662,6 +667,13 @@ class Settings(BaseModel):
     @classmethod
     def normalize_automation_backend(cls, value: str) -> str:
         return normalize_automation_backend_value(value)
+
+    @field_validator("haindy_home", mode="before")
+    @classmethod
+    def normalize_haindy_home(cls, value: Any) -> Path:
+        if isinstance(value, Path):
+            return value.expanduser()
+        return Path(str(value or "~/.haindy")).expanduser()
 
     @field_validator("cu_provider")
     @classmethod
@@ -761,6 +773,7 @@ class Settings(BaseModel):
             self.desktop_screenshot_dir,
             self.mobile_screenshot_dir,
             self.cache_dir,
+            self.haindy_home,
             self.desktop_coordinate_cache_path.parent,
             self.mobile_coordinate_cache_path.parent,
             self.task_plan_cache_path.parent,

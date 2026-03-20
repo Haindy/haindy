@@ -28,20 +28,23 @@ cp .env.example .env  # then fill in API keys
 ### Running
 ```bash
 # Standard run (both flags required)
-python -m src.main --plan <requirements_file> --context <context_file>
+haindy --plan <requirements_file> --context <context_file>
 
 # Mobile ADB backend
-python -m src.main --mobile --plan <plan> --context <context>
+haindy --mobile --plan <plan> --context <context>
 
 # Debug mode
-python -m src.main --plan <plan> --context <context> --debug
+haindy --plan <plan> --context <context> --debug
 
 # OAuth auth management
-python -m src.main --codex-auth login|logout|status
+haindy --codex-auth login|logout|status
 
 # API connectivity test
-python -m src.main --test-api
+haindy --test-api
 ```
+
+Keep `python -m src.main ...` as a local/dev fallback when you intentionally
+need the module entrypoint.
 
 ### Testing
 ```bash
