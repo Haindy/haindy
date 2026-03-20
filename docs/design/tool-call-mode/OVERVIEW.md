@@ -22,6 +22,7 @@ The goal of tool call mode is to expose Haindy as a first-class tool that a codi
 
 - **CLI over MCP/API**: A well-designed CLI paired with a skill requires less context and has better adoption than an MCP server or custom API. Coding agents are trained to use CLIs and can learn new ones via a skill loaded in-context.
 - **Session-based**: A persistent session daemon keeps the device alive between calls, avoiding expensive re-initialization on every command.
+- **Independent daemon launch**: `session new` returns only after an independently launched daemon is ready on its Unix socket, so later commands are not coupled to the parent CLI process lifetime.
 - **Layered abstraction**: Commands are tiered from direct device actions up to full test plans. The coding agent picks the right level of abstraction for its needs.
 - **Stable JSON contract**: Every command returns the same JSON envelope. The `status` field is machine-readable. The `response` field is natural language that the coding agent can pass directly to the user or reason about.
 - **Screenshot on every response**: Agents need visual grounding. Every response includes a path to the latest screenshot.
@@ -87,7 +88,7 @@ flowchart TD
 
 **CLI client** (`haindy <subcommand>`): Thin wrapper. Locates the session daemon socket from the explicit session ID provided on the command, sends the command over IPC, waits for the JSON response, prints to stdout, exits with code 0 (success) or 1 (failure/error).
 
-**Session Daemon**: A long-running Python process spawned by `haindy session new`. Owns the device connection for the lifetime of the session. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON.
+**Session Daemon**: A long-running Python process launched by `haindy session new` through a dedicated daemonization helper. Owns the device connection for the lifetime of the session. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON.
 
 **Action Agent**: Receives a natural language instruction, takes a screenshot via computer use, and either executes a single interaction (tap, click, type, scroll) or, for `session status`, observes the current screen and returns a natural-language description without taking action. Returns immediately with the result.
 

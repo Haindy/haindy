@@ -33,6 +33,10 @@ source .venv/bin/activate
 .venv/bin/pip install -e ".[dev]"
 ```
 
+After the editable install, activating `.venv` exposes `haindy` on `PATH`.
+If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
+`python -m src.main ...` remains available as an internal/dev fallback.
+
 ### 3. Install backend prerequisites
 
 - Linux/X11 desktop automation: install the runtime tools in [docs/RUNBOOK.md](docs/RUNBOOK.md)
@@ -64,7 +68,7 @@ OpenAI auth modes:
 Plan and context files are both required:
 
 ```bash
-.venv/bin/python -m src.main \
+haindy \
   --plan test_scenarios/wikipedia_search_simple.txt \
   --context test_scenarios/wikipedia_search_simple.txt
 ```
@@ -72,7 +76,7 @@ Plan and context files are both required:
 Force the mobile backend:
 
 ```bash
-.venv/bin/python -m src.main \
+haindy \
   --mobile \
   --plan <plan_file> \
   --context <context_file>
@@ -81,7 +85,7 @@ Force the mobile backend:
 Optional debug logging:
 
 ```bash
-.venv/bin/python -m src.main \
+haindy \
   --plan <plan_file> \
   --context <context_file> \
   --debug
@@ -94,18 +98,18 @@ Tool-call mode is a separate runtime for coding agents. Every command prints exa
 Start a session:
 
 ```bash
-.venv/bin/python -m src.main session new --desktop
-.venv/bin/python -m src.main session new --android --android-serial emulator-5554
+haindy session new --desktop
+haindy session new --android --android-serial emulator-5554
 ```
 
 Use the returned `session_id` explicitly:
 
 ```bash
-.venv/bin/python -m src.main session status --session <SESSION_ID>
-.venv/bin/python -m src.main act "tap the Login button" --session <SESSION_ID>
-.venv/bin/python -m src.main test "sign in and verify the dashboard appears" --session <SESSION_ID>
-.venv/bin/python -m src.main session set USERNAME alice@example.com --session <SESSION_ID>
-.venv/bin/python -m src.main session close --session <SESSION_ID>
+haindy session status --session <SESSION_ID>
+haindy act "tap the Login button" --session <SESSION_ID>
+haindy test "sign in and verify the dashboard appears" --session <SESSION_ID>
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session close --session <SESSION_ID>
 ```
 
 Tool-call mode guidance:
@@ -115,13 +119,15 @@ Tool-call mode guidance:
 - Desktop sessions assume the target site or app is already running
 - Desktop `session new --url ...` is intentionally deferred from V1
 - `explore` is V2 work and is not part of the current CLI surface
+- `session new` now launches the daemon independently, so later commands should keep working after the original CLI process exits
+- If a wrapper still kills the entire process container or cgroup, fall back to a long-lived shell and run `python -m src.main __tool_call_daemon ...` for debugging
 
 ## Codex OAuth
 
 ```bash
-.venv/bin/python -m src.main --codex-auth login
-.venv/bin/python -m src.main --codex-auth status
-.venv/bin/python -m src.main --codex-auth logout
+haindy --codex-auth login
+haindy --codex-auth status
+haindy --codex-auth logout
 ```
 
 ## Developer checks

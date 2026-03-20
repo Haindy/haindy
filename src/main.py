@@ -44,6 +44,7 @@ from src.tool_call_mode.cli import (
     run_tool_call_cli,
     run_tool_call_daemon_cli,
 )
+from src.tool_call_mode.launcher import public_cli_program_name
 
 console = Console()
 logger = get_logger("main")
@@ -51,22 +52,26 @@ logger = get_logger("main")
 
 def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser."""
+    cli_name = public_cli_program_name()
     parser = argparse.ArgumentParser(
         description="HAINDY - Autonomous AI Testing Agent v0.1.0",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
   # Full desktop-first execution (required)
-  python -m src.main --plan requirements.md --context execution_context.txt
+  {cli_name} --plan requirements.md --context execution_context.txt
 
   # Login with OpenAI Codex OAuth
-  python -m src.main --codex-auth login
+  {cli_name} --codex-auth login
 
   # Berserk mode
-  python -m src.main --berserk --plan requirements.md --context execution_context.txt
+  {cli_name} --berserk --plan requirements.md --context execution_context.txt
 
   # Test your active OpenAI auth configuration
-  python -m src.main --test-api
+  {cli_name} --test-api
+
+Fallback:
+  python -m src.main --plan requirements.md --context execution_context.txt
         """,
     )
 

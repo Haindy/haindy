@@ -1,9 +1,7 @@
 """Tests for tool-call parser and CLI helpers."""
 
-import asyncio
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,6 +12,7 @@ from src.tool_call_mode.cli import (
     create_tool_call_parser,
     run_tool_call_cli,
 )
+from src.tool_call_mode.launcher import ToolCallDaemonLaunch
 from src.tool_call_mode.models import SessionMetadata
 from src.tool_call_mode.paths import (
     get_session_dir,
@@ -138,23 +137,21 @@ async def test_run_tool_call_cli_returns_json_usage_envelope_on_bad_args(
 
 
 @pytest.mark.asyncio
-async def test_handle_session_new_detaches_daemon_stdio(monkeypatch) -> None:
-    class FakeProcess:
-        def __init__(self) -> None:
-            self.returncode: int | None = None
-
-        async def wait(self) -> int:
-            await asyncio.sleep(60)
-            return 0
-
+async def test_handle_session_new_launches_daemon_with_expected_settings(
+    monkeypatch,
+) -> None:
     captured_kwargs: dict[str, object] = {}
     session_id = "session-detach-test"
+    read_fd, write_fd = os.pipe()
 
-    async def fake_create_subprocess_exec(*cmd, **kwargs):
+    def fake_launch_tool_call_daemon(**kwargs):
         captured_kwargs.update(kwargs)
-        readiness_fd = int(kwargs["env"]["HAINDY_READINESS_FD"])
-        os.write(readiness_fd, b"1")
-        return FakeProcess()
+        os.write(write_fd, b"1")
+        os.close(write_fd)
+        return ToolCallDaemonLaunch(
+            command=("haindy", "__tool_call_daemon"),
+            readiness_fd=read_fd,
+        )
 
     monkeypatch.setattr("src.tool_call_mode.cli.cleanup_stale_sessions", lambda: None)
     monkeypatch.setattr(
@@ -170,8 +167,8 @@ async def test_handle_session_new_detaches_daemon_stdio(monkeypatch) -> None:
         )(),
     )
     monkeypatch.setattr(
-        "src.tool_call_mode.cli.asyncio.create_subprocess_exec",
-        fake_create_subprocess_exec,
+        "src.tool_call_mode.cli.launch_tool_call_daemon",
+        fake_launch_tool_call_daemon,
     )
     monkeypatch.setattr(
         "src.tool_call_mode.cli.load_session_metadata",
@@ -201,7 +198,8 @@ async def test_handle_session_new_detaches_daemon_stdio(monkeypatch) -> None:
 
     assert exit_code == 0
     assert envelope.status.value == "success"
-    assert captured_kwargs["start_new_session"] is True
-    assert captured_kwargs["stdin"] == subprocess.DEVNULL
-    assert captured_kwargs["stdout"] == subprocess.DEVNULL
-    assert captured_kwargs["stderr"] == subprocess.DEVNULL
+    assert captured_kwargs["session_id"] == session_id
+    assert captured_kwargs["backend"] == "mobile_adb"
+    assert captured_kwargs["idle_timeout"] == 1800
+    assert captured_kwargs["android_serial"] == "emulator-5554"
+    assert captured_kwargs["android_app"] == "co.playerup.flutterApp"

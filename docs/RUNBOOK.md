@@ -16,6 +16,11 @@ source .venv/bin/activate
 .venv/bin/pip install -e ".[dev]"
 ```
 
+After the editable install, `haindy` should be available on `PATH` inside the
+activated virtual environment. If you are not activating `.venv`, use
+`.venv/bin/haindy`. Keep `python -m src.main ...` as a debugging or
+development fallback.
+
 ## Linux/X11 desktop prerequisites
 
 Desktop automation is Linux/X11-only today.
@@ -81,24 +86,26 @@ Operational rules:
 - Daemon logs must go to `logs/daemon.log` or stderr when `--debug` is set
 - Session variables are memory-only in V1; secret values should be passed with `--value-file` when possible
 - `session status` captures a fresh screenshot and counts as one action
+- `session new` launches the daemon independently and returns only after the socket is ready
 - Desktop `session new --url ...` is not part of V1
 - `explore` is V2 and intentionally absent
 
 Useful commands:
 
 ```bash
-.venv/bin/python -m src.main session new --desktop
-.venv/bin/python -m src.main session list
-.venv/bin/python -m src.main session status --session <SESSION_ID>
-.venv/bin/python -m src.main act "tap the Login button" --session <SESSION_ID>
-.venv/bin/python -m src.main test "complete checkout and verify the order summary" --session <SESSION_ID>
-.venv/bin/python -m src.main session close --session <SESSION_ID>
+haindy session new --desktop
+haindy session list
+haindy session status --session <SESSION_ID>
+haindy act "tap the Login button" --session <SESSION_ID>
+haindy test "complete checkout and verify the order summary" --session <SESSION_ID>
+haindy session close --session <SESSION_ID>
 ```
 
 ## Troubleshooting
 
 - If a tool-call command loses the daemon mid-run, inspect `~/.haindy/sessions/<id>/logs/daemon.log`
 - If `session list` does not show a session, the daemon is dead or its socket was cleaned up as stale
+- If a wrapper kills the entire process container or cgroup after `session new`, detached daemon survival is not possible there; rerun from a normal shell or keep the hidden `python -m src.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging
 - If desktop capture fails, verify `DISPLAY`, `ffmpeg`, and X11 permissions
 - If desktop input fails, verify `xdotool` or `/dev/uinput` access
 - If Android startup fails, run `adb devices` and confirm the package name or serial

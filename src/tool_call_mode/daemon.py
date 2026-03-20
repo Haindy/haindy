@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import time
 from contextlib import suppress
 from typing import Any
@@ -50,6 +51,8 @@ class ToolCallDaemon:
         self._server: asyncio.AbstractServer | None = None
         self._command_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
+        self._shutdown_reason = "unknown"
+        self._registered_signals: list[int] = []
 
     async def run(self) -> None:
         """Run the session daemon until shutdown."""
@@ -57,6 +60,7 @@ class ToolCallDaemon:
         ensure_session_layout(self.session_id)
         write_pid_file(self.session_id, os.getpid())
         self.runtime.set_pid(os.getpid())
+        self._install_signal_handlers()
 
         await self.runtime.start()
         save_session_metadata(self.runtime.metadata)
@@ -78,13 +82,18 @@ class ToolCallDaemon:
             async with self._server:
                 await self._shutdown_event.wait()
         finally:
+            self._remove_signal_handlers()
             idle_task.cancel()
             with suppress(asyncio.CancelledError):
                 await idle_task
             await self.runtime.stop()
             cleanup_session_artifacts(self.session_id)
             logger.info(
-                "Tool-call daemon stopped", extra={"session_id": self.session_id}
+                "Tool-call daemon stopped",
+                extra={
+                    "session_id": self.session_id,
+                    "shutdown_reason": self._shutdown_reason,
+                },
             )
 
     async def _handle_client(
@@ -153,7 +162,7 @@ class ToolCallDaemon:
             writer.close()
             await writer.wait_closed()
             if self.runtime.is_close_requested():
-                self._shutdown_event.set()
+                self._request_shutdown(reason="session_close")
 
     async def _idle_watchdog(self) -> None:
         """Shutdown the daemon after the configured idle timeout."""
@@ -172,8 +181,64 @@ class ToolCallDaemon:
                         "idle_seconds": int(idle_seconds),
                     },
                 )
-                self._shutdown_event.set()
+                self._request_shutdown(
+                    reason="idle_timeout",
+                    note=(
+                        "Session daemon stopped after reaching the configured idle timeout."
+                    ),
+                )
                 return
+
+    def _install_signal_handlers(self) -> None:
+        """Install signal handlers that convert external termination into logs."""
+
+        loop = asyncio.get_running_loop()
+        for signal_name in ("SIGTERM", "SIGHUP"):
+            signum = getattr(signal, signal_name, None)
+            if signum is None:
+                continue
+            try:
+                loop.add_signal_handler(
+                    signum,
+                    self._handle_shutdown_signal,
+                    signal_name,
+                )
+            except (NotImplementedError, RuntimeError):
+                continue
+            self._registered_signals.append(signum)
+
+    def _remove_signal_handlers(self) -> None:
+        """Best-effort cleanup for installed signal handlers."""
+
+        loop = asyncio.get_running_loop()
+        for signum in self._registered_signals:
+            with suppress(NotImplementedError, RuntimeError):
+                loop.remove_signal_handler(signum)
+        self._registered_signals.clear()
+
+    def _handle_shutdown_signal(self, signal_name: str) -> None:
+        """Capture external shutdown signals before the daemon exits."""
+
+        logger.warning(
+            "Tool-call daemon received shutdown signal",
+            extra={"session_id": self.session_id, "signal": signal_name},
+        )
+        self._request_shutdown(
+            reason=f"signal:{signal_name}",
+            note=f"External shutdown signal received: {signal_name}.",
+        )
+
+    def _request_shutdown(self, *, reason: str, note: str | None = None) -> None:
+        """Request daemon shutdown while preserving diagnostic metadata."""
+
+        if self._shutdown_event.is_set():
+            return
+        self._shutdown_reason = reason
+        if note:
+            self.runtime.metadata.status = "closing"
+            self.runtime.metadata.notes = note
+            save_session_metadata(self.runtime.metadata)
+        self._shutdown_event.set()
 
     @staticmethod
     def _signal_ready() -> None:

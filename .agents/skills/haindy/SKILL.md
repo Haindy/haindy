@@ -20,9 +20,9 @@ Read `session_id` from the JSON response and pass it explicitly on later command
 
 Troubleshooting:
 
-- In some agent terminal wrappers, detached background children are reaped when the parent `session new` command exits.
-- Symptom: `session new` returns success and may launch the app, but the very next command returns `No active session found`.
-- If that happens, treat it as a harness/process-lifetime issue rather than an app failure. Keep the daemon process alive in a long-lived PTY and continue using the same `session_id`, or rerun from a normal shell that allows detached children to survive.
+- `session new` should normally survive after the original CLI process exits because HAINDY launches the session daemon independently.
+- If `session new` returns success but the very next command still says `No active session found`, treat it as a harness/process-lifetime issue rather than an app failure.
+- Wrappers that kill the entire process container or cgroup can still defeat detached daemons. In that case, rerun from a normal shell or keep the hidden `python -m src.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging.
 
 Desktop rules:
 

@@ -5,8 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import subprocess
-import sys
 import time
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -19,6 +17,11 @@ from src.runtime.environment import normalize_automation_backend
 
 from .daemon import run_daemon_from_args
 from .ipc import send_request
+from .launcher import (
+    ToolCallDaemonLaunchError,
+    launch_tool_call_daemon,
+    public_cli_program_name,
+)
 from .models import (
     CommandStatus,
     ExitReason,
@@ -97,7 +100,7 @@ def create_tool_call_parser() -> argparse.ArgumentParser:
     """Create the public tool-call parser."""
 
     parser = ToolCallArgumentParser(
-        prog="haindy",
+        prog=public_cli_program_name(),
         description="HAINDY tool-call mode",
     )
     parser.add_argument(
@@ -248,7 +251,9 @@ def create_tool_call_parser() -> argparse.ArgumentParser:
 def create_tool_call_daemon_parser() -> argparse.ArgumentParser:
     """Create the hidden daemon parser."""
 
-    parser = argparse.ArgumentParser(prog="haindy __tool_call_daemon")
+    parser = argparse.ArgumentParser(
+        prog=f"{public_cli_program_name()} __tool_call_daemon"
+    )
     parser.add_argument("__tool_call_daemon")
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--backend", required=True)
@@ -351,56 +356,38 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
     session_id = str(uuid4())
     ensure_session_layout(session_id)
 
-    read_fd, write_fd = os.pipe()
-    env = os.environ.copy()
-    env["HAINDY_READINESS_FD"] = str(write_fd)
-    cmd = [
-        sys.executable,
-        "-m",
-        "src.main",
-        "__tool_call_daemon",
-        "--session-id",
-        session_id,
-        "--backend",
-        backend,
-        "--idle-timeout",
-        str(args.idle_timeout),
-    ]
-    if args.android_serial:
-        cmd.extend(["--android-serial", args.android_serial])
-    if args.android_app:
-        cmd.extend(["--android-app", args.android_app])
-    if args.debug:
-        cmd.append("--debug")
-
     started = time.perf_counter()
     try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            env=env,
-            start_new_session=True,
-            pass_fds=(write_fd,),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        launch = launch_tool_call_daemon(
+            session_id=session_id,
+            backend=backend,
+            idle_timeout=args.idle_timeout,
+            android_serial=args.android_serial,
+            android_app=args.android_app,
+            debug=bool(args.debug),
         )
-    finally:
-        os.close(write_fd)
+    except ToolCallDaemonLaunchError as exc:
+        envelope = make_envelope(
+            session_id=session_id,
+            command="session",
+            status=CommandStatus.ERROR,
+            response=(
+                "Session daemon could not be launched. "
+                f"Check {get_daemon_log_path(session_id)}. Details: {exc}"
+            ),
+            screenshot_path=None,
+            exit_reason=ExitReason.AGENT_ERROR,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            actions_taken=0,
+        )
+        return envelope, 1
 
     try:
-        readiness_task = asyncio.create_task(asyncio.to_thread(os.read, read_fd, 1))
-        process_wait_task = asyncio.create_task(process.wait())
-        done, pending = await asyncio.wait(
-            {readiness_task, process_wait_task},
+        ready_byte = await asyncio.wait_for(
+            asyncio.to_thread(os.read, launch.readiness_fd, 1),
             timeout=30.0,
-            return_when=asyncio.FIRST_COMPLETED,
         )
-        for task in pending:
-            task.cancel()
-
-        if not done:
-            raise asyncio.TimeoutError
-        if process_wait_task in done:
+        if ready_byte != b"1":
             envelope = make_envelope(
                 session_id=session_id,
                 command="session",
@@ -415,7 +402,6 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
                 actions_taken=0,
             )
             return envelope, 1
-        await readiness_task
     except asyncio.TimeoutError:
         envelope = make_envelope(
             session_id=session_id,
@@ -432,7 +418,7 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
         )
         return envelope, 1
     finally:
-        os.close(read_fd)
+        os.close(launch.readiness_fd)
 
     metadata = load_session_metadata(session_id)
     if metadata is None or not is_process_alive(metadata.pid):
@@ -445,22 +431,6 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
                 f"Check {get_daemon_log_path(session_id)}."
             ),
             screenshot_path=None,
-            exit_reason=ExitReason.AGENT_ERROR,
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            actions_taken=0,
-        )
-        return envelope, 1
-
-    if process.returncode is not None and process.returncode != 0:
-        envelope = make_envelope(
-            session_id=session_id,
-            command="session",
-            status=CommandStatus.ERROR,
-            response=(
-                "Session daemon exited during startup. "
-                f"Check {get_daemon_log_path(session_id)}."
-            ),
-            screenshot_path=metadata.latest_screenshot_path,
             exit_reason=ExitReason.AGENT_ERROR,
             duration_ms=int((time.perf_counter() - started) * 1000),
             actions_taken=0,
