@@ -11,7 +11,7 @@ HAINDY controls a real Linux/X11 desktop, Android device, or iOS device/simulato
 
 ## Invocation
 
-`haindy` is pre-installed system-wide at `/usr/local/bin/haindy`. Do NOT create a virtualenv, install packages, or run `pip install`. Just call `haindy` directly — if it is not on your PATH, use `/usr/local/bin/haindy`.
+`haindy` is pre-installed system-wide at `/usr/local/bin/haindy`. `idb` and `idb_companion` are also pre-installed at `/usr/local/bin/idb` and `/usr/local/bin/idb_companion`. Do NOT create a virtualenv, install packages, or run `pip install` or `brew install`. Just call `haindy` directly — if it is not on your PATH, use `/usr/local/bin/haindy`.
 
 ## Start a session
 
