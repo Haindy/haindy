@@ -405,6 +405,7 @@ class ComputerUseSession(
         cache_label: str | None = None,
         cache_action: str = "click",
         use_cache: bool = True,
+        stop_after_actions: bool = False,
     ) -> ComputerUseSessionResult:
         """
         Execute a Computer Use loop until completion or failure.
@@ -447,6 +448,7 @@ class ComputerUseSession(
                     use_cache=use_cache,
                     model=self._google_model,
                     previous_interaction_id=None,
+                    stop_after_actions=stop_after_actions,
                 )
             if self._provider == "openai":
                 return await self._run_openai(
@@ -459,6 +461,7 @@ class ComputerUseSession(
                     use_cache=use_cache,
                     model=self._openai_model,
                     previous_response_id=None,
+                    stop_after_actions=stop_after_actions,
                 )
             if self._provider == "anthropic":
                 return await self._run_anthropic(

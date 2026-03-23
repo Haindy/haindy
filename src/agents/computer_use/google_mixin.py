@@ -142,6 +142,7 @@ class GoogleComputerUseMixin:
         use_cache: bool,
         model: str,
         previous_interaction_id: str | None,
+        stop_after_actions: bool = False,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
@@ -535,6 +536,11 @@ class GoogleComputerUseMixin:
                     turn_counter += 1
 
             if executed_turns:
+                if stop_after_actions:
+                    # Tool-call act mode: the coding agent handles validation.
+                    # Skip the follow-up API call entirely — action_agent will
+                    # take a fresh screenshot from the driver.
+                    break
                 (
                     response,
                     response_dict,
