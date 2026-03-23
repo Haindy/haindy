@@ -62,6 +62,7 @@ class OpenAIComputerUseMixin:
         use_cache: bool,
         model: str,
         previous_response_id: str | None,
+        stop_after_actions: bool = False,
     ) -> ComputerUseSessionResult:
         result = ComputerUseSessionResult()
 
@@ -213,9 +214,9 @@ class OpenAIComputerUseMixin:
                 )
                 if acknowledged_safety_checks:
                     turns[0].acknowledged = True
-                    turns[0].metadata["acknowledged_safety_checks"] = (
-                        acknowledged_safety_checks
-                    )
+                    turns[0].metadata[
+                        "acknowledged_safety_checks"
+                    ] = acknowledged_safety_checks
 
                 processed_turns: list[ComputerToolTurn] = []
                 for action_index, turn in enumerate(turns, start=1):
@@ -302,6 +303,12 @@ class OpenAIComputerUseMixin:
                     break
 
             if should_stop:
+                break
+
+            if stop_after_actions:
+                # Tool-call act mode: the coding agent handles validation.
+                # Skip the follow-up API call entirely — action_agent will
+                # take a fresh screenshot from the driver.
                 break
 
             follow_up_payload, follow_up_batch = await self._build_follow_up_request(

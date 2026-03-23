@@ -970,6 +970,7 @@ Respond with JSON only:
         screenshot: bytes | None = None,
         record_driver_actions: bool = False,
         step_session: ActionAgentStepSession | None = None,
+        stop_after_actions: bool = False,
     ) -> EnhancedActionResult:
         """Execute an action using the Computer Use tool and return a rich result."""
         if not self.automation_driver:
@@ -1066,6 +1067,7 @@ Respond with JSON only:
                     environment=environment,
                     cache_label=cache_label,
                     cache_action=cache_action,
+                    stop_after_actions=stop_after_actions,
                 )
         except Exception as exc:
             self._mark_step_session_unusable(step_session, str(exc))
@@ -1232,6 +1234,7 @@ Respond with JSON only:
         screenshot: bytes | None = None,
         record_driver_actions: bool = False,
         step_session: ActionAgentStepSession | None = None,
+        stop_after_actions: bool = False,
     ) -> EnhancedActionResult:
         """Execute an action through Computer Use (except explicit skip-navigation)."""
         self.reset_conversation()
@@ -1254,6 +1257,7 @@ Respond with JSON only:
                 screenshot=screenshot,
                 record_driver_actions=record_driver_actions,
                 step_session=step_session,
+                stop_after_actions=stop_after_actions,
             )
         except ComputerUseExecutionError:
             logger.error(
@@ -1340,6 +1344,7 @@ Respond with JSON only:
             step,
             test_context=test_context or {},
             screenshot=screenshot,
+            stop_after_actions=True,
         )
 
     async def observe_current_screen(
