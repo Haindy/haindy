@@ -117,15 +117,16 @@ Session variables let you store values once and reference them by name in subseq
 
 ```bash
 haindy session set USERNAME alice@example.com --session <SESSION_ID>
-haindy session set PASSWORD "$TEST_PASSWORD" --secret --session <SESSION_ID>
 haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 
-# Reference with $NAME in any instruction string
-haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears" --session <SESSION_ID>
-haindy act "type '$USERNAME' into the email field" --session <SESSION_ID>
+# Reference with {{NAME}} — shell-safe in both single- and double-quoted strings
+haindy test "sign in with {{USERNAME}} and {{PASSWORD}} and verify the dashboard appears" --session <SESSION_ID>
+haindy act "type {{USERNAME}} into the email field" --session <SESSION_ID>
 ```
 
-The daemon interpolates `$NAME` tokens before passing the instruction to agents. Secret variables appear as `[redacted]` in any response text.
+The daemon interpolates `{{NAME}}` tokens before passing the instruction to agents. Secret variables appear as `[redacted]` in any response text.
+
+Important: use the exact name you passed to `session set`. If you stored it as `USERNAME`, reference it as `{{USERNAME}}` — not `{{LOGIN_EMAIL}}`, `{{USER}}`, or any other variation.
 
 ### 7. Handling Failures
 
@@ -152,7 +153,7 @@ haindy session status --session <SESSION_ID>
 # response: "Device is on the home screen of the Android launcher."
 
 # 3. Sign in and reach the dashboard
-haindy test "open the Acme app, sign in with $USERNAME and $PASSWORD, and verify the dashboard is shown" --session <SESSION_ID>
+haindy test "open the Acme app, sign in with {{USERNAME}} and {{PASSWORD}}, and verify the dashboard is shown" --session <SESSION_ID>
 # status: success
 # response: "Test passed in 3 steps. App opened, credentials entered, dashboard confirmed."
 
@@ -177,7 +178,7 @@ In CI pipelines, have the caller capture `.session_id` from the JSON response of
 ```bash
 haindy session new --android
 # Caller stores the returned .session_id as <SESSION_ID>
-haindy session set USERNAME "$CI_TEST_USER" --session <SESSION_ID>
+haindy session set USERNAME "$CI_TEST_USER" --session <SESSION_ID>  # shell expands $CI_TEST_USER here intentionally — that's the env var holding the value
 haindy session set PASSWORD --value-file /run/secrets/ci_test_pass --secret --session <SESSION_ID>
 haindy test "complete onboarding flow" --session <SESSION_ID>
 haindy session close --session <SESSION_ID>
@@ -254,7 +255,10 @@ Close the session when done:
     haindy session set <N> <V> [--secret] --session <SESSION_ID>  # store a session variable
     haindy session set <N> --value-file <path> [--secret] --session <SESSION_ID>  # read a variable value from a file
 
-Reference session variables with $NAME in any instruction string.
+Reference session variables with {{NAME}} in any instruction string. The {{NAME}} syntax is
+shell-safe — it works in both single- and double-quoted strings without being expanded by the
+shell. Use the exact name you passed to `session set` — if you stored it as USERNAME, reference
+it as {{USERNAME}}.
 
 ## JSON response (always)
 
@@ -285,7 +289,7 @@ Read `response` and `meta.exit_reason` before retrying.
 - assertion_failed: action worked but expected outcome did not appear.
 - element_not_found: target not visible; check screen state first.
 - max_steps_reached: increase --max-steps or split into smaller test calls.
-- session_busy: another command is already running; wait and retry.
+- session_busy: another command is already running; wait 5-10 seconds and retry once.
 Do not retry the same `act` more than twice. Switch to `test` for better diagnostics.
 ```
 

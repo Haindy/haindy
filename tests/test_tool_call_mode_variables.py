@@ -9,19 +9,20 @@ def test_variable_store_interpolates_known_variables_and_preserves_unknowns() ->
     store.set("PASSWORD", "hunter2", secret=True)
 
     rendered = store.interpolate(
-        "sign in with $USERNAME and $PASSWORD and keep $UNKNOWN unchanged"
+        "sign in with {{USERNAME}} and {{PASSWORD}} and keep {{UNKNOWN}} unchanged"
     )
 
     assert rendered == (
-        "sign in with alice@example.com and hunter2 and keep $UNKNOWN unchanged"
+        "sign in with alice@example.com and hunter2 and keep {{UNKNOWN}} unchanged"
     )
 
 
-def test_variable_store_treats_double_dollar_as_literal_dollar() -> None:
+def test_variable_store_unknown_token_is_left_unchanged() -> None:
     store = SessionVariableStore()
-    store.set("PRICE", "19.99")
 
-    assert store.interpolate("The price is $$$PRICE") == "The price is $19.99"
+    assert store.interpolate("type {{EMAIL}} into the field") == (
+        "type {{EMAIL}} into the field"
+    )
 
 
 def test_variable_store_redacts_only_secret_values() -> None:
@@ -45,3 +46,10 @@ def test_variable_store_public_map_masks_secret_values() -> None:
         "PASSWORD": "[secret]",
         "USERNAME": "alice@example.com",
     }
+
+
+def test_variable_store_double_brace_token_not_matched_without_closing() -> None:
+    store = SessionVariableStore()
+    store.set("NAME", "alice")
+
+    assert store.interpolate("hello {{NAME} world") == "hello {{NAME} world"
