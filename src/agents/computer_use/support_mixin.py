@@ -1048,6 +1048,21 @@ class ComputerUseSupportMixin:
             )
             return mobile_context + goal
 
+        if env_mode == "mobile_ios":
+            goal = self._strip_mobile_goal_wrapper(goal)
+            ios_context = (
+                "IMPORTANT: You are controlling an iOS device (iPhone or iPad) through idb-backed screenshots.\n"
+                "- Treat coordinates as positions on the provided iOS screenshot.\n"
+                "- Use mobile interactions only: click_at, type_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at and go_home when needed.\n"
+                "- Browser-style actions such as open_web_browser, search, navigate, hover_at, go_forward, scroll_document, drag_and_drop, and key_combination are unavailable in this mobile flow.\n"
+                "- For system navigation, use the go_home helper to return to the iOS home screen.\n"
+                "- Do not use desktop assumptions, browser navigation actions, or desktop shortcuts.\n"
+                "- For text entry, use type_text_at directly. Set press_enter=true only when the task explicitly says to submit or press Enter.\n\n"
+                + completion_instruction
+                + "YOUR TASK: "
+            )
+            return ios_context + goal
+
         desktop_context = (
             "IMPORTANT: You are controlling an UBUNTU LINUX desktop with GNOME shell. "
             "The screenshot shows native applications (Slack, Firefox, terminals, etc.). "

@@ -70,6 +70,10 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "mobile_coordinate_cache_path": "HAINDY_MOBILE_COORDINATE_CACHE_PATH",
     "mobile_default_adb_serial": "HAINDY_MOBILE_DEFAULT_ADB_SERIAL",
     "mobile_adb_timeout_seconds": "HAINDY_MOBILE_ADB_TIMEOUT_SECONDS",
+    "ios_screenshot_dir": "HAINDY_IOS_SCREENSHOT_DIR",
+    "ios_coordinate_cache_path": "HAINDY_IOS_COORDINATE_CACHE_PATH",
+    "ios_default_device_udid": "HAINDY_IOS_DEFAULT_DEVICE_UDID",
+    "ios_idb_timeout_seconds": "HAINDY_IOS_IDB_TIMEOUT_SECONDS",
     "enable_screen_recording": "HAINDY_ENABLE_SCREEN_RECORDING",
     "screen_recording_output_dir": "HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
     "screen_recording_framerate": "HAINDY_SCREEN_RECORDING_FRAMERATE",
@@ -439,6 +443,23 @@ class Settings(BaseModel):
         ge=0.5,
         description="Timeout in seconds for individual ADB commands",
     )
+    ios_screenshot_dir: Path = Field(
+        default=Path("data/screenshots/ios"),
+        description="Directory for iOS screenshots",
+    )
+    ios_coordinate_cache_path: Path = Field(
+        default=Path("data/ios_cache/coordinates.json"),
+        description="Coordinate cache path for iOS actions",
+    )
+    ios_default_device_udid: str = Field(
+        default="",
+        description="Default iOS device UDID for idb runs",
+    )
+    ios_idb_timeout_seconds: float = Field(
+        default=15.0,
+        ge=0.5,
+        description="Timeout in seconds for individual idb commands",
+    )
     enable_screen_recording: bool = Field(
         default=False,
         description="Enable GNOME desktop screen recording during test execution",
@@ -803,10 +824,12 @@ class Settings(BaseModel):
             self.screenshots_dir,
             self.desktop_screenshot_dir,
             self.mobile_screenshot_dir,
+            self.ios_screenshot_dir,
             self.cache_dir,
             self.haindy_home,
             self.desktop_coordinate_cache_path.parent,
             self.mobile_coordinate_cache_path.parent,
+            self.ios_coordinate_cache_path.parent,
             self.task_plan_cache_path.parent,
             self.planning_cache_path.parent,
             self.situational_cache_path.parent,

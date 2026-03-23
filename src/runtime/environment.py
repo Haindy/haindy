@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-RuntimeEnvironmentName = Literal["desktop", "browser", "mobile_adb"]
-AutomationBackendName = Literal["desktop", "mobile_adb"]
-TargetTypeName = Literal["desktop_app", "web", "mobile_adb"]
+RuntimeEnvironmentName = Literal["desktop", "browser", "mobile_adb", "mobile_ios"]
+AutomationBackendName = Literal["desktop", "mobile_adb", "mobile_ios"]
+TargetTypeName = Literal["desktop_app", "web", "mobile_adb", "mobile_ios"]
 
 _RUNTIME_ENV_ALIASES: dict[str, RuntimeEnvironmentName] = {
     "desktop": "desktop",
@@ -23,6 +23,11 @@ _RUNTIME_ENV_ALIASES: dict[str, RuntimeEnvironmentName] = {
     "android": "mobile_adb",
     "phone": "mobile_adb",
     "tablet": "mobile_adb",
+    "mobile_ios": "mobile_ios",
+    "ios": "mobile_ios",
+    "iphone": "mobile_ios",
+    "ipad": "mobile_ios",
+    "apple": "mobile_ios",
 }
 _TARGET_TYPE_ALIASES: dict[str, TargetTypeName] = {
     "desktop_app": "desktop_app",
@@ -37,6 +42,10 @@ _TARGET_TYPE_ALIASES: dict[str, TargetTypeName] = {
     "android": "mobile_adb",
     "phone": "mobile_adb",
     "tablet": "mobile_adb",
+    "mobile_ios": "mobile_ios",
+    "ios": "mobile_ios",
+    "iphone": "mobile_ios",
+    "ipad": "mobile_ios",
 }
 
 
@@ -62,7 +71,15 @@ class RuntimeEnvironmentSpec:
 
     @property
     def is_mobile(self) -> bool:
+        return self.name in {"mobile_adb", "mobile_ios"}
+
+    @property
+    def is_android(self) -> bool:
         return self.name == "mobile_adb"
+
+    @property
+    def is_ios(self) -> bool:
+        return self.name == "mobile_ios"
 
     @property
     def is_browser(self) -> bool:
@@ -70,15 +87,19 @@ class RuntimeEnvironmentSpec:
 
     @property
     def coordinate_cache_attribute(self) -> str:
-        return (
-            "mobile_coordinate_cache_path"
-            if self.is_mobile
-            else "desktop_coordinate_cache_path"
-        )
+        if self.name == "mobile_ios":
+            return "ios_coordinate_cache_path"
+        if self.name == "mobile_adb":
+            return "mobile_coordinate_cache_path"
+        return "desktop_coordinate_cache_path"
 
     @property
     def openai_computer_environment(self) -> str:
-        return "browser" if self.is_browser else "linux"
+        if self.is_browser:
+            return "browser"
+        if self.is_ios:
+            return "mac"
+        return "linux"
 
     @property
     def google_computer_environment_name(self) -> str:
@@ -99,6 +120,12 @@ def runtime_environment_spec(name: RuntimeEnvironmentName) -> RuntimeEnvironment
             name="mobile_adb",
             automation_backend="mobile_adb",
             target_type="mobile_adb",
+        )
+    if name == "mobile_ios":
+        return RuntimeEnvironmentSpec(
+            name="mobile_ios",
+            automation_backend="mobile_ios",
+            target_type="mobile_ios",
         )
     if name == "browser":
         return RuntimeEnvironmentSpec(
@@ -133,6 +160,8 @@ def normalize_automation_backend(
     matched = _match_runtime_environment(value)
     if matched == "mobile_adb":
         return "mobile_adb"
+    if matched == "mobile_ios":
+        return "mobile_ios"
     if matched in {"desktop", "browser"}:
         return "desktop"
     return default
@@ -160,6 +189,11 @@ def resolve_runtime_environment(
     matched_target_type = _match_target_type(target_type)
     matched_backend_environment = _match_runtime_environment(automation_backend)
 
+    if (
+        matched_target_type == "mobile_ios"
+        or matched_backend_environment == "mobile_ios"
+    ):
+        return runtime_environment_spec("mobile_ios")
     if (
         matched_target_type == "mobile_adb"
         or matched_backend_environment == "mobile_adb"

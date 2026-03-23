@@ -94,6 +94,8 @@ class SessionMetadata(BaseModel):
     actions_executed: int = Field(default=0, ge=0)
     android_serial: str | None = None
     android_app: str | None = None
+    ios_udid: str | None = None
+    ios_app: str | None = None
     notes: str | None = None
 
     @classmethod
@@ -105,6 +107,8 @@ class SessionMetadata(BaseModel):
         idle_timeout_seconds: int,
         android_serial: str | None = None,
         android_app: str | None = None,
+        ios_udid: str | None = None,
+        ios_app: str | None = None,
     ) -> SessionMetadata:
         now = datetime.now(timezone.utc).isoformat()
         return cls(
@@ -115,6 +119,8 @@ class SessionMetadata(BaseModel):
             idle_timeout_seconds=idle_timeout_seconds,
             android_serial=android_serial or None,
             android_app=android_app or None,
+            ios_udid=ios_udid or None,
+            ios_app=ios_app or None,
         )
 
 

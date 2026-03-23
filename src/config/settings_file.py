@@ -55,6 +55,11 @@ _JSON_TO_FIELD: dict[str, str] = {
     "mobile.coordinate_cache_path": "mobile_coordinate_cache_path",
     "mobile.default_adb_serial": "mobile_default_adb_serial",
     "mobile.adb_timeout_seconds": "mobile_adb_timeout_seconds",
+    # ios section
+    "ios.screenshot_dir": "ios_screenshot_dir",
+    "ios.coordinate_cache_path": "ios_coordinate_cache_path",
+    "ios.default_device_udid": "ios_default_device_udid",
+    "ios.idb_timeout_seconds": "ios_idb_timeout_seconds",
     # screen_recording section
     "screen_recording.enable": "enable_screen_recording",
     "screen_recording.output_dir": "screen_recording_output_dir",

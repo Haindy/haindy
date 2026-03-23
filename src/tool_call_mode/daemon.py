@@ -38,6 +38,8 @@ class ToolCallDaemon:
         idle_timeout_seconds: int,
         android_serial: str | None = None,
         android_app: str | None = None,
+        ios_udid: str | None = None,
+        ios_app: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.socket_path = get_socket_path(session_id)
@@ -47,6 +49,8 @@ class ToolCallDaemon:
             idle_timeout_seconds=idle_timeout_seconds,
             android_serial=android_serial,
             android_app=android_app,
+            ios_udid=ios_udid,
+            ios_app=ios_app,
         )
         self._server: asyncio.AbstractServer | None = None
         self._command_lock = asyncio.Lock()
@@ -266,8 +270,10 @@ async def run_daemon_from_args(args: Any) -> int:
         session_id=args.session_id,
         backend=args.backend,
         idle_timeout_seconds=args.idle_timeout,
-        android_serial=args.android_serial,
-        android_app=args.android_app,
+        android_serial=getattr(args, "android_serial", None),
+        android_app=getattr(args, "android_app", None),
+        ios_udid=getattr(args, "ios_udid", None),
+        ios_app=getattr(args, "ios_app", None),
     )
     try:
         await daemon.run()

@@ -16,6 +16,7 @@ from src.core.enhanced_types import EnhancedActionResult
 from src.core.types import StepResult, TestCaseResult, TestState, TestStatus
 from src.desktop.controller import DesktopController
 from src.mobile.controller import MobileController
+from src.mobile.ios_controller import IOSController
 from src.monitoring.debug_logger import initialize_debug_logger
 from src.monitoring.logger import get_logger, set_run_id
 from src.runtime.agent_factory import AgentFactory
@@ -56,6 +57,8 @@ class ToolCallSessionRuntime:
         settings: Settings | None = None,
         android_serial: str | None = None,
         android_app: str | None = None,
+        ios_udid: str | None = None,
+        ios_app: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.settings = settings or get_settings()
@@ -63,8 +66,12 @@ class ToolCallSessionRuntime:
         self.idle_timeout_seconds = max(int(idle_timeout_seconds), 1)
         self.android_serial = (android_serial or "").strip() or None
         self.android_app = (android_app or "").strip() or None
+        self.ios_udid = (ios_udid or "").strip() or None
+        self.ios_app = (ios_app or "").strip() or None
 
-        self.controller: DesktopController | MobileController | None = None
+        self.controller: DesktopController | MobileController | IOSController | None = (
+            None
+        )
         self.action_agent: ActionAgent | None = None
         self.test_planner: TestPlannerAgent | None = None
         self.test_runner: TestRunner | None = None
@@ -75,6 +82,8 @@ class ToolCallSessionRuntime:
             idle_timeout_seconds=self.idle_timeout_seconds,
             android_serial=self.android_serial,
             android_app=self.android_app,
+            ios_udid=self.ios_udid,
+            ios_app=self.ios_app,
         )
         self._close_requested = False
         self._command_counter = 0
@@ -117,6 +126,14 @@ class ToolCallSessionRuntime:
             )
             if self.android_app:
                 await self.controller.driver.launch_app(self.android_app)
+
+        if self.backend == "mobile_ios" and isinstance(self.controller, IOSController):
+            await self.controller.driver.configure_target(
+                udid=self.ios_udid,
+                bundle_id=self.ios_app,
+            )
+            if self.ios_app:
+                await self.controller.driver.launch_app(self.ios_app)
 
         agents = AgentFactory(self.settings).create_runtime_agents(
             automation_driver=self.controller.driver
@@ -232,14 +249,18 @@ class ToolCallSessionRuntime:
         return make_envelope(
             session_id=self.session_id,
             command="session",
-            status=CommandStatus.SUCCESS
-            if result.overall_success
-            else CommandStatus.FAILURE,
+            status=(
+                CommandStatus.SUCCESS
+                if result.overall_success
+                else CommandStatus.FAILURE
+            ),
             response=self._redact(response),
             screenshot_path=screenshot_path,
-            exit_reason=ExitReason.COMPLETED
-            if result.overall_success
-            else self._action_failure_reason(result),
+            exit_reason=(
+                ExitReason.COMPLETED
+                if result.overall_success
+                else self._action_failure_reason(result)
+            ),
             duration_ms=0,
             actions_taken=1,
         )
@@ -264,14 +285,18 @@ class ToolCallSessionRuntime:
         return make_envelope(
             session_id=self.session_id,
             command="act",
-            status=CommandStatus.SUCCESS
-            if result.overall_success
-            else CommandStatus.FAILURE,
+            status=(
+                CommandStatus.SUCCESS
+                if result.overall_success
+                else CommandStatus.FAILURE
+            ),
             response=self._redact(response_text),
             screenshot_path=screenshot_path,
-            exit_reason=ExitReason.COMPLETED
-            if result.overall_success
-            else self._action_failure_reason(result),
+            exit_reason=(
+                ExitReason.COMPLETED
+                if result.overall_success
+                else self._action_failure_reason(result)
+            ),
             duration_ms=0,
             actions_taken=actions_taken,
         )
@@ -408,11 +433,15 @@ class ToolCallSessionRuntime:
             ai_log_path=get_logs_dir(self.session_id) / "ai_interactions.jsonl",
         )
 
-    def _create_controller(self) -> DesktopController | MobileController:
+    def _create_controller(
+        self,
+    ) -> DesktopController | MobileController | IOSController:
         """Instantiate the controller for this session backend."""
 
         if self.backend == "mobile_adb":
             return MobileController(preferred_serial=self.android_serial)
+        if self.backend == "mobile_ios":
+            return IOSController(preferred_udid=self.ios_udid)
         return DesktopController()
 
     def _tool_context(self, command_name: str) -> dict[str, Any]:
@@ -428,6 +457,10 @@ class ToolCallSessionRuntime:
             context["adb_serial"] = self.android_serial
         if self.android_app:
             context["app_package"] = self.android_app
+        if self.ios_udid:
+            context["ios_udid"] = self.ios_udid
+        if self.ios_app:
+            context["bundle_id"] = self.ios_app
         return context
 
     def _build_startup_response(self) -> str:
@@ -444,6 +477,19 @@ class ToolCallSessionRuntime:
             )
             serial_suffix = f" Device found: {serial}." if serial else ""
             return f"Session started with Android ADB backend.{serial_suffix}"
+        if self.backend == "mobile_ios":
+            ios_driver = (
+                self.controller.driver
+                if isinstance(self.controller, IOSController)
+                else None
+            )
+            idb_client = getattr(ios_driver, "idb", None)
+            detected_udid = getattr(idb_client, "udid", None)
+            udid = self.ios_udid or (
+                str(detected_udid).strip() if detected_udid else ""
+            )
+            udid_suffix = f" Device UDID: {udid}." if udid else ""
+            return f"Session started with iOS idb backend.{udid_suffix}"
         return "Session started with desktop backend."
 
     def _status_response(

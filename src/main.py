@@ -25,6 +25,7 @@ from src.desktop.controller import DesktopController
 from src.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
 from src.error_handling import ScopeTriageBlockedError
 from src.mobile.controller import MobileController
+from src.mobile.ios_controller import IOSController
 from src.monitoring.debug_logger import initialize_debug_logger
 from src.monitoring.logger import get_logger, get_run_id, setup_logging
 from src.monitoring.reporter import TestReporter
@@ -137,7 +138,12 @@ Fallback:
     parser.add_argument(
         "--mobile",
         action="store_true",
-        help="Use mobile ADB backend (hard override for this run)",
+        help="Use mobile ADB backend for Android (hard override for this run)",
+    )
+    parser.add_argument(
+        "--ios",
+        action="store_true",
+        help="Use iOS idb backend (hard override for this run)",
     )
     parser.add_argument(
         "--berserk",
@@ -223,7 +229,9 @@ async def run_test(
 ) -> int:
     """Run a test with mandatory requirements and context inputs."""
     automation_backend = normalize_automation_backend(automation_backend)
-    automation_controller: DesktopController | MobileController | None = None
+    automation_controller: (
+        DesktopController | MobileController | IOSController | None
+    ) = None
     coordinator: WorkflowCoordinator | None = None
     screen_recorder: ScreenRecorder | None = None
     recording_artifact_path: Path | None = None
@@ -278,6 +286,34 @@ async def run_test(
                     ambiguous_points=assessment.notes,
                     blocking_questions=[
                         "Context requires mobile_adb execution. Re-run with --mobile."
+                    ],
+                )
+            )
+        if (
+            automation_backend == "mobile_ios"
+            and assessment.target_type != "mobile_ios"
+        ):
+            raise ScopeTriageBlockedError(
+                triage_result=ScopeTriageResult(
+                    in_scope="",
+                    explicit_exclusions=[],
+                    ambiguous_points=assessment.notes,
+                    blocking_questions=[
+                        "--ios requires mobile_ios context (provide iOS idb setup details)."
+                    ],
+                )
+            )
+        if (
+            assessment.target_type == "mobile_ios"
+            and automation_backend != "mobile_ios"
+        ):
+            raise ScopeTriageBlockedError(
+                triage_result=ScopeTriageResult(
+                    in_scope="",
+                    explicit_exclusions=[],
+                    ambiguous_points=assessment.notes,
+                    blocking_questions=[
+                        "Context requires mobile_ios execution. Re-run with --ios."
                     ],
                 )
             )
@@ -462,11 +498,15 @@ async def _create_coordinator_stack(
     max_steps: int,
     backend: str = "desktop",
     agent_factory: AgentFactory | None = None,
-) -> tuple[DesktopController | MobileController, WorkflowCoordinator]:
+) -> tuple[DesktopController | MobileController | IOSController, WorkflowCoordinator]:
     """Build and initialize the automation backend/coordinator stack."""
     normalized_backend = normalize_automation_backend(backend)
     if normalized_backend == "mobile_adb":
-        automation_controller: DesktopController | MobileController = MobileController()
+        automation_controller: DesktopController | MobileController | IOSController = (
+            MobileController()
+        )
+    elif normalized_backend == "mobile_ios":
+        automation_controller = IOSController()
     else:
         automation_controller = DesktopController()
     try:
@@ -759,10 +799,14 @@ async def async_main(args: list[str] | None = None) -> int:
     requirements = await read_plan_file(parsed_args.plan)
     context_text = await read_context_file(parsed_args.context)
     automation_backend = (
-        "mobile_adb"
-        if parsed_args.mobile
-        else normalize_automation_backend(
-            getattr(settings, "automation_backend", "desktop")
+        "mobile_ios"
+        if parsed_args.ios
+        else (
+            "mobile_adb"
+            if parsed_args.mobile
+            else normalize_automation_backend(
+                getattr(settings, "automation_backend", "desktop")
+            )
         )
     )
 

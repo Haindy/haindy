@@ -170,8 +170,11 @@ def create_tool_call_parser() -> argparse.ArgumentParser:
     target_group.add_argument(
         "--desktop", action="store_true", help="Use desktop backend."
     )
+    target_group.add_argument("--ios", action="store_true", help="Use iOS idb backend.")
     session_new.add_argument("--android-serial", help="Target Android serial.")
     session_new.add_argument("--android-app", help="Launch Android package on start.")
+    session_new.add_argument("--ios-udid", help="Target iOS device or simulator UDID.")
+    session_new.add_argument("--ios-app", help="Launch iOS bundle ID on start.")
     session_new.add_argument(
         "--url",
         help="Desktop URL startup support is intentionally deferred in this build.",
@@ -260,6 +263,8 @@ def create_tool_call_daemon_parser() -> argparse.ArgumentParser:
     parser.add_argument("--idle-timeout", type=int, default=1800)
     parser.add_argument("--android-serial")
     parser.add_argument("--android-app")
+    parser.add_argument("--ios-udid")
+    parser.add_argument("--ios-app")
     parser.add_argument("--debug", action="store_true")
     return parser
 
@@ -364,6 +369,8 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
             idle_timeout=args.idle_timeout,
             android_serial=args.android_serial,
             android_app=args.android_app,
+            ios_udid=getattr(args, "ios_udid", None),
+            ios_app=getattr(args, "ios_app", None),
             debug=bool(args.debug),
         )
     except ToolCallDaemonLaunchError as exc:
@@ -469,9 +476,11 @@ def _handle_session_list() -> tuple[ToolCallEnvelope, int]:
             sessions.append(
                 SessionListEntry(
                     session_id=metadata.session_id,
-                    backend="android"
-                    if metadata.backend == "mobile_adb"
-                    else "desktop",
+                    backend=(
+                        "android"
+                        if metadata.backend == "mobile_adb"
+                        else "ios" if metadata.backend == "mobile_ios" else "desktop"
+                    ),
                     created_at=metadata.created_at,
                     steps_executed=metadata.actions_executed,
                     idle_seconds=idle_seconds,
@@ -614,6 +623,8 @@ def _resolve_requested_backend(
         return "mobile_adb"
     if args.desktop:
         return "desktop"
+    if getattr(args, "ios", False):
+        return "mobile_ios"
     return normalize_automation_backend(
         getattr(settings, "automation_backend", "desktop")
     )
@@ -625,6 +636,10 @@ def _startup_response_from_metadata(metadata: object) -> str:
         serial = getattr(metadata, "android_serial", None)
         serial_suffix = f" Device found: {serial}." if serial else ""
         return f"Session started with Android ADB backend.{serial_suffix}"
+    if backend == "mobile_ios":
+        udid = getattr(metadata, "ios_udid", None)
+        udid_suffix = f" Device UDID: {udid}." if udid else ""
+        return f"Session started with iOS idb backend.{udid_suffix}"
     return "Session started with desktop backend."
 
 
