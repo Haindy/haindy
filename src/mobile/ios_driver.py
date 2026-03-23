@@ -216,6 +216,33 @@ class IOSDriver(AutomationDriver):
             await self.idb.run_idb("ui", "text", text)
         self._capture_call("type_text", {"length": len(text)})
 
+    async def clear_and_type(self, x: int, y: int, text: str) -> None:
+        """Select all text in a field via triple-tap then type replacement text.
+
+        idb has no chord command, so cmd+a cannot be sent as a simultaneous
+        key combination. Triple-tapping a text field is the reliable iOS
+        gesture to select all existing text; the subsequent type_text call
+        then replaces the selection.
+        """
+        await self._ensure_ready()
+        mapped_x, mapped_y = await self._map_point_to_device(x, y)
+        # Triple-tap to select all text in the field.
+        for _ in range(3):
+            await self.idb.run_idb("ui", "tap", str(mapped_x), str(mapped_y))
+        await asyncio.sleep(0.3)
+        if text:
+            await self.idb.run_idb("ui", "text", text)
+        self._capture_call(
+            "clear_and_type",
+            {
+                "x": x,
+                "y": y,
+                "mapped_x": mapped_x,
+                "mapped_y": mapped_y,
+                "length": len(text),
+            },
+        )
+
     # Special virtual keys that map to idb ui button rather than HID keycodes.
     _IOS_BUTTON_KEYS: frozenset[str] = frozenset({"home", "lock", "siri"})
 
