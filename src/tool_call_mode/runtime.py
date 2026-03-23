@@ -180,7 +180,9 @@ class ToolCallSessionRuntime:
         self.metadata.last_command_at = _utc_now().isoformat()
         save_session_metadata(self.metadata)
 
-        if request.command == "act":
+        if request.command == "screenshot":
+            envelope = await self._handle_screenshot()
+        elif request.command == "act":
             envelope = await self._handle_act(request)
         elif request.command == "test":
             envelope = await self._handle_test(request)
@@ -263,6 +265,24 @@ class ToolCallSessionRuntime:
             ),
             duration_ms=0,
             actions_taken=1,
+        )
+
+    async def _handle_screenshot(self) -> ToolCallEnvelope:
+        self._activate_command_context("screenshot")
+        if self.controller is None:
+            raise RuntimeError("Controller is not initialized.")
+
+        screenshot_bytes = await self.controller.driver.screenshot()
+        screenshot_path = self._store_screenshot_bytes(screenshot_bytes)
+        return make_envelope(
+            session_id=self.session_id,
+            command="screenshot",
+            status=CommandStatus.SUCCESS,
+            response="Screenshot captured.",
+            screenshot_path=screenshot_path,
+            exit_reason=ExitReason.COMPLETED,
+            duration_ms=0,
+            actions_taken=0,
         )
 
     async def _handle_act(self, request: ToolCallRequest) -> ToolCallEnvelope:

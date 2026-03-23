@@ -46,7 +46,7 @@ from .paths import (
     terminate_session_process,
 )
 
-TOOL_CALL_COMMANDS = {"session", "act", "test", "__tool_call_daemon"}
+TOOL_CALL_COMMANDS = {"session", "act", "test", "screenshot", "__tool_call_daemon"}
 
 
 class ToolCallUsageError(ValueError):
@@ -231,6 +231,13 @@ def create_tool_call_parser() -> argparse.ArgumentParser:
     )
     del session_vars
 
+    screenshot_parser = subparsers.add_parser(
+        "screenshot",
+        help="Take a screenshot and return its path (no AI model call)",
+        parents=[common_parser, session_parser_parent],
+    )
+    screenshot_parser.add_argument("--timeout", type=int, default=30)
+
     act_parser = subparsers.add_parser(
         "act",
         help="Execute one direct action",
@@ -312,6 +319,14 @@ async def run_tool_call_cli(argv: list[str]) -> int:
             )
         else:  # pragma: no cover - parser guarantees this branch is unreachable
             envelope, exit_code = _usage_error("Unknown session subcommand.")
+    elif args.tool_command == "screenshot":
+        envelope, exit_code = await _send_session_request(
+            args,
+            ToolCallRequest(
+                command="screenshot",
+                options={"timeout_seconds": args.timeout},
+            ),
+        )
     elif args.tool_command == "act":
         envelope, exit_code = await _send_session_request(
             args,

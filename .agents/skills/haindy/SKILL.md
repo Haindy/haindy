@@ -50,6 +50,7 @@ iOS rules:
 ## Core commands
 
 ```bash
+haindy screenshot --session <SESSION_ID>
 haindy session status --session <SESSION_ID>
 haindy act "<single action>" --session <SESSION_ID>
 haindy test "<scenario with an expected outcome>" --session <SESSION_ID>
@@ -61,11 +62,12 @@ haindy session close --session <SESSION_ID>
 
 Command choice:
 
-- Use `session status` to see the current screen
+- Use `screenshot` to capture the current screen cheaply — no AI model is invoked, returns immediately with `screenshot_path`
+- Use `session status` when you also want an AI description of what is on screen
 - Use `act` for one direct interaction when you do not need outcome validation
 - Use `test` when you care whether the result actually happened
 
-Prefer `test` over `act` when the outcome matters.
+Prefer `screenshot` over `session status` whenever you just need to see the screen. Prefer `test` over `act` when the outcome matters.
 
 ## Session variables
 
