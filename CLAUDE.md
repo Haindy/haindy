@@ -24,8 +24,8 @@ source .venv/bin/activate
 .venv/bin/pip install -e ".[dev]"
 
 # Configure credentials (stored in system keychain)
-haindy --auth-set openai      # or google / anthropic
-haindy --auth-status          # verify
+haindy --auth login openai    # or google / anthropic / openai-codex
+haindy --auth status          # verify
 
 # Optional: create ~/.haindy/settings.json for persistent non-secret settings
 # See .agents/skills/haindy-setup/SKILL.md for full setup guidance
@@ -46,7 +46,9 @@ haindy --mobile --plan <plan> --context <context>
 haindy --plan <plan> --context <context> --debug
 
 # OAuth auth management
-haindy --codex-auth login|logout|status
+haindy --auth login openai-codex
+haindy --auth status
+haindy --auth clear openai-codex
 
 # API connectivity test
 haindy --test-api

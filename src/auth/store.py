@@ -86,7 +86,7 @@ class EncryptedJsonFileStore:
         nonce = base64.b64decode(str(payload["nonce"]))
         ciphertext = base64.b64decode(str(payload["ciphertext"]))
         plaintext = AESGCM(self._load_or_create_key()).decrypt(nonce, ciphertext, None)
-        return json.loads(plaintext.decode("utf-8"))
+        return dict(json.loads(plaintext.decode("utf-8")))
 
     def _save(self, data: dict[str, str]) -> None:
         self._ensure_parent_dir()

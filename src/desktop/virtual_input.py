@@ -17,10 +17,10 @@ _UInputCtor: Any
 _UInputErrorType: type[Exception]
 
 try:
-    from evdev import AbsInfo as _AbsInfoCtor
-    from evdev import UInput as _UInputCtor
+    from evdev import AbsInfo as _AbsInfoCtor  # type: ignore[no-redef]
+    from evdev import UInput as _UInputCtor  # type: ignore[no-redef]
     from evdev import ecodes
-    from evdev.uinput import UInputError as _UInputErrorType
+    from evdev.uinput import UInputError as _UInputErrorType  # type: ignore[no-redef]
 
     _EVDEV_AVAILABLE = True
     _EVDEV_IMPORT_ERROR: Exception | None = None
@@ -954,7 +954,7 @@ class VirtualInput:
         }
         alias_map = {k: int(v) for k, v in alias_map.items() if v is not None}
         if normalized in alias_map:
-            return alias_map[normalized]
+            return int(alias_map[normalized])
 
         if normalized.startswith("kp") and normalized[2:].isdigit():
             code = getattr(ecodes, f"KEY_KP{normalized[2:]}", None)

@@ -112,6 +112,31 @@ _JSON_TO_FIELD: dict[str, str] = {
 _FIELD_TO_JSON: dict[str, str] = {v: k for k, v in _JSON_TO_FIELD.items()}
 
 
+_SETTINGS_SKELETON: dict[str, Any] = {
+    "computer_use": {
+        "model": "gpt-5.4",
+    },
+    "execution": {
+        "automation_backend": "desktop",
+    },
+    "logging": {
+        "level": "INFO",
+    },
+}
+
+
+def ensure_settings_skeleton(path: Path) -> bool:
+    """Create a minimal settings file at *path* if one does not already exist.
+
+    Returns True if a new file was created, False if it already existed.
+    """
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_SETTINGS_SKELETON, indent=2), encoding="utf-8")
+    return True
+
+
 def load_settings_file(path: Path) -> dict[str, Any]:
     """Load a settings JSON file and return the raw nested dict.
 
@@ -128,7 +153,9 @@ def load_settings_file(path: Path) -> dict[str, Any]:
         raise ValueError(f"Settings file {path} contains invalid JSON: {exc}") from exc
 
     if not isinstance(data, dict):
-        raise ValueError(f"Settings file {path} must contain a JSON object at the top level")
+        raise ValueError(
+            f"Settings file {path} must contain a JSON object at the top level"
+        )
 
     _reject_secret_fields(data, path)
     return data
@@ -177,7 +204,9 @@ def write_settings_file(path: Path, data: dict[str, Any]) -> None:
             existing = {}
 
     _deep_merge(existing, data)
-    path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(existing, indent=2, default=_json_default), encoding="utf-8"
+    )
 
 
 def flat_to_nested(flat: dict[str, Any]) -> dict[str, Any]:
@@ -222,6 +251,13 @@ def _reject_secret_fields(data: dict[str, Any], path: Path) -> None:
                 "API keys must not be stored in settings files. "
                 "Use 'haindy --auth-set <provider>' instead."
             )
+
+
+def _json_default(obj: Any) -> Any:
+    """Fallback serializer for types that json.dumps cannot handle natively."""
+    if isinstance(obj, Path):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:

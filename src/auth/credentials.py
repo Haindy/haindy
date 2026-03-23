@@ -36,7 +36,7 @@ def get_api_key(provider: str) -> str | None:
     try:
         value = keyring.get_password(KEYRING_SERVICE, account)
         if value:
-            return value
+            return str(value)
     except (keyring.errors.NoKeyringError, Exception):
         pass
     return _file_store().get(account)

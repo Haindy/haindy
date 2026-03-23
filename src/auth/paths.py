@@ -9,7 +9,7 @@ from platformdirs import user_state_path
 
 def get_auth_state_dir() -> Path:
     """Return the per-user directory used for HAINDY auth state."""
-    return user_state_path("haindy", ensure_exists=False) / "auth"
+    return Path(user_state_path("haindy", ensure_exists=False)) / "auth"
 
 
 def get_codex_oauth_store_path() -> Path:
