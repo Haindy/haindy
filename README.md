@@ -43,22 +43,42 @@ If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
 - Android automation: ensure `adb` is installed and the target device or emulator is reachable
 - macOS is fine for development and tests, but the `desktop` backend is Linux/X11-only today
 
-### 4. Configure environment
+### 4. Configure credentials and settings
+
+**Recommended: interactive setup**
 
 ```bash
-cp .env.example .env
+haindy --auth-set openai      # prompts for API key; stored in system keychain
+haindy --auth-set google      # prompts for Vertex project, location, and API key
+haindy --auth-set anthropic   # prompts for API key; stored in system keychain
+haindy --auth-status          # shows which providers have credentials configured
 ```
 
-Important settings:
+**Settings file** (`~/.haindy/settings.json`): create this for persistent non-secret configuration:
 
-- `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
-- `HAINDY_CU_PROVIDER=openai|google|anthropic`
-- `HAINDY_AUTOMATION_BACKEND=desktop|mobile_adb` to set the default backend
-- `HAINDY_HOME` to override the tool-call session home (default: `~/.haindy`)
+```json
+{
+  "computer_use": { "provider": "google" },
+  "execution": { "automation_backend": "desktop" },
+  "logging": { "level": "INFO" }
+}
+```
+
+
+
+
+**Migrating from .env**: if you have an existing `.env` file:
+
+```bash
+haindy --config-migrate          # reads .env, splits settings to settings.json and keys to keychain
+haindy --config-show             # verify the effective configuration
+```
+
+**CI/CD**: environment variables still work and take the highest priority. Copy `.env.example` to `.env` and fill in values, or export them directly.
 
 OpenAI auth modes:
 
-- Default non-CU OpenAI auth uses `HAINDY_OPENAI_API_KEY`
+- Default non-CU OpenAI auth uses the stored/env `HAINDY_OPENAI_API_KEY`
 - `--codex-auth login` stores a local encrypted Codex OAuth session for non-CU OpenAI requests
 - `--codex-auth status` shows the active non-CU OpenAI auth mode
 - `--codex-auth logout` clears the stored OAuth session

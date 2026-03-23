@@ -20,7 +20,7 @@ from src.auth.codex_oauth import (
     extract_chatgpt_account_id,
 )
 from src.auth.manager import OpenAIAuthManager
-from src.auth.store import LocalEncryptedAuthStore, StoredCodexOAuthCredentials
+from src.auth.store import EncryptedJsonFileStore, StoredCodexOAuthCredentials
 
 
 def _jwt_with_claims(claims: dict[str, object]) -> str:
@@ -36,10 +36,72 @@ def _jwt_with_claims(claims: dict[str, object]) -> str:
     return f"{header}.{payload}."
 
 
-def test_local_encrypted_auth_store_round_trip(tmp_path: Path) -> None:
-    store = LocalEncryptedAuthStore(
-        store_path=tmp_path / "state" / "codex.enc",
-        key_path=tmp_path / "state" / "codex.key",
+def test_encrypted_json_file_store_round_trip(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
+        store_path=tmp_path / "state" / "test.enc",
+        key_path=tmp_path / "state" / "test.key",
+    )
+
+    store.set("foo", "bar")
+    store.set("baz", "qux")
+
+    assert store.get("foo") == "bar"
+    assert store.get("baz") == "qux"
+    assert store.get("missing") is None
+
+    encrypted_text = (tmp_path / "state" / "test.enc").read_text(encoding="utf-8")
+    assert "bar" not in encrypted_text
+    assert "qux" not in encrypted_text
+
+
+def test_encrypted_json_file_store_delete(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
+        store_path=tmp_path / "test.enc",
+        key_path=tmp_path / "test.key",
+    )
+    store.set("key1", "value1")
+    store.set("key2", "value2")
+
+    store.delete("key1")
+
+    assert store.get("key1") is None
+    assert store.get("key2") == "value2"
+
+
+def test_encrypted_json_file_store_delete_missing_key_is_noop(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
+        store_path=tmp_path / "test.enc",
+        key_path=tmp_path / "test.key",
+    )
+    store.delete("nonexistent")  # should not raise
+
+
+def test_encrypted_json_file_store_get_all(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
+        store_path=tmp_path / "test.enc",
+        key_path=tmp_path / "test.key",
+    )
+    store.set("a", "1")
+    store.set("b", "2")
+
+    all_data = store.get_all()
+
+    assert all_data == {"a": "1", "b": "2"}
+
+
+def test_encrypted_json_file_store_empty_on_missing_file(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
+        store_path=tmp_path / "missing.enc",
+        key_path=tmp_path / "missing.key",
+    )
+    assert store.get("anything") is None
+    assert store.get_all() == {}
+
+
+def test_oauth_credentials_round_trip_via_manager(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
+        store_path=tmp_path / "codex.enc",
+        key_path=tmp_path / "codex.key",
     )
     credentials = StoredCodexOAuthCredentials(
         access_token="access-token",
@@ -49,21 +111,37 @@ def test_local_encrypted_auth_store_round_trip(tmp_path: Path) -> None:
         expires_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
     )
 
-    store.set_codex_oauth_credentials(credentials)
+    manager = OpenAIAuthManager(
+        settings=SimpleNamespace(openai_api_key=""),
+        store=store,
+        oauth_client=CodexOAuthClient(),
+    )
+    manager._set_oauth_credentials(credentials)
+    loaded = manager._get_oauth_credentials()
 
-    loaded = store.get_codex_oauth_credentials()
-    assert loaded == credentials
-    encrypted_text = (tmp_path / "state" / "codex.enc").read_text(encoding="utf-8")
+    assert loaded is not None
+    assert loaded.access_token == credentials.access_token
+    assert loaded.refresh_token == credentials.refresh_token
+    assert loaded.id_token == credentials.id_token
+    assert loaded.account_label == credentials.account_label
+    assert loaded.expires_at == credentials.expires_at
+
+    encrypted_text = (tmp_path / "codex.enc").read_text(encoding="utf-8")
     assert "access-token" not in encrypted_text
     assert "refresh-token" not in encrypted_text
 
 
-def test_local_encrypted_auth_store_clear(tmp_path: Path) -> None:
-    store = LocalEncryptedAuthStore(
+def test_oauth_credentials_clear_via_manager(tmp_path: Path) -> None:
+    store = EncryptedJsonFileStore(
         store_path=tmp_path / "codex.enc",
         key_path=tmp_path / "codex.key",
     )
-    store.set_codex_oauth_credentials(
+    manager = OpenAIAuthManager(
+        settings=SimpleNamespace(openai_api_key=""),
+        store=store,
+        oauth_client=CodexOAuthClient(),
+    )
+    manager._set_oauth_credentials(
         StoredCodexOAuthCredentials(
             access_token="a",
             refresh_token="b",
@@ -73,10 +151,9 @@ def test_local_encrypted_auth_store_clear(tmp_path: Path) -> None:
         )
     )
 
-    store.clear_codex_oauth_credentials()
+    manager.clear_oauth_credentials()
 
-    assert store.get_codex_oauth_credentials() is None
-    assert not (tmp_path / "codex.enc").exists()
+    assert manager._get_oauth_credentials() is None
 
 
 def test_codex_oauth_build_authorize_url_and_parse_redirect() -> None:
@@ -116,31 +193,44 @@ def test_extract_chatgpt_account_id_and_account_label() -> None:
     assert derive_account_label(jwt_token) == "user@example.com"
 
 
+class _FakeStore:
+    """In-memory store implementing the EncryptedJsonFileStore interface."""
+
+    def __init__(self, initial: dict[str, str] | None = None) -> None:
+        self._data: dict[str, str] = dict(initial or {})
+
+    def get(self, key: str) -> str | None:
+        return self._data.get(key)
+
+    def get_all(self) -> dict[str, str]:
+        return dict(self._data)
+
+    def set(self, key: str, value: str) -> None:
+        self._data[key] = value
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
+
 @pytest.mark.asyncio
 async def test_auth_manager_prefers_oauth_and_refreshes_expiring_tokens() -> None:
     now = datetime(2026, 3, 1, tzinfo=timezone.utc)
-    stored = StoredCodexOAuthCredentials(
+    id_token = _jwt_with_claims({"email": "fresh@example.com"})
+    initial_credentials = StoredCodexOAuthCredentials(
         access_token="",
         refresh_token="refresh-token",
-        id_token=_jwt_with_claims({"email": "fresh@example.com"}),
+        id_token=id_token,
         account_label="",
         expires_at=now,
     )
+    fake_store = _FakeStore()
 
-    class FakeStore:
-        def __init__(self) -> None:
-            self.saved: StoredCodexOAuthCredentials | None = None
-
-        def get_codex_oauth_credentials(self) -> StoredCodexOAuthCredentials | None:
-            return self.saved or stored
-
-        def set_codex_oauth_credentials(
-            self, credentials: StoredCodexOAuthCredentials | None
-        ) -> None:
-            self.saved = credentials
-
-        def clear_codex_oauth_credentials(self) -> None:
-            self.saved = None
+    manager_for_setup = OpenAIAuthManager(
+        settings=SimpleNamespace(openai_api_key="fallback-key"),
+        store=fake_store,
+        oauth_client=CodexOAuthClient(),
+    )
+    manager_for_setup._set_oauth_credentials(initial_credentials)
 
     class FakeOAuthClient:
         async def refresh_access_token(self, refresh_token: str) -> CodexOAuthToken:
@@ -154,7 +244,7 @@ async def test_auth_manager_prefers_oauth_and_refreshes_expiring_tokens() -> Non
 
     manager = OpenAIAuthManager(
         settings=SimpleNamespace(openai_api_key="fallback-key"),
-        store=FakeStore(),
+        store=fake_store,
         oauth_client=FakeOAuthClient(),
         now=lambda: now,
     )
@@ -171,10 +261,7 @@ async def test_auth_manager_prefers_oauth_and_refreshes_expiring_tokens() -> Non
 def test_auth_manager_status_falls_back_to_api_key_when_no_oauth() -> None:
     manager = OpenAIAuthManager(
         settings=SimpleNamespace(openai_api_key="sk-test"),
-        store=SimpleNamespace(
-            get_codex_oauth_credentials=lambda: None,
-            clear_codex_oauth_credentials=lambda: None,
-        ),
+        store=_FakeStore(),
         oauth_client=CodexOAuthClient(),
     )
 

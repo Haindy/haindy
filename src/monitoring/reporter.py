@@ -53,9 +53,9 @@ class TestExecutionReport:
         self.journal = journal
         self.config = config or ReportConfig()
         self.generated_at = datetime.now(timezone.utc)
-        self.bug_reports: list[
-            dict[str, Any]
-        ] = []  # Will be populated after initialization
+        self.bug_reports: list[dict[str, Any]] = (
+            []
+        )  # Will be populated after initialization
         self.artifacts = artifacts or {}
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,14 +68,18 @@ class TestExecutionReport:
                 "test_name": self.test_metrics.test_name,
             },
             "summary": {
-                "outcome": self.test_metrics.outcome.value
-                if self.test_metrics.outcome
-                else "unknown",
+                "outcome": (
+                    self.test_metrics.outcome.value
+                    if self.test_metrics.outcome
+                    else "unknown"
+                ),
                 "duration_seconds": self.test_metrics.duration_seconds,
                 "start_time": self.test_metrics.start_time.isoformat(),
-                "end_time": self.test_metrics.end_time.isoformat()
-                if self.test_metrics.end_time
-                else None,
+                "end_time": (
+                    self.test_metrics.end_time.isoformat()
+                    if self.test_metrics.end_time
+                    else None
+                ),
                 "success_rate": self.test_metrics.success_rate,
             },
             "steps": {
@@ -112,9 +116,11 @@ class TestExecutionReport:
         if self.config.include_journal_entries and self.journal:
             report["execution_journal"] = {
                 "entries": len(self.journal.entries),
-                "summary": self.journal.get_summary()
-                if hasattr(self.journal, "get_summary")
-                else {},
+                "summary": (
+                    self.journal.get_summary()
+                    if hasattr(self.journal, "get_summary")
+                    else {}
+                ),
             }
 
         # Add bug reports
@@ -141,8 +147,11 @@ class TestExecutionReport:
         if debug_logger:
             template_data["ai_conversations"] = debug_logger.get_ai_conversations_html()
 
-        return template.render(
-            report=template_data, ai_conversations=template_data.get("ai_conversations")
+        return str(
+            template.render(
+                report=template_data,
+                ai_conversations=template_data.get("ai_conversations"),
+            )
         )
 
     def to_markdown(self) -> str:

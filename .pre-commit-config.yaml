@@ -15,7 +15,7 @@ repos:
     rev: 26.1.0
     hooks:
       - id: black
-        language_version: python3.10
+        language_version: python3
 
   - repo: https://github.com/pycqa/isort
     rev: 8.0.0
@@ -33,7 +33,7 @@ repos:
     rev: v1.19.1
     hooks:
       - id: mypy
-        additional_dependencies: 
+        additional_dependencies:
           - types-aiofiles
           - pydantic
         args: ["--ignore-missing-imports"]
