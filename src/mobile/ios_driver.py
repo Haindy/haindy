@@ -293,27 +293,66 @@ class IOSDriver(AutomationDriver):
 
     async def screenshot(self) -> bytes:
         await self._ensure_ready()
+        screenshot_bytes = await self._screenshot_idb()
+        if screenshot_bytes is None:
+            screenshot_bytes = await self._screenshot_simctl()
+        if not screenshot_bytes.startswith(_PNG_SIGNATURE):
+            raise RuntimeError(
+                f"iOS screenshot did not produce a valid PNG (got {len(screenshot_bytes)} bytes)"
+            )
+        size = self._parse_png_size(screenshot_bytes)
+        if size is not None:
+            self._last_screenshot_size = size
+        self._capture_call("screenshot", {"label": "ios"})
+        return screenshot_bytes
+
+    async def _screenshot_idb(self) -> bytes | None:
+        """Try idb screenshot; return None if it fails or produces no image."""
         tmp_path = tempfile.mktemp(suffix=".png")
         try:
-            await self.idb.run_idb("screenshot", tmp_path)
+            result = await self.idb.run_idb("screenshot", tmp_path, check=False)
+            if result.returncode != 0:
+                return None
             with open(tmp_path, "rb") as fh:
-                screenshot_bytes = fh.read()
+                data = fh.read()
+            return data if data.startswith(_PNG_SIGNATURE) else None
+        except Exception:
+            return None
         finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
 
-        if not screenshot_bytes.startswith(_PNG_SIGNATURE):
-            raise RuntimeError(
-                f"idb screenshot did not produce a valid PNG (got {len(screenshot_bytes)} bytes)"
+    async def _screenshot_simctl(self) -> bytes:
+        """Fall back to xcrun simctl io screenshot (works on newer iOS betas)."""
+        udid = self.idb.udid
+        if not udid:
+            raise RuntimeError("No UDID set; cannot use simctl screenshot fallback.")
+        tmp_path = tempfile.mktemp(suffix=".png")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "xcrun",
+                "simctl",
+                "io",
+                udid,
+                "screenshot",
+                tmp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-
-        size = self._parse_png_size(screenshot_bytes)
-        if size is not None:
-            self._last_screenshot_size = size
-        self._capture_call("screenshot", {"label": "ios"})
-        return screenshot_bytes
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"simctl screenshot failed: {stderr.decode('utf-8', errors='replace').strip()}"
+                )
+            with open(tmp_path, "rb") as fh:
+                return fh.read()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     async def wait(self, milliseconds: int) -> None:
         await asyncio.sleep(max(int(milliseconds), 0) / 1000.0)
