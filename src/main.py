@@ -22,6 +22,8 @@ from src.auth import (
     OAuthCallbackCapture,
     OpenAIAuthManager,
 )
+from src.cli.auth_commands import handle_auth_clear, handle_auth_set, handle_auth_status
+from src.cli.config_commands import handle_config_migrate, handle_config_show
 from src.config.settings import Settings, get_settings
 from src.core.types import ScopeTriageResult, TestPlan, TestState
 from src.desktop.controller import DesktopController
@@ -70,6 +72,24 @@ Examples:
   # Test your active OpenAI auth configuration
   {cli_name} --test-api
 
+  # Store API credentials interactively
+  {cli_name} --auth-set openai
+  {cli_name} --auth-set google
+  {cli_name} --auth-set anthropic
+
+  # Show which providers have credentials configured
+  {cli_name} --auth-status
+
+  # Clear stored credentials for a provider
+  {cli_name} --auth-clear openai
+
+  # Show effective configuration (secrets redacted)
+  {cli_name} --config-show
+
+  # Migrate an existing .env file to the new config system
+  {cli_name} --config-migrate
+  {cli_name} --config-migrate /path/to/.env
+
 Fallback:
   python -m src.main --plan requirements.md --context execution_context.txt
         """,
@@ -96,6 +116,35 @@ Fallback:
         "--codex-auth",
         choices=["login", "logout", "status"],
         help="Manage OpenAI Codex OAuth credentials for non-CU OpenAI requests",
+    )
+    input_group.add_argument(
+        "--auth-set",
+        choices=["openai", "google", "anthropic"],
+        metavar="PROVIDER",
+        help="Store API credentials for a provider interactively (openai|google|anthropic)",
+    )
+    input_group.add_argument(
+        "--auth-clear",
+        choices=["openai", "google", "anthropic"],
+        metavar="PROVIDER",
+        help="Remove stored credentials for a provider",
+    )
+    input_group.add_argument(
+        "--auth-status",
+        action="store_true",
+        help="Show which providers have API credentials configured",
+    )
+    input_group.add_argument(
+        "--config-show",
+        action="store_true",
+        help="Show the effective configuration (secrets redacted)",
+    )
+    input_group.add_argument(
+        "--config-migrate",
+        nargs="?",
+        const=".env",
+        metavar="DOTENV_PATH",
+        help="Migrate a .env file to settings.json and keychain (default: .env)",
     )
 
     parser.add_argument(
@@ -783,6 +832,16 @@ async def async_main(args: list[str] | None = None) -> int:
 
     if parsed_args.codex_auth:
         return await _handle_codex_auth_command(parsed_args.codex_auth)
+    if parsed_args.auth_set:
+        return await handle_auth_set(parsed_args.auth_set)
+    if parsed_args.auth_clear:
+        return await handle_auth_clear(parsed_args.auth_clear)
+    if parsed_args.auth_status:
+        return await handle_auth_status()
+    if parsed_args.config_show:
+        return await handle_config_show()
+    if parsed_args.config_migrate is not None:
+        return await handle_config_migrate(Path(parsed_args.config_migrate))
 
     if not parsed_args.plan:
         parser.print_help()

@@ -20,3 +20,18 @@ def get_codex_oauth_store_path() -> Path:
 def get_codex_oauth_key_path() -> Path:
     """Return the symmetric key path for encrypted credential storage."""
     return get_auth_state_dir() / "codex_oauth.key"
+
+
+def get_user_settings_path() -> Path:
+    """Return the user-level settings file path."""
+    return Path("~/.haindy").expanduser() / "settings.json"
+
+
+def get_api_key_store_path() -> Path:
+    """Return the encrypted API key store path."""
+    return get_auth_state_dir() / "api_keys.enc"
+
+
+def get_api_key_store_key_path() -> Path:
+    """Return the symmetric key path for the API key store."""
+    return get_auth_state_dir() / "api_keys.key"

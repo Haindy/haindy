@@ -124,6 +124,12 @@ SETTINGS_ENV_VARS: dict[str, str] = {
 }
 
 OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
+
+_SECRET_FIELD_TO_PROVIDER: dict[str, str] = {
+    "openai_api_key": "openai",
+    "anthropic_api_key": "anthropic",
+    "vertex_api_key": "vertex",
+}
 LIST_FIELDS = {
     "actions_computer_tool_allowed_domains",
     "actions_computer_tool_blocked_domains",
@@ -279,11 +285,40 @@ def _build_agent_models(env: Mapping[str, str]) -> dict[str, AgentModelConfig]:
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> "Settings":
-    """Load settings from exact environment variable names only."""
+    """Load settings from all sources, low-to-high priority.
 
-    raw_env = _merge_runtime_env() if env is None else dict(env)
+    Priority (lowest to highest):
+      1. Pydantic field defaults
+      2. ~/.haindy/settings.json (user-level)
+      3. .haindy.json in CWD (project-level)
+      4. API keys from system keychain / encrypted file fallback
+      5. HAINDY_* environment variables + .env file
+    """
+    from src.auth.credentials import get_api_key
+    from src.config.settings_file import flatten_settings_dict, load_settings_file
+
     payload: dict[str, Any] = {}
 
+    # Layer 1: user-level settings file
+    user_path = Path("~/.haindy/settings.json").expanduser()
+    payload.update(flatten_settings_dict(load_settings_file(user_path)))
+
+    # Layer 2: project-level settings file (.haindy.json in CWD)
+    payload.update(flatten_settings_dict(load_settings_file(Path(".haindy.json"))))
+
+    # Layer 3: env vars (build raw_env first so we can check which secret keys
+    # are already covered by an env var before hitting the keychain)
+    raw_env = _merge_runtime_env() if env is None else dict(env)
+
+    # Layer 3: keychain / encrypted file for secret fields not already set by env
+    for field_name, provider in _SECRET_FIELD_TO_PROVIDER.items():
+        env_name = SETTINGS_ENV_VARS[field_name]
+        if env_name not in raw_env:
+            key = get_api_key(provider)
+            if key:
+                payload[field_name] = key
+
+    # Layer 4: env vars (highest priority)
     for field_name, env_name in SETTINGS_ENV_VARS.items():
         raw_value = raw_env.get(env_name)
         if raw_value is None:

@@ -22,8 +22,17 @@ python3 -m venv .venv
 source .venv/bin/activate
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e ".[dev]"
-cp .env.example .env  # then fill in API keys
+
+# Configure credentials (stored in system keychain)
+haindy --auth-set openai      # or google / anthropic
+haindy --auth-status          # verify
+
+# Optional: create ~/.haindy/settings.json for persistent non-secret settings
+# See .agents/skills/haindy-setup/SKILL.md for full setup guidance
 ```
+
+For CI/CD or if you prefer a flat file, copy `.env.example` to `.env` and fill
+in the values. Environment variables take priority over all other sources.
 
 ### Running
 ```bash
@@ -137,4 +146,6 @@ Configured via `HAINDY_AUTOMATION_BACKEND`:
 When changing these areas, update all affected files together:
 
 - **Backend names/aliases/defaults**: `src/runtime/environment.py`, `src/config/settings.py`, `.env.example`, `README.md`, tests
-- **Env vars/cache paths/provider settings**: `src/config/settings.py`, `.env.example`, `README.md`, `docs/RUNBOOK.md`, tests
+- **Env vars/cache paths/provider settings**: `src/config/settings.py`, `src/config/settings_file.py` (`_JSON_TO_FIELD`), `.env.example`, `README.md`, `docs/RUNBOOK.md`, tests
+- **Adding a new settings field**: update `Settings` in `src/config/settings.py`, add to `SETTINGS_ENV_VARS`, add to `_JSON_TO_FIELD` in `src/config/settings_file.py`, add to `.env.example`
+- **Adding a new secret/API key**: update `_SECRET_FIELD_TO_PROVIDER` in `src/config/settings.py`, update `_PROVIDER_TO_ACCOUNT` in `src/auth/credentials.py`, update `src/cli/auth_commands.py`

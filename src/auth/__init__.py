@@ -18,7 +18,7 @@ from .codex_oauth import (
     extract_chatgpt_account_id,
 )
 from .manager import OpenAIAuthManager, OpenAIAuthStatus, ResolvedOpenAIAuth
-from .store import LocalEncryptedAuthStore, StoredCodexOAuthCredentials
+from .store import EncryptedJsonFileStore, StoredCodexOAuthCredentials
 
 __all__ = [
     "CODEX_OAUTH_AUTHORIZE_PATH",
@@ -34,7 +34,7 @@ __all__ = [
     "CodexOAuthToken",
     "CodexOAuthUnauthorizedError",
     "derive_account_label",
-    "LocalEncryptedAuthStore",
+    "EncryptedJsonFileStore",
     "OAuthCallbackCapture",
     "OpenAIAuthManager",
     "OpenAIAuthStatus",

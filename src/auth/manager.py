@@ -16,7 +16,11 @@ from .codex_oauth import (
     derive_account_label,
     extract_chatgpt_account_id,
 )
-from .store import LocalEncryptedAuthStore, StoredCodexOAuthCredentials
+from .store import (
+    EncryptedJsonFileStore,
+    StoredCodexOAuthCredentials,
+    _make_oauth_store,
+)
 
 _REFRESH_LEAD_TIME = timedelta(seconds=60)
 
@@ -51,12 +55,12 @@ class OpenAIAuthManager:
     def __init__(
         self,
         settings: Settings | None = None,
-        store: LocalEncryptedAuthStore | None = None,
+        store: EncryptedJsonFileStore | None = None,
         oauth_client: CodexOAuthClient | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._store = store or LocalEncryptedAuthStore()
+        self._store = store or _make_oauth_store()
         self._oauth_client = oauth_client or CodexOAuthClient()
         self._now = now or (lambda: datetime.now(timezone.utc))
 
@@ -64,7 +68,7 @@ class OpenAIAuthManager:
         self, api_key_override: str | None = None
     ) -> ResolvedOpenAIAuth:
         """Resolve the active auth mode for non-CU OpenAI requests."""
-        credentials = self._store.get_codex_oauth_credentials()
+        credentials = self._get_oauth_credentials()
         if credentials and credentials.refresh_token.strip():
             credentials = await self._refresh_if_needed(credentials)
             headers: dict[str, str] = {
@@ -96,7 +100,7 @@ class OpenAIAuthManager:
 
     def get_status(self, api_key_override: str | None = None) -> OpenAIAuthStatus:
         """Return the persisted auth status without mutating stored credentials."""
-        credentials = self._store.get_codex_oauth_credentials()
+        credentials = self._get_oauth_credentials()
         now = self._now()
         oauth_connected = bool(credentials and credentials.refresh_token.strip())
         oauth_expires_at = credentials.expires_at if credentials else None
@@ -130,12 +134,13 @@ class OpenAIAuthManager:
             account_label=account_label,
             expires_at=token.expires_at.astimezone(timezone.utc),
         )
-        self._store.set_codex_oauth_credentials(credentials)
+        self._set_oauth_credentials(credentials)
         return credentials
 
     def clear_oauth_credentials(self) -> None:
         """Delete persisted Codex OAuth credentials."""
-        self._store.clear_codex_oauth_credentials()
+        for key in ("access_token", "refresh_token", "id_token", "account_label", "expires_at"):
+            self._store.delete(key)
 
     async def _refresh_if_needed(
         self, credentials: StoredCodexOAuthCredentials
@@ -162,6 +167,31 @@ class OpenAIAuthManager:
                 "Re-run --codex-auth login."
             )
         return refreshed
+
+    def _get_oauth_credentials(self) -> StoredCodexOAuthCredentials | None:
+        data = self._store.get_all()
+        refresh_token = data.get("refresh_token", "")
+        if not refresh_token:
+            return None
+        expires_at_raw = data.get("expires_at", "")
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+        return StoredCodexOAuthCredentials(
+            access_token=data.get("access_token", ""),
+            refresh_token=refresh_token,
+            id_token=data.get("id_token", ""),
+            account_label=data.get("account_label", ""),
+            expires_at=expires_at.astimezone(timezone.utc),
+        )
+
+    def _set_oauth_credentials(self, credentials: StoredCodexOAuthCredentials) -> None:
+        json_dict = credentials.to_json_dict()
+        for key, value in json_dict.items():
+            self._store.set(key, str(value))
 
     def _token_expiring_soon(self, expires_at: datetime) -> bool:
         deadline = self._now() + _REFRESH_LEAD_TIME
