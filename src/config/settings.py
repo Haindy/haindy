@@ -595,9 +595,9 @@ class Settings(BaseModel):
         description="Timeout in milliseconds for executing a single computer action",
     )
     actions_computer_tool_stabilization_wait_ms: int = Field(
-        default=1000,
+        default=2000,
         ge=0,
-        le=1000,
+        le=10000,
         description="Delay after executing an action before capturing the next screenshot",
     )
     actions_computer_tool_fail_fast_on_safety: bool = Field(
