@@ -16,6 +16,8 @@ haindy session new --desktop
 haindy session new --android [--android-serial <SERIAL>] [--android-app <PACKAGE>]
 ```
 
+`--android-app` tells HAINDY to launch the app at session start via `adb shell monkey`. Omit it if you have already launched the app yourself (e.g. after installing it with `adb install`). Passing `--android-app` when the app is already in the foreground is harmless — HAINDY will detect that and skip the launch — but omitting it is clearer when you know the app is already running.
+
 Read `session_id` from the JSON response and pass it explicitly on later commands.
 
 Troubleshooting:
