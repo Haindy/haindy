@@ -64,9 +64,8 @@ haindy --auth-status          # shows which providers have credentials configure
 }
 ```
 
-A `.haindy.json` in the working directory can override settings for a specific project (safe to commit - no secrets allowed in either file).
 
-**Priority** (lowest to highest): built-in defaults < `~/.haindy/settings.json` < `.haindy.json` < environment variables.
+
 
 **Migrating from .env**: if you have an existing `.env` file:
 

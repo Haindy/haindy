@@ -5,7 +5,7 @@ Settings are stored as JSON with nested sections that map to the flat
 from this schema -- they belong in the system keychain or env vars.
 
 Priority (low to high):
-  built-in defaults < ~/.haindy/settings.json < .haindy.json (project) < env vars
+  built-in defaults < ~/.haindy/settings.json < env vars
 """
 
 from __future__ import annotations
@@ -28,8 +28,6 @@ _JSON_TO_FIELD: dict[str, str] = {
     # computer_use section
     "computer_use.provider": "cu_provider",
     "computer_use.model": "computer_use_model",
-    "computer_use.google_model": "google_cu_model",
-    "computer_use.anthropic_model": "anthropic_cu_model",
     "computer_use.anthropic_beta": "anthropic_cu_beta",
     "computer_use.anthropic_max_tokens": "anthropic_cu_max_tokens",
     "computer_use.vertex_project": "vertex_project",
@@ -161,11 +159,19 @@ def load_settings_file(path: Path) -> dict[str, Any]:
     return data
 
 
+_PROVIDER_MODEL_FIELD: dict[str, str] = {
+    "openai": "computer_use_model",
+    "google": "google_cu_model",
+    "anthropic": "anthropic_cu_model",
+}
+
+
 def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
     """Convert the nested settings JSON structure to the flat dict ``Settings`` expects.
 
-    The ``agent_models`` section passes through as-is. Unknown section keys are
-    silently ignored (forward-compatibility).
+    ``computer_use.model`` is routed to the provider-specific model field based on
+    ``computer_use.provider`` in the same dict. The ``agent_models`` section passes
+    through as-is. Unknown section keys are silently ignored (forward-compatibility).
     """
     flat: dict[str, Any] = {}
 
@@ -182,6 +188,14 @@ def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
             field_name = _JSON_TO_FIELD.get(mapping_key)
             if field_name is not None:
                 flat[field_name] = value
+
+    # Route computer_use.model to the correct provider-specific field.
+    # This must run after the full dict is built so provider is resolved first.
+    if "computer_use_model" in flat:
+        provider = str(flat.get("cu_provider", "openai")).strip().lower()
+        target_field = _PROVIDER_MODEL_FIELD.get(provider, "computer_use_model")
+        if target_field != "computer_use_model":
+            flat[target_field] = flat.pop("computer_use_model")
 
     return flat
 

@@ -67,7 +67,7 @@ haindy --auth-set anthropic   # Anthropic API key
 
 Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_VERTEX_API_KEY` as environment variables (highest priority, good for CI/CD).
 
-**Settings file** (`~/.haindy/settings.json`): non-secret configuration. A `.haindy.json` in the working directory can override project-specific settings. See `haindy --config-show` for the full effective configuration.
+**Settings file** (`~/.haindy/settings.json`): non-secret configuration. See `haindy --config-show` for the full effective configuration.
 
 Important env vars (still supported, override all other sources):
 

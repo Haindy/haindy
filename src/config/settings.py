@@ -289,22 +289,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> "Settings":
 
     Priority (lowest to highest):
       1. Pydantic field defaults
-      2. ~/.haindy/settings.json (user-level)
-      3. .haindy.json in CWD (project-level)
-      4. API keys from system keychain / encrypted file fallback
-      5. HAINDY_* environment variables + .env file
+      2. ~/.haindy/settings.json
+      3. API keys from system keychain / encrypted file fallback
+      4. HAINDY_* environment variables + .env file
     """
     from src.auth.credentials import get_api_key
     from src.config.settings_file import flatten_settings_dict, load_settings_file
 
     payload: dict[str, Any] = {}
 
-    # Layer 1: user-level settings file
+    # Layer 1: settings file
     user_path = Path("~/.haindy/settings.json").expanduser()
     payload.update(flatten_settings_dict(load_settings_file(user_path)))
-
-    # Layer 2: project-level settings file (.haindy.json in CWD)
-    payload.update(flatten_settings_dict(load_settings_file(Path(".haindy.json"))))
 
     # Layer 3: env vars (build raw_env first so we can check which secret keys
     # are already covered by an env var before hitting the keychain)
