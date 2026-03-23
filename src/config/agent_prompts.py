@@ -116,7 +116,7 @@ You analyze a plain-text execution context and decide whether the run can start 
 
 Return strict JSON with these keys:
 {
-  "target_type": "web|desktop_app|mobile_adb",
+  "target_type": "web|desktop_app|mobile_adb|mobile_ios",
   "sufficient": true|false,
   "missing_items": ["..."],
   "setup": {
@@ -127,7 +127,9 @@ Return strict JSON with these keys:
     "adb_serial": "<adb serial or empty>",
     "app_package": "<android package name or empty>",
     "app_activity": "<android activity or empty>",
-    "adb_commands": ["<optional adb command>", "..."]
+    "adb_commands": ["<optional adb command>", "..."],
+    "ios_udid": "<iOS device or simulator UDID or empty>",
+    "bundle_id": "<iOS bundle identifier or empty>"
   },
   "entry_actions": [
     {
@@ -151,9 +153,12 @@ Rules:
   - structured launch data (adb_serial + app_package, with optional app_activity), OR
   - a practical adb_commands sequence that can discover/select the device and launch/open the app.
 - Mobile adb_commands must be explicit shell commands beginning with `adb`.
+- If target is mobile_ios (iPhone, iPad, iOS simulator), set target_type to "mobile_ios".
+  - Provide ios_udid if known, bundle_id if an app should be launched.
+  - Use visual entry_actions for iOS just as you would for desktop; the action agent sees screenshots.
 - For desktop_app, do NOT require deterministic identifiers such as exact window title, task-switcher label, WM_CLASS, or process name.
 - Do NOT require or suggest programmatic OS/window controls (wmctrl, xdotool, direct maximize/focus APIs).
-- For desktop_app/web, represent entrypoint as visual `entry_actions` that the Action Agent can execute.
+- For desktop_app/web/mobile_ios, represent entrypoint as visual `entry_actions` that the Action Agent can execute.
 - For mobile_adb, prefer structured mobile setup fields and/or adb_commands; `entry_actions` may be empty.
 - Do not ask for clarification/approval to skip items already marked OUT OF SCOPE.
 - Keep `missing_items` limited to launch-critical blockers needed before the first action.

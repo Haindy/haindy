@@ -60,8 +60,9 @@ Key sections:
 | Section | Fields |
 |---------|--------|
 | `computer_use` | `provider` (openai\|google\|anthropic), `model`, `visual_mode`, `safety_policy` |
-| `execution` | `automation_backend` (desktop\|mobile_adb), `max_test_steps` |
+| `execution` | `automation_backend` (desktop\|mobile_adb\|mobile_ios), `max_test_steps` |
 | `desktop` | `prefer_resolution`, `keyboard_layout` (us\|es) |
+| `ios` | `default_device_udid`, `idb_timeout_seconds` |
 | `logging` | `level` (DEBUG\|INFO\|WARNING), `format` (json\|text) |
 | `storage` | `data_dir`, `reports_dir`, `cache_dir` |
 | `cache` | `enable_planning`, `enable_situational`, `enable_execution_replay` |

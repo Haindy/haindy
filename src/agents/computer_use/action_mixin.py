@@ -419,6 +419,17 @@ class ComputerUseActionMixin:
                             normalized=normalized_coords,
                             turn=turn,
                         )
+                    if clear_before and environment == "mobile_ios":
+                        clear_and_type = getattr(
+                            self._automation_driver, "clear_and_type", None
+                        )
+                        if callable(clear_and_type):
+                            await clear_and_type(x, y, str(text_payload))
+                            if press_enter:
+                                await self._automation_driver.press_key("enter")
+                            turn.metadata.update({"x": x, "y": y})
+                            turn.status = "executed"
+                            return
                     tap_count = (
                         3 if (clear_before and environment == "mobile_adb") else 1
                     )

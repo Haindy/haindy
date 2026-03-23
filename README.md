@@ -11,7 +11,7 @@ Desktop-first autonomous testing agent with two operating modes:
 - `src/tool_call_mode/`: tool-call CLI, daemon, IPC, runtime, and session state helpers
 - `src/agents/`: planner, runner, action, and situational agents
 - `src/desktop/`: Linux/X11 desktop automation
-- `src/mobile/`: Android ADB automation
+- `src/mobile/`: Android ADB and iOS idb automation
 - `src/config/settings.py`: env-backed runtime configuration
 - `docs/design/tool-call-mode/`: tool-call mode design docs
 - `docs/RUNBOOK.md`: setup and operational notes
@@ -41,6 +41,7 @@ If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
 
 - Linux/X11 desktop automation: install the runtime tools in [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - Android automation: ensure `adb` is installed and the target device or emulator is reachable
+- iOS automation (macOS only): `brew install idb-companion` — see [docs/RUNBOOK.md](docs/RUNBOOK.md) for full prerequisites
 - macOS is fine for development and tests, but the `desktop` backend is Linux/X11-only today
 
 ### 4. Configure credentials and settings
@@ -93,11 +94,20 @@ haindy \
   --context test_scenarios/wikipedia_search_simple.txt
 ```
 
-Force the mobile backend:
+Force the Android mobile backend:
 
 ```bash
 haindy \
   --mobile \
+  --plan <plan_file> \
+  --context <context_file>
+```
+
+Force the iOS backend:
+
+```bash
+haindy \
+  --ios \
   --plan <plan_file> \
   --context <context_file>
 ```
@@ -120,6 +130,7 @@ Start a session:
 ```bash
 haindy session new --desktop
 haindy session new --android --android-serial emulator-5554
+haindy session new --ios [--ios-udid <UDID>] [--ios-app <BUNDLE_ID>]
 ```
 
 Use the returned `session_id` explicitly:

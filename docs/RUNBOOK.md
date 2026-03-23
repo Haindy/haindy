@@ -55,6 +55,31 @@ Host expectations:
 - Pass `--android-serial` when multiple devices are connected
 - Pass `--android-app` when the session should launch a package on startup
 
+## iOS / idb prerequisites
+
+macOS only. Required tools:
+
+```bash
+brew install idb-companion
+pip install fb-idb
+```
+
+Host expectations:
+
+- Real devices (iOS 16+): enable Developer Mode (Settings > Privacy & Security > Developer Mode)
+- Real devices: connect via USB and accept the trust prompt on the device
+- Simulators: boot via Xcode or `xcrun simctl boot <UDID>`
+- Run `idb list-targets` to verify the device or simulator appears as `Booted` or `Connected`
+- Set `HAINDY_IOS_DEFAULT_DEVICE_UDID` when multiple targets are connected
+
+Run with `--ios` flag:
+
+```bash
+haindy --ios --plan <plan> --context <context>
+```
+
+Or set `HAINDY_AUTOMATION_BACKEND=mobile_ios` in the environment.
+
 ## Environment contract
 
 **Credentials** (recommended: store in system keychain):
@@ -71,7 +96,7 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
 
 Important env vars (still supported, override all other sources):
 
-- `HAINDY_AUTOMATION_BACKEND=desktop|mobile_adb`
+- `HAINDY_AUTOMATION_BACKEND=desktop|mobile_adb|mobile_ios`
 - `HAINDY_HOME` for tool-call session state root
 - `HAINDY_CU_PROVIDER=openai|google|anthropic`
 - `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
@@ -121,3 +146,4 @@ haindy session close --session <SESSION_ID>
 - If desktop capture fails, verify `DISPLAY`, `ffmpeg`, and X11 permissions
 - If desktop input fails, verify `xdotool` or `/dev/uinput` access
 - If Android startup fails, run `adb devices` and confirm the package name or serial
+- If iOS startup fails, run `idb list-targets` and confirm the UDID and state is `Booted`

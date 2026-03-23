@@ -59,6 +59,8 @@ class SetupInstructions:
     app_package: str = ""
     app_activity: str = ""
     adb_commands: list[str] = field(default_factory=list)
+    ios_udid: str = ""
+    bundle_id: str = ""
 
 
 @dataclass
@@ -197,6 +199,17 @@ class SituationalAgent(BaseAgent):
             await self._prepare_mobile_entrypoint(automation_driver, assessment.setup)
             return
 
+        if assessment.target_type == "mobile_ios":
+            configure_target = getattr(automation_driver, "configure_target", None)
+            if callable(configure_target):
+                await configure_target(
+                    udid=assessment.setup.ios_udid or None,
+                    bundle_id=assessment.setup.bundle_id or None,
+                )
+            await automation_driver.start()
+            await self._prepare_ios_entrypoint(automation_driver, assessment.setup)
+            return
+
         await automation_driver.start()
 
         if action_agent is None:
@@ -277,6 +290,17 @@ class SituationalAgent(BaseAgent):
 
         await automation_driver.screenshot()
 
+    async def _prepare_ios_entrypoint(
+        self,
+        automation_driver: AutomationDriver,
+        setup: SetupInstructions,
+    ) -> None:
+        launch_app = getattr(automation_driver, "launch_app", None)
+        if callable(launch_app) and setup.bundle_id:
+            await launch_app(bundle_id=setup.bundle_id)
+
+        await automation_driver.screenshot()
+
     @staticmethod
     def _assessment_to_cache_payload(
         assessment: SituationalAssessment,
@@ -294,6 +318,8 @@ class SituationalAgent(BaseAgent):
                 "app_package": assessment.setup.app_package,
                 "app_activity": assessment.setup.app_activity,
                 "adb_commands": list(assessment.setup.adb_commands),
+                "ios_udid": assessment.setup.ios_udid,
+                "bundle_id": assessment.setup.bundle_id,
             },
             "entry_actions": [
                 {
@@ -316,7 +342,7 @@ class SituationalAgent(BaseAgent):
             raise ValueError("Assessment payload must be a dictionary.")
 
         target_type = str(payload.get("target_type") or "").strip().lower()
-        if target_type not in {"web", "desktop_app", "mobile_adb"}:
+        if target_type not in {"web", "desktop_app", "mobile_adb", "mobile_ios"}:
             raise ValueError(f"Unsupported cached target_type: {target_type!r}")
 
         setup_payload = (
@@ -331,6 +357,8 @@ class SituationalAgent(BaseAgent):
             app_package=str(setup_payload.get("app_package") or "").strip(),
             app_activity=str(setup_payload.get("app_activity") or "").strip(),
             adb_commands=self._ensure_command_list(setup_payload.get("adb_commands")),
+            ios_udid=str(setup_payload.get("ios_udid") or "").strip(),
+            bundle_id=str(setup_payload.get("bundle_id") or "").strip(),
         )
 
         return SituationalAssessment(
@@ -490,9 +518,11 @@ class SituationalAgent(BaseAgent):
             return self._heuristic_assessment(source_text)
 
         target_type = str(payload.get("target_type") or "").strip().lower()
-        if target_type not in {"web", "desktop_app", "mobile_adb"}:
+        if target_type not in {"web", "desktop_app", "mobile_adb", "mobile_ios"}:
             if self._extract_url(source_text):
                 target_type = "web"
+            elif self._looks_like_ios_context(source_text):
+                target_type = "mobile_ios"
             elif self._looks_like_mobile_context(source_text):
                 target_type = "mobile_adb"
             else:
@@ -510,6 +540,8 @@ class SituationalAgent(BaseAgent):
             app_package=str(setup_payload.get("app_package") or "").strip(),
             app_activity=str(setup_payload.get("app_activity") or "").strip(),
             adb_commands=self._ensure_command_list(setup_payload.get("adb_commands")),
+            ios_udid=str(setup_payload.get("ios_udid") or "").strip(),
+            bundle_id=str(setup_payload.get("bundle_id") or "").strip(),
         )
         model_missing_items = self._filter_non_visual_missing_items(
             self._ensure_string_list(payload.get("missing_items"))
@@ -582,6 +614,8 @@ class SituationalAgent(BaseAgent):
     def _heuristic_assessment(self, source_text: str) -> SituationalAssessment:
         if self._extract_url(source_text):
             target_type = "web"
+        elif self._looks_like_ios_context(source_text):
+            target_type = "mobile_ios"
         elif self._looks_like_mobile_context(source_text):
             target_type = "mobile_adb"
         else:
@@ -643,6 +677,45 @@ class SituationalAgent(BaseAgent):
 
         if target_type == "mobile_adb":
             return []
+
+        if target_type == "mobile_ios":
+            # For iOS, use visual entry actions just like desktop/web.
+            # If a URL is present navigate to it; otherwise open the home screen app.
+            url = setup.web_url or self._extract_url(source_text)
+            if url:
+                return [
+                    EntrypointAction(
+                        action_type=ActionType.NAVIGATE,
+                        description=f"Open Safari and navigate to {url}",
+                        target=url,
+                        value=url,
+                        expected_outcome=f"{url} is open and visible in Safari.",
+                        computer_use_prompt=(
+                            f"Open Safari on the iOS device and navigate to {url}. "
+                            "If Safari is not already open, tap its icon on the home screen. "
+                            "Then tap the address bar, type the URL, and go. "
+                            "Stop when the page is fully loaded and visible."
+                        ),
+                    )
+                ]
+            app_name = setup.app_name or (
+                setup.bundle_id.split(".")[-1].capitalize()
+                if setup.bundle_id
+                else "the target app"
+            )
+            return [
+                EntrypointAction(
+                    action_type=ActionType.CLICK,
+                    description=f"Open {app_name} on the iOS device",
+                    target=app_name,
+                    expected_outcome=f"{app_name} is open and ready for testing.",
+                    computer_use_prompt=(
+                        f"Open {app_name} on the iOS device. "
+                        "Tap its icon on the home screen or in the dock. "
+                        "Stop when the app is fully visible and ready for the first test action."
+                    ),
+                )
+            ]
 
         if target_type != "desktop_app":
             return []
@@ -828,6 +901,15 @@ class SituationalAgent(BaseAgent):
             )
             return any(marker in item for marker in mobile_markers)
 
+        if target_type == "mobile_ios":
+            ios_markers = (
+                "ios_udid",
+                "bundle_id",
+                "bundle id",
+                "udid",
+            )
+            return any(marker in item for marker in ios_markers)
+
         if target_type == "web":
             if "web_url" in item:
                 return True
@@ -931,6 +1013,21 @@ class SituationalAgent(BaseAgent):
             "physical device",
             "package:",
             "app_package",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _looks_like_ios_context(text: str) -> bool:
+        lowered = (text or "").lower()
+        markers = (
+            "iphone",
+            "ipad",
+            "mobile_ios",
+            "ios simulator",
+            "xcode simulator",
+            "idb",
+            "bundle_id",
+            "udid",
         )
         return any(marker in lowered for marker in markers)
 

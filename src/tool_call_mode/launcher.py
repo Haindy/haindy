@@ -47,6 +47,8 @@ def build_tool_call_daemon_command(
     idle_timeout: int,
     android_serial: str | None = None,
     android_app: str | None = None,
+    ios_udid: str | None = None,
+    ios_app: str | None = None,
     debug: bool = False,
 ) -> list[str]:
     """Build the argv used to launch the hidden daemon entrypoint."""
@@ -65,6 +67,10 @@ def build_tool_call_daemon_command(
         command.extend(["--android-serial", android_serial])
     if android_app:
         command.extend(["--android-app", android_app])
+    if ios_udid:
+        command.extend(["--ios-udid", ios_udid])
+    if ios_app:
+        command.extend(["--ios-app", ios_app])
     if debug:
         command.append("--debug")
     return command
@@ -77,6 +83,8 @@ def launch_tool_call_daemon(
     idle_timeout: int,
     android_serial: str | None = None,
     android_app: str | None = None,
+    ios_udid: str | None = None,
+    ios_app: str | None = None,
     debug: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> ToolCallDaemonLaunch:
@@ -96,6 +104,8 @@ def launch_tool_call_daemon(
             idle_timeout=idle_timeout,
             android_serial=android_serial,
             android_app=android_app,
+            ios_udid=ios_udid,
+            ios_app=ios_app,
             debug=debug,
         )
     )
