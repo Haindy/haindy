@@ -153,10 +153,25 @@ sequenceDiagram
 - **TestReporter**: builds Markdown/HTML summaries, stores action logs, bug reports, and coverage data in `reports/<timestamp>/`.
 - **Enhanced Reporter**: surfaces aggregated HTML linked from CLI output for quick triage.
 
-### Configuration & Settings (`src/config`)
-- `settings.py` wraps Pydantic settings; sources values from `.env`, environment, or defaults.
-- Provides agent model configs (model name, temperature, reasoning level, modalities) and execution tunables (timeouts, domain allowlists, stabilization waits).
-- Centralised constants keep agents consistent and simplify environment customisation (e.g., switching to different OpenAI endpoints or adjusting coverage thresholds).
+### Configuration & Settings (`src/config`, `src/auth/credentials.py`)
+
+Settings are loaded in priority order (lowest to highest):
+
+1. Pydantic field defaults
+2. `~/.haindy/settings.json` — user-level, hierarchical JSON (sections: `computer_use`, `desktop`, `execution`, `logging`, etc.)
+3. `.haindy.json` in CWD — project-level overrides, safe to commit (no secrets)
+4. `HAINDY_*` environment variables + `.env` file — highest priority, used by CI/CD
+
+API keys (`openai_api_key`, `anthropic_api_key`, `vertex_api_key`) are resolved separately via
+the system keychain (`keyring`) with an AES-GCM encrypted local file as fallback for headless
+environments. They are never permitted in JSON settings files.
+
+- `src/config/settings.py`: flat Pydantic `Settings` model; `load_settings()` assembles all four layers; `_SECRET_FIELD_TO_PROVIDER` maps secret fields to their keychain provider names.
+- `src/config/settings_file.py`: reads/writes hierarchical JSON settings files; `_JSON_TO_FIELD` maps every nested key to its flat `Settings` field name.
+- `src/auth/credentials.py`: `get_api_key` / `set_api_key` / `delete_api_key` backed by `keyring` + `EncryptedJsonFileStore` fallback.
+- `src/auth/store.py`: generic `EncryptedJsonFileStore(store_path, key_path)` used for both OAuth tokens and API key persistence.
+
+Interactive credential management: `haindy --auth-set openai|google|anthropic`, `--auth-status`, `--auth-clear`. Migration from legacy `.env`: `haindy --config-migrate`.
 
 ### Security & Safety
 - Rate limiting prevents runaway API usage in failure loops.
