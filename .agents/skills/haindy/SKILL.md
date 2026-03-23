@@ -9,6 +9,10 @@ metadata:
 
 HAINDY controls a real Linux/X11 desktop, Android device, or iOS device/simulator. In tool-call mode it runs as a background session daemon and every command returns exactly one JSON object on stdout.
 
+## Invocation
+
+`haindy` is pre-installed system-wide at `/usr/local/bin/haindy`. Do NOT create a virtualenv, install packages, or run `pip install`. Just call `haindy` directly — if it is not on your PATH, use `/usr/local/bin/haindy`.
+
 ## Start a session
 
 ```bash
