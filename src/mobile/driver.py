@@ -137,6 +137,20 @@ class MobileDriver(AutomationDriver):
         await self.adb.run_adb("shell", "pm", "clear", package)
         self._capture_call("clear_app_data", {"app_package": package})
 
+    async def _is_app_foreground(self, package: str) -> bool:
+        """Return True if the package is the current top resumed activity."""
+        result = await self.adb.run_adb(
+            "shell", "dumpsys", "activity", "activities", check=False
+        )
+        output = (result.stdout or b"").decode(errors="replace")
+        # API 29+: mResumedActivity / topResumedActivity lines contain the package
+        for line in output.splitlines():
+            if (
+                "mResumedActivity" in line or "topResumedActivity" in line
+            ) and package in line:
+                return True
+        return False
+
     async def launch_app(
         self,
         app_package: str,
@@ -153,6 +167,12 @@ class MobileDriver(AutomationDriver):
             component = activity if "/" in activity else f"{package}/{activity}"
             await self.adb.run_adb("shell", "am", "start", "-n", component)
         else:
+            if await self._is_app_foreground(package):
+                self._capture_call(
+                    "launch_app",
+                    {"app_package": package, "app_activity": "", "skipped": True},
+                )
+                return
             await self.adb.run_adb("shell", "monkey", "-p", package, "1")
         self._capture_call(
             "launch_app",
