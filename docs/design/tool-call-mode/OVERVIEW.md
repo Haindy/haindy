@@ -177,7 +177,7 @@ Exit codes mirror status: 0 for `success`, 1 for `failure` or `error`.
 | **Coding agent** | An AI coding assistant (Codex, Claude Code, etc.) using Haindy as a tool. |
 | **Session** | A persistent device connection owned by a daemon process, identified by a UUID. |
 | **Session daemon** | The background process that owns the device connection and dispatches commands. |
-| **Session variable** | A named value stored in the session, referenced as `$VAR` in commands. Secret variables are masked in logs and responses. |
+| **Session variable** | A named value stored in the session, referenced as `{{VAR}}` in commands. Secret variables are masked in logs and responses. |
 | **Skill** | A context-injection file that teaches a coding agent how to use `haindy` in tool call mode. Placed per-agent (e.g. `.claude/skills/` for Claude Code). |
 | **IPC** | Inter-process communication between CLI client and daemon, over a Unix domain socket. |
 | **act** | A single direct device interaction with no outcome validation. |

@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 _VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_VAR_TOKEN_PATTERN = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
 
 
 @dataclass(frozen=True)
@@ -57,40 +58,18 @@ class SessionVariableStore:
         )
 
     def interpolate(self, text: str) -> str:
-        """Apply exact `$NAME` interpolation with `$$` escaping."""
+        """Replace {{NAME}} tokens with stored variable values.
 
-        raw = str(text or "")
-        result: list[str] = []
-        idx = 0
-        length = len(raw)
+        Unknown tokens are left unchanged. No escaping is needed because
+        {{NAME}} has no special meaning to the shell.
+        """
 
-        while idx < length:
-            current = raw[idx]
-            if current != "$":
-                result.append(current)
-                idx += 1
-                continue
-
-            if idx + 1 < length and raw[idx + 1] == "$":
-                result.append("$")
-                idx += 2
-                continue
-
-            match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", raw[idx + 1 :])
-            if not match:
-                result.append("$")
-                idx += 1
-                continue
-
-            name = match.group(0)
+        def _replace(match: re.Match[str]) -> str:
+            name = match.group(1)
             variable = self._values.get(name)
-            if variable is None:
-                result.append(f"${name}")
-            else:
-                result.append(variable.value)
-            idx += 1 + len(name)
+            return variable.value if variable is not None else match.group(0)
 
-        return "".join(result)
+        return _VAR_TOKEN_PATTERN.sub(_replace, str(text or ""))
 
     def redact(self, text: str | None) -> str | None:
         """Replace any secret value echoes with `[redacted]`."""

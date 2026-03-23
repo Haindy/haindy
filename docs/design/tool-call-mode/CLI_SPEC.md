@@ -173,7 +173,7 @@ haindy session status --session <id> [--timeout <seconds>]
 
 ### `haindy session set`
 
-Store a named variable in the session. The variable can be referenced as `$NAME` in any subsequent command string. The daemon interpolates matching `$NAME` tokens before passing the final instruction string to agents.
+Store a named variable in the session. The variable can be referenced as `{{NAME}}` in any subsequent command string. The daemon interpolates matching `{{NAME}}` tokens before passing the final instruction string to agents.
 
 ```
 haindy session set <NAME> <VALUE> [--secret] --session <id>
@@ -191,23 +191,22 @@ Note: `--secret` protects the value after Haindy receives it. Shells expand envi
 
 **Interpolation rules:**
 
-- Substitution is exact text replacement of `$NAME` with the stored value.
-- Only variables that exist in the session are substituted. Unknown `$NAME` tokens are left unchanged in the instruction string.
-- `$$` is treated as a literal `$`.
+- Substitution is exact text replacement of `{{NAME}}` with the stored value.
+- Only variables that exist in the session are substituted. Unknown `{{NAME}}` tokens are left unchanged in the instruction string.
+- `{{NAME}}` has no special meaning to the shell, so instruction strings can be double-quoted or single-quoted without affecting interpolation.
 - No shell-style parsing is performed after substitution. Quotes, whitespace, and newlines remain part of the final instruction string and are passed to the model as-is.
 
 **Examples:**
 
 ```bash
 haindy session set USERNAME alice@example.com --session <SESSION_ID>
-haindy session set PASSWORD "$TEST_PASSWORD" --secret --session <SESSION_ID>
 haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 haindy session set BASE_URL https://staging.example.com --session <SESSION_ID>
 
-# Then use in commands:
-haindy act "type '$USERNAME' into the email field" --session <SESSION_ID>
-haindy test "sign in with $USERNAME and $PASSWORD and verify the dashboard appears" --session <SESSION_ID>
-haindy act "navigate to $BASE_URL/login" --session <SESSION_ID>
+# Then use in commands (double or single quotes both work — {{NAME}} is not a shell token):
+haindy act "type {{USERNAME}} into the email field" --session <SESSION_ID>
+haindy test "sign in with {{USERNAME}} and {{PASSWORD}} and verify the dashboard appears" --session <SESSION_ID>
+haindy act "navigate to {{BASE_URL}}/login" --session <SESSION_ID>
 ```
 
 **Stdout:**

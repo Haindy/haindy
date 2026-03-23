@@ -54,11 +54,23 @@ Prefer `test` over `act` when the outcome matters.
 
 ## Session variables
 
-- Reference stored values as `$NAME`
-- `$$` means a literal dollar sign
-- Unknown variable names stay unchanged
-- Prefer `--value-file` for secrets so sensitive data does not travel in shell history
-- Secret values are masked in responses and are not persisted to `session.json`
+Store a variable once, then reference it by the exact same name you chose:
+
+```bash
+haindy session set EMAIL user@example.com --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/pass --secret --session <SESSION_ID>
+
+# Reference with {{NAME}} in any instruction string
+haindy act "type {{EMAIL}} into the email field" --session <SESSION_ID>
+haindy test "sign in with {{EMAIL}} and {{PASSWORD}} and verify the dashboard appears" --session <SESSION_ID>
+```
+
+Rules:
+- Use `{{NAME}}` — double curly braces around the variable name. This syntax is shell-safe and works in both single- and double-quoted strings.
+- Use the exact name you passed to `session set`. If you stored it as `EMAIL`, reference it as `{{EMAIL}}`, not `{{LOGIN_EMAIL}}` or `{{USER}}`.
+- Unknown `{{NAME}}` tokens are left unchanged in the instruction string.
+- Prefer `--value-file` for secrets so sensitive data does not travel in shell history.
+- Secret values are masked in responses and are not persisted to `session.json`.
 
 ## Read the JSON response
 
@@ -76,7 +88,7 @@ Important `exit_reason` values:
 - `element_not_found`: the target was not visible
 - `max_steps_reached` or `max_actions_reached`: the command ran out of budget
 - `command_timeout`: the command hit its wall-clock timeout
-- `session_busy`: another command is already running in that session
+- `session_busy`: another command is already running in that session; wait 5-10 seconds and retry once
 - `agent_error` or `device_error`: HAINDY itself failed
 
 ## V1 boundaries
