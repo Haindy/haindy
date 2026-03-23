@@ -100,6 +100,7 @@ class IOSDriver(AutomationDriver):
 
     async def stop(self) -> None:
         self._started = False
+        await self.idb.run_idb("kill", check=False)
 
     async def configure_target(
         self,
