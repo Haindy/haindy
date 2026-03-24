@@ -7,18 +7,30 @@ Desktop-first autonomous testing agent with two operating modes:
 
 ## Quick project map
 
-- `src/main.py`: shared CLI entrypoint
-- `src/tool_call_mode/`: tool-call CLI, daemon, IPC, runtime, and session state helpers
-- `src/agents/`: planner, runner, action, and situational agents
-- `src/desktop/`: Linux/X11 desktop automation
-- `src/macos/`: macOS desktop automation (pynput + mss)
-- `src/mobile/`: Android ADB and iOS idb automation
-- `src/config/settings.py`: env-backed runtime configuration
+- `haindy/main.py`: shared CLI entrypoint
+- `haindy/tool_call_mode/`: tool-call CLI, daemon, IPC, runtime, and session state helpers
+- `haindy/agents/`: planner, runner, action, and situational agents
+- `haindy/desktop/`: Linux/X11 desktop automation
+- `haindy/macos/`: macOS desktop automation (pynput + mss)
+- `haindy/mobile/`: Android ADB and iOS idb automation
+- `haindy/config/settings.py`: env-backed runtime configuration
 - `docs/design/tool-call-mode/`: tool-call mode design docs
 - `docs/RUNBOOK.md`: setup and operational notes
 - `.agents/skills/haindy/SKILL.md`: bundled skill for agent workflows
 
-## Setup
+## Installation
+
+```bash
+pip install haindy
+haindy setup
+```
+
+`haindy setup` runs the interactive first-run wizard: it checks dependencies,
+configures credentials, and installs skills for any AI CLIs it detects.
+
+Run `haindy doctor` at any time to verify your environment.
+
+## Development Setup
 
 ### 1. Create and activate a virtual environment
 
@@ -36,7 +48,7 @@ source .venv/bin/activate
 
 After the editable install, activating `.venv` exposes `haindy` on `PATH`.
 If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
-`python -m src.main ...` remains available as an internal/dev fallback.
+`python -m haindy.main ...` remains available as an internal/dev fallback.
 
 ### 3. Install backend prerequisites
 
@@ -152,7 +164,7 @@ Tool-call mode guidance:
 - Desktop `session new --url ...` is intentionally deferred from V1
 - `explore` is V2 work and is not part of the current CLI surface
 - `session new` now launches the daemon independently, so later commands should keep working after the original CLI process exits
-- If a wrapper still kills the entire process container or cgroup, fall back to a long-lived shell and run `python -m src.main __tool_call_daemon ...` for debugging
+- If a wrapper still kills the entire process container or cgroup, fall back to a long-lived shell and run `python -m haindy.main __tool_call_daemon ...` for debugging
 
 ## Codex OAuth
 
@@ -167,6 +179,6 @@ haindy --codex-auth logout
 ```bash
 .venv/bin/ruff check .
 .venv/bin/ruff format .
-.venv/bin/mypy src
+.venv/bin/mypy haindy
 .venv/bin/pytest
 ```

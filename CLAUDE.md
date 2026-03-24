@@ -23,6 +23,15 @@ source .venv/bin/activate
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e ".[dev]"
 
+# First-run setup wizard
+haindy setup
+
+# Check system dependencies and configuration
+haindy doctor
+
+# Non-interactive setup (for CI)
+haindy setup --non-interactive
+
 # Configure credentials (stored in system keychain)
 haindy --auth login openai    # or google / anthropic / openai-codex
 haindy --auth status          # verify
@@ -54,14 +63,14 @@ haindy --auth clear openai-codex
 haindy --test-api
 ```
 
-Keep `python -m src.main ...` as a local/dev fallback when you intentionally
+Keep `python -m haindy.main ...` as a local/dev fallback when you intentionally
 need the module entrypoint.
 
 ### Testing
 ```bash
 .venv/bin/pytest
 .venv/bin/pytest -m "not slow"
-.venv/bin/pytest --cov=src
+.venv/bin/pytest --cov=haindy
 ```
 
 ### Code Quality
@@ -110,16 +119,16 @@ Report Generation         HTML report + JSONL execution log
 
 | Path | Purpose |
 |------|---------|
-| `src/main.py` | CLI entrypoint |
-| `src/agents/` | All agent implementations |
-| `src/agents/computer_use/session.py` | Multi-provider computer-use orchestrator |
-| `src/orchestration/coordinator.py` | Multi-agent workflow coordinator |
-| `src/desktop/` | Linux/X11 automation (uinput, ffmpeg, xrandr) |
-| `src/mobile/` | Android ADB automation |
-| `src/runtime/` | Execution context, caches, replay |
-| `src/config/settings.py` | Pydantic settings, all env vars |
-| `src/core/types.py` | Core types: TestPlan, TestCase, TestStep, ActionType |
-| `src/monitoring/` | JSONL logging, HTML report generation |
+| `haindy/main.py` | CLI entrypoint |
+| `haindy/agents/` | All agent implementations |
+| `haindy/agents/computer_use/session.py` | Multi-provider computer-use orchestrator |
+| `haindy/orchestration/coordinator.py` | Multi-agent workflow coordinator |
+| `haindy/desktop/` | Linux/X11 automation (uinput, ffmpeg, xrandr) |
+| `haindy/mobile/` | Android ADB automation |
+| `haindy/runtime/` | Execution context, caches, replay |
+| `haindy/config/settings.py` | Pydantic settings, all env vars |
+| `haindy/core/types.py` | Core types: TestPlan, TestCase, TestStep, ActionType |
+| `haindy/monitoring/` | JSONL logging, HTML report generation |
 
 ### Computer-Use Providers
 
@@ -147,7 +156,7 @@ Configured via `HAINDY_AUTOMATION_BACKEND`:
 
 When changing these areas, update all affected files together:
 
-- **Backend names/aliases/defaults**: `src/runtime/environment.py`, `src/config/settings.py`, `.env.example`, `README.md`, tests
-- **Env vars/cache paths/provider settings**: `src/config/settings.py`, `src/config/settings_file.py` (`_JSON_TO_FIELD`), `.env.example`, `README.md`, `docs/RUNBOOK.md`, tests
-- **Adding a new settings field**: update `Settings` in `src/config/settings.py`, add to `SETTINGS_ENV_VARS`, add to `_JSON_TO_FIELD` in `src/config/settings_file.py`, add to `.env.example`
-- **Adding a new secret/API key**: update `_SECRET_FIELD_TO_PROVIDER` in `src/config/settings.py`, update `_PROVIDER_TO_ACCOUNT` in `src/auth/credentials.py`, update `src/cli/auth_commands.py`
+- **Backend names/aliases/defaults**: `haindy/runtime/environment.py`, `haindy/config/settings.py`, `.env.example`, `README.md`, tests
+- **Env vars/cache paths/provider settings**: `haindy/config/settings.py`, `haindy/config/settings_file.py` (`_JSON_TO_FIELD`), `.env.example`, `README.md`, `docs/RUNBOOK.md`, tests
+- **Adding a new settings field**: update `Settings` in `haindy/config/settings.py`, add to `SETTINGS_ENV_VARS`, add to `_JSON_TO_FIELD` in `haindy/config/settings_file.py`, add to `.env.example`
+- **Adding a new secret/API key**: update `_SECRET_FIELD_TO_PROVIDER` in `haindy/config/settings.py`, update `_PROVIDER_TO_ACCOUNT` in `haindy/auth/credentials.py`, update `haindy/cli/auth_commands.py`
