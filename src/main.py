@@ -129,6 +129,32 @@ Fallback:
         metavar="DOTENV_PATH",
         help="Migrate a .env file to settings.json and keychain (default: .env)",
     )
+    input_group.add_argument(
+        "--setup",
+        action="store_true",
+        help="Run the first-time setup wizard",
+    )
+    input_group.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Check system dependencies and configuration",
+    )
+
+    parser.add_argument(
+        "--include-android",
+        action="store_true",
+        help="Include Android/ADB checks in doctor output",
+    )
+    parser.add_argument(
+        "--include-ios",
+        action="store_true",
+        help="Include iOS/idb checks in doctor output",
+    )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run setup wizard without interactive prompts",
+    )
 
     parser.add_argument(
         "--context",
@@ -738,6 +764,17 @@ def _any_auth_configured() -> bool:
     return bool(OpenAIAuthManager().get_status().oauth_connected)
 
 
+_SETUP_MARKER = Path.home() / ".haindy" / "setup_complete"
+
+
+def _is_setup_complete() -> bool:
+    return _SETUP_MARKER.exists()
+
+
+def _should_bypass_gate(parsed_args: argparse.Namespace) -> bool:
+    return bool(parsed_args.setup or parsed_args.doctor or parsed_args.version)
+
+
 async def async_main(args: list[str] | None = None) -> int:
     """Async main entrypoint."""
     argv = list(args) if args is not None else sys.argv[1:]
@@ -753,6 +790,31 @@ async def async_main(args: list[str] | None = None) -> int:
 
     if parsed_args.version:
         return show_version()
+
+    if parsed_args.setup:
+        from src.cli.setup_wizard import run_setup_wizard
+
+        return run_setup_wizard(non_interactive=parsed_args.non_interactive)
+
+    if parsed_args.doctor:
+        from src.cli.doctor import run_doctor
+
+        return run_doctor(
+            include_android=parsed_args.include_android,
+            include_ios=parsed_args.include_ios,
+        )
+
+    if not _is_setup_complete() and not _should_bypass_gate(parsed_args):
+        console.print(
+            "Haindy is not set up yet. Run:\n\n"
+            "  haindy setup\n\n"
+            "Or, if you have Claude Code, Codex, or OpenCode installed, "
+            "install the setup skill:\n\n"
+            "  haindy setup --install-skill\n\n"
+            "Then run /haindy-setup inside your AI coding tool."
+        )
+        sys.exit(1)
+
     if parsed_args.test_api:
         return await test_api_connection()
 
