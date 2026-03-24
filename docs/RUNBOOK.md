@@ -7,18 +7,30 @@ This runbook covers the host prerequisites and operational notes for HAINDY's tw
 - Standard batch mode via `--plan` and `--context`
 - Tool-call mode via `session`, `act`, and `test`
 
-## Python setup
+## Quick Install
+
+```bash
+pip install haindy
+haindy setup
+```
+
+`haindy setup` runs the interactive first-run wizard. It checks OS dependencies,
+configures credentials, and installs skills for any AI CLIs it detects on the
+host. Pass `--non-interactive` for CI environments.
+
+## Development Setup
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e ".[dev]"
+haindy setup
 ```
 
 After the editable install, `haindy` should be available on `PATH` inside the
 activated virtual environment. If you are not activating `.venv`, use
-`.venv/bin/haindy`. Keep `python -m src.main ...` as a debugging or
+`.venv/bin/haindy`. Keep `python -m haindy.main ...` as a debugging or
 development fallback.
 
 ## macOS desktop prerequisites
@@ -188,9 +200,12 @@ haindy session close --session <SESSION_ID>
 
 ## Troubleshooting
 
+Run `haindy doctor` first. It checks all required OS dependencies, credentials,
+and permissions, and prints a clear pass/fail summary for each item.
+
 - If a tool-call command loses the daemon mid-run, inspect `~/.haindy/sessions/<id>/logs/daemon.log`
 - If `session list` does not show a session, the daemon is dead or its socket was cleaned up as stale
-- If a wrapper kills the entire process container or cgroup after `session new`, detached daemon survival is not possible there; rerun from a normal shell or keep the hidden `python -m src.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging
+- If a wrapper kills the entire process container or cgroup after `session new`, detached daemon survival is not possible there; rerun from a normal shell or keep the hidden `python -m haindy.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging
 - If desktop capture fails, verify `DISPLAY`, `ffmpeg`, and X11 permissions
 - If desktop input fails, verify `xdotool` or `/dev/uinput` access
 - If Android startup fails, run `adb devices` and confirm the package name or serial
