@@ -23,24 +23,27 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Testing",
     "Topic :: Software Development :: Quality Assurance",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing :: Acceptance",
 ]
 
 dependencies = [
-    "openai==2.23.0",
-    "google-genai==1.64.0",
-    "anthropic==0.84.0",
-    "cryptography==46.0.5",
-    "platformdirs==4.9.2",
-    "rich==14.3.3",
-    "pydantic==2.12.5",
-    "python-dotenv==1.2.1",
-    "pillow==12.1.1",
-    "numpy==2.4.2",
-    "aiofiles==25.1.0",
-    "jsonlines==4.0.0",
-    "jinja2==3.1.6",
-    "tiktoken==0.12.0",
-    "evdev==1.9.3; sys_platform == 'linux'",
+    "openai>=2.23.0",
+    "google-genai>=1.64.0",
+    "anthropic>=0.84.0",
+    "cryptography>=46.0.5",
+    "platformdirs>=4.9.2",
+    "rich>=14.3.3",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.1",
+    "pillow>=12.1.1",
+    "numpy>=2.4.2",
+    "aiofiles>=25.1.0",
+    "jsonlines>=4.0.0",
+    "jinja2>=3.1.6",
+    "tiktoken>=0.12.0",
+    "evdev>=1.9.3; sys_platform == 'linux'",
     "fb-idb>=1.1.7; sys_platform == 'darwin'",
     "pynput>=1.7.7; sys_platform == 'darwin'",
     "mss>=9.0.2; sys_platform == 'darwin'",
@@ -63,16 +66,17 @@ dev = [
 haindy = "src.main:main"
 
 [project.urls]
-Homepage = "https://github.com/fkeegan/haindy"
-Repository = "https://github.com/fkeegan/haindy"
-Issues = "https://github.com/fkeegan/haindy/issues"
+Homepage = "https://github.com/Haindy/haindy"
+Repository = "https://github.com/Haindy/haindy"
+Issues = "https://github.com/Haindy/haindy/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-"src.monitoring" = ["templates/*.j2"]
+"haindy.skills" = ["**/*.md"]
+"haindy.monitoring" = ["templates/*.j2"]
 
 [tool.black]
 line-length = 88
