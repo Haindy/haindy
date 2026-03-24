@@ -55,6 +55,23 @@ def _check_api_key(provider: str) -> tuple[Text, str]:
         return _missing(f"run: haindy --auth login {provider}")
 
 
+def _check_codex_oauth() -> tuple[Text, str]:
+    try:
+        from haindy.auth.manager import OpenAIAuthManager
+
+        status = OpenAIAuthManager().get_status()
+        if status.oauth_connected:
+            label = status.oauth_account_label or ""
+            if status.oauth_expired:
+                return _missing(
+                    f"token expired ({label}) — run: haindy --auth login openai-codex"
+                )
+            return _ok(label)
+        return _missing("run: haindy --auth login openai-codex")
+    except Exception:
+        return _missing("run: haindy --auth login openai-codex")
+
+
 def _check_macos_pynput() -> tuple[Text, str]:
     if importlib.util.find_spec("pynput") is not None:
         return _ok("")
@@ -162,6 +179,9 @@ def run_doctor(
 
     status, notes = _check_api_key("vertex")
     _add("Google credentials", status, notes)
+
+    status, notes = _check_codex_oauth()
+    _add("OpenAI Codex (OAuth)", status, notes)
 
     if sys.platform == "darwin":
         status, notes = _check_macos_pynput()
