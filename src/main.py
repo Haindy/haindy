@@ -507,6 +507,10 @@ async def _create_coordinator_stack(
         )
     elif normalized_backend == "mobile_ios":
         automation_controller = IOSController()
+    elif sys.platform == "darwin":
+        from src.macos.controller import MacOSController
+
+        automation_controller = MacOSController()  # type: ignore[assignment]
     else:
         automation_controller = DesktopController()
     try:

@@ -21,9 +21,57 @@ activated virtual environment. If you are not activating `.venv`, use
 `.venv/bin/haindy`. Keep `python -m src.main ...` as a debugging or
 development fallback.
 
-## Linux/X11 desktop prerequisites
+## macOS desktop prerequisites
 
-Desktop automation is Linux/X11-only today.
+Desktop automation on macOS uses `pynput` (input injection) and `mss`
+(screenshot capture). Both are installed automatically via `requirements.lock`
+on macOS. No additional system tools are required, but two macOS privacy
+permissions must be granted before the first run.
+
+### Required permissions
+
+**Accessibility** — needed for keyboard injection via pynput.
+
+1. Open System Settings -> Privacy & Security -> Accessibility
+2. Add and enable the terminal emulator you use (e.g. Terminal, iTerm2) or the
+   Python executable if running headlessly
+
+**Screen Recording** — needed for `mss` to capture the screen.
+
+1. Open System Settings -> Privacy & Security -> Screen Recording
+2. Add and enable the same terminal or Python process
+
+The agent prints a clear error and exits if either permission is missing.
+
+### Retina displays
+
+Screenshots are captured at native pixel resolution (e.g. 2560x1600 on a
+13-inch MacBook Pro). The computer-use model sees this full-resolution image.
+Mouse click coordinates returned by the model are automatically scaled from
+pixel space to logical points before injection. No manual configuration is
+needed; the scale factor is detected at session startup.
+
+Resolution switching is not available on macOS. The system uses whatever
+resolution is currently set in Display Preferences.
+
+### Host expectations
+
+- Start the target application before opening a tool-call session
+- Maximize or position the target window so screenshots capture the app content
+- Set `HAINDY_AUTOMATION_BACKEND=desktop`; on macOS the right driver is
+  selected automatically
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `This process is not trusted` or keyboard input is ignored | Accessibility not granted | Add terminal to Accessibility in System Settings |
+| Screenshots are black or `CGWindowListCreateImage` fails | Screen Recording not granted | Add terminal to Screen Recording in System Settings |
+| Mouse clicks land in the wrong position | Scale factor mismatch | Run `haindy session status` and compare the screenshot size to the reported viewport |
+
+---
+
+## Linux/X11 desktop prerequisites
 
 Required runtime tools:
 

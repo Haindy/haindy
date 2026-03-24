@@ -42,6 +42,8 @@ dependencies = [
     "tiktoken==0.12.0",
     "evdev==1.9.3; sys_platform == 'linux'",
     "fb-idb>=1.1.7; sys_platform == 'darwin'",
+    "pynput>=1.7.7; sys_platform == 'darwin'",
+    "mss>=9.0.2; sys_platform == 'darwin'",
     "keyring>=25.0.0",
 ]
 

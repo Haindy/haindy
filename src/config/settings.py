@@ -74,6 +74,12 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "ios_coordinate_cache_path": "HAINDY_IOS_COORDINATE_CACHE_PATH",
     "ios_default_device_udid": "HAINDY_IOS_DEFAULT_DEVICE_UDID",
     "ios_idb_timeout_seconds": "HAINDY_IOS_IDB_TIMEOUT_SECONDS",
+    "macos_screenshot_dir": "HAINDY_MACOS_SCREENSHOT_DIR",
+    "macos_coordinate_cache_path": "HAINDY_MACOS_COORDINATE_CACHE_PATH",
+    "macos_keyboard_layout": "HAINDY_MACOS_KEYBOARD_LAYOUT",
+    "macos_keyboard_key_delay_ms": "HAINDY_MACOS_KEY_DELAY_MS",
+    "macos_clipboard_timeout_seconds": "HAINDY_MACOS_CLIPBOARD_TIMEOUT_SECONDS",
+    "macos_clipboard_hold_seconds": "HAINDY_MACOS_CLIPBOARD_HOLD_SECONDS",
     "enable_screen_recording": "HAINDY_ENABLE_SCREEN_RECORDING",
     "screen_recording_output_dir": "HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
     "screen_recording_framerate": "HAINDY_SCREEN_RECORDING_FRAMERATE",
@@ -459,6 +465,33 @@ class Settings(BaseModel):
         default=15.0,
         ge=0.5,
         description="Timeout in seconds for individual idb commands",
+    )
+    macos_screenshot_dir: Path = Field(
+        default=Path("data/screenshots/macos"),
+        description="Directory for macOS desktop screenshots",
+    )
+    macos_coordinate_cache_path: Path = Field(
+        default=Path("data/macos_cache/coordinates.json"),
+        description="Coordinate cache path for macOS desktop actions",
+    )
+    macos_keyboard_layout: str = Field(
+        default="us",
+        description="Keyboard layout for macOS automation",
+    )
+    macos_keyboard_key_delay_ms: int = Field(
+        default=12,
+        ge=0,
+        description="Delay between key events for macOS automation",
+    )
+    macos_clipboard_timeout_seconds: float = Field(
+        default=3.0,
+        ge=0.5,
+        description="Timeout for macOS clipboard operations",
+    )
+    macos_clipboard_hold_seconds: float = Field(
+        default=15.0,
+        ge=0.5,
+        description="Max time to hold macOS clipboard owner process",
     )
     enable_screen_recording: bool = Field(
         default=False,

@@ -60,6 +60,13 @@ _JSON_TO_FIELD: dict[str, str] = {
     "ios.coordinate_cache_path": "ios_coordinate_cache_path",
     "ios.default_device_udid": "ios_default_device_udid",
     "ios.idb_timeout_seconds": "ios_idb_timeout_seconds",
+    # macos section
+    "macos.screenshot_dir": "macos_screenshot_dir",
+    "macos.coordinate_cache_path": "macos_coordinate_cache_path",
+    "macos.keyboard_layout": "macos_keyboard_layout",
+    "macos.key_delay_ms": "macos_keyboard_key_delay_ms",
+    "macos.clipboard_timeout_seconds": "macos_clipboard_timeout_seconds",
+    "macos.clipboard_hold_seconds": "macos_clipboard_hold_seconds",
     # screen_recording section
     "screen_recording.enable": "enable_screen_recording",
     "screen_recording.output_dir": "screen_recording_output_dir",

@@ -457,11 +457,16 @@ class ToolCallSessionRuntime:
         self,
     ) -> DesktopController | MobileController | IOSController:
         """Instantiate the controller for this session backend."""
+        import sys
 
         if self.backend == "mobile_adb":
             return MobileController(preferred_serial=self.android_serial)
         if self.backend == "mobile_ios":
             return IOSController(preferred_udid=self.ios_udid)
+        if sys.platform == "darwin":
+            from src.macos.controller import MacOSController
+
+            return MacOSController()  # type: ignore[return-value]
         return DesktopController()
 
     def _tool_context(self, command_name: str) -> dict[str, Any]:
