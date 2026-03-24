@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.agents.test_runner_artifacts import TestRunnerArtifacts
-from src.monitoring.debug_logger import DebugLogger
+from haindy.agents.test_runner_artifacts import TestRunnerArtifacts
+from haindy.monitoring.debug_logger import DebugLogger
 
 
 def test_test_runner_artifacts_preserve_all_run_screenshots_by_default(
@@ -14,7 +14,7 @@ def test_test_runner_artifacts_preserve_all_run_screenshots_by_default(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    import src.monitoring.debug_logger as debug_logger_module
+    import haindy.monitoring.debug_logger as debug_logger_module
 
     debug_logger = DebugLogger("test-run")
     monkeypatch.setattr(debug_logger_module, "_debug_logger", debug_logger)

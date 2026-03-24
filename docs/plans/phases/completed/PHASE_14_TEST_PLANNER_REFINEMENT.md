@@ -121,21 +121,21 @@ Test Plan
 ```markdown
 # Test Plan: E-commerce Checkout Flow
 
-**Description**: Comprehensive test plan for checkout process  
-**Created**: 2025-01-10  
-**Requirements**: PRD v1.2  
+**Description**: Comprehensive test plan for checkout process
+**Created**: 2025-01-10
+**Requirements**: PRD v1.2
 
 ## Test Case TC001: Guest Checkout
 
-**Priority**: Critical  
-**Description**: Verify guest users can complete checkout  
+**Priority**: Critical
+**Description**: Verify guest users can complete checkout
 
 ### Prerequisites
 - Product catalog available
 - Payment gateway active
 
 ### Test Steps
-1. **Navigate to product page**  
+1. **Navigate to product page**
    _Expected_: Product page loads with details
 ```
 

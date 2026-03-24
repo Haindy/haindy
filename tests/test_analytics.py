@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.monitoring.analytics import (
+from haindy.monitoring.analytics import (
     MetricsCollector,
     TestMetrics,
     TestOutcome,

@@ -59,12 +59,12 @@ class BaseAgent(ABC):
         self.agent_id = agent_id
         self.client = openai_client
         self.logger = self._setup_logger()
-    
+
     @abstractmethod
     async def process(self, input_data: Any) -> Any:
         """Main processing method for the agent"""
         pass
-    
+
     def validate_output(self, output: Any) -> bool:
         """Validate agent output before returning"""
         pass
@@ -80,7 +80,7 @@ class TestStep:
     expected_outcome: str
     element_description: Optional[str]
     validation_criteria: List[str]
-    
+
 @dataclass
 class ActionResult:
     success: bool

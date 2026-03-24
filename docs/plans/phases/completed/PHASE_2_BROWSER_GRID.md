@@ -64,14 +64,14 @@ class AdaptiveGrid:
         self.grid_width = width
         self.grid_height = height
         self.refinement_threshold = 0.80
-    
+
     def map_to_coordinates(self, cell: str) -> PixelCoordinates:
         """Convert grid cell (e.g., 'M23') to pixel coordinates"""
         pass
-    
-    def refine_selection(self, 
-                        initial_cell: str, 
-                        screenshot: bytes, 
+
+    def refine_selection(self,
+                        initial_cell: str,
+                        screenshot: bytes,
                         confidence: float) -> RefinedCoordinates:
         """Apply adaptive refinement for higher precision"""
         pass
@@ -96,7 +96,7 @@ Refinement Process:
 
 ```python
 class PlaywrightDriver:
-    async def click_at_grid(self, 
+    async def click_at_grid(self,
                            grid_coords: GridCoordinates,
                            wait_after: int = 1000):
         """Execute click at grid coordinates"""

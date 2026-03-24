@@ -69,7 +69,7 @@ In `_create_coordinator_stack()`, replace the `else` branch with platform detect
 else:
     import sys
     if sys.platform == "darwin":
-        from src.macos.controller import MacOSController
+        from haindy.macos.controller import MacOSController
         automation_controller = MacOSController()
     else:
         automation_controller = DesktopController()

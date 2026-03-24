@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.core.types import TestStatus
-from src.monitoring.simple_html_reporter import SimpleHTMLReporter
+from haindy.core.types import TestStatus
+from haindy.monitoring.simple_html_reporter import SimpleHTMLReporter
 
 
 def test_prepare_template_data_includes_coordinate_context_and_screenshots() -> None:

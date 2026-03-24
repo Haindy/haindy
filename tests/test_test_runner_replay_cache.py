@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from src.runtime.execution_replay_cache import ExecutionReplayCacheKey
+from haindy.runtime.execution_replay_cache import ExecutionReplayCacheKey
 from tests.support_test_runner import (
     _build_test_case,
     runner_factory,

@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from src.monitoring.debug_logger import DebugLogger
-from src.security.sanitizer import set_literal_redactions
-from src.utils.model_logging import ModelCallLogger
+from haindy.monitoring.debug_logger import DebugLogger
+from haindy.security.sanitizer import set_literal_redactions
+from haindy.utils.model_logging import ModelCallLogger
 
 
 def test_debug_logger_redacts_runtime_literal_secrets(tmp_path) -> None:

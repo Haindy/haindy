@@ -1,6 +1,6 @@
 """Core type tests for the computer-use data model."""
 
-from src.core.types import (
+from haindy.core.types import (
     ActionInstruction,
     ActionType,
     CoordinateReference,

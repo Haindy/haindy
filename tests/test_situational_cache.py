@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.runtime.situational_cache import (
+from haindy.runtime.situational_cache import (
     SITUATIONAL_CACHE_VERSION,
     SituationalCache,
     build_situational_cache_key_payload,

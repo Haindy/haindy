@@ -6,7 +6,7 @@ from collections import deque
 
 import pytest
 
-from src.core.enhanced_types import ComputerToolTurn
+from haindy.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     make_session,
     openai_computer_call,

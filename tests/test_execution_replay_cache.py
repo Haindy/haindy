@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.runtime.execution_replay_cache import (
+from haindy.runtime.execution_replay_cache import (
     EXECUTION_REPLAY_CACHE_VERSION,
     ExecutionReplayCache,
     ExecutionReplayCacheKey,

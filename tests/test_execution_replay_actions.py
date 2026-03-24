@@ -1,6 +1,6 @@
 import pytest
 
-from src.desktop.execution_replay import (
+from haindy.desktop.execution_replay import (
     DriverActionError,
     normalize_driver_action,
     normalize_driver_actions,

@@ -49,7 +49,7 @@ Test Runner → Action Agent → Browser Action + Evaluation → Result
          ↓
 ┌─────────────────────────────────────┐
 │         Action Agent                │
-│  • Validates action                 │ → All evaluation 
+│  • Validates action                 │ → All evaluation
 │  • Executes action                  │   happens here ✅
 │  • Evaluates outcome                │
 │  • Returns comprehensive result     │
@@ -61,7 +61,7 @@ Test Runner → Action Agent → Browser Action + Evaluation → Result
 ### To Remove:
 ```
 ❌ /src/agents/evaluator.py (364 lines)
-❌ /tests/test_evaluator.py (295 lines)  
+❌ /tests/test_evaluator.py (295 lines)
 ❌ /examples/evaluator_demo.py (370 lines)
 ❌ EVALUATOR_AGENT_SYSTEM_PROMPT
 ❌ EvaluatorAgent from interfaces.py
@@ -90,7 +90,7 @@ Total: ~1,100 lines of dead code
 
 ```
 Day 1 Morning:    Extract utilities
-Day 1 Afternoon:  Enhance Action Agent  
+Day 1 Afternoon:  Enhance Action Agent
 Day 1 Evening:    Remove Evaluator code
 ─────────────────────────────────────
 Total: 1 day (as estimated)

@@ -4,13 +4,13 @@ Tests for the script recorder.
 
 import pytest
 
-from src.core.types import ActionType
-from src.journal.models import (
+from haindy.core.types import ActionType
+from haindy.journal.models import (
     ActionRecord,
     JournalActionResult,
     PatternType,
 )
-from src.journal.script_recorder import ScriptRecorder
+from haindy.journal.script_recorder import ScriptRecorder
 
 
 @pytest.fixture

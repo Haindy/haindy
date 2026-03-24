@@ -193,7 +193,7 @@ The CLI launches the daemon through a narrow double-fork helper so the long-live
 session process is not tied to the lifetime of the `session new` client
 process. The launcher:
 
-- resolves the canonical HAINDY CLI entrypoint (`haindy` when installed, otherwise `python -m src.main`)
+- resolves the canonical HAINDY CLI entrypoint (`haindy` when installed, otherwise `python -m haindy.main`)
 - creates the readiness pipe and passes its write end through `HAINDY_READINESS_FD`
 - performs `fork`, `setsid()`, and a second `fork`
 - redirects stdin/stdout/stderr to `/dev/null`
@@ -251,7 +251,7 @@ The hidden daemon entrypoint remains available for local debugging, integration
 tests, and hostile wrappers that kill all detached descendants:
 
 ```bash
-python -m src.main __tool_call_daemon --session-id <SESSION_ID> --backend desktop
+python -m haindy.main __tool_call_daemon --session-id <SESSION_ID> --backend desktop
 ```
 
 This is an operational fallback, not the primary V1 path.

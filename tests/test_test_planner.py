@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.test_planner import TestPlannerAgent
-from src.core.types import (
+from haindy.agents.test_planner import TestPlannerAgent
+from haindy.core.types import (
     TestCase,
     TestCasePriority,
     TestPlan,

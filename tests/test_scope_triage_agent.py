@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.scope_triage import ScopeTriageAgent
-from src.core.types import ScopeTriageResult
+from haindy.agents.scope_triage import ScopeTriageAgent
+from haindy.core.types import ScopeTriageResult
 
 
 class TestScopeTriageAgent:

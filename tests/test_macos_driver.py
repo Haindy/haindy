@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from src.macos.driver import MacOSDriver, _parse_png_size
-from src.macos.input_handler import MacOSInputHandler
+from haindy.macos.driver import MacOSDriver, _parse_png_size
+from haindy.macos.input_handler import MacOSInputHandler
 
 # ---------------------------------------------------------------------------
 # Minimal PNG factory helpers
@@ -120,8 +120,10 @@ class StubScreenCapture:
 
 
 def _make_driver(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MacOSDriver:
-    monkeypatch.setattr("src.macos.driver.MacOSScreenCapture", StubScreenCapture)
-    monkeypatch.setattr("src.macos.driver.MacOSInputHandler", _make_stub_input_class())
+    monkeypatch.setattr("haindy.macos.driver.MacOSScreenCapture", StubScreenCapture)
+    monkeypatch.setattr(
+        "haindy.macos.driver.MacOSInputHandler", _make_stub_input_class()
+    )
     return MacOSDriver(
         screenshot_dir=tmp_path / "shots",
         cache_path=tmp_path / "coords.json",
@@ -211,8 +213,8 @@ async def test_start_detects_scale_factor(
 ) -> None:
     """scale_x / scale_y == 2.0 when logical=2x2 and screenshot pixels=4x4."""
     StubInput = _make_stub_input_class()
-    monkeypatch.setattr("src.macos.driver.MacOSScreenCapture", StubScreenCapture)
-    monkeypatch.setattr("src.macos.driver.MacOSInputHandler", StubInput)
+    monkeypatch.setattr("haindy.macos.driver.MacOSScreenCapture", StubScreenCapture)
+    monkeypatch.setattr("haindy.macos.driver.MacOSInputHandler", StubInput)
 
     driver = MacOSDriver(
         screenshot_dir=tmp_path / "shots",
@@ -238,8 +240,8 @@ async def test_start_is_idempotent(
             super().__init__(**kwargs)
             created.append(1)
 
-    monkeypatch.setattr("src.macos.driver.MacOSScreenCapture", StubScreenCapture)
-    monkeypatch.setattr("src.macos.driver.MacOSInputHandler", CountingInput)
+    monkeypatch.setattr("haindy.macos.driver.MacOSScreenCapture", StubScreenCapture)
+    monkeypatch.setattr("haindy.macos.driver.MacOSInputHandler", CountingInput)
 
     driver = MacOSDriver(
         screenshot_dir=tmp_path / "shots",

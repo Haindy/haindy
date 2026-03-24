@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.agents.computer_use import ComputerUseSession
+from haindy.agents.computer_use import ComputerUseSession
 
 
 class DummyFunctionCall:

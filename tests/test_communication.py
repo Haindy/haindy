@@ -1,6 +1,6 @@
 """Tests for coordinator diagnostics helpers."""
 
-from src.orchestration.communication import (
+from haindy.orchestration.communication import (
     CoordinatorDiagnostics,
     DiagnosticsEvent,
     MessageType,

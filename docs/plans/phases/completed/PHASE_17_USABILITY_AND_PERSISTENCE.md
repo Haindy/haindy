@@ -84,20 +84,20 @@ haindy/
 ```python
 class TestPlanManager:
     """Manages test plan storage and retrieval."""
-    
+
     def save_test_plan(self, test_plan: TestPlan) -> Path:
         """Save test plan to structured directory."""
         # Create date-based directory
         # Save as JSON with proper formatting
         # Generate human-readable markdown version
         # Return path to saved plan
-    
+
     def load_test_plan(self, plan_id: UUID) -> TestPlan:
         """Load test plan by ID."""
         # Search for plan across date directories
         # Load and validate JSON
         # Return TestPlan object
-    
+
     def save_action_decomposition(self, plan_id: UUID, actions: Dict) -> Path:
         """Save Test Runner's decomposed actions."""
         # Link to test plan via ID
@@ -109,7 +109,7 @@ class TestPlanManager:
 ```python
 class EnhancedReportGenerator:
     """Generate structured test reports."""
-    
+
     def generate_report(self, test_state: TestState) -> None:
         """Generate hierarchical test report."""
         # Top level: Test Plan summary

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.computer_use import ComputerUseSession
+from haindy.agents.computer_use import ComputerUseSession
 
 
 class DummyResponse:

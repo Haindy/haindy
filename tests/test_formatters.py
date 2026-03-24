@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from src.agents.formatters import TestPlanFormatter
-from src.core.types import TestCase, TestCasePriority, TestPlan, TestStep
+from haindy.agents.formatters import TestPlanFormatter
+from haindy.core.types import TestCase, TestCasePriority, TestPlan, TestStep
 
 
 class TestTestPlanFormatter:

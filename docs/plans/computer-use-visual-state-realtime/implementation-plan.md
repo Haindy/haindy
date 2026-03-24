@@ -52,7 +52,7 @@
 - The supplied validation command remains unchanged:
 
 ```bash
-python -m src.main --mobile --plan test_scenarios/playerup/sign-in-test-plan-short.md --context test_scenarios/playerup/playerup_context.md
+python -m haindy.main --mobile --plan test_scenarios/playerup/sign-in-test-plan-short.md --context test_scenarios/playerup/playerup_context.md
 ```
 
 - After implementation, run targeted unit/integration tests first, then run the PlayerUp mobile command in the venv, and iterate fixing until the run completes without internal errors introduced by this refactor. App/test failures are acceptable; transport, screenshot, cartography, verifier, and artifact-pipeline crashes are not.

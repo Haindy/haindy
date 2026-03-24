@@ -252,4 +252,3 @@ Outputs summarized in a local HTML/CLI dashboard (no external services required)
 - [ ] Watchdog behaviors defined
 - [ ] P2 confirm‑to‑act path validated on 3 internal tests
 - [ ] P3 autonomous path validated on low‑risk gigs
-

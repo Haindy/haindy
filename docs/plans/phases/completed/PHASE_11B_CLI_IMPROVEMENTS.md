@@ -12,8 +12,8 @@ The runtime now expects requirements to come from files and supports utility/aut
 ### Core Input
 
 ```bash
-python -m src.main --plan <file>
-python -m src.main -p <file>
+python -m haindy.main --plan <file>
+python -m haindy.main -p <file>
 ```
 
 - Reads requirements text directly from the provided file.
@@ -23,16 +23,16 @@ python -m src.main -p <file>
 ### Utility Commands
 
 ```bash
-python -m src.main --test-api
-python -m src.main --version
-python -m src.main --help
+python -m haindy.main --test-api
+python -m haindy.main --version
+python -m haindy.main --help
 ```
 
 ### Execution Modes
 
 ```bash
-python -m src.main --berserk --plan requirements.md
-python -m src.main --plan-only --plan requirements.md
+python -m haindy.main --berserk --plan requirements.md
+python -m haindy.main --plan-only --plan requirements.md
 ```
 
 ## Key Implementation Notes

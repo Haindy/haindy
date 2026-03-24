@@ -82,9 +82,8 @@ async def test_google_step_actions_reuse_previous_interaction_chain(
     assert "previous_interaction_id" not in first_request
     assert first_request["input"][0]["type"] == "text"
     assert first_request["input"][1]["type"] == "image"
-    assert (
-        "IMPORTANT: You are controlling a single Firefox browser window"
-        in (first_request["input"][0]["text"])
+    assert "IMPORTANT: You are controlling a single Firefox browser window" in (
+        first_request["input"][0]["text"]
     )
 
     assert follow_up_request["previous_interaction_id"] == "int_1"

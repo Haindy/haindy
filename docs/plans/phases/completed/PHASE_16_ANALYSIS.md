@@ -158,7 +158,7 @@ Given that:
 1. **Preserve useful logic:**
    - Extract `check_for_errors()` logic to utility function
    - Consider adding confidence thresholds to Action Agent
-   
+
 2. **Update Action Agent:**
    - Add explicit evaluation methods if needed
    - Improve deviation detection
@@ -186,7 +186,7 @@ Given that:
 
 ### 6.3 Benefits
 - Cleaner architecture
-- Less code to maintain  
+- Less code to maintain
 - Clearer responsibility boundaries
 - Matches current implementation reality
 

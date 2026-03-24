@@ -7,9 +7,9 @@ import logging
 import pytest
 from PIL import Image, ImageDraw
 
-from src.agents.computer_use.common import denormalize_coordinates
-from src.agents.computer_use.visual_pipeline import VisualStatePlanner
-from src.agents.computer_use.visual_state import (
+from haindy.agents.computer_use.common import denormalize_coordinates
+from haindy.agents.computer_use.visual_pipeline import VisualStatePlanner
+from haindy.agents.computer_use.visual_state import (
     CARTOGRAPHY_BLOCK_END,
     CARTOGRAPHY_BLOCK_START,
     CartographyMap,
@@ -21,7 +21,7 @@ from src.agents.computer_use.visual_state import (
     encode_png,
     expand_bounds,
 )
-from src.core.enhanced_types import ComputerToolTurn
+from haindy.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import make_session
 
 pytest_plugins = ("tests.computer_use_session_support",)
@@ -161,7 +161,7 @@ async def test_visual_state_planner_logs_selected_patch_context(caplog) -> None:
         patch_margin_ratio=0.12,
     )
 
-    with caplog.at_level(logging.INFO, logger="src.agents.computer_use.session"):
+    with caplog.at_level(logging.INFO, logger="haindy.agents.computer_use.session"):
         await planner.build_follow_up_frame(
             screenshot_bytes=screenshot,
             metadata={"target": "email"},

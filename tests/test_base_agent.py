@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.base_agent import BaseAgent
-from src.core.types import AgentMessage, ConfidenceLevel
+from haindy.agents.base_agent import BaseAgent
+from haindy.core.types import AgentMessage, ConfidenceLevel
 
 
 class TestBaseAgent:
@@ -40,7 +40,7 @@ class TestBaseAgent:
         assert agent.reasoning_level == "medium"
         assert agent.modalities == {"text"}
 
-    @patch("src.agents.base_agent.OpenAIClient")
+    @patch("haindy.agents.base_agent.OpenAIClient")
     def test_client_lazy_loading(self, mock_client_class):
         """Test lazy loading of OpenAI client."""
         agent = BaseAgent(name="TestAgent")
