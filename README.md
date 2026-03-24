@@ -11,6 +11,7 @@ Desktop-first autonomous testing agent with two operating modes:
 - `src/tool_call_mode/`: tool-call CLI, daemon, IPC, runtime, and session state helpers
 - `src/agents/`: planner, runner, action, and situational agents
 - `src/desktop/`: Linux/X11 desktop automation
+- `src/macos/`: macOS desktop automation (pynput + mss)
 - `src/mobile/`: Android ADB and iOS idb automation
 - `src/config/settings.py`: env-backed runtime configuration
 - `docs/design/tool-call-mode/`: tool-call mode design docs
@@ -42,7 +43,7 @@ If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
 - Linux/X11 desktop automation: install the runtime tools in [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - Android automation: ensure `adb` is installed and the target device or emulator is reachable
 - iOS automation (macOS only): `brew install idb-companion` — see [docs/RUNBOOK.md](docs/RUNBOOK.md) for full prerequisites
-- macOS is fine for development and tests, but the `desktop` backend is Linux/X11-only today
+- macOS desktop automation: grant Accessibility and Screen Recording permissions to your terminal app (System Settings > Privacy & Security) — see [docs/RUNBOOK.md](docs/RUNBOOK.md) for details
 
 ### 4. Configure credentials and settings
 
