@@ -792,12 +792,12 @@ async def async_main(args: list[str] | None = None) -> int:
         return show_version()
 
     if parsed_args.setup:
-        from src.cli.setup_wizard import run_setup_wizard
+        from haindy.cli.setup_wizard import run_setup_wizard
 
         return run_setup_wizard(non_interactive=parsed_args.non_interactive)
 
     if parsed_args.doctor:
-        from src.cli.doctor import run_doctor
+        from haindy.cli.doctor import run_doctor
 
         return run_doctor(
             include_android=parsed_args.include_android,
