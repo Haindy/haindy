@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ TargetTypeName = Literal["desktop_app", "web", "mobile_adb", "mobile_ios"]
 _RUNTIME_ENV_ALIASES: dict[str, RuntimeEnvironmentName] = {
     "desktop": "desktop",
     "linux": "desktop",
+    "macos": "desktop",
+    "mac": "desktop",
     "os": "desktop",
     "system": "desktop",
     "browser": "browser",
@@ -91,6 +94,8 @@ class RuntimeEnvironmentSpec:
             return "ios_coordinate_cache_path"
         if self.name == "mobile_adb":
             return "mobile_coordinate_cache_path"
+        if self.name == "desktop" and sys.platform == "darwin":
+            return "macos_coordinate_cache_path"
         return "desktop_coordinate_cache_path"
 
     @property
@@ -98,6 +103,8 @@ class RuntimeEnvironmentSpec:
         if self.is_browser:
             return "browser"
         if self.is_ios:
+            return "mac"
+        if self.name == "desktop" and sys.platform == "darwin":
             return "mac"
         return "linux"
 

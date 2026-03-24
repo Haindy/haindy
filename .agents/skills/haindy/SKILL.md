@@ -7,7 +7,7 @@ metadata:
 
 # Using HAINDY Tool-Call Mode
 
-HAINDY controls a real Linux/X11 desktop, Android device, or iOS device/simulator. In tool-call mode it runs as a background session daemon and every command returns exactly one JSON object on stdout.
+HAINDY controls a real desktop (Linux/X11 or macOS), Android device, or iOS device/simulator. In tool-call mode it runs as a background session daemon and every command returns exactly one JSON object on stdout.
 
 ## Invocation
 
@@ -38,6 +38,7 @@ Desktop rules:
 - Start the target site or desktop app before opening the session
 - Prefer a maximized target window
 - Desktop `session new --url ...` is not part of V1
+- On macOS, grant **Accessibility** and **Screen Recording** permissions to the terminal app before starting a session (System Settings > Privacy & Security). A restart of the terminal may be required after granting permissions.
 
 iOS rules:
 

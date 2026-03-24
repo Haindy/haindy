@@ -129,17 +129,22 @@ sequenceDiagram
 - Applies domain allow/block lists and fail-fast safety handling; mirrors all turns into `ComputerToolTurn` records with screenshots and timing.
 - Automatically confirms “Should I proceed?” messages to keep workflows non-blocking.
 
-### Automation Backends (`src/desktop`, `src/mobile`)
-- `DesktopDriver` performs desktop automation through OS-level input, screen
-  capture, clipboard handling, and optional resolution switching.
+### Automation Backends (`src/desktop`, `src/macos`, `src/mobile`)
+- `DesktopDriver` performs Linux/X11 desktop automation through uinput-backed
+  input, screen capture, clipboard handling, and optional resolution switching.
 - `DesktopController` owns desktop-driver lifecycle and exposes high-level
   desktop control to the coordinator.
+- `MacOSDriver` performs macOS desktop automation using pynput (Quartz CGEvent
+  input injection) and mss (native-resolution screenshots). Handles Retina
+  coordinate scaling automatically; selected via `sys.platform == "darwin"`.
+- `MacOSController` owns macOS-driver lifecycle and exposes the same interface
+  as `DesktopController`.
 - `MobileDriver` performs Android automation through ADB-backed input and
   screenshot capture.
 - `MobileController` owns mobile-driver lifecycle and exposes the same
   automation-driver contract for mobile runs.
 - `normalize_automation_backend` selects the active backend so the coordinator
-  can run against either desktop or mobile execution without changing agent
+  can run against desktop, macOS, or mobile execution without changing agent
   logic.
 
 ### OpenAI Client Layer (`src/models/openai_client.py`)
@@ -158,7 +163,7 @@ sequenceDiagram
 Settings are loaded in priority order (lowest to highest):
 
 1. Pydantic field defaults
-2. `~/.haindy/settings.json` — user-level, hierarchical JSON (sections: `computer_use`, `desktop`, `execution`, `logging`, etc.)
+2. `~/.haindy/settings.json` — user-level, hierarchical JSON (sections: `computer_use`, `desktop`, `macos`, `mobile`, `ios`, `execution`, `logging`, etc.)
 3. `.haindy.json` in CWD — project-level overrides, safe to commit (no secrets)
 4. `HAINDY_*` environment variables + `.env` file — highest priority, used by CI/CD
 

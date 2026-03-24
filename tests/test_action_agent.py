@@ -44,7 +44,7 @@ def test_build_computer_use_goal_prefers_explicit_prompt() -> None:
         ),
     )
 
-    goal = ActionAgent._build_computer_use_goal(step, step.action_instruction)
+    goal = ActionAgent._build_computer_use_goal(step, step.action_instruction)  # type: ignore[arg-type]
     assert goal == "Use this exact prepared prompt"
 
 
@@ -63,7 +63,7 @@ def test_build_computer_use_goal_generates_structured_prompt_when_needed() -> No
         ),
     )
 
-    goal = ActionAgent._build_computer_use_goal(step, step.action_instruction)
+    goal = ActionAgent._build_computer_use_goal(step, step.action_instruction)  # type: ignore[arg-type]
     assert "Action type: type" in goal
     assert "Target: Search field" in goal
     assert "Value: openai" in goal
@@ -89,7 +89,7 @@ def test_build_action_session_metadata_preserves_mobile_app_identity(
     metadata, environment, safety_identifier = agent._build_action_session_metadata(
         step_session=None,
         test_step=step,
-        instruction=step.action_instruction,
+        instruction=step.action_instruction,  # type: ignore[arg-type]
         interaction_mode="execute",
         current_url="android://screen",
         context_lookup={
@@ -112,7 +112,7 @@ def test_build_step_validation_prompt_scopes_verdict_to_current_step(
 ) -> None:
     _patch_settings(monkeypatch)
     agent = ActionAgent()
-    test_case = TestCase(
+    test_case = TestCase(  # type: ignore[call-arg]
         test_id="TC002",
         name="Case-insensitive sign-in",
         description=(
@@ -156,6 +156,11 @@ def test_new_computer_use_session_skips_openai_client_for_google(
             desktop_coordinate_cache_path=Path(
                 "data/desktop_cache/test_coordinates.json"
             ),
+            macos_coordinate_cache_path=Path("data/macos_cache/test_coordinates.json"),
+            mobile_coordinate_cache_path=Path(
+                "data/mobile_cache/test_coordinates.json"
+            ),
+            ios_coordinate_cache_path=Path("data/ios_cache/test_coordinates.json"),
             computer_use_model="gpt-5.4",
             cu_provider="google",
         ),
@@ -170,7 +175,7 @@ def test_new_computer_use_session_skips_openai_client_for_google(
 
     monkeypatch.setattr("src.agents.action_agent.ComputerUseSession", _FakeSession)
 
-    agent = ActionAgent(automation_driver=object())
+    agent = ActionAgent(automation_driver=object())  # type: ignore[arg-type]
 
     agent._new_computer_use_session(debug_logger=None, environment="desktop")
 
@@ -197,7 +202,7 @@ async def test_execute_action_routes_skip_navigation_without_driver(
 
     result = await agent.execute_action(step, {})
     assert result.overall_success is True
-    assert result.execution.success is True
+    assert result.execution.success is True  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
@@ -227,7 +232,7 @@ async def test_execute_action_delegates_to_computer_workflow(
         overall_success=True,
     )
 
-    async def _fake(*_args, **_kwargs):
+    async def _fake(*_args, **_kwargs):  # type: ignore[no-untyped-def]
         return expected
 
     monkeypatch.setattr(agent, "_execute_computer_tool_workflow", _fake)
@@ -261,7 +266,7 @@ async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
     )
 
     class _FakeSession:
-        async def run(self, *_args, **_kwargs):
+        async def run(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
             return ComputerUseSessionResult(
                 final_output="Done",
                 final_visual_frame=visual_patch,
@@ -269,7 +274,7 @@ async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
             )
 
     agent = ActionAgent(
-        automation_driver=SimpleNamespace(
+        automation_driver=SimpleNamespace(  # type: ignore[arg-type]
             get_page_url=AsyncMock(return_value="https://example.com"),
             get_page_title=AsyncMock(return_value="Example"),
             get_viewport_size=AsyncMock(return_value=(1280, 720)),
