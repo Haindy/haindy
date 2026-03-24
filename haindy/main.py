@@ -141,16 +141,6 @@ Fallback:
     )
 
     parser.add_argument(
-        "--include-android",
-        action="store_true",
-        help="Include Android/ADB checks in doctor output",
-    )
-    parser.add_argument(
-        "--include-ios",
-        action="store_true",
-        help="Include iOS/idb checks in doctor output",
-    )
-    parser.add_argument(
         "--non-interactive",
         action="store_true",
         help="Run setup wizard without interactive prompts",
@@ -799,10 +789,7 @@ async def async_main(args: list[str] | None = None) -> int:
     if parsed_args.doctor:
         from haindy.cli.doctor import run_doctor
 
-        return run_doctor(
-            include_android=parsed_args.include_android,
-            include_ios=parsed_args.include_ios,
-        )
+        return run_doctor()
 
     if not _is_setup_complete() and not _should_bypass_gate(parsed_args):
         console.print(

@@ -104,14 +104,7 @@ def _wizard(non_interactive: bool) -> int:
             _install_skills(cli_binary, setup_target, main_target)
 
     _console.rule("Step 4: Dependency Check")
-    check_android = False
-    check_ios = False
-    if not non_interactive:
-        check_android = Confirm.ask("Check Android/ADB dependencies?", default=False)
-        if sys.platform == "darwin":
-            check_ios = Confirm.ask("Check iOS/idb dependencies?", default=False)
-
-    doctor_code = run_doctor(include_android=check_android, include_ios=check_ios)
+    doctor_code = run_doctor()
     if not non_interactive and doctor_code != 0:
         _console.print(
             "\n[yellow]Some dependencies are missing. "

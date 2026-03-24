@@ -143,10 +143,7 @@ def _check_linux_display() -> tuple[Text, str]:
     return _missing("DISPLAY env var not set")
 
 
-def run_doctor(
-    include_android: bool = False,
-    include_ios: bool = False,
-) -> int:
+def run_doctor() -> int:
     """Run system dependency checks and print a rich table.
 
     Returns 0 if all required components are present, 1 if any required
@@ -214,41 +211,37 @@ def run_doctor(
         status, notes = _check_linux_display()
         _add("DISPLAY", status, notes)
 
-    if include_android:
-        if shutil.which("adb"):
-            _add("adb", *_ok(), required=False)
+    if shutil.which("adb"):
+        _add("adb (Android, optional)", *_ok(), required=False)
+    else:
+        _add(
+            "adb (Android, optional)",
+            *_missing("Install Android SDK platform-tools"),
+            required=False,
+        )
+
+    if sys.platform == "darwin":
+        if shutil.which("idb_companion"):
+            _add("idb-companion (iOS, optional)", *_ok(), required=False)
         else:
             _add(
-                "adb",
-                *_missing("Install Android SDK platform-tools"),
+                "idb-companion (iOS, optional)",
+                *_missing("brew install facebook/fb/idb-companion"),
+                required=False,
+            )
+        if importlib.util.find_spec("idb") is not None:
+            _add("fb-idb Python package (iOS, optional)", *_ok(), required=False)
+        else:
+            _add(
+                "fb-idb Python package (iOS, optional)",
+                *_missing("pip install fb-idb"),
                 required=False,
             )
     else:
-        _add("adb (Android)", *_na("pass --include-android to check"), required=False)
-
-    if include_ios:
-        if sys.platform == "darwin":
-            if shutil.which("idb_companion"):
-                _add("idb-companion", *_ok(), required=False)
-            else:
-                _add(
-                    "idb-companion",
-                    *_missing("brew install facebook/fb/idb-companion"),
-                    required=False,
-                )
-            if importlib.util.find_spec("idb") is not None:
-                _add("fb-idb Python package", *_ok(), required=False)
-            else:
-                _add(
-                    "fb-idb Python package",
-                    *_missing("pip install fb-idb"),
-                    required=False,
-                )
-        else:
-            _add("idb-companion", *_na("macOS only"), required=False)
-            _add("fb-idb Python package", *_na("macOS only"), required=False)
-    else:
-        _add("idb-companion (iOS)", *_na("pass --include-ios to check"), required=False)
+        _add("idb-companion (iOS, optional)", *_na("macOS only"), required=False)
+        _add(
+            "fb-idb Python package (iOS, optional)", *_na("macOS only"), required=False
+        )
 
     _console.print(table)
 
