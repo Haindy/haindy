@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.agents.test_runner_verifier import TestRunnerVerifier
-from src.core.types import TestCase, TestStep
+from haindy.agents.test_runner_verifier import TestRunnerVerifier
+from haindy.core.types import TestCase, TestStep
 
 
 @pytest.mark.asyncio

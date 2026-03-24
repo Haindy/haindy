@@ -3,8 +3,8 @@ from collections.abc import Sequence
 
 import pytest
 
-from src.mobile.adb_client import ADBClient, ADBCommandResult
-from src.mobile.driver import MobileDriver
+from haindy.mobile.adb_client import ADBClient, ADBCommandResult
+from haindy.mobile.driver import MobileDriver
 
 
 def _png_bytes(width: int, height: int) -> bytes:

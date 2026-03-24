@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.runtime.agent_factory import AgentFactory
+from haindy.runtime.agent_factory import AgentFactory
 
 
 @dataclass
@@ -40,13 +40,13 @@ class _TestRunnerStub(_PlanningAgentStub):
 
 def test_factory_creates_planning_bundle_with_shared_config(monkeypatch) -> None:
     monkeypatch.setattr(
-        "src.runtime.agent_factory.ScopeTriageAgent", _PlanningAgentStub
+        "haindy.runtime.agent_factory.ScopeTriageAgent", _PlanningAgentStub
     )
     monkeypatch.setattr(
-        "src.runtime.agent_factory.TestPlannerAgent", _PlanningAgentStub
+        "haindy.runtime.agent_factory.TestPlannerAgent", _PlanningAgentStub
     )
     monkeypatch.setattr(
-        "src.runtime.agent_factory.SituationalAgent", _PlanningAgentStub
+        "haindy.runtime.agent_factory.SituationalAgent", _PlanningAgentStub
     )
 
     factory = AgentFactory(settings=_SettingsStub())
@@ -63,16 +63,16 @@ def test_factory_creates_planning_bundle_with_shared_config(monkeypatch) -> None
 
 def test_factory_creates_runtime_bundle_and_wires_action_agent(monkeypatch) -> None:
     monkeypatch.setattr(
-        "src.runtime.agent_factory.ScopeTriageAgent", _PlanningAgentStub
+        "haindy.runtime.agent_factory.ScopeTriageAgent", _PlanningAgentStub
     )
     monkeypatch.setattr(
-        "src.runtime.agent_factory.TestPlannerAgent", _PlanningAgentStub
+        "haindy.runtime.agent_factory.TestPlannerAgent", _PlanningAgentStub
     )
     monkeypatch.setattr(
-        "src.runtime.agent_factory.SituationalAgent", _PlanningAgentStub
+        "haindy.runtime.agent_factory.SituationalAgent", _PlanningAgentStub
     )
-    monkeypatch.setattr("src.runtime.agent_factory.ActionAgent", _ActionAgentStub)
-    monkeypatch.setattr("src.runtime.agent_factory.TestRunner", _TestRunnerStub)
+    monkeypatch.setattr("haindy.runtime.agent_factory.ActionAgent", _ActionAgentStub)
+    monkeypatch.setattr("haindy.runtime.agent_factory.TestRunner", _TestRunnerStub)
 
     driver = object()
     factory = AgentFactory(settings=_SettingsStub())

@@ -4,7 +4,7 @@ Unit tests for error handling exceptions.
 
 from datetime import datetime
 
-from src.error_handling.exceptions import (
+from haindy.error_handling.exceptions import (
     AgentError,
     AutomationError,
     CoordinationError,

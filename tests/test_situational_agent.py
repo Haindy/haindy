@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agents.situational_agent import SituationalAgent
-from src.core.types import ActionType
-from src.runtime.situational_cache import (
+from haindy.agents.situational_agent import SituationalAgent
+from haindy.core.types import ActionType
+from haindy.runtime.situational_cache import (
     SituationalCache,
     build_situational_cache_key_payload,
     hash_situational_cache_key,
@@ -222,7 +222,7 @@ async def test_assess_context_persists_model_and_debug_logs(
     model_logger = SimpleNamespace(log_call=AsyncMock())
     debug_logger = MagicMock()
     monkeypatch.setattr(
-        "src.agents.situational_agent.get_debug_logger", lambda: debug_logger
+        "haindy.agents.situational_agent.get_debug_logger", lambda: debug_logger
     )
 
     cache = SituationalCache(tmp_path / "situational_cache.json")
@@ -266,7 +266,7 @@ async def test_assess_context_logs_fallback_when_model_call_fails(
     model_logger = SimpleNamespace(log_call=AsyncMock())
     debug_logger = MagicMock()
     monkeypatch.setattr(
-        "src.agents.situational_agent.get_debug_logger", lambda: debug_logger
+        "haindy.agents.situational_agent.get_debug_logger", lambda: debug_logger
     )
 
     cache = SituationalCache(tmp_path / "situational_cache.json")

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.runtime.task_cache import TaskPlanCache
+from haindy.runtime.task_cache import TaskPlanCache
 
 
 def test_task_plan_cache_store_lookup_and_invalidate(tmp_path: Path) -> None:

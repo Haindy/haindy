@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.core.types import TestPlan, TestStep
-from src.journal.manager import JournalManager
-from src.journal.models import ExecutionMode, JournalActionResult
+from haindy.core.types import TestPlan, TestStep
+from haindy.journal.manager import JournalManager
+from haindy.journal.models import ExecutionMode, JournalActionResult
 
 
 def _plan() -> TestPlan:

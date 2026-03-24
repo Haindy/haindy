@@ -2,13 +2,13 @@
 
 import pytest
 
-from src.core.types import (
+from haindy.core.types import (
     ActionInstruction,
     ActionType,
     CoordinateReference,
     ResolvedAction,
 )
-from src.error_handling.validation import (
+from haindy.error_handling.validation import (
     ActionValidator,
     ConfidenceScorer,
     HallucinationDetector,

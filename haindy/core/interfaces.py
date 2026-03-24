@@ -1,0 +1,287 @@
+"""
+Core interfaces and abstract base classes for the HAINDY framework.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+from haindy.core.types import (
+    ActionInstruction,
+    ActionResult,
+    AgentMessage,
+    CoordinateReference,
+    ResolvedAction,
+    TestPlan,
+    TestState,
+    TestStep,
+)
+
+
+class Agent(ABC):
+    """Abstract base class for all AI agents."""
+
+    def __init__(self, name: str, model: str = "gpt-5.4") -> None:
+        """
+        Initialize the agent.
+
+        Args:
+            name: Name identifier for the agent
+            model: OpenAI model to use
+        """
+        self.name = name
+        self.model = model
+        self._message_history: list[AgentMessage] = []
+
+    @abstractmethod
+    async def process(self, message: AgentMessage) -> AgentMessage | None:
+        """
+        Process an incoming message and optionally return a response.
+
+        Args:
+            message: Incoming message to process
+
+        Returns:
+            Optional response message
+        """
+        pass
+
+    def add_to_history(self, message: AgentMessage) -> None:
+        """Add a message to the agent's history."""
+        self._message_history.append(message)
+
+    def get_history(self) -> list[AgentMessage]:
+        """Get the agent's message history."""
+        return self._message_history.copy()
+
+
+class TestPlannerAgent(Agent):
+    """Abstract base class for test planning agents."""
+
+    @abstractmethod
+    async def create_test_plan(self, requirements: str) -> TestPlan:
+        """
+        Create a test plan from high-level requirements.
+
+        Args:
+            requirements: Natural language requirements or PRD
+
+        Returns:
+            Structured test plan
+        """
+        pass
+
+
+class TestRunnerAgent(Agent):
+    """Abstract base class for test execution coordination agents."""
+
+    @abstractmethod
+    async def get_next_action(
+        self, test_plan: TestPlan, current_state: TestState
+    ) -> ActionInstruction | None:
+        """
+        Determine the next action to execute based on current state.
+
+        Args:
+            test_plan: The test plan being executed
+            current_state: Current execution state
+
+        Returns:
+            Next action instruction or None if complete
+        """
+        pass
+
+    @abstractmethod
+    async def evaluate_step_result(
+        self, step: TestStep, result: ActionResult
+    ) -> TestState:
+        """
+        Evaluate the result of a test step and update state.
+
+        Args:
+            step: The test step that was executed
+            result: The execution result
+
+        Returns:
+            Updated test state
+        """
+        pass
+
+
+class ActionAgent(Agent):
+    """Abstract base class for action determination agents."""
+
+    @abstractmethod
+    async def determine_action(
+        self, screenshot: bytes, instruction: ActionInstruction
+    ) -> ResolvedAction:
+        """
+        Determine coordinate metadata for an action from a screenshot.
+
+        Args:
+            screenshot: Screenshot of current state
+            instruction: Action instruction to execute
+
+        Returns:
+            Resolved action with coordinates
+        """
+        pass
+
+    @abstractmethod
+    async def refine_coordinates(
+        self, cropped_region: bytes, initial_coords: CoordinateReference
+    ) -> CoordinateReference:
+        """
+        Refine coordinates using provider-neutral metadata.
+
+        Args:
+            cropped_region: Cropped screenshot region
+            initial_coords: Initial coordinate metadata
+
+        Returns:
+            Refined coordinates with higher precision
+        """
+        pass
+
+
+class AutomationDriver(ABC):
+    """Abstract interface for environment automation."""
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start the automation session."""
+        pass
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the automation session."""
+        pass
+
+    @abstractmethod
+    async def navigate(self, url: str) -> None:
+        """Navigate to a URL."""
+        pass
+
+    @abstractmethod
+    async def click(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+    ) -> None:
+        """Click at absolute coordinates with optional button and count."""
+        pass
+
+    @abstractmethod
+    async def move_mouse(self, x: int, y: int, steps: int = 1) -> None:
+        """Move the mouse pointer to absolute coordinates without clicking."""
+        pass
+
+    @abstractmethod
+    async def drag_mouse(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        steps: int = 1,
+    ) -> None:
+        """Drag the mouse pointer from a start position to an end position."""
+        pass
+
+    @abstractmethod
+    async def type_text(self, text: str) -> None:
+        """Type text at current focus."""
+        pass
+
+    @abstractmethod
+    async def press_key(self, key: str) -> None:
+        """Press a keyboard key."""
+        pass
+
+    @abstractmethod
+    async def scroll(self, direction: str, amount: int) -> None:
+        """Scroll in given direction."""
+        pass
+
+    @abstractmethod
+    async def scroll_by_pixels(
+        self, x: int = 0, y: int = 0, smooth: bool = True
+    ) -> None:
+        """Scroll by a specific number of pixels."""
+        pass
+
+    @abstractmethod
+    async def screenshot(self) -> bytes:
+        """Take a screenshot and return as bytes."""
+        pass
+
+    @abstractmethod
+    async def wait(self, milliseconds: int) -> None:
+        """Wait for specified duration."""
+        pass
+
+    @abstractmethod
+    async def get_viewport_size(self) -> tuple[int, int]:
+        """Get current viewport dimensions."""
+        pass
+
+    @abstractmethod
+    async def get_page_url(self) -> str:
+        """Get the current page URL."""
+        pass
+
+    @abstractmethod
+    async def get_page_title(self) -> str:
+        """Get the current page title."""
+        pass
+
+
+class TestExecutor(ABC):
+    """Abstract interface for test execution orchestration."""
+
+    @abstractmethod
+    async def execute_test_plan(self, test_plan: TestPlan) -> TestState:
+        """
+        Execute a complete test plan.
+
+        Args:
+            test_plan: Test plan to execute
+
+        Returns:
+            Final test state after execution
+        """
+        pass
+
+    @abstractmethod
+    async def execute_step(self, step: TestStep, state: TestState) -> ActionResult:
+        """
+        Execute a single test step.
+
+        Args:
+            step: Test step to execute
+            state: Current test state
+
+        Returns:
+            Action execution result
+        """
+        pass
+
+
+class ConfigProvider(ABC):
+    """Abstract interface for configuration management."""
+
+    @abstractmethod
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get configuration value."""
+        pass
+
+    @abstractmethod
+    def get_required(self, key: str) -> Any:
+        """Get required configuration value, raise if missing."""
+        pass
+
+    @abstractmethod
+    def get_all(self) -> dict[str, Any]:
+        """Get all configuration values."""
+        pass

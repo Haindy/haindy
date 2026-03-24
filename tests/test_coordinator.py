@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.types import (
+from haindy.core.types import (
     ActionInstruction,
     ActionType,
     ScopeTriageResult,
@@ -19,8 +19,8 @@ from src.core.types import (
     TestPlan,
     TestStep,
 )
-from src.orchestration.communication import MessageType
-from src.orchestration.coordinator import CoordinatorState, WorkflowCoordinator
+from haindy.orchestration.communication import MessageType
+from haindy.orchestration.coordinator import CoordinatorState, WorkflowCoordinator
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ class TestWorkflowCoordinatorTestExecution:
         )
 
         with patch(
-            "src.orchestration.coordinator.run_scope_triage_and_plan",
+            "haindy.orchestration.coordinator.run_scope_triage_and_plan",
             AsyncMock(return_value=(sample_test_plan, triage_result)),
         ):
             # Generate plan

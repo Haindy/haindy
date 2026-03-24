@@ -5,13 +5,13 @@ Unit tests for error aggregation and reporting.
 import json
 from datetime import datetime, timedelta, timezone
 
-from src.error_handling.aggregator import (
+from haindy.error_handling.aggregator import (
     ErrorAggregator,
     ErrorCategory,
     ErrorMetrics,
     ErrorReport,
 )
-from src.error_handling.exceptions import (
+from haindy.error_handling.exceptions import (
     AgentError,
     AutomationError,
     CoordinationError,

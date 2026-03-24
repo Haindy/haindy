@@ -15,12 +15,12 @@ from textwrap import dedent
 
 import pytest
 
-from src.tool_call_mode.daemon import ToolCallDaemon
-from src.tool_call_mode.launcher import (
+from haindy.tool_call_mode.daemon import ToolCallDaemon
+from haindy.tool_call_mode.launcher import (
     public_cli_program_name,
     resolve_cli_executable_argv,
 )
-from src.tool_call_mode.paths import (
+from haindy.tool_call_mode.paths import (
     cleanup_session_artifacts,
     is_process_alive,
     load_session_metadata,
@@ -34,12 +34,12 @@ def test_resolve_cli_executable_argv_prefers_current_haindy_script(
     script_path = tmp_path / "haindy"
     script_path.write_text("#!/bin/sh\n", encoding="utf-8")
     script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr("src.tool_call_mode.launcher.sys.argv", [str(script_path)])
+    monkeypatch.setattr("haindy.tool_call_mode.launcher.sys.argv", [str(script_path)])
     monkeypatch.setattr(
-        "src.tool_call_mode.launcher.sys.executable",
+        "haindy.tool_call_mode.launcher.sys.executable",
         str(tmp_path / "python"),
     )
-    monkeypatch.setattr("src.tool_call_mode.launcher.shutil.which", lambda _: None)
+    monkeypatch.setattr("haindy.tool_call_mode.launcher.shutil.which", lambda _: None)
 
     assert resolve_cli_executable_argv() == [str(script_path.resolve())]
 
@@ -51,14 +51,14 @@ def test_resolve_cli_executable_argv_falls_back_to_python_module(
     python_path = tmp_path / "python"
     python_path.write_text("", encoding="utf-8")
     python_path.chmod(python_path.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr("src.tool_call_mode.launcher.sys.argv", ["pytest"])
+    monkeypatch.setattr("haindy.tool_call_mode.launcher.sys.argv", ["pytest"])
     monkeypatch.setattr(
-        "src.tool_call_mode.launcher.sys.executable",
+        "haindy.tool_call_mode.launcher.sys.executable",
         str(python_path),
     )
-    monkeypatch.setattr("src.tool_call_mode.launcher.shutil.which", lambda _: None)
+    monkeypatch.setattr("haindy.tool_call_mode.launcher.shutil.which", lambda _: None)
 
-    assert resolve_cli_executable_argv() == [str(python_path), "-m", "src.main"]
+    assert resolve_cli_executable_argv() == [str(python_path), "-m", "haindy.main"]
 
 
 def test_tool_call_daemon_records_external_signal(
@@ -75,7 +75,7 @@ def test_tool_call_daemon_records_external_signal(
         saved_notes.append(getattr(metadata, "notes", None))
 
     monkeypatch.setattr(
-        "src.tool_call_mode.daemon.save_session_metadata", _save_metadata
+        "haindy.tool_call_mode.daemon.save_session_metadata", _save_metadata
     )
 
     daemon._handle_shutdown_signal("SIGTERM")
@@ -101,16 +101,15 @@ def test_tool_call_daemon_survives_session_new_process_exit(
     sitecustomize_dir = base_dir / "stub-runtime"
     sitecustomize_dir.mkdir()
     (sitecustomize_dir / "sitecustomize.py").write_text(
-        dedent(
-            """
+        dedent("""
             from __future__ import annotations
 
             import time
             from datetime import datetime, timezone
 
-            from src.tool_call_mode.models import CommandStatus, ExitReason, make_envelope, public_command_name
-            from src.tool_call_mode.paths import save_session_metadata
-            from src.tool_call_mode.runtime import ToolCallSessionRuntime
+            from haindy.tool_call_mode.models import CommandStatus, ExitReason, make_envelope, public_command_name
+            from haindy.tool_call_mode.paths import save_session_metadata
+            from haindy.tool_call_mode.runtime import ToolCallSessionRuntime
 
 
             def _now() -> str:
@@ -168,8 +167,7 @@ def test_tool_call_daemon_survives_session_new_process_exit(
             ToolCallSessionRuntime.start = _fake_start
             ToolCallSessionRuntime.stop = _fake_stop
             ToolCallSessionRuntime.handle_request = _fake_handle_request
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -257,10 +255,10 @@ def test_installed_haindy_help_smoke() -> None:
 
     assert result.returncode == 0, result.stderr
     assert f"{public_cli_program_name()} --plan requirements.md" in result.stdout
-    assert "python -m src.main --plan requirements.md" in result.stdout
+    assert "python -m haindy.main --plan requirements.md" in result.stdout
     assert result.stdout.index(
         f"{public_cli_program_name()} --plan"
-    ) < result.stdout.index("python -m src.main --plan")
+    ) < result.stdout.index("python -m haindy.main --plan")
 
 
 def _haindy_cli_path() -> Path:

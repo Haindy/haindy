@@ -43,10 +43,10 @@ This document maps the evaluation needs of each agent in the HAINDY system and a
 async def _execute_step():
     # Delegates actual evaluation to Action Agent
     result = await self.action_agent.execute_action(...)
-    
+
     # Interprets evaluation results
     success = (result.validation.valid and result.execution.success)
-    
+
     # Makes flow control decisions
     if not success:
         should_continue = await self._should_continue_after_failure(...)
@@ -71,9 +71,9 @@ async def _execute_step():
 # Built into each action workflow
 async def _execute_click_workflow():
     # Step 1: Validation
-    # Step 2: Execution  
+    # Step 2: Execution
     # Step 3: Evaluation (built-in)
-    
+
     # Returns comprehensive result with:
     result.validation = ValidationResult(...)
     result.execution = ExecutionResult(...)
@@ -225,7 +225,7 @@ async def _execute_click_workflow():
 
 For post-MVP versions, consider:
 1. **Evaluation Service** (not agent) for complex analysis
-2. **Historical Analysis Module** for regression detection  
+2. **Historical Analysis Module** for regression detection
 3. **Cross-Step Validator** for sequence validation
 4. **Performance Analyzer** for timing/efficiency metrics
 

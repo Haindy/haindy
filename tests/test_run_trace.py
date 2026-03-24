@@ -2,8 +2,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.core.types import StepResult, TestStatus, TestStep
-from src.runtime.trace import RunTraceWriter, load_model_calls_for_run
+from haindy.core.types import StepResult, TestStatus, TestStep
+from haindy.runtime.trace import RunTraceWriter, load_model_calls_for_run
 
 
 def test_run_trace_writer_writes_trace(tmp_path: Path) -> None:

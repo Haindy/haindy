@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.types import (
+from haindy.core.types import (
     BugReport,
     BugSeverity,
     StepIntent,
@@ -21,8 +21,8 @@ from src.core.types import (
     TestStatus,
     TestStep,
 )
-from src.monitoring.enhanced_reporter import EnhancedReporter
-from src.monitoring.enhanced_reporter_data import (
+from haindy.monitoring.enhanced_reporter import EnhancedReporter
+from haindy.monitoring.enhanced_reporter_data import (
     clean_ai_conversation,
     extract_template_data,
     screenshot_to_data_uri,

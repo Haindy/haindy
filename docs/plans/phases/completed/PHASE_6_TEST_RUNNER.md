@@ -14,7 +14,7 @@ The Test Runner Agent is responsible for orchestrating test execution and decidi
 
 ```python
 class TestRunnerAgent(BaseAgent):
-    """Orchestrates test execution → Decides next steps"""  
+    """Orchestrates test execution → Decides next steps"""
     def get_next_action(self, test_plan: TestPlan, current_state: TestState) -> ActionInstruction: pass
     def evaluate_step_result(self, step_result: StepResult) -> TestState: pass
 ```
@@ -33,7 +33,7 @@ TestRunnerAgent: "Step 1: Navigate to product page"
     ↓
 ActionAgent: Analyzes screenshot → "Click grid cell B7"
     ↓
-BrowserDriver: Executes action, waits, captures screenshot  
+BrowserDriver: Executes action, waits, captures screenshot
     ↓
 EvaluatorAgent: "Success - product page loaded correctly"
     ↓

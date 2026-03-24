@@ -3,8 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
-from src.core.enhanced_types import CoordinateResult
-from src.core.types import CoordinateReference
+from haindy.core.enhanced_types import CoordinateResult
+from haindy.core.types import CoordinateReference
 
 
 def test_coordinate_reference_defaults() -> None:

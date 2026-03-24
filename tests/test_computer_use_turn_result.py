@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.agents.computer_use.turn_result import build_follow_up_batch
-from src.core.enhanced_types import ComputerToolTurn
+from haindy.agents.computer_use.turn_result import build_follow_up_batch
+from haindy.core.enhanced_types import ComputerToolTurn
 
 
 def test_build_follow_up_batch_groups_actions_and_renders_grounding() -> None:

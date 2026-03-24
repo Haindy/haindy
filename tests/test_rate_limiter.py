@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.security.rate_limiter import (
+from haindy.security.rate_limiter import (
     RateLimitConfig,
     RateLimiter,
     RateLimitExceeded,

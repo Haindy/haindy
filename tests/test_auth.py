@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.auth.codex_oauth import (
+from haindy.auth.codex_oauth import (
     CODEX_OAUTH_CLIENT_ID,
     CODEX_OAUTH_REDIRECT_URI,
     CODEX_OAUTH_SCOPE,
@@ -19,8 +19,8 @@ from src.auth.codex_oauth import (
     derive_account_label,
     extract_chatgpt_account_id,
 )
-from src.auth.manager import OpenAIAuthManager
-from src.auth.store import EncryptedJsonFileStore, StoredCodexOAuthCredentials
+from haindy.auth.manager import OpenAIAuthManager
+from haindy.auth.store import EncryptedJsonFileStore, StoredCodexOAuthCredentials
 
 
 def _jwt_with_claims(claims: dict[str, object]) -> str:

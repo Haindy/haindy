@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import src.agents.computer_use.session as cu_session_module
-from src.agents.computer_use import ComputerUseExecutionError
-from src.core.enhanced_types import ComputerToolTurn
+import haindy.agents.computer_use.session as cu_session_module
+from haindy.agents.computer_use import ComputerUseExecutionError
+from haindy.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     DummyResponse,
     make_anthropic_client,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.desktop.virtual_input import VirtualInput
+from haindy.desktop.virtual_input import VirtualInput
 
 
 class _DummyProcess:
@@ -24,13 +24,13 @@ async def test_virtual_input_falls_back_to_xdotool_when_uinput_unavailable(
         commands.append(tuple(str(part) for part in cmd))
         return _DummyProcess()
 
-    monkeypatch.setattr("src.desktop.virtual_input._EVDEV_AVAILABLE", False)
+    monkeypatch.setattr("haindy.desktop.virtual_input._EVDEV_AVAILABLE", False)
     monkeypatch.setattr(
-        "src.desktop.virtual_input.shutil.which",
+        "haindy.desktop.virtual_input.shutil.which",
         lambda name: "/usr/bin/xdotool" if name == "xdotool" else None,
     )
     monkeypatch.setattr(
-        "src.desktop.virtual_input.asyncio.create_subprocess_exec",
+        "haindy.desktop.virtual_input.asyncio.create_subprocess_exec",
         _fake_create_subprocess_exec,
     )
 
@@ -62,8 +62,8 @@ async def test_virtual_input_falls_back_to_xdotool_when_uinput_unavailable(
 def test_virtual_input_raises_without_uinput_or_xdotool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("src.desktop.virtual_input._EVDEV_AVAILABLE", False)
-    monkeypatch.setattr("src.desktop.virtual_input.shutil.which", lambda name: None)
+    monkeypatch.setattr("haindy.desktop.virtual_input._EVDEV_AVAILABLE", False)
+    monkeypatch.setattr("haindy.desktop.virtual_input.shutil.which", lambda name: None)
 
     with pytest.raises(
         RuntimeError, match="desktop input backend requires Linux evdev or xdotool"

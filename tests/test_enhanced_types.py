@@ -1,6 +1,6 @@
 """Enhanced action result model tests."""
 
-from src.core.enhanced_types import (
+from haindy.core.enhanced_types import (
     AIAnalysis,
     ComputerToolTurn,
     CoordinateResult,
@@ -10,7 +10,7 @@ from src.core.enhanced_types import (
     SafetyEvent,
     ValidationResult,
 )
-from src.core.types import TestStep
+from haindy.core.types import TestStep
 
 
 def _step() -> TestStep:

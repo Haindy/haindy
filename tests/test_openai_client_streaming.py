@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.auth import CODEX_SYSTEM_INSTRUCTIONS
-from src.auth.manager import ResolvedOpenAIAuth
-from src.models.openai_client import OpenAIClient, ResponseStreamObserver
+from haindy.auth import CODEX_SYSTEM_INSTRUCTIONS
+from haindy.auth.manager import ResolvedOpenAIAuth
+from haindy.models.openai_client import OpenAIClient, ResponseStreamObserver
 
 
 class RecordingObserver(ResponseStreamObserver):
@@ -150,10 +150,12 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         openai_request_timeout_seconds=30,
     )
 
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
     monkeypatch.setattr(
-        "src.models.openai_client.OpenAIClient._estimate_token_count",
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+    monkeypatch.setattr(
+        "haindy.models.openai_client.OpenAIClient._estimate_token_count",
         lambda self, text, encoder: len(text),
     )
 
@@ -199,8 +201,10 @@ def test_ensure_json_keyword_appends_input_message_when_missing(monkeypatch) -> 
         openai_request_timeout_seconds=30,
     )
 
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
 
     client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     input_items = [
@@ -226,8 +230,10 @@ def test_ensure_json_keyword_appends_input_even_if_only_instructions_mention_jso
         openai_request_timeout_seconds=30,
     )
 
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
 
     client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     input_items: list[dict[str, Any]] = []
@@ -247,8 +253,10 @@ def test_ensure_json_keyword_keeps_existing_input_json_reference(monkeypatch) ->
         openai_request_timeout_seconds=30,
     )
 
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", FakeAsyncOpenAI)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
 
     client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     input_items = [
@@ -286,8 +294,10 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
         openai_api_key="dummy",
         openai_request_timeout_seconds=30,
     )
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
 
     client = OpenAIClient(model="gpt-5.4", api_key="test-key")
     result = await client._call_responses_api(
@@ -346,8 +356,10 @@ async def test_codex_mode_uses_codex_base_url_headers_and_store_false(
         },
     )
 
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
 
     client = OpenAIClient(
         model="gpt-5.4",
@@ -407,8 +419,10 @@ async def test_codex_mode_defaults_instructions_when_missing(monkeypatch) -> Non
         default_headers={},
     )
 
-    monkeypatch.setattr("src.models.openai_client.AsyncOpenAI", fake_make_client)
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
 
     client = OpenAIClient(
         model="gpt-5.4",
@@ -443,7 +457,9 @@ async def test_codex_call_uses_streaming_path_even_when_stream_false(
         default_headers={},
     )
 
-    monkeypatch.setattr("src.models.openai_client.get_settings", lambda: dummy_settings)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
     client = OpenAIClient(
         model="gpt-5.4",
         auth_manager=StubAuthManager(auth),

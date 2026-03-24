@@ -6,9 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from src.config.migrate import MigrationResult, migrate_from_dotenv
+from haindy.config.migrate import migrate_from_dotenv
 
 
 def _write_env(path: Path, content: str) -> None:
@@ -50,8 +48,10 @@ class TestMigrateFromDotenv:
         def fake_set_api_key(provider: str, value: str) -> None:
             stored_keys[provider] = value
 
-        with patch("src.config.migrate.set_api_key", side_effect=fake_set_api_key):
-            result = migrate_from_dotenv(dotenv_path=env_path, settings_out=settings_path)
+        with patch("haindy.config.migrate.set_api_key", side_effect=fake_set_api_key):
+            result = migrate_from_dotenv(
+                dotenv_path=env_path, settings_out=settings_path
+            )
 
         assert "openai" in result.secrets_stored
         assert "anthropic" in result.secrets_stored
@@ -62,7 +62,7 @@ class TestMigrateFromDotenv:
         env_path = tmp_path / ".env"
         _write_env(env_path, "HAINDY_OPENAI_API_KEY=\n")
 
-        with patch("src.config.migrate.set_api_key") as mock_set:
+        with patch("haindy.config.migrate.set_api_key") as mock_set:
             result = migrate_from_dotenv(
                 dotenv_path=env_path, settings_out=tmp_path / "settings.json"
             )
@@ -78,8 +78,10 @@ class TestMigrateFromDotenv:
             "HAINDY_DESKTOP_KEYBOARD_LAYOUT=es\nHAINDY_LOG_LEVEL=DEBUG\n",
         )
 
-        with patch("src.config.migrate.set_api_key"):
-            result = migrate_from_dotenv(dotenv_path=env_path, settings_out=settings_path)
+        with patch("haindy.config.migrate.set_api_key"):
+            result = migrate_from_dotenv(
+                dotenv_path=env_path, settings_out=settings_path
+            )
 
         assert settings_path.exists()
         written = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -96,7 +98,7 @@ class TestMigrateFromDotenv:
             "HAINDY_OPENAI_API_KEY=sk-key\nHAINDY_LOG_LEVEL=DEBUG\n",
         )
 
-        with patch("src.config.migrate.set_api_key") as mock_set:
+        with patch("haindy.config.migrate.set_api_key") as mock_set:
             result = migrate_from_dotenv(
                 dotenv_path=env_path, settings_out=settings_path, dry_run=True
             )
@@ -130,7 +132,9 @@ class TestMigrateFromDotenv:
         env_path = tmp_path / ".env"
         _write_env(env_path, "HAINDY_LOG_LEVEL=INFO\n")
 
-        migrate_from_dotenv(dotenv_path=env_path, settings_out=tmp_path / "settings.json")
+        migrate_from_dotenv(
+            dotenv_path=env_path, settings_out=tmp_path / "settings.json"
+        )
 
         assert env_path.exists()
 
@@ -139,19 +143,27 @@ class TestMigrateFromDotenv:
         settings_path = tmp_path / "settings.json"
         _write_env(
             env_path,
-            "\n".join([
-                "HAINDY_OPENAI_API_KEY=sk-key",
-                "HAINDY_ANTHROPIC_API_KEY=",
-                "HAINDY_LOG_LEVEL=WARNING",
-                "HAINDY_CU_PROVIDER=anthropic",
-                "HAINDY_MAX_TEST_STEPS=50",
-            ]) + "\n",
+            "\n".join(
+                [
+                    "HAINDY_OPENAI_API_KEY=sk-key",
+                    "HAINDY_ANTHROPIC_API_KEY=",
+                    "HAINDY_LOG_LEVEL=WARNING",
+                    "HAINDY_CU_PROVIDER=anthropic",
+                    "HAINDY_MAX_TEST_STEPS=50",
+                ]
+            )
+            + "\n",
         )
 
         stored: dict[str, str] = {}
 
-        with patch("src.config.migrate.set_api_key", side_effect=lambda p, v: stored.update({p: v})):
-            result = migrate_from_dotenv(dotenv_path=env_path, settings_out=settings_path)
+        with patch(
+            "haindy.config.migrate.set_api_key",
+            side_effect=lambda p, v: stored.update({p: v}),
+        ):
+            result = migrate_from_dotenv(
+                dotenv_path=env_path, settings_out=settings_path
+            )
 
         assert stored.get("openai") == "sk-key"
         assert "anthropic" in result.secrets_skipped

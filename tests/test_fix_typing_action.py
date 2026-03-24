@@ -1,7 +1,7 @@
 """Replay extraction tests for typing-related computer actions."""
 
-from src.agents.action_agent import ActionAgent
-from src.core.enhanced_types import ComputerToolTurn
+from haindy.agents.action_agent import ActionAgent
+from haindy.core.enhanced_types import ComputerToolTurn
 
 
 def test_extract_driver_actions_for_type_text_at_with_clear_and_enter() -> None:

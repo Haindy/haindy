@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.core.types import ScopeTriageResult, TestCase, TestPlan, TestStep
-from src.error_handling.exceptions import ScopeTriageBlockedError
-from src.orchestration.scope_pipeline import run_scope_triage_and_plan
-from src.runtime.planning_cache import PlanningCache
+from haindy.core.types import ScopeTriageResult, TestCase, TestPlan, TestStep
+from haindy.error_handling.exceptions import ScopeTriageBlockedError
+from haindy.orchestration.scope_pipeline import run_scope_triage_and_plan
+from haindy.runtime.planning_cache import PlanningCache
 
 
 def _sample_test_plan(name: str = "Cached Plan") -> TestPlan:

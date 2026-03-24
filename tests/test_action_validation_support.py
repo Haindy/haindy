@@ -1,12 +1,12 @@
 """Validation support tests for provider-neutral actions."""
 
-from src.core.types import (
+from haindy.core.types import (
     ActionInstruction,
     ActionType,
     CoordinateReference,
     ResolvedAction,
 )
-from src.error_handling.validation import ConfidenceScorer
+from haindy.error_handling.validation import ConfidenceScorer
 
 
 def test_confidence_scorer_uses_coordinate_confidence() -> None:

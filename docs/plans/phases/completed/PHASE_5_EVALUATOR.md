@@ -43,7 +43,7 @@ From Section 4.3, the Evaluator Agent specializes in:
 In the multi-agent execution flow (Section 4.2):
 
 ```
-BrowserDriver: Executes action, waits, captures screenshot  
+BrowserDriver: Executes action, waits, captures screenshot
     ↓
 EvaluatorAgent: "Success - product page loaded correctly"
     ↓

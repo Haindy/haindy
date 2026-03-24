@@ -98,4 +98,4 @@ iOS screenshots are taken at physical pixel resolution (Retina/high-DPI). `idb u
 3. `HAINDY_AUTOMATION_BACKEND=mobile_ios haindy --plan <plan> --context <context>` also works
 4. `pytest tests/test_ios_driver.py` passes (no device required)
 5. `ruff check src/mobile/ios_driver.py src/mobile/idb_client.py src/mobile/ios_controller.py`
-6. `mypy src/mobile/ios_driver.py`
+6. `mypy haindy/mobile/ios_driver.py`

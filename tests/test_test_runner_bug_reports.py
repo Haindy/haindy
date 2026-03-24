@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.agents.test_runner_bug_reports import (
+from haindy.agents.test_runner_bug_reports import (
     BugReportRequest,
     TestRunnerBugReportBuilder,
 )
-from src.core.types import (
+from haindy.core.types import (
     StepIntent,
     StepResult,
     TestCase,

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.monitoring.logger import HumanReadableFormatter, get_logger, setup_logging
+from haindy.monitoring.logger import HumanReadableFormatter, get_logger, setup_logging
 
 
 @pytest.fixture()
@@ -21,7 +21,7 @@ def test_human_readable_formatter_orders_known_fields(
 ) -> None:
     """Formatter should surface high-signal extras in the expected order."""
     record = logging.LogRecord(
-        name="src.agents.test_runner",
+        name="haindy.agents.test_runner",
         level=logging.INFO,
         pathname=__file__,
         lineno=42,
@@ -82,7 +82,7 @@ def test_human_readable_formatter_prefers_agent_name(
 ) -> None:
     """Formatter should use agent_name for the component label."""
     record = logging.LogRecord(
-        name="src.monitoring.debug_logger",
+        name="haindy.monitoring.debug_logger",
         level=logging.INFO,
         pathname=__file__,
         lineno=20,
@@ -103,7 +103,7 @@ def test_human_readable_formatter_serializes_datetime_in_structured_extra(
 ) -> None:
     """Formatter should not fail when structured extras contain datetimes."""
     record = logging.LogRecord(
-        name="src.agents.computer_use.session",
+        name="haindy.agents.computer_use.session",
         level=logging.ERROR,
         pathname=__file__,
         lineno=30,

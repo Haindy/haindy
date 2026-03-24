@@ -5,7 +5,7 @@ Unit tests for data sanitization.
 import logging
 import re
 
-from src.security.sanitizer import (
+from haindy.security.sanitizer import (
     DataSanitizer,
     RedactionMethod,
     SensitiveDataPattern,
