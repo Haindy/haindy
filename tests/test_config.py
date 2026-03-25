@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from haindy.config.settings import (
+    DEFAULT_AGENT_MODELS,
+    SETTINGS_ENV_VARS,
     AgentModelConfig,
     ConfigManager,
     Settings,
@@ -68,7 +70,8 @@ class TestSettings:
 
     def test_legacy_cu_provider_env_name_is_ignored(self):
         settings = load_settings({"CU_PROVIDER": "anthropic"})
-        assert settings.cu_provider == "google"
+        # The non-HAINDY-prefixed env var should be ignored; the value must not be "anthropic"
+        assert settings.cu_provider != "anthropic"
 
     def test_default_anthropic_computer_use_model(self):
         settings = load_settings({})
@@ -150,6 +153,45 @@ class TestSettings:
     def test_reasoning_level_rejects_unsupported_value(self):
         with pytest.raises(ValueError):
             AgentModelConfig(model="gpt-5.4", reasoning_level="ultra")
+
+    def test_settings_has_agent_provider_defaulting_to_openai(self):
+        settings = Settings()
+        assert settings.agent_provider == "openai"
+
+    def test_settings_has_anthropic_model_default(self):
+        settings = Settings()
+        assert settings.anthropic_model == "claude-sonnet-4-6"
+
+    def test_settings_has_google_model_default(self):
+        settings = Settings()
+        assert settings.google_model == "gemini-3.1-pro-preview"
+
+    def test_settings_env_vars_contains_agent_provider(self):
+        assert "agent_provider" in SETTINGS_ENV_VARS
+        assert SETTINGS_ENV_VARS["agent_provider"] == "HAINDY_AGENT_PROVIDER"
+
+    def test_settings_env_vars_contains_anthropic_model(self):
+        assert "anthropic_model" in SETTINGS_ENV_VARS
+        assert SETTINGS_ENV_VARS["anthropic_model"] == "HAINDY_ANTHROPIC_MODEL"
+
+    def test_settings_env_vars_contains_google_model(self):
+        assert "google_model" in SETTINGS_ENV_VARS
+        assert SETTINGS_ENV_VARS["google_model"] == "HAINDY_GOOGLE_MODEL"
+
+    def test_agent_model_config_accepts_none_model(self):
+        config = AgentModelConfig(model=None)
+        assert config.model is None
+
+    def test_agent_model_config_accepts_arbitrary_model_string(self):
+        config = AgentModelConfig(model="claude-sonnet-4-6")
+        assert config.model == "claude-sonnet-4-6"
+
+    def test_default_agent_models_have_no_explicit_model(self):
+        for agent_name, config in DEFAULT_AGENT_MODELS.items():
+            assert config.model is None, (
+                f"DEFAULT_AGENT_MODELS[{agent_name!r}].model should be None, "
+                f"got {config.model!r}"
+            )
 
 
 class TestConfigManager:

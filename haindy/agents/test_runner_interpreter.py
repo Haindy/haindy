@@ -72,7 +72,7 @@ class TestRunnerInterpreter:
         self._trace = trace
         self._model_logger = model_logger
         self._model = model
-        self._call_openai = call_model
+        self._call_model = call_model
 
     async def interpret_step(
         self,
@@ -347,7 +347,7 @@ Respond with a JSON object containing an "actions" array where every item follow
         )
 
         try:
-            response = await self._call_openai(
+            response = await self._call_model(
                 messages=[{"role": "user", "content": message_content}],
                 response_format={"type": "json_object"},
             )

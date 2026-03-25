@@ -1,5 +1,4 @@
-"""Provider selection commands for haindy provider <list|set|set-computer-use>."""
-
+"""Handlers for haindy provider list|set|set-computer-use commands."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,162 +6,126 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from haindy.auth import OpenAIAuthManager
-from haindy.auth.credentials import list_configured_providers
-from haindy.config.settings import get_settings
-from haindy.config.settings_file import write_settings_file
+from haindy.auth.credentials import get_api_key
+from haindy.config.settings_file import load_settings_file, write_settings_file
 
 _CONSOLE = Console()
-_VALID_PROVIDERS = ("openai", "anthropic", "google", "openai-codex")
-_API_PROVIDERS = ("openai", "anthropic", "google")
-_SETTINGS_PATH = Path("~/.haindy/settings.json")
+
+_SETTINGS_PATH = Path("~/.haindy/settings.json").expanduser()
+
+_ALL_PROVIDERS = ("openai", "openai-codex", "google", "anthropic")
+_CU_CAPABLE_PROVIDERS = ("openai", "google", "anthropic")
+_AGENT_ONLY_PROVIDERS = ("openai-codex",)
+
+_PROVIDER_KEY_FIELD: dict[str, str] = {
+    "openai": "openai",
+    "google": "vertex",
+    "anthropic": "anthropic",
+}
 
 
-async def handle_provider_list() -> int:
-    """List available providers and show which are active for each use."""
+def handle_provider_list() -> int:
+    """Print a table showing available providers and their configuration status."""
+    from haindy.auth import OpenAIAuthManager
+    from haindy.auth.credentials import list_configured_providers
+
     configured = list_configured_providers()
-    codex_status = OpenAIAuthManager().get_status()
-    settings = get_settings()
-    current_agent = str(settings.agent_provider or "openai").strip().lower()
-    current_cu = str(settings.cu_provider or "openai").strip().lower()
+    auth_manager = OpenAIAuthManager()
+    codex_status = auth_manager.get_status()
 
-    codex_active = bool(codex_status.oauth_connected and not codex_status.oauth_expired)
-
-    has_openai = bool(configured.get("openai")) or codex_active
-    has_anthropic = bool(configured.get("anthropic"))
-    has_google = bool(configured.get("vertex"))
-
-    any_configured = has_openai or has_anthropic or has_google
-
-    if not any_configured:
-        _CONSOLE.print(
-            "[yellow]No providers configured. Run: haindy auth login <provider>[/yellow]"
-        )
-        _CONSOLE.print("  Available: openai, anthropic, google, openai-codex")
-        return 0
+    settings_data = load_settings_file(_SETTINGS_PATH)
+    agent_provider = settings_data.get("agent", {}).get("provider", "openai")
+    cu_provider = settings_data.get("computer_use", {}).get("provider", "google")
 
     table = Table(title="Provider Configuration", show_header=True)
     table.add_column("Provider", style="bold")
     table.add_column("Credentials")
-    table.add_column("Non-CU (planning)")
+    table.add_column("Agent (non-CU)")
     table.add_column("Computer Use")
 
-    if has_openai:
-        cred_label = "[green]configured[/green]"
-        ncu_label = "[green]active[/green]" if current_agent == "openai" else ""
-        cu_label = "[green]active[/green]" if current_cu == "openai" else ""
-        table.add_row("openai", cred_label, ncu_label, cu_label)
+    for provider in _ALL_PROVIDERS:
+        if provider == "openai-codex":
+            if codex_status.oauth_connected and not codex_status.oauth_expired:
+                cred_mark = "[green]connected[/green]"
+            else:
+                cred_mark = "[dim]not connected[/dim]"
+        else:
+            keychain_key = _PROVIDER_KEY_FIELD.get(provider, provider)
+            cred_mark = (
+                "[green]configured[/green]"
+                if configured.get(keychain_key)
+                else "[dim]not configured[/dim]"
+            )
 
-    if codex_active and not configured.get("openai"):
-        # Show codex separately when no direct openai key
-        cred_label = "[green]oauth[/green]"
-        ncu_label = "[green]active[/green]" if current_agent == "openai-codex" else ""
-        cu_label = "[dim]not supported[/dim]"
-        table.add_row("openai-codex", cred_label, ncu_label, cu_label)
+        agent_mark = "[green]active[/green]" if agent_provider == provider else ""
+        cu_mark = "[green]active[/green]" if cu_provider == provider else ""
 
-    if has_anthropic:
-        cred_label = "[green]configured[/green]"
-        ncu_label = "[green]active[/green]" if current_agent == "anthropic" else ""
-        cu_label = "[green]active[/green]" if current_cu == "anthropic" else ""
-        table.add_row("anthropic", cred_label, ncu_label, cu_label)
+        if provider in _AGENT_ONLY_PROVIDERS:
+            cu_mark = "[dim]n/a[/dim]"
 
-    if has_google:
-        cred_label = "[green]configured[/green]"
-        ncu_label = "[green]active[/green]" if current_agent == "google" else ""
-        cu_label = "[green]active[/green]" if current_cu == "google" else ""
-        table.add_row("google", cred_label, ncu_label, cu_label)
+        table.add_row(provider, cred_mark, agent_mark, cu_mark)
 
     _CONSOLE.print(table)
-    _CONSOLE.print(
-        f"\n[dim]Non-CU provider: {current_agent}  |  CU provider: {current_cu}[/dim]"
-    )
-    _CONSOLE.print(
-        "[dim]Change with: haindy provider set <provider>  "
-        "or  haindy provider set-computer-use <provider>[/dim]"
-    )
     return 0
 
 
-async def handle_provider_set(provider: str) -> int:
-    """Set the active provider for all calls (CU and non-CU)."""
-    if provider not in _VALID_PROVIDERS:
+def handle_provider_set(provider: str) -> int:
+    """Set the active provider for agent (non-CU) calls.
+
+    For providers that also support computer-use, also updates computer_use.provider.
+    For agent-only providers (openai-codex), only sets agent.provider and warns about CU.
+    """
+    if provider not in _ALL_PROVIDERS:
         _CONSOLE.print(
             f"[red]Unknown provider: {provider}. "
-            f"Choose from: {', '.join(_VALID_PROVIDERS)}[/red]"
+            f"Choose from: {', '.join(_ALL_PROVIDERS)}[/red]"
         )
         return 1
 
-    configured = list_configured_providers()
-    codex_status = OpenAIAuthManager().get_status()
-    codex_active = bool(codex_status.oauth_connected and not codex_status.oauth_expired)
+    # Validate credentials exist
+    if provider not in _AGENT_ONLY_PROVIDERS:
+        keychain_key = _PROVIDER_KEY_FIELD.get(provider, provider)
+        has_key = bool(get_api_key(keychain_key))
+        if not has_key:
+            _CONSOLE.print(
+                f"[red]No credentials configured for {provider!r}. "
+                f"Run: haindy auth login {provider}[/red]"
+            )
+            return 1
 
-    has_creds = _provider_has_credentials(provider, configured, codex_active)
-    if not has_creds:
-        _CONSOLE.print(f"[red]No credentials configured for {provider}.[/red]")
-        _CONSOLE.print(f"Run: haindy auth login {provider}")
-        return 1
+    write_settings_file(_SETTINGS_PATH, {"agent": {"provider": provider}})
+    _CONSOLE.print(f"[green]Agent provider set to {provider!r}.[/green]")
 
-    settings_path = _SETTINGS_PATH.expanduser()
-
-    if provider == "openai-codex":
+    if provider in _AGENT_ONLY_PROVIDERS:
         _CONSOLE.print(
-            "[yellow]openai-codex cannot be used for computer use. "
-            "Only the non-CU (planning) provider will be updated.[/yellow]"
-        )
-        write_settings_file(settings_path, {"agent": {"provider": "openai-codex"}})
-        _CONSOLE.print("[green]Non-CU provider set to openai-codex.[/green]")
-        _CONSOLE.print(
-            "[dim]Note: you still need a CU provider. "
-            "Run: haindy provider set-computer-use <provider>[/dim]"
+            f"[yellow]Note: {provider!r} does not support computer use. "
+            "Computer-use provider is unchanged.[/yellow]"
         )
     else:
-        write_settings_file(
-            settings_path,
-            {
-                "agent": {"provider": provider},
-                "computer_use": {"provider": provider},
-            },
-        )
-        _CONSOLE.print(f"[green]Provider set to {provider!r} for all calls.[/green]")
+        write_settings_file(_SETTINGS_PATH, {"computer_use": {"provider": provider}})
+        _CONSOLE.print(f"[green]Computer-use provider also set to {provider!r}.[/green]")
 
     return 0
 
 
-async def handle_provider_set_computer_use(provider: str) -> int:
-    """Set the active provider for computer use only."""
-    if provider not in _API_PROVIDERS:
+def handle_provider_set_computer_use(provider: str) -> int:
+    """Set the active provider for computer-use calls only."""
+    if provider not in _CU_CAPABLE_PROVIDERS:
         _CONSOLE.print(
-            f"[red]Invalid CU provider: {provider}. "
-            f"Choose from: {', '.join(_API_PROVIDERS)}[/red]"
+            f"[red]Unknown CU provider: {provider}. "
+            f"Choose from: {', '.join(_CU_CAPABLE_PROVIDERS)}[/red]"
         )
         return 1
 
-    configured = list_configured_providers()
-    codex_status = OpenAIAuthManager().get_status()
-    codex_active = bool(codex_status.oauth_connected and not codex_status.oauth_expired)
-
-    has_creds = _provider_has_credentials(provider, configured, codex_active)
-    if not has_creds:
-        _CONSOLE.print(f"[red]No credentials configured for {provider}.[/red]")
-        _CONSOLE.print(f"Run: haindy auth login {provider}")
+    keychain_key = _PROVIDER_KEY_FIELD.get(provider, provider)
+    has_key = bool(get_api_key(keychain_key))
+    if not has_key:
+        _CONSOLE.print(
+            f"[red]No credentials configured for {provider!r}. "
+            f"Run: haindy auth login {provider}[/red]"
+        )
         return 1
 
-    settings_path = _SETTINGS_PATH.expanduser()
-    write_settings_file(settings_path, {"computer_use": {"provider": provider}})
-    _CONSOLE.print(f"[green]CU provider set to {provider!r}.[/green]")
+    write_settings_file(_SETTINGS_PATH, {"computer_use": {"provider": provider}})
+    _CONSOLE.print(f"[green]Computer-use provider set to {provider!r}.[/green]")
     return 0
-
-
-def _provider_has_credentials(
-    provider: str, configured: dict[str, bool], codex_active: bool
-) -> bool:
-    """Return True if credentials are available for the given provider."""
-    if provider == "openai":
-        return bool(configured.get("openai")) or codex_active
-    if provider == "openai-codex":
-        return codex_active
-    if provider == "anthropic":
-        return bool(configured.get("anthropic"))
-    if provider == "google":
-        return bool(configured.get("vertex"))
-    return False

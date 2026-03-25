@@ -9,6 +9,7 @@ import pytest
 
 from haindy.config.settings_file import (
     _JSON_TO_FIELD,
+    _SETTINGS_SKELETON,
     flat_to_nested,
     flatten_settings_dict,
     load_settings_file,
@@ -126,6 +127,24 @@ class TestFlattenSettingsDict:
                 f"_JSON_TO_FIELD maps '{json_path}' -> '{field_name}' "
                 f"but '{field_name}' is not a field in Settings"
             )
+
+    def test_agent_provider_maps_to_agent_provider_field(self) -> None:
+        result = flatten_settings_dict({"agent": {"provider": "anthropic"}})
+        assert result == {"agent_provider": "anthropic"}
+
+    def test_agent_anthropic_model_maps_to_anthropic_model_field(self) -> None:
+        result = flatten_settings_dict({"agent": {"anthropic_model": "claude-opus"}})
+        assert result == {"anthropic_model": "claude-opus"}
+
+    def test_agent_google_model_maps_to_google_model_field(self) -> None:
+        result = flatten_settings_dict({"agent": {"google_model": "gemini-3.1-pro"}})
+        assert result == {"google_model": "gemini-3.1-pro"}
+
+
+class TestSettingsSkeleton:
+    def test_skeleton_includes_agent_provider(self) -> None:
+        assert "agent" in _SETTINGS_SKELETON
+        assert _SETTINGS_SKELETON["agent"].get("provider") == "openai"
 
 
 class TestWriteSettingsFile:

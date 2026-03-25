@@ -45,7 +45,7 @@ class TestPlannerAgent(BaseAgent):
         stream_observer: ResponseStreamObserver | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Get completion from the configured AI provider."""
+        """Get completion from OpenAI."""
         response = await self.call_model(
             messages=messages,
             temperature=kwargs.get("temperature", self.temperature),

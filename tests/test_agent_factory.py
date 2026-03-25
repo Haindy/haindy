@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from haindy.runtime.agent_factory import AgentFactory
 
 
 @dataclass
 class _AgentConfig:
-    model: str
+    model: Any  # str | None
     temperature: float
     reasoning_level: str
     modalities: set[str]
@@ -21,6 +22,16 @@ class _SettingsStub:
             model=f"{agent_name}-model",
             temperature=0.2,
             reasoning_level="medium",
+            modalities={"text"},
+        )
+
+
+class _SettingsStubWithNoneModel:
+    def get_agent_model_config(self, agent_name: str) -> _AgentConfig:
+        return _AgentConfig(
+            model=None,
+            temperature=0.3,
+            reasoning_level="high",
             modalities={"text"},
         )
 
@@ -87,3 +98,26 @@ def test_factory_creates_runtime_bundle_and_wires_action_agent(monkeypatch) -> N
     assert bundle.test_runner.kwargs["action_agent"] is bundle.action_agent
     assert bundle.as_dict()["action_agent"] is bundle.action_agent
     assert bundle.as_dict()["test_runner"] is bundle.test_runner
+
+
+def test_agent_kwargs_passes_none_model_to_agent(monkeypatch) -> None:
+    """When AgentModelConfig.model is None, _agent_kwargs returns model=None."""
+    monkeypatch.setattr(
+        "haindy.runtime.agent_factory.ScopeTriageAgent", _PlanningAgentStub
+    )
+    monkeypatch.setattr(
+        "haindy.runtime.agent_factory.TestPlannerAgent", _PlanningAgentStub
+    )
+    monkeypatch.setattr(
+        "haindy.runtime.agent_factory.SituationalAgent", _PlanningAgentStub
+    )
+
+    factory = AgentFactory(settings=_SettingsStubWithNoneModel())
+
+    bundle = factory.create_planning_agents()
+
+    assert bundle.scope_triage.kwargs["model"] is None
+    assert bundle.test_planner.kwargs["model"] is None
+    assert bundle.situational_agent.kwargs["model"] is None
+    assert bundle.scope_triage.kwargs["temperature"] == 0.3
+    assert bundle.scope_triage.kwargs["reasoning_level"] == "high"
