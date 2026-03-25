@@ -41,7 +41,7 @@ def _install_skills(cli_name: str, setup_target: str, main_target: str) -> None:
         "haindy": Path(main_target).expanduser(),
     }
     try:
-        skills_pkg = importlib.resources.files("src.skills")
+        skills_pkg = importlib.resources.files("haindy.skills")
         for skill_name, target_dir in targets.items():
             target_dir.mkdir(parents=True, exist_ok=True)
             skill_file = skills_pkg / skill_name / "SKILL.md"
