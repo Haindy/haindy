@@ -954,7 +954,7 @@ class VirtualInput:
         }
         alias_map = {k: int(v) for k, v in alias_map.items() if v is not None}
         if normalized in alias_map:
-            return int(alias_map[normalized])
+            return alias_map[normalized]
 
         if normalized.startswith("kp") and normalized[2:].isdigit():
             code = getattr(ecodes, f"KEY_KP{normalized[2:]}", None)

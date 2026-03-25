@@ -20,6 +20,7 @@ else:
 
 from haindy.core.enhanced_types import ComputerToolTurn
 from haindy.runtime.environment import runtime_environment_spec
+from haindy.utils.model_logging import log_model_call_failure
 
 from .common import (
     _inject_context_metadata,
@@ -184,16 +185,15 @@ class GoogleComputerUseMixin:
             model=model,
             previous_interaction_id=previous_interaction_id,
         )
-        response = await self._create_google_response(request_payload)
-        await self._model_logger.log_call(
+        response = await self._create_google_response(
+            request_payload,
             agent=(
                 "computer_use.google.initial"
                 if previous_interaction_id is None
                 else "computer_use.google.continuation"
             ),
-            model=model,
             prompt=wrapped_goal,
-            request_payload={
+            request_payload_for_log={
                 "provider": "google",
                 "environment": environment,
                 "payload_type": (
@@ -202,7 +202,6 @@ class GoogleComputerUseMixin:
                 "api_surface": "interactions",
                 "request": self._sanitize_google_payload_for_log(request_payload),
             },
-            response=response,
             screenshots=(
                 [("computer_use_initial", logged_screenshot)]
                 if logged_screenshot
@@ -315,20 +314,17 @@ class GoogleComputerUseMixin:
                     environment=environment,
                     model=model,
                 )
-                response = await self._create_google_response(reask_payload)
-                await self._model_logger.log_call(
+                response = await self._create_google_response(
+                    reask_payload,
                     agent="computer_use.google.reask",
-                    model=model,
                     prompt=f"{goal} (ambiguous-batch-reask)",
-                    request_payload={
+                    request_payload_for_log={
                         "provider": "google",
                         "environment": environment,
                         "payload_type": "ambiguous_reask",
                         "api_surface": "interactions",
                         "request": self._sanitize_google_payload_for_log(reask_payload),
                     },
-                    response=response,
-                    screenshots=None,
                     metadata={
                         "environment": environment,
                         "ambiguous_function_names": ambiguous_names,
@@ -712,19 +708,17 @@ class GoogleComputerUseMixin:
             environment=environment,
             model=model,
         )
-        response = await self._create_google_response(follow_up_payload)
-        await self._model_logger.log_call(
+        response = await self._create_google_response(
+            follow_up_payload,
             agent="computer_use.google.follow_up",
-            model=model,
             prompt=f"{goal} (follow-up)",
-            request_payload={
+            request_payload_for_log={
                 "provider": "google",
                 "environment": environment,
                 "payload_type": "follow_up",
                 "api_surface": "interactions",
                 "request": self._sanitize_google_payload_for_log(follow_up_payload),
             },
-            response=response,
             screenshots=[("computer_use_follow_up", follow_up_screenshot)],
             metadata={"environment": environment, **metadata},
         )
@@ -1094,18 +1088,16 @@ class GoogleComputerUseMixin:
             "response_format": {"type": "object"},
         }
 
-        response = await self._create_google_response(payload)
-        await self._model_logger.log_call(
+        response = await self._create_google_response(
+            payload,
             agent="computer_use.google.step_reflection",
-            model=model,
             prompt=prompt,
-            request_payload={
+            request_payload_for_log={
                 "provider": "google",
                 "payload_type": "step_reflection",
                 "api_surface": "interactions",
                 "request": self._sanitize_google_payload_for_log(payload),
             },
-            response=response,
             metadata=metadata,
         )
 
@@ -1185,7 +1177,14 @@ class GoogleComputerUseMixin:
         return [payload]
 
     async def _create_google_response(
-        self: _ComputerUseSession, payload: dict[str, Any]
+        self: _ComputerUseSession,
+        payload: dict[str, Any],
+        *,
+        agent: str | None = None,
+        prompt: str | None = None,
+        request_payload_for_log: Any | None = None,
+        screenshots: list[tuple[str, bytes]] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Any:
         client = self._ensure_google_client()
         if not client:
@@ -1243,6 +1242,48 @@ class GoogleComputerUseMixin:
         transport_retry_count = 0
         safety_retry_count = 0
 
+        async def _log_success(response: Any, *, attempt_number: int) -> None:
+            if not agent or prompt is None:
+                return
+            await self._model_logger.log_outcome(
+                agent=agent,
+                model=str(payload.get("model") or self._model),
+                prompt=prompt,
+                request_payload=request_payload_for_log,
+                response=response,
+                screenshots=screenshots,
+                metadata={
+                    "provider": "google",
+                    "api_surface": api_surface or None,
+                    "attempt_number": attempt_number,
+                    "transport_retry_count": transport_retry_count,
+                    "prompt_safety_retry_count": safety_retry_count,
+                    **(metadata or {}),
+                },
+                outcome="success",
+            )
+
+        async def _log_failure(exc: BaseException, *, attempt_number: int) -> None:
+            if not agent or prompt is None:
+                return
+            await log_model_call_failure(
+                self._model_logger,
+                agent=agent,
+                model=str(payload.get("model") or self._model),
+                prompt=prompt,
+                request_payload=request_payload_for_log,
+                exception=exc,
+                screenshots=screenshots,
+                metadata={
+                    "provider": "google",
+                    "api_surface": api_surface or None,
+                    "attempt_number": attempt_number,
+                    "transport_retry_count": transport_retry_count,
+                    "prompt_safety_retry_count": safety_retry_count,
+                    **(metadata or {}),
+                },
+            )
+
         while True:
             attempt_number = transport_retry_count + 1
             try:
@@ -1255,6 +1296,7 @@ class GoogleComputerUseMixin:
                 if transport_retry_count >= len(
                     retry_delays
                 ) or not self._is_google_retryable_error(exc):
+                    await _log_failure(exc, attempt_number=attempt_number)
                     logger.error(
                         "Google Computer Use request failed",
                         extra={
@@ -1265,6 +1307,8 @@ class GoogleComputerUseMixin:
                         },
                     )
                     raise
+
+                await _log_failure(exc, attempt_number=attempt_number)
 
                 delay_seconds = retry_delays[transport_retry_count]
                 transport_retry_count += 1
@@ -1284,9 +1328,11 @@ class GoogleComputerUseMixin:
             response_dict = normalize_response(response)
             block_reason, _ = self._extract_google_prompt_block_feedback(response_dict)
             if block_reason != "SAFETY":
+                await _log_success(response, attempt_number=attempt_number)
                 return response
 
             if safety_retry_count >= len(safety_retry_delays):
+                await _log_success(response, attempt_number=attempt_number)
                 return response
 
             delay_seconds = self._compute_google_prompt_safety_retry_delay(

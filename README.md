@@ -207,3 +207,13 @@ haindy --codex-auth logout
 .venv/bin/mypy haindy
 .venv/bin/pytest
 ```
+
+## Model Logs
+
+HAINDY writes structured model-call artifacts to `data/model_logs/model_calls.jsonl`.
+Successful calls and non-rate-limit failed attempts are both recorded there.
+
+Rate-limit-family retry noise is intentionally excluded from durable failure entries by
+default, including `429`, `resource_exhausted`, and equivalent provider-specific
+signals. Screenshot attachments referenced by those entries are stored under
+`data/model_logs/screenshots/`.

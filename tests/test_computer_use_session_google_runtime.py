@@ -446,6 +446,80 @@ async def test_google_interactions_failure_logs_payload_summary(
 
 
 @pytest.mark.asyncio
+async def test_google_computer_use_logs_non_retryable_failed_attempt(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(side_effect=RuntimeError("google failed"))
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=make_google_client(generate_content),
+    )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="google failed"):
+        await session._create_google_response(
+            {"model": "gemini-3-flash-preview", "contents": [], "config": {}},
+            agent="computer_use.google.initial",
+            prompt="Tap Login",
+            request_payload_for_log={"request": "sanitized"},
+            metadata={"environment": "desktop"},
+        )
+
+    entry = json.loads(
+        session_settings.model_log_path.read_text(encoding="utf-8").strip()
+    )
+    assert entry["outcome"] == "failure"
+    assert entry["agent"] == "computer_use.google.initial"
+    assert entry["metadata"]["provider"] == "google"
+    assert entry["metadata"]["attempt_number"] == 1
+
+
+@pytest.mark.asyncio
+async def test_google_computer_use_suppresses_rate_limit_failure_entries(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "google"
+    generate_content = MagicMock(
+        side_effect=[
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+        ]
+    )
+    sleep_mock = AsyncMock()
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=make_google_client(generate_content),
+    )
+    session._invoke_google_request = _invoke_google_call_direct  # type: ignore[method-assign]
+    session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        await session._create_google_response(
+            {"model": "gemini-3-flash-preview", "contents": [], "config": {}},
+            agent="computer_use.google.initial",
+            prompt="Tap Login",
+            request_payload_for_log={"request": "sanitized"},
+            metadata={"environment": "desktop"},
+        )
+
+    assert (
+        not session_settings.model_log_path.exists()
+        or session_settings.model_log_path.read_text(encoding="utf-8") == ""
+    )
+
+
+@pytest.mark.asyncio
 async def test_google_runtime_stores_in_session_localization_from_response(
     mock_client, mock_browser, session_settings
 ):

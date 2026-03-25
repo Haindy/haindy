@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -253,3 +254,36 @@ async def test_anthropic_computer_use_calls_do_not_pass_request_timeout(
     await session._create_anthropic_response(payload)
 
     create.assert_awaited_once_with(**payload)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_computer_use_logs_failed_request_attempt(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "test-key"
+    create = AsyncMock(side_effect=RuntimeError("anthropic request failed"))
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=make_anthropic_client(create),
+    )
+
+    with pytest.raises(RuntimeError, match="anthropic request failed"):
+        await session._create_anthropic_response(
+            {"model": "claude-sonnet-4-6", "messages": []},
+            agent="computer_use.anthropic.initial",
+            prompt="Open the app",
+            request_payload_for_log={"request": "sanitized"},
+            metadata={"environment": "desktop"},
+        )
+
+    entry = json.loads(
+        session_settings.model_log_path.read_text(encoding="utf-8").strip()
+    )
+    assert entry["outcome"] == "failure"
+    assert entry["agent"] == "computer_use.anthropic.initial"
+    assert entry["metadata"]["provider"] == "anthropic"

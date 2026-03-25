@@ -748,7 +748,7 @@ class Settings(BaseModel):
         description="Logging level",
     )
     log_format: str = Field(
-        default="json",
+        default="text",
         description="Log format (json or text)",
     )
     log_file: str | None = Field(default=None, description="Log file path")

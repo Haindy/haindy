@@ -180,6 +180,8 @@ _THIRD_PARTY_LOGGER_LEVELS: dict[str, int] = {
     "asyncio": logging.WARNING,
     "google": logging.WARNING,
     "google.genai": logging.WARNING,
+    "google_genai": logging.WARNING,
+    "google_genai.models": logging.WARNING,
     # Pillow's PNG parser emits chunk-by-chunk debug spam when root logging is DEBUG.
     "PIL": logging.WARNING,
     "PIL.PngImagePlugin": logging.WARNING,

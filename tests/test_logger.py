@@ -147,6 +147,10 @@ def test_setup_logging_suppresses_noisy_third_party_debug_loggers() -> None:
     setup_logging(log_level="DEBUG", log_format="text", log_file=None)
 
     assert logging.getLogger("google.genai").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("google_genai").getEffectiveLevel() == logging.WARNING
+    assert (
+        logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
+    )
     assert (
         logging.getLogger("PIL.PngImagePlugin").getEffectiveLevel() == logging.WARNING
     )

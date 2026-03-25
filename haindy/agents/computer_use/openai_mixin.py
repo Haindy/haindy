@@ -9,6 +9,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any, cast
 
 from haindy.core.enhanced_types import ComputerToolTurn
+from haindy.utils.model_logging import log_model_call_failure
 
 from .common import (
     _inject_context_metadata,
@@ -86,17 +87,15 @@ class OpenAIComputerUseMixin:
             previous_response_id=previous_response_id,
         )
 
-        response = await self._create_response(request_payload)
-        await self._model_logger.log_call(
+        response = await self._create_response(
+            request_payload,
             agent=(
                 "computer_use.openai.initial"
                 if previous_response_id is None
                 else "computer_use.openai.continuation"
             ),
-            model=model,
             prompt=goal,
-            request_payload=self._sanitize_payload_for_log(request_payload),
-            response=response,
+            request_payload_for_log=self._sanitize_payload_for_log(request_payload),
             metadata={"environment": environment, **metadata},
         )
         response_dict = normalize_response(response)
@@ -142,7 +141,15 @@ class OpenAIComputerUseMixin:
                     metadata=metadata,
                     model=model,
                 )
-                response = await self._create_response(confirmation_payload)
+                response = await self._create_response(
+                    confirmation_payload,
+                    agent="computer_use.openai.confirmation",
+                    prompt=f"{goal} (confirmation)",
+                    request_payload_for_log=self._sanitize_payload_for_log(
+                        confirmation_payload
+                    ),
+                    metadata={"environment": environment, **metadata},
+                )
                 response_dict = normalize_response(response)
                 result.response_ids.append(response_dict.get("id", ""))
                 current_response_id = response_dict.get("id")
@@ -318,13 +325,13 @@ class OpenAIComputerUseMixin:
                 model=model,
             )
 
-            response = await self._create_response(follow_up_payload)
-            await self._model_logger.log_call(
+            response = await self._create_response(
+                follow_up_payload,
                 agent="computer_use.openai.follow_up",
-                model=model,
                 prompt=f"{goal} (follow-up)",
-                request_payload=self._sanitize_payload_for_log(follow_up_payload),
-                response=response,
+                request_payload_for_log=self._sanitize_payload_for_log(
+                    follow_up_payload
+                ),
                 screenshots=(
                     [("computer_use_follow_up", follow_up_batch.screenshot_bytes)]
                     if follow_up_batch.screenshot_bytes
@@ -534,13 +541,11 @@ class OpenAIComputerUseMixin:
         if safety_identifier:
             payload["safety_identifier"] = safety_identifier
 
-        response = await self._create_response(payload)
-        await self._model_logger.log_call(
+        response = await self._create_response(
+            payload,
             agent="computer_use.openai.step_reflection",
-            model=model,
             prompt=prompt,
-            request_payload=self._sanitize_payload_for_log(payload),
-            response=response,
+            request_payload_for_log=self._sanitize_payload_for_log(payload),
             metadata=metadata,
         )
 
@@ -654,7 +659,14 @@ class OpenAIComputerUseMixin:
         return None
 
     async def _create_response(
-        self: _ComputerUseSession, payload: dict[str, Any]
+        self: _ComputerUseSession,
+        payload: dict[str, Any],
+        *,
+        agent: str | None = None,
+        prompt: str | None = None,
+        request_payload_for_log: Any | None = None,
+        screenshots: list[tuple[str, bytes]] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Any:
         """Call the OpenAI Responses API with the provided payload."""
         logger.debug(
@@ -665,12 +677,72 @@ class OpenAIComputerUseMixin:
             raise ComputerUseExecutionError(
                 "OpenAI client is not configured for this Computer Use session."
             )
+
+        async def _log_success(
+            response: Any,
+            *,
+            attempt_number: int,
+            transport_name: str,
+        ) -> None:
+            if not agent or prompt is None:
+                return
+            await self._model_logger.log_outcome(
+                agent=agent,
+                model=str(payload.get("model") or self._model),
+                prompt=prompt,
+                request_payload=request_payload_for_log,
+                response=response,
+                screenshots=screenshots,
+                metadata={
+                    "provider": "openai",
+                    "attempt_number": attempt_number,
+                    "transport": transport_name,
+                    **(metadata or {}),
+                },
+                outcome="success",
+            )
+
+        async def _log_failure(
+            exc: BaseException,
+            *,
+            attempt_number: int,
+            transport_name: str,
+        ) -> None:
+            if not agent or prompt is None:
+                return
+            await log_model_call_failure(
+                self._model_logger,
+                agent=agent,
+                model=str(payload.get("model") or self._model),
+                prompt=prompt,
+                request_payload=request_payload_for_log,
+                exception=exc,
+                screenshots=screenshots,
+                metadata={
+                    "provider": "openai",
+                    "attempt_number": attempt_number,
+                    "transport": transport_name,
+                    **(metadata or {}),
+                },
+            )
+
         transport = getattr(self, "_openai_transport", None)
         if transport is None:
-            return await client.responses.create(**payload)
+            try:
+                response = await client.responses.create(**payload)
+            except Exception as exc:
+                await _log_failure(exc, attempt_number=1, transport_name="client")
+                raise
+            await _log_success(response, attempt_number=1, transport_name="client")
+            return response
         try:
-            return await transport.request(payload)
-        except Exception:
+            response = await transport.request(payload)
+        except Exception as exc:
+            await _log_failure(
+                exc,
+                attempt_number=1,
+                transport_name=type(transport).__name__,
+            )
             transport_mode = str(
                 getattr(self._settings, "openai_cu_transport", "responses_websocket")
             ).strip()
@@ -682,4 +754,25 @@ class OpenAIComputerUseMixin:
             )
             fallback_transport = OpenAIResponsesHTTPTransport(client)
             self._openai_transport = fallback_transport
-            return await fallback_transport.request(payload)
+            try:
+                response = await fallback_transport.request(payload)
+            except Exception as fallback_exc:
+                await _log_failure(
+                    fallback_exc,
+                    attempt_number=2,
+                    transport_name=type(fallback_transport).__name__,
+                )
+                raise
+            await _log_success(
+                response,
+                attempt_number=2,
+                transport_name=type(fallback_transport).__name__,
+            )
+            return response
+
+        await _log_success(
+            response,
+            attempt_number=1,
+            transport_name=type(transport).__name__,
+        )
+        return response

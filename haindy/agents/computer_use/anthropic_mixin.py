@@ -15,6 +15,7 @@ else:
     _AsyncAnthropic = _AsyncAnthropicType
 
 from haindy.core.enhanced_types import ComputerToolTurn
+from haindy.utils.model_logging import log_model_call_failure
 
 from .common import (
     _inject_context_metadata,
@@ -80,13 +81,11 @@ class AnthropicComputerUseMixin:
             model=model,
         )
 
-        response = await self._create_anthropic_response(request_payload)
-        await self._model_logger.log_call(
+        response = await self._create_anthropic_response(
+            request_payload,
             agent="computer_use.anthropic.initial",
-            model=model,
             prompt=goal,
-            request_payload=self._sanitize_payload_for_log(request_payload),
-            response=response,
+            request_payload_for_log=self._sanitize_payload_for_log(request_payload),
             screenshots=[("computer_use_initial", screenshot)],
             metadata={"environment": environment, **metadata},
         )
@@ -275,13 +274,13 @@ class AnthropicComputerUseMixin:
                 model=model,
             )
             history_messages = list(follow_up_payload.get("messages", []))
-            response = await self._create_anthropic_response(follow_up_payload)
-            await self._model_logger.log_call(
+            response = await self._create_anthropic_response(
+                follow_up_payload,
                 agent="computer_use.anthropic.follow_up",
-                model=model,
                 prompt=f"{goal} (follow-up)",
-                request_payload=self._sanitize_payload_for_log(follow_up_payload),
-                response=response,
+                request_payload_for_log=self._sanitize_payload_for_log(
+                    follow_up_payload
+                ),
                 screenshots=(
                     [("computer_use_follow_up", follow_up_screenshot)]
                     if follow_up_screenshot
@@ -468,7 +467,14 @@ class AnthropicComputerUseMixin:
         return payload, follow_up_batch.screenshot_bytes
 
     async def _create_anthropic_response(
-        self: _ComputerUseSession, payload: dict[str, Any]
+        self: _ComputerUseSession,
+        payload: dict[str, Any],
+        *,
+        agent: str | None = None,
+        prompt: str | None = None,
+        request_payload_for_log: Any | None = None,
+        screenshots: list[tuple[str, bytes]] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Any:
         client = self._ensure_anthropic_client()
         if not client:
@@ -476,17 +482,57 @@ class AnthropicComputerUseMixin:
                 "Anthropic computer-use provider requested but anthropic SDK is not installed."
             )
 
+        async def _log_success(response: Any) -> None:
+            if not agent or prompt is None:
+                return
+            await self._model_logger.log_outcome(
+                agent=agent,
+                model=str(payload.get("model") or self._model),
+                prompt=prompt,
+                request_payload=request_payload_for_log,
+                response=response,
+                screenshots=screenshots,
+                metadata={"provider": "anthropic", **(metadata or {})},
+                outcome="success",
+            )
+
+        async def _log_failure(exc: BaseException) -> None:
+            if not agent or prompt is None:
+                return
+            await log_model_call_failure(
+                self._model_logger,
+                agent=agent,
+                model=str(payload.get("model") or self._model),
+                prompt=prompt,
+                request_payload=request_payload_for_log,
+                exception=exc,
+                screenshots=screenshots,
+                metadata={"provider": "anthropic", **(metadata or {})},
+            )
+
         if hasattr(client, "beta") and hasattr(client.beta, "messages"):
             create_call = getattr(client.beta.messages, "create", None)
             if callable(create_call):
-                return await create_call(**payload)
+                try:
+                    response = await create_call(**payload)
+                except Exception as exc:
+                    await _log_failure(exc)
+                    raise
+                await _log_success(response)
+                return response
 
         if hasattr(client, "messages"):
             create_call = getattr(client.messages, "create", None)
             if callable(create_call):
                 fallback_payload = dict(payload)
                 fallback_payload.pop("betas", None)
-                return await create_call(**fallback_payload)
+                try:
+                    response = await create_call(**fallback_payload)
+                except Exception as exc:
+                    await _log_failure(exc)
+                    raise
+                await _log_success(response)
+                return response
 
         raise ComputerUseExecutionError(
             "Anthropic client does not support messages.create calls."
