@@ -45,6 +45,10 @@ class TestSettings:
         settings = Settings()
         assert settings.openai_model == "gpt-5.4"
 
+    def test_default_openai_codex_model(self):
+        settings = Settings()
+        assert settings.openai_codex_model == "gpt-5.4"
+
     def test_default_openai_computer_use_model(self):
         settings = load_settings({})
         assert settings.computer_use_model == "gpt-5.4"
@@ -142,6 +146,10 @@ class TestSettings:
         with pytest.raises(ValueError, match="Unsupported OpenAI model 'gpt-5.2'"):
             load_settings({"HAINDY_OPENAI_MODEL": "gpt-5.2"})
 
+    def test_openai_codex_model_rejects_unsupported_value(self):
+        with pytest.raises(ValueError, match="Unsupported OpenAI model 'gpt-5.2'"):
+            load_settings({"HAINDY_OPENAI_CODEX_MODEL": "gpt-5.2"})
+
     @pytest.mark.parametrize(
         "level",
         ["none", "minimal", "low", "medium", "high", "xhigh"],
@@ -158,17 +166,25 @@ class TestSettings:
         settings = Settings()
         assert settings.agent_provider == "openai"
 
+    def test_settings_accepts_openai_codex_agent_provider(self):
+        settings = load_settings({"HAINDY_AGENT_PROVIDER": "openai-codex"})
+        assert settings.agent_provider == "openai-codex"
+
     def test_settings_has_anthropic_model_default(self):
         settings = Settings()
         assert settings.anthropic_model == "claude-sonnet-4-6"
 
     def test_settings_has_google_model_default(self):
         settings = Settings()
-        assert settings.google_model == "gemini-3.1-pro-preview"
+        assert settings.google_model == "gemini-3-flash-preview"
 
     def test_settings_env_vars_contains_agent_provider(self):
         assert "agent_provider" in SETTINGS_ENV_VARS
         assert SETTINGS_ENV_VARS["agent_provider"] == "HAINDY_AGENT_PROVIDER"
+
+    def test_settings_env_vars_contains_openai_codex_model(self):
+        assert "openai_codex_model" in SETTINGS_ENV_VARS
+        assert SETTINGS_ENV_VARS["openai_codex_model"] == "HAINDY_OPENAI_CODEX_MODEL"
 
     def test_settings_env_vars_contains_anthropic_model(self):
         assert "anthropic_model" in SETTINGS_ENV_VARS

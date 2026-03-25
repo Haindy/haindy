@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from haindy.agents.base_agent import BaseAgent
+from haindy.agents.structured_output_schemas import SCOPE_TRIAGE_RESPONSE_FORMAT
 from haindy.config.agent_prompts import SCOPE_TRIAGE_SYSTEM_PROMPT
 from haindy.core.types import ScopeTriageResult
 from haindy.monitoring.logger import get_logger
@@ -57,7 +58,7 @@ class ScopeTriageAgent(BaseAgent):
 
         response = await self.call_model(
             messages=messages,
-            response_format={"type": "json_object"},
+            response_format=SCOPE_TRIAGE_RESPONSE_FORMAT,
             temperature=self.temperature,
         )
 

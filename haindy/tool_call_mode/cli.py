@@ -494,7 +494,9 @@ def _handle_session_list() -> tuple[ToolCallEnvelope, int]:
                     backend=(
                         "android"
                         if metadata.backend == "mobile_adb"
-                        else "ios" if metadata.backend == "mobile_ios" else "desktop"
+                        else "ios"
+                        if metadata.backend == "mobile_ios"
+                        else "desktop"
                     ),
                     created_at=metadata.created_at,
                     steps_executed=metadata.actions_executed,

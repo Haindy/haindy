@@ -152,7 +152,35 @@ haindy auth login anthropic   # Anthropic API key
 
 Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_VERTEX_API_KEY` as environment variables (highest priority, good for CI/CD).
 
-**Settings file** (`~/.haindy/settings.json`): non-secret configuration. See `haindy config show` for the full effective configuration.
+**Settings file** (`~/.haindy/settings.json`): non-secret configuration. Provider models are stored per provider, with separate `computer_use_model` values for providers that support CU. Example:
+
+```json
+{
+  "agent": { "provider": "openai" },
+  "computer_use": { "provider": "google" },
+  "openai": { "model": "gpt-5.4", "computer_use_model": "gpt-5.4" },
+  "openai-codex": { "model": "gpt-5.4" },
+  "google": {
+    "model": "gemini-3-flash-preview",
+    "computer_use_model": "gemini-3-flash-preview"
+  },
+  "anthropic": {
+    "model": "claude-sonnet-4-6",
+    "computer_use_model": "claude-sonnet-4-6"
+  }
+}
+```
+
+Useful commands:
+
+```bash
+haindy provider set openai
+haindy provider set-computer-use google
+haindy provider set-model google gemini-3-flash-preview
+haindy provider set-model google gemini-3-flash-preview --computer-use
+```
+
+`openai-codex` is non-CU only and cannot be selected for computer-use or assigned a CU model.
 
 Important env vars (still supported, override all other sources):
 

@@ -10,6 +10,10 @@ from typing import Any
 
 from haindy.agents.base_agent import BaseAgent
 from haindy.agents.formatters import TestPlanFormatter
+from haindy.agents.structured_output_schemas import (
+    TEST_PLAN_RESPONSE_FORMAT,
+    TEST_SCENARIOS_RESPONSE_FORMAT,
+)
 from haindy.config.agent_prompts import TEST_PLANNER_SYSTEM_PROMPT
 from haindy.core.types import (
     StepIntent,
@@ -50,7 +54,7 @@ class TestPlannerAgent(BaseAgent):
             messages=messages,
             temperature=kwargs.get("temperature", self.temperature),
             response_format=kwargs.get("response_format"),
-            stream=True,
+            stream=stream_observer is not None,
             stream_observer=stream_observer,
         )
 
@@ -113,7 +117,7 @@ class TestPlannerAgent(BaseAgent):
         # Get test plan from AI
         response = await self._get_completion(
             messages=messages,
-            response_format={"type": "json_object"},
+            response_format=TEST_PLAN_RESPONSE_FORMAT,
             temperature=0.3,  # Lower temperature for more consistent planning
             stream_observer=stream_observer,
         )
@@ -177,7 +181,7 @@ class TestPlannerAgent(BaseAgent):
         ]
         response = await self._get_completion(
             messages=messages,
-            response_format={"type": "json_object"},
+            response_format=TEST_PLAN_RESPONSE_FORMAT,
             temperature=0.25,
             stream_observer=stream_observer,
         )
@@ -657,7 +661,9 @@ Please provide an updated test plan that addresses the feedback while maintainin
 
         # Get refined plan from AI
         response = await self._get_completion(
-            messages=messages, response_format={"type": "json_object"}, temperature=0.3
+            messages=messages,
+            response_format=TEST_PLAN_RESPONSE_FORMAT,
+            temperature=0.3,
         )
 
         # Parse the refined plan
@@ -710,14 +716,21 @@ Output as JSON object with a "scenarios" array."""
         ]
 
         response = await self._get_completion(
-            messages=messages, response_format={"type": "json_object"}, temperature=0.3
+            messages=messages,
+            response_format=TEST_SCENARIOS_RESPONSE_FORMAT,
+            temperature=0.3,
         )
 
         try:
             import json
 
-            content = response.get("content", "{}")
-            scenarios_data = json.loads(content)
+            content = response.get("content", {})
+            if isinstance(content, str):
+                scenarios_data = json.loads(content)
+            elif isinstance(content, dict):
+                scenarios_data = content
+            else:
+                scenarios_data = {}
             scenarios_raw = scenarios_data.get("scenarios", [])
             scenarios: list[dict[str, str]] = []
             if isinstance(scenarios_raw, list):

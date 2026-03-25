@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from haindy.agents.structured_output_schemas import TEST_PLAN_RESPONSE_FORMAT
 from haindy.agents.test_planner import TestPlannerAgent
 from haindy.core.types import (
     TestCase,
@@ -567,5 +568,32 @@ class TestTestPlannerAgent:
         agent.call_model.assert_called_once()
         call_args = agent.call_model.call_args
         assert "response_format" in call_args.kwargs
-        assert call_args.kwargs["response_format"] == {"type": "json_object"}
+        assert call_args.kwargs["response_format"] == TEST_PLAN_RESPONSE_FORMAT
         assert call_args.kwargs["temperature"] == 0.3
+        assert call_args.kwargs["stream"] is False
+        assert call_args.kwargs["stream_observer"] is None
+
+    @pytest.mark.asyncio
+    async def test_streaming_only_enabled_with_observer(self, agent):
+        """Planner should only stream when an observer is attached."""
+        agent.call_model = AsyncMock(
+            return_value={
+                "content": json.dumps(
+                    {
+                        "name": "Test",
+                        "description": "Test",
+                        "requirements_source": "Test",
+                        "test_cases": [],
+                        "tags": [],
+                    }
+                )
+            }
+        )
+
+        observer = MagicMock()
+
+        await agent.create_test_plan("Test requirements", stream_observer=observer)
+
+        call_args = agent.call_model.call_args
+        assert call_args.kwargs["stream"] is True
+        assert call_args.kwargs["stream_observer"] is observer

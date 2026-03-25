@@ -1,4 +1,5 @@
 """Protocol definition for LLM clients used by non-CU agents."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable

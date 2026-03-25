@@ -72,11 +72,36 @@ haindy auth status            # shows which providers have credentials configure
 
 ```json
 {
+  "agent": { "provider": "openai" },
   "computer_use": { "provider": "google" },
+  "openai": {
+    "model": "gpt-5.4",
+    "computer_use_model": "gpt-5.4"
+  },
+  "openai-codex": { "model": "gpt-5.4" },
+  "google": {
+    "model": "gemini-3-flash-preview",
+    "computer_use_model": "gemini-3-flash-preview"
+  },
+  "anthropic": {
+    "model": "claude-sonnet-4-6",
+    "computer_use_model": "claude-sonnet-4-6"
+  },
   "execution": { "automation_backend": "desktop" },
   "logging": { "level": "INFO" }
 }
 ```
+
+Provider/model commands:
+
+```bash
+haindy provider set openai
+haindy provider set-computer-use google
+haindy provider set-model google gemini-3-flash-preview
+haindy provider set-model google gemini-3-flash-preview --computer-use
+```
+
+`haindy provider set <provider>` switches the active provider and uses that provider's persisted model configuration. `haindy provider set-model ...` changes the stored model for one provider without affecting the others. `openai-codex` is non-CU only and cannot be configured as a computer-use provider or computer-use model target.
 
 
 

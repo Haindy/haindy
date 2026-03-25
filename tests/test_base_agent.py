@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from haindy.agents.base_agent import BaseAgent
 from haindy.core.types import AgentMessage, ConfidenceLevel
 from haindy.models.anthropic_client import AnthropicClient
+from haindy.models.errors import ModelCallError
 from haindy.models.google_client import GoogleClient
 from haindy.models.openai_client import OpenAIClient
 
@@ -16,14 +19,28 @@ from haindy.models.openai_client import OpenAIClient
 def _make_settings(
     provider: str = "openai",
     openai_model: str = "gpt-5.4",
+    openai_codex_model: str = "gpt-5.4",
     anthropic_model: str = "claude-sonnet-4-6",
-    google_model: str = "gemini-2.5-pro-preview-05-06",
+    google_model: str = "gemini-3-flash-preview",
+    model_log_path: Path | None = None,
 ) -> MagicMock:
     s = MagicMock()
     s.agent_provider = provider
     s.openai_model = openai_model
+    s.openai_codex_model = openai_codex_model
     s.anthropic_model = anthropic_model
     s.google_model = google_model
+    s.model_log_path = model_log_path
+    s.max_screenshots = None
+    provider_models = {
+        "openai": openai_model,
+        "openai-codex": openai_codex_model,
+        "anthropic": anthropic_model,
+        "google": google_model,
+    }
+    s.get_provider_model.side_effect = lambda provider_name, computer_use=False: (
+        provider_models[provider_name]
+    )
     return s
 
 
@@ -47,10 +64,14 @@ class TestBaseAgent:
 
     def test_default_initialization(self):
         """Test agent initialization with defaults."""
-        agent = BaseAgent(name="TestAgent")
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai"),
+        ):
+            agent = BaseAgent(name="TestAgent")
 
         assert agent.name == "TestAgent"
-        assert agent.model is None
+        assert agent.model == "gpt-5.4"
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
@@ -88,6 +109,15 @@ class TestBaseAgent:
             agent = BaseAgent(name="TestAgent")
             assert isinstance(agent.client, GoogleClient)
 
+    def test_client_dispatches_openai_codex(self):
+        """agent_provider='openai-codex' should still produce an OpenAIClient."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai-codex"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            assert isinstance(agent.client, OpenAIClient)
+
     def test_client_uses_model_override(self):
         """Explicit model passed to BaseAgent should override settings default."""
         with patch(
@@ -103,7 +133,9 @@ class TestBaseAgent:
         """When model=None, the provider's settings model is used."""
         with patch(
             "haindy.agents.base_agent.get_settings",
-            return_value=_make_settings("anthropic", anthropic_model="claude-haiku-3-5"),
+            return_value=_make_settings(
+                "anthropic", anthropic_model="claude-haiku-3-5"
+            ),
         ):
             agent = BaseAgent(name="TestAgent")
             client = agent.client
@@ -126,7 +158,9 @@ class TestBaseAgent:
         openai_settings = _make_settings("openai")
         anthropic_settings = _make_settings("anthropic")
 
-        with patch("haindy.agents.base_agent.get_settings", return_value=openai_settings):
+        with patch(
+            "haindy.agents.base_agent.get_settings", return_value=openai_settings
+        ):
             agent = BaseAgent(name="TestAgent")
             first = agent.client
             assert isinstance(first, OpenAIClient)
@@ -145,14 +179,17 @@ class TestBaseAgent:
     @pytest.mark.asyncio
     async def test_call_model(self):
         """call_model should delegate to the client with correct arguments."""
-        agent = BaseAgent(name="TestAgent", temperature=0.8)
+        settings = _make_settings("openai")
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent", temperature=0.8)
         mock_client = AsyncMock()
         mock_client.call.return_value = {"result": "test"}
         agent._client = mock_client
         agent._client_provider = "openai"
 
         messages = [{"role": "user", "content": "Hello"}]
-        result = await agent.call_model(messages)
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            result = await agent.call_model(messages)
 
         assert result == {"result": "test"}
         mock_client.call.assert_called_once_with(
@@ -170,7 +207,9 @@ class TestBaseAgent:
     @pytest.mark.asyncio
     async def test_call_model_with_overrides(self):
         """call_model should honour per-call temperature and format overrides."""
-        agent = BaseAgent(name="TestAgent", temperature=0.8)
+        settings = _make_settings("openai")
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent", temperature=0.8)
         mock_client = AsyncMock()
         mock_client.call.return_value = {"result": "test"}
         agent._client = mock_client
@@ -179,11 +218,12 @@ class TestBaseAgent:
         messages = [{"role": "user", "content": "Hello"}]
         response_format = {"type": "json_object"}
 
-        result = await agent.call_model(
-            messages,
-            temperature=0.3,
-            response_format=response_format,
-        )
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            result = await agent.call_model(
+                messages,
+                temperature=0.3,
+                response_format=response_format,
+            )
 
         assert result == {"result": "test"}
         mock_client.call.assert_called_once_with(
@@ -197,6 +237,73 @@ class TestBaseAgent:
             stream=False,
             stream_observer=None,
         )
+
+    @pytest.mark.asyncio
+    async def test_call_model_logs_failure_payload(self, tmp_path: Path):
+        log_path = tmp_path / "model_calls.jsonl"
+        settings = _make_settings("openai", model_log_path=log_path)
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent", temperature=0.8)
+
+        mock_client = AsyncMock()
+        mock_client.call.side_effect = ModelCallError(
+            "Failed to parse JSON response from OpenAI.",
+            failure_kind="response_parse_error",
+            response_payload={"content_text": "{invalid json}"},
+        )
+        agent._client = mock_client
+        agent._client_provider = "openai"
+
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            with pytest.raises(ModelCallError):
+                await agent.call_model(
+                    [{"role": "user", "content": "Hello"}],
+                    log_agent="test_runner.interpret_step",
+                    log_metadata={"step_number": 3},
+                )
+
+        entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+        assert entry["outcome"] == "failure"
+        assert entry["failure_kind"] == "response_parse_error"
+        assert entry["agent"] == "test_runner.interpret_step"
+        assert entry["metadata"]["step_number"] == 3
+        assert entry["response"]["content_text"] == "{invalid json}"
+
+    @pytest.mark.asyncio
+    async def test_call_model_logs_stream_failure_with_partial_output(
+        self, tmp_path: Path
+    ):
+        log_path = tmp_path / "model_calls.jsonl"
+        settings = _make_settings("openai", model_log_path=log_path)
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent")
+
+        async def _raise_after_partial(**kwargs):
+            observer = kwargs["stream_observer"]
+            observer.on_stream_start()
+            observer.on_text_delta("hello ")
+            observer.on_usage_total({"input_tokens": 4, "output_tokens": 2})
+            observer.on_error(RuntimeError("stream blew up"))
+            raise RuntimeError("stream blew up")
+
+        mock_client = AsyncMock()
+        mock_client.call.side_effect = _raise_after_partial
+        agent._client = mock_client
+        agent._client_provider = "openai"
+
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            with pytest.raises(RuntimeError, match="stream blew up"):
+                await agent.call_model(
+                    [{"role": "user", "content": "Hello"}],
+                    stream=True,
+                    log_agent="planner.stream",
+                )
+
+        entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+        assert entry["outcome"] == "failure"
+        assert entry["response"]["content_text"] == "hello "
+        assert entry["response"]["usage"]["input_tokens"] == 4
+        assert entry["response"]["usage"]["output_tokens"] == 2
 
     # -----------------------------------------------------------------------
     # process / message handling

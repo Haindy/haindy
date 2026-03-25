@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from haindy.agents.structured_output_schemas import STEP_INTERPRETATION_RESPONSE_FORMAT
 from haindy.core.types import (
     StepResult,
     TestCase,
@@ -349,29 +350,9 @@ Respond with a JSON object containing an "actions" array where every item follow
         try:
             response = await self._call_model(
                 messages=[{"role": "user", "content": message_content}],
-                response_format={"type": "json_object"},
-            )
-
-            log_message_content = [{"type": "input_text", "text": prompt}]
-            if screenshot_bytes:
-                log_message_content.append(
-                    {"type": "input_image", "image_url": "<<attached screenshot>>"}
-                )
-            await self._model_logger.log_call(
-                agent="test_runner.interpret_step",
-                model=self._model,
-                prompt=prompt,
-                request_payload={
-                    "messages": [{"role": "user", "content": log_message_content}],
-                    "response_format": {"type": "json_object"},
-                },
-                response=response,
-                screenshots=(
-                    [("test_runner_interpretation", screenshot_bytes)]
-                    if screenshot_bytes
-                    else None
-                ),
-                metadata={
+                response_format=STEP_INTERPRETATION_RESPONSE_FORMAT,
+                log_agent="test_runner.interpret_step",
+                log_metadata={
                     "step_number": step.step_number,
                     "test_case": test_case.name,
                     "cache_key": step_cache_key,
@@ -389,7 +370,11 @@ Respond with a JSON object containing an "actions" array where every item follow
             )
 
             content = response.get("content", {})
-            if not isinstance(content, dict):
+            if isinstance(content, list):
+                # Some models (e.g. Google Gemini) return the actions array
+                # directly as a top-level JSON array instead of wrapping it.
+                content = {"actions": content}
+            elif not isinstance(content, dict):
                 raise TypeError(f"Expected dict content but got {type(content)}")
 
             actions = content.get("actions", [])

@@ -1,7 +1,6 @@
 """Unit tests for SituationalAgent."""
 
 from hashlib import sha256
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -219,14 +218,13 @@ def test_parse_assessment_treats_desktop_missing_items_as_non_blocking() -> None
 async def test_assess_context_persists_model_and_debug_logs(
     monkeypatch, tmp_path
 ) -> None:
-    model_logger = SimpleNamespace(log_call=AsyncMock())
     debug_logger = MagicMock()
     monkeypatch.setattr(
         "haindy.agents.situational_agent.get_debug_logger", lambda: debug_logger
     )
 
     cache = SituationalCache(tmp_path / "situational_cache.json")
-    agent = SituationalAgent(model_logger=model_logger, situational_cache=cache)
+    agent = SituationalAgent(situational_cache=cache)
     agent.call_model = AsyncMock(
         return_value={
             "content": {
@@ -246,12 +244,12 @@ async def test_assess_context_persists_model_and_debug_logs(
     )
 
     assert assessment.sufficient is True
-    model_logger.log_call.assert_awaited_once()
-    logged_kwargs = model_logger.log_call.await_args.kwargs
-    assert logged_kwargs["agent"] == "situational.assessment"
-    assert "REQUIREMENTS:" in logged_kwargs["prompt"]
-    assert "EXECUTION CONTEXT:" in logged_kwargs["prompt"]
-    assert logged_kwargs["metadata"]["fallback_used"] is False
+    call_kwargs = agent.call_model.await_args.kwargs
+    assert call_kwargs["log_agent"] == "situational.assessment"
+    assert call_kwargs["log_metadata"] == {"phase": "situational_assessment"}
+    user_prompt = call_kwargs["messages"][1]["content"]
+    assert "REQUIREMENTS:" in user_prompt
+    assert "EXECUTION CONTEXT:" in user_prompt
 
     debug_logger.log_ai_interaction.assert_called_once()
     debug_kwargs = debug_logger.log_ai_interaction.call_args.kwargs
@@ -263,14 +261,13 @@ async def test_assess_context_persists_model_and_debug_logs(
 async def test_assess_context_logs_fallback_when_model_call_fails(
     monkeypatch, tmp_path
 ) -> None:
-    model_logger = SimpleNamespace(log_call=AsyncMock())
     debug_logger = MagicMock()
     monkeypatch.setattr(
         "haindy.agents.situational_agent.get_debug_logger", lambda: debug_logger
     )
 
     cache = SituationalCache(tmp_path / "situational_cache.json")
-    agent = SituationalAgent(model_logger=model_logger, situational_cache=cache)
+    agent = SituationalAgent(situational_cache=cache)
     agent.call_model = AsyncMock(side_effect=RuntimeError("simulated API failure"))
 
     assessment = await agent.assess_context(
@@ -281,10 +278,9 @@ async def test_assess_context_logs_fallback_when_model_call_fails(
     assert assessment.target_type == "desktop_app"
     assert assessment.sufficient is True
 
-    model_logger.log_call.assert_awaited_once()
-    logged_kwargs = model_logger.log_call.await_args.kwargs
-    assert logged_kwargs["metadata"]["fallback_used"] is True
-    assert "simulated API failure" in (logged_kwargs["metadata"]["error"] or "")
+    call_kwargs = agent.call_model.await_args.kwargs
+    assert call_kwargs["log_agent"] == "situational.assessment"
+    assert call_kwargs["log_metadata"] == {"phase": "situational_assessment"}
 
     debug_logger.log_ai_interaction.assert_called_once()
     debug_response = debug_logger.log_ai_interaction.call_args.kwargs["response"]

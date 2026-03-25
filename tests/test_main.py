@@ -50,6 +50,31 @@ class TestCLIParser:
         assert args.provider_command == "set-computer-use"
         assert args.provider == "google"
 
+    def test_provider_set_model_subcommand(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(
+            ["provider", "set-model", "google", "gemini-3-flash-preview"]
+        )
+        assert args.command == "provider"
+        assert args.provider_command == "set-model"
+        assert args.provider == "google"
+        assert args.model == "gemini-3-flash-preview"
+        assert args.computer_use is False
+
+    def test_provider_set_model_computer_use_flag(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(
+            [
+                "provider",
+                "set-model",
+                "google",
+                "gemini-3-flash-preview",
+                "--computer-use",
+            ]
+        )
+        assert args.provider_command == "set-model"
+        assert args.computer_use is True
+
     def test_run_subcommand_args(self) -> None:
         parser = create_parser()
         args = parser.parse_args(["run", "--plan", "test.md", "--context", "ctx.txt"])
@@ -92,10 +117,14 @@ class TestCLIParser:
 
     def test_run_mobile_flags(self) -> None:
         parser = create_parser()
-        args = parser.parse_args(["run", "--plan", "p.md", "--context", "c.txt", "--mobile"])
+        args = parser.parse_args(
+            ["run", "--plan", "p.md", "--context", "c.txt", "--mobile"]
+        )
         assert args.mobile is True
 
-        args = parser.parse_args(["run", "--plan", "p.md", "--context", "c.txt", "--ios"])
+        args = parser.parse_args(
+            ["run", "--plan", "p.md", "--context", "c.txt", "--ios"]
+        )
         assert args.ios is True
 
 
@@ -515,6 +544,7 @@ async def test_run_test_stops_desktop_even_if_coordinator_cleanup_fails(
     coordinator.cleanup.assert_awaited_once()
     desktop_controller.stop.assert_awaited_once()
 
+
 class TestValidateAuthForRun:
     """Tests for _validate_auth_for_run."""
 
@@ -543,7 +573,9 @@ class TestValidateAuthForRun:
             openai_api_key="sk-openai-key",
         )
         with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
-            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            mock_mgr_cls.return_value.get_status.return_value = (
+                self._make_codex_status()
+            )
             issues = _validate_auth_for_run(settings)
         assert any("anthropic" in i.lower() for i in issues)
 
@@ -555,10 +587,18 @@ class TestValidateAuthForRun:
             openai_api_key="sk-openai-key",
         )
         with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
-            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            mock_mgr_cls.return_value.get_status.return_value = (
+                self._make_codex_status()
+            )
             issues = _validate_auth_for_run(settings)
         # No agent provider issue (but may still have CU issue)
-        agent_issues = [i for i in issues if "planning" in i.lower() or "anthropic" in i.lower() and "computer-use" not in i.lower()]
+        agent_issues = [
+            i
+            for i in issues
+            if "planning" in i.lower()
+            or "anthropic" in i.lower()
+            and "computer-use" not in i.lower()
+        ]
         assert len(agent_issues) == 0
 
     def test_google_agent_provider_with_no_key_reports_issue(self):
@@ -569,7 +609,9 @@ class TestValidateAuthForRun:
             openai_api_key="sk-openai-key",
         )
         with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
-            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            mock_mgr_cls.return_value.get_status.return_value = (
+                self._make_codex_status()
+            )
             issues = _validate_auth_for_run(settings)
         assert any("google" in i.lower() for i in issues)
 
@@ -581,12 +623,12 @@ class TestValidateAuthForRun:
             openai_api_key="sk-openai-key",
         )
         with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
-            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            mock_mgr_cls.return_value.get_status.return_value = (
+                self._make_codex_status()
+            )
             issues = _validate_auth_for_run(settings)
         # Should not report missing google agent key
-        assert not any(
-            "google" in i.lower() and "agent" in i.lower() for i in issues
-        )
+        assert not any("google" in i.lower() and "agent" in i.lower() for i in issues)
 
     def test_openai_agent_provider_missing_key_reports_openai_issue(self):
         settings = self._make_settings(
@@ -595,7 +637,9 @@ class TestValidateAuthForRun:
             cu_provider="openai",
         )
         with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
-            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            mock_mgr_cls.return_value.get_status.return_value = (
+                self._make_codex_status()
+            )
             issues = _validate_auth_for_run(settings)
         assert any("openai" in i.lower() for i in issues)
 
@@ -606,10 +650,14 @@ class TestValidateAuthForRun:
             cu_provider="openai",
         )
         with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
-            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            mock_mgr_cls.return_value.get_status.return_value = (
+                self._make_codex_status()
+            )
             issues = _validate_auth_for_run(settings)
         # CU issue may exist, but not agent issue
-        agent_issues = [i for i in issues if "non-cu" in i.lower() or "planning" in i.lower()]
+        agent_issues = [
+            i for i in issues if "non-cu" in i.lower() or "planning" in i.lower()
+        ]
         assert len(agent_issues) == 0
 
 
@@ -638,9 +686,30 @@ async def test_provider_set_command_dispatches() -> None:
 @pytest.mark.asyncio
 async def test_provider_set_computer_use_command_dispatches() -> None:
     with (
-        patch("haindy.main.handle_provider_set_computer_use", return_value=0) as mock_cu,
+        patch(
+            "haindy.main.handle_provider_set_computer_use", return_value=0
+        ) as mock_cu,
         patch("haindy.main.ensure_settings_skeleton"),
     ):
         result = await async_main(["provider", "set-computer-use", "google"])
     assert result == 0
     mock_cu.assert_called_once_with("google")
+
+
+@pytest.mark.asyncio
+async def test_provider_set_model_command_dispatches() -> None:
+    with (
+        patch(
+            "haindy.main.handle_provider_set_model", return_value=0
+        ) as mock_set_model,
+        patch("haindy.main.ensure_settings_skeleton"),
+    ):
+        result = await async_main(
+            ["provider", "set-model", "google", "gemini-3-flash-preview"]
+        )
+    assert result == 0
+    mock_set_model.assert_called_once_with(
+        "google",
+        "gemini-3-flash-preview",
+        computer_use=False,
+    )

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -117,6 +118,212 @@ def _redact_sensitive(value: Any) -> Any:
     return value
 
 
+@dataclass(frozen=True)
+class ModelCallFailure:
+    """Normalized details for one failed model-call attempt."""
+
+    failure_kind: str
+    error: dict[str, Any]
+    response: Any | None
+    suppressed: bool = False
+
+
+def _extract_error_payload(value: Any) -> Any | None:
+    """Best-effort normalization for provider error payloads."""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, str, int, float, bool)):
+        return value
+
+    response_body = getattr(value, "body", None)
+    if response_body is not None:
+        return _normalize_response_obj(response_body)
+
+    error_payload = getattr(value, "error", None)
+    if error_payload is not None:
+        return _normalize_response_obj(error_payload)
+
+    errors_payload = getattr(value, "errors", None)
+    if errors_payload is not None:
+        return _normalize_response_obj(errors_payload)
+
+    json_method = getattr(value, "json", None)
+    if callable(json_method):
+        try:
+            return _normalize_response_obj(json_method())
+        except Exception:
+            pass
+
+    text_value = getattr(value, "text", None)
+    if isinstance(text_value, str) and text_value.strip():
+        return text_value
+
+    content_value = getattr(value, "content", None)
+    if content_value is not None:
+        return _normalize_response_obj(content_value)
+
+    normalized = _normalize_response_obj(value)
+    if normalized == str(value):
+        return None
+    return normalized
+
+
+def _extract_exception_details(exc: BaseException) -> tuple[dict[str, Any], Any | None]:
+    """Return structured exception metadata plus any provider error payload."""
+    error: dict[str, Any] = {
+        "type": type(exc).__name__,
+        "message": str(exc),
+    }
+
+    for attr_name in ("status_code", "request_id"):
+        value = getattr(exc, attr_name, None)
+        if value is not None:
+            error[attr_name] = value
+
+    code = getattr(exc, "code", None)
+    if code is not None:
+        error["provider_code"] = code
+
+    payload: Any | None = None
+    for candidate in (
+        getattr(exc, "body", None),
+        getattr(exc, "error", None),
+        getattr(exc, "errors", None),
+        getattr(exc, "response", None),
+    ):
+        payload = _extract_error_payload(candidate)
+        if payload is not None:
+            break
+
+    if payload is not None:
+        error["raw_error_payload"] = payload
+
+    return error, payload
+
+
+def _serialized_failure_text(exc: BaseException, payload: Any | None) -> str:
+    """Build a normalized text blob for retry/noise classification."""
+    parts = [str(exc)]
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        parts.append(str(status_code))
+    code = getattr(exc, "code", None)
+    if code is not None:
+        parts.append(str(code))
+    if payload is not None:
+        try:
+            parts.append(json.dumps(_sanitize_for_json(payload), ensure_ascii=False))
+        except Exception:
+            parts.append(str(payload))
+    return " ".join(part for part in parts if part).lower()
+
+
+def is_suppressed_retryable_failure(
+    exc: BaseException,
+    *,
+    response: Any | None = None,
+) -> bool:
+    """Return True for excluded retry-noise failures such as rate limits."""
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and status_code == 429:
+        return True
+
+    code = getattr(exc, "code", None)
+    if isinstance(code, int) and code == 429:
+        return True
+    if isinstance(code, str):
+        normalized_code = code.strip().lower()
+        if normalized_code in {
+            "429",
+            "resource_exhausted",
+            "rate_limit",
+            "rate_limit_exceeded",
+            "too_many_requests",
+        }:
+            return True
+
+    _, payload = _extract_exception_details(exc)
+    payload_to_check = response if response is not None else payload
+    message = _serialized_failure_text(exc, payload_to_check)
+    markers = (
+        "resource_exhausted",
+        "rate limit",
+        "rate_limit",
+        "ratelimit",
+        "too many requests",
+        "too_many_requests",
+        "429",
+    )
+    return any(marker in message for marker in markers)
+
+
+def classify_model_call_failure(
+    exc: BaseException,
+    *,
+    response: Any | None = None,
+    failure_kind: str | None = None,
+) -> ModelCallFailure:
+    """Normalize a failed model-call attempt for durable logging."""
+    error, provider_payload = _extract_exception_details(exc)
+    effective_response = response if response is not None else provider_payload
+
+    normalized_failure_kind = failure_kind
+    if normalized_failure_kind is None:
+        if isinstance(exc, json.JSONDecodeError):
+            normalized_failure_kind = "response_parse_error"
+        elif getattr(exc, "status_code", None) is not None:
+            normalized_failure_kind = "provider_http_error"
+        elif getattr(exc, "code", None) is not None:
+            normalized_failure_kind = "provider_sdk_error"
+        else:
+            normalized_failure_kind = "unknown_error"
+
+    suppressed = is_suppressed_retryable_failure(exc, response=effective_response)
+    return ModelCallFailure(
+        failure_kind=normalized_failure_kind,
+        error=error,
+        response=effective_response,
+        suppressed=suppressed,
+    )
+
+
+async def log_model_call_failure(
+    model_logger: ModelCallLogger,
+    *,
+    agent: str,
+    model: str,
+    prompt: str,
+    request_payload: Any | None,
+    exception: BaseException,
+    response: Any | None = None,
+    screenshots: Sequence[tuple[str, bytes]] | None = None,
+    metadata: dict[str, Any] | None = None,
+    failure_kind: str | None = None,
+) -> bool:
+    """Persist one failed model-call attempt unless policy suppresses it."""
+    failure = classify_model_call_failure(
+        exception,
+        response=response,
+        failure_kind=failure_kind,
+    )
+    if failure.suppressed:
+        return False
+
+    await model_logger.log_outcome(
+        agent=agent,
+        model=model,
+        prompt=prompt,
+        request_payload=request_payload,
+        response=failure.response,
+        error=failure.error,
+        screenshots=screenshots,
+        metadata=metadata,
+        outcome="failure",
+        failure_kind=failure.failure_kind,
+    )
+    return True
+
+
 class ModelCallLogger:
     """Append-only logger for model inputs/outputs with optional screenshots."""
 
@@ -141,6 +348,31 @@ class ModelCallLogger:
         screenshots: Sequence[tuple[str, bytes]] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        await self.log_outcome(
+            agent=agent,
+            model=model,
+            prompt=prompt,
+            request_payload=request_payload,
+            response=response,
+            screenshots=screenshots,
+            metadata=metadata,
+            outcome="success",
+        )
+
+    async def log_outcome(
+        self,
+        *,
+        agent: str,
+        model: str,
+        prompt: str,
+        request_payload: Any | None,
+        response: Any,
+        error: Any | None = None,
+        screenshots: Sequence[tuple[str, bytes]] | None = None,
+        metadata: dict[str, Any] | None = None,
+        outcome: str = "success",
+        failure_kind: str | None = None,
+    ) -> None:
         screenshot_entries: list[dict[str, str]] = []
         screenshot_errors: list[dict[str, str]] = []
         if screenshots:
@@ -160,6 +392,7 @@ class ModelCallLogger:
             "run_id": get_run_id(),
             "agent": agent,
             "model": model,
+            "outcome": outcome,
             "prompt": sanitize_string(prompt),
             "request_payload": _redact_sensitive(_sanitize_for_json(request_payload)),
             "prompt_has_screenshot": bool(screenshot_entries),
@@ -169,6 +402,12 @@ class ModelCallLogger:
             ),
             "metadata": _redact_sensitive(_sanitize_for_json(metadata or {})),
         }
+        if error is not None:
+            entry["error"] = _redact_sensitive(
+                _sanitize_for_json(_normalize_response_obj(error))
+            )
+        if failure_kind is not None:
+            entry["failure_kind"] = failure_kind
         if screenshot_errors:
             entry["metadata"]["screenshot_errors"] = screenshot_errors
 
