@@ -778,30 +778,8 @@ async def async_main(args: list[str] | None = None) -> int:
 
         return run_doctor()
 
-    if not _is_setup_complete():
-        console.print(
-            "Haindy is not set up yet. Run:\n\n"
-            "  haindy setup\n\n"
-            "Or, if you have Claude Code, Codex, or OpenCode installed, "
-            "install the setup skill:\n\n"
-            "  haindy setup --install-skill\n\n"
-            "Then run /haindy-setup inside your AI coding tool."
-        )
-        sys.exit(1)
-
     if command == "test-api":
         return await test_api_connection()
-
-    settings = get_settings()
-    setup_logging(
-        log_level=settings.log_level,
-        log_format=settings.log_format,
-        log_file=settings.log_file,
-    )
-
-    # Initialize security components
-    RateLimiter()
-    DataSanitizer()
 
     if command == "auth":
         auth_command = getattr(parsed_args, "auth_command", None)
@@ -826,6 +804,17 @@ async def async_main(args: list[str] | None = None) -> int:
             return await handle_config_migrate(Path(parsed_args.dotenv_path))
 
     if command == "run":
+        if not _is_setup_complete():
+            console.print(
+                "Haindy is not set up yet. Run:\n\n"
+                "  haindy setup\n\n"
+                "Or, if you have Claude Code, Codex, or OpenCode installed, "
+                "install the setup skill:\n\n"
+                "  haindy setup --install-skill\n\n"
+                "Then run /haindy-setup inside your AI coding tool."
+            )
+            sys.exit(1)
+
         if not parsed_args.plan:
             console.print("[red]Error: --plan is required[/red]")
             return 1
@@ -835,11 +824,19 @@ async def async_main(args: list[str] | None = None) -> int:
             )
             return 1
 
+        settings = get_settings()
         if parsed_args.debug:
             settings.debug_mode = True
             settings.log_level = "DEBUG"
         if parsed_args.verbose:
             settings.log_format = "json"
+        setup_logging(
+            log_level=settings.log_level,
+            log_format=settings.log_format,
+            log_file=settings.log_file,
+        )
+        RateLimiter()
+        DataSanitizer()
 
         auth_issues = _validate_auth_for_run(settings)
         if auth_issues:
