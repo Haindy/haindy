@@ -133,6 +133,20 @@ def _check_linux_which(tool: str, install_hint: str = "") -> tuple[Text, str]:
 def _check_linux_uinput() -> tuple[Text, str]:
     if os.access("/dev/uinput", os.W_OK):
         return _ok("")
+    # Distinguish: user not in group vs device lacks group permissions
+    try:
+        import grp
+
+        input_gid = grp.getgrnam("input").gr_gid
+        in_group = input_gid in os.getgroups()
+    except Exception:
+        in_group = False
+    if in_group:
+        return _missing(
+            'echo \'KERNEL=="uinput", GROUP="input", MODE="0660"\' | '
+            "sudo tee /etc/udev/rules.d/99-uinput.rules && "
+            "sudo udevadm control --reload-rules && sudo udevadm trigger"
+        )
     return _missing("sudo usermod -aG input $USER && reboot")
 
 
@@ -148,6 +162,10 @@ def run_doctor() -> int:
 
     Returns 0 if all required components are present, 1 if any required
     component is missing.
+
+    Backend-specific deps (uinput, xdotool, etc.) are informational — they do
+    not individually block setup. A single required "Automation backend" row at
+    the bottom passes if at least one backend (desktop or Android) is ready.
     """
     table = Table(title="Haindy System Check", show_header=True)
     table.add_column("Component", style="bold")
@@ -155,6 +173,8 @@ def run_doctor() -> int:
     table.add_column("Notes")
 
     any_missing = False
+    desktop_ok = True
+    mobile_adb_ok = False
 
     def _add(label: str, status: Text, notes: str, required: bool = True) -> None:
         nonlocal any_missing
@@ -180,39 +200,55 @@ def run_doctor() -> int:
     status, notes = _check_codex_oauth()
     _add("OpenAI Codex (OAuth)", status, notes)
 
+    # macOS desktop deps — backend-specific, not individually required
     if sys.platform == "darwin":
         status, notes = _check_macos_pynput()
-        _add("pynput", status, notes)
+        _add("pynput", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
 
         status, notes = _check_macos_mss()
-        _add("mss", status, notes)
+        _add("mss", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
 
         status, notes = _check_macos_accessibility()
-        _add("Accessibility permission", status, notes)
+        _add("Accessibility permission", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
 
         status, notes = _check_macos_screen_recording()
-        _add("Screen Recording permission", status, notes)
+        _add("Screen Recording permission", status, notes, required=False)
 
+    # Linux desktop deps — backend-specific, not individually required
     if sys.platform == "linux":
         status, notes = _check_linux_which(
             "ffmpeg", "apt install ffmpeg / brew install ffmpeg"
         )
-        _add("ffmpeg", status, notes)
+        _add("ffmpeg", status, notes, required=False)
 
         status, notes = _check_linux_which("xdotool")
-        _add("xdotool", status, notes)
+        _add("xdotool", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
 
         status, notes = _check_linux_which("xclip")
-        _add("xclip", status, notes)
+        _add("xclip", status, notes, required=False)
 
         status, notes = _check_linux_uinput()
-        _add("/dev/uinput access", status, notes)
+        _add("/dev/uinput access", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
 
         status, notes = _check_linux_display()
-        _add("DISPLAY", status, notes)
+        _add("DISPLAY", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
 
+    # Mobile deps — optional
     if shutil.which("adb"):
         _add("adb (Android, optional)", *_ok(), required=False)
+        mobile_adb_ok = True
     else:
         _add(
             "adb (Android, optional)",
@@ -241,6 +277,20 @@ def run_doctor() -> int:
         _add("idb-companion (iOS, optional)", *_na("macOS only"), required=False)
         _add(
             "fb-idb Python package (iOS, optional)", *_na("macOS only"), required=False
+        )
+
+    # Backend summary — this IS required: at least one backend must be usable
+    if desktop_ok or mobile_adb_ok:
+        ready = []
+        if desktop_ok:
+            ready.append("desktop")
+        if mobile_adb_ok:
+            ready.append("android")
+        _add("Automation backend", *_ok(", ".join(ready)))
+    else:
+        _add(
+            "Automation backend",
+            *_missing("Fix desktop deps above or install adb"),
         )
 
     _console.print(table)
