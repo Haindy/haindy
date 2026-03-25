@@ -1,4 +1,4 @@
-"""Handlers for haindy --config-show and --config-migrate."""
+"""Handlers for haindy config show and haindy config migrate."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Interactive handlers for haindy --auth login|status|clear."""
+"""Interactive handlers for haindy auth login|status|clear."""
 
 from __future__ import annotations
 
@@ -30,39 +30,6 @@ _API_PROVIDERS = ("openai", "google", "anthropic")
 _ALL_PROVIDERS = (*_API_PROVIDERS, "openai-codex")
 _CU_ONLY_PROVIDERS = ("google", "anthropic")
 
-
-async def handle_auth_command(args: list[str]) -> int:
-    """Dispatch --auth COMMAND [PROVIDER]."""
-    if not args:
-        _CONSOLE.print("[red]Usage: --auth login|status|clear [PROVIDER][/red]")
-        return 1
-
-    command = args[0]
-    provider = args[1] if len(args) > 1 else None
-
-    if command == "status":
-        return await handle_auth_status()
-
-    if command == "login":
-        if not provider:
-            _CONSOLE.print(
-                f"[red]Usage: --auth login PROVIDER  (choose from: {', '.join(_ALL_PROVIDERS)})[/red]"
-            )
-            return 1
-        return await handle_auth_login(provider)
-
-    if command == "clear":
-        if not provider:
-            _CONSOLE.print(
-                f"[red]Usage: --auth clear PROVIDER  (choose from: {', '.join(_ALL_PROVIDERS)})[/red]"
-            )
-            return 1
-        return await handle_auth_clear(provider)
-
-    _CONSOLE.print(
-        f"[red]Unknown auth command: {command!r}. Choose from: login, status, clear[/red]"
-    )
-    return 1
 
 
 async def handle_auth_login(provider: str) -> int:
@@ -209,7 +176,7 @@ async def _setup_cu_only_provider(provider: str) -> int:
                 "[yellow]OpenAI credentials are still missing. Non-CU calls will fail.[/yellow]"
             )
             _CONSOLE.print(
-                "Run: haindy --auth login openai  or  haindy --auth login openai-codex"
+                "Run: haindy auth login openai  or  haindy auth login openai-codex"
             )
 
     return rc

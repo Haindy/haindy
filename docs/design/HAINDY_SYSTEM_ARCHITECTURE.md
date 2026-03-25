@@ -176,7 +176,7 @@ environments. They are never permitted in JSON settings files.
 - `src/auth/credentials.py`: `get_api_key` / `set_api_key` / `delete_api_key` backed by `keyring` + `EncryptedJsonFileStore` fallback.
 - `src/auth/store.py`: generic `EncryptedJsonFileStore(store_path, key_path)` used for both OAuth tokens and API key persistence.
 
-Interactive credential management: `haindy --auth-set openai|google|anthropic`, `--auth-status`, `--auth-clear`. Migration from legacy `.env`: `haindy --config-migrate`.
+Interactive credential management: `haindy auth login openai|google|anthropic`, `haindy auth status`, `haindy auth clear <provider>`. Migration from legacy `.env`: `haindy config migrate`.
 
 ### Security & Safety
 - Rate limiting prevents runaway API usage in failure loops.
