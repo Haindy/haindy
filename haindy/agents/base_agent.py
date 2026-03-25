@@ -6,9 +6,6 @@ from typing import Any
 from haindy.config.settings import get_settings
 from haindy.core.interfaces import Agent
 from haindy.core.types import AgentMessage, ConfidenceLevel
-from haindy.models.anthropic_client import AnthropicClient
-from haindy.models.google_client import GoogleClient
-from haindy.models.llm_client import LLMClient
 from haindy.models.openai_client import OpenAIClient, ResponseStreamObserver
 
 
@@ -29,20 +26,20 @@ class BaseAgent(Agent):
 
         Args:
             name: Name identifier for the agent
-            model: Optional model override; if None the provider default is used
+            model: Model override (provider-specific). If None, uses provider default.
             system_prompt: System prompt for the agent
             temperature: Temperature for model responses
-            reasoning_level: Reasoning effort level for supported providers
-            modalities: Set of output modalities (defaults to text)
+            reasoning_level: Reasoning effort level
+            modalities: Set of modalities to use
         """
-        super().__init__(name, model)
+        effective_model = model if model is not None else "gpt-5.4"
+        super().__init__(name, effective_model)
         self.logger = logging.getLogger(f"agent.{name}")
         self.system_prompt = system_prompt or self._get_default_system_prompt()
         self.temperature = temperature
         self.reasoning_level = reasoning_level
         self.modalities = modalities or {"text"}
-        self._client: LLMClient | None = None
-        self._client_provider: str | None = None
+        self._client: Any | None = None
 
     def _get_default_system_prompt(self) -> str:
         """Get default system prompt for the agent."""
@@ -53,31 +50,25 @@ class BaseAgent(Agent):
         )
 
     @property
-    def client(self) -> LLMClient:
-        """Lazy-load and return an LLM client for the configured provider."""
-        settings = get_settings()
-        provider = str(settings.agent_provider or "openai").strip().lower()
-
-        if self._client is None or self._client_provider != provider:
-            model = self.model
+    def client(self) -> Any:
+        """Lazy-load the appropriate LLM client based on agent_provider setting."""
+        if self._client is None:
+            settings = get_settings()
+            provider = str(settings.agent_provider).strip().lower()
             if provider == "anthropic":
-                self._client = AnthropicClient(
-                    model=model or settings.anthropic_model,
-                    reasoning_level=self.reasoning_level,
-                    modalities=self.modalities,
-                )
+                from haindy.models.anthropic_client import AnthropicClient
+
+                self._client = AnthropicClient()
             elif provider == "google":
-                self._client = GoogleClient(
-                    model=model or settings.google_model,
-                )
+                from haindy.models.google_client import GoogleClient
+
+                self._client = GoogleClient()
             else:
                 self._client = OpenAIClient(
-                    model=model or settings.openai_model,
+                    model=self.model,
                     reasoning_level=self.reasoning_level,
                     modalities=self.modalities,
                 )
-            self._client_provider = provider
-
         return self._client
 
     async def process(self, message: AgentMessage) -> AgentMessage | None:
@@ -184,15 +175,13 @@ class BaseAgent(Agent):
         stream_observer: ResponseStreamObserver | None = None,
     ) -> dict[str, Any]:
         """
-        Make a call to the configured AI provider.
+        Make a call to the configured model provider.
 
         Args:
             messages: List of message dictionaries
             temperature: Override default temperature
             response_format: Optional response format specification
-            reasoning_level: Override reasoning effort level
-            modalities: Override output modalities
-            stream: Enable streaming
+            stream: Enable streaming API integration
             stream_observer: Optional observer for streaming events
 
         Returns:
@@ -201,7 +190,6 @@ class BaseAgent(Agent):
         return await self.client.call(
             messages=messages,
             temperature=temperature or self.temperature,
-            max_tokens=None,
             system_prompt=self.system_prompt,
             response_format=response_format,
             reasoning_level=reasoning_level or self.reasoning_level,
@@ -213,8 +201,8 @@ class BaseAgent(Agent):
     def update_reasoning_level(self, level: str) -> None:
         """Update reasoning level for future calls."""
         self.reasoning_level = level
-        self._client = None
-        self._client_provider = None
+        if self._client:
+            self._client.reasoning_level = level
 
     def build_messages(
         self,
@@ -223,7 +211,7 @@ class BaseAgent(Agent):
         include_history: bool = False,
     ) -> list[dict[str, str]]:
         """
-        Build message list for the AI provider.
+        Build message list for model API calls.
 
         Args:
             user_content: User message content

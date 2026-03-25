@@ -8,6 +8,7 @@ import pytest
 
 from haindy.main import (
     _create_coordinator_stack,
+    _validate_auth_for_run,
     async_main,
     create_parser,
     read_context_file,
@@ -27,6 +28,27 @@ class TestCLIParser:
         assert "setup" in subcommands
         assert "version" in subcommands
         assert "test-api" in subcommands
+        assert "provider" in subcommands
+
+    def test_provider_list_subcommand(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["provider", "list"])
+        assert args.command == "provider"
+        assert args.provider_command == "list"
+
+    def test_provider_set_subcommand(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["provider", "set", "anthropic"])
+        assert args.command == "provider"
+        assert args.provider_command == "set"
+        assert args.provider == "anthropic"
+
+    def test_provider_set_computer_use_subcommand(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["provider", "set-computer-use", "google"])
+        assert args.command == "provider"
+        assert args.provider_command == "set-computer-use"
+        assert args.provider == "google"
 
     def test_run_subcommand_args(self) -> None:
         parser = create_parser()
@@ -492,3 +514,133 @@ async def test_run_test_stops_desktop_even_if_coordinator_cleanup_fails(
     assert kwargs["cache_key_context"] == {"execution_context": "desktop context"}
     coordinator.cleanup.assert_awaited_once()
     desktop_controller.stop.assert_awaited_once()
+
+class TestValidateAuthForRun:
+    """Tests for _validate_auth_for_run."""
+
+    def _make_settings(self, **kwargs):
+        defaults = {
+            "openai_api_key": "",
+            "anthropic_api_key": "",
+            "vertex_api_key": "",
+            "agent_provider": "openai",
+            "cu_provider": "openai",
+        }
+        defaults.update(kwargs)
+        return SimpleNamespace(**defaults)
+
+    def _make_codex_status(self, *, oauth_connected=False, oauth_expired=False):
+        return SimpleNamespace(
+            oauth_connected=oauth_connected,
+            oauth_expired=oauth_expired,
+        )
+
+    def test_anthropic_agent_provider_with_no_key_reports_issue(self):
+        settings = self._make_settings(
+            agent_provider="anthropic",
+            anthropic_api_key="",
+            cu_provider="openai",
+            openai_api_key="sk-openai-key",
+        )
+        with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
+            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            issues = _validate_auth_for_run(settings)
+        assert any("anthropic" in i.lower() for i in issues)
+
+    def test_anthropic_agent_provider_with_key_no_issue(self):
+        settings = self._make_settings(
+            agent_provider="anthropic",
+            anthropic_api_key="sk-ant-123",
+            cu_provider="openai",
+            openai_api_key="sk-openai-key",
+        )
+        with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
+            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            issues = _validate_auth_for_run(settings)
+        # No agent provider issue (but may still have CU issue)
+        agent_issues = [i for i in issues if "planning" in i.lower() or "anthropic" in i.lower() and "computer-use" not in i.lower()]
+        assert len(agent_issues) == 0
+
+    def test_google_agent_provider_with_no_key_reports_issue(self):
+        settings = self._make_settings(
+            agent_provider="google",
+            vertex_api_key="",
+            cu_provider="openai",
+            openai_api_key="sk-openai-key",
+        )
+        with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
+            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            issues = _validate_auth_for_run(settings)
+        assert any("google" in i.lower() for i in issues)
+
+    def test_google_agent_provider_with_key_no_agent_issue(self):
+        settings = self._make_settings(
+            agent_provider="google",
+            vertex_api_key="key123",
+            cu_provider="openai",
+            openai_api_key="sk-openai-key",
+        )
+        with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
+            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            issues = _validate_auth_for_run(settings)
+        # Should not report missing google agent key
+        assert not any(
+            "google" in i.lower() and "agent" in i.lower() for i in issues
+        )
+
+    def test_openai_agent_provider_missing_key_reports_openai_issue(self):
+        settings = self._make_settings(
+            agent_provider="openai",
+            openai_api_key="",
+            cu_provider="openai",
+        )
+        with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
+            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            issues = _validate_auth_for_run(settings)
+        assert any("openai" in i.lower() for i in issues)
+
+    def test_openai_agent_provider_with_key_no_agent_issue(self):
+        settings = self._make_settings(
+            agent_provider="openai",
+            openai_api_key="sk-test",
+            cu_provider="openai",
+        )
+        with patch("haindy.main.OpenAIAuthManager") as mock_mgr_cls:
+            mock_mgr_cls.return_value.get_status.return_value = self._make_codex_status()
+            issues = _validate_auth_for_run(settings)
+        # CU issue may exist, but not agent issue
+        agent_issues = [i for i in issues if "non-cu" in i.lower() or "planning" in i.lower()]
+        assert len(agent_issues) == 0
+
+
+@pytest.mark.asyncio
+async def test_provider_list_command_dispatches() -> None:
+    with (
+        patch("haindy.main.handle_provider_list", return_value=0) as mock_list,
+        patch("haindy.main.ensure_settings_skeleton"),
+    ):
+        result = await async_main(["provider", "list"])
+    assert result == 0
+    mock_list.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_provider_set_command_dispatches() -> None:
+    with (
+        patch("haindy.main.handle_provider_set", return_value=0) as mock_set,
+        patch("haindy.main.ensure_settings_skeleton"),
+    ):
+        result = await async_main(["provider", "set", "anthropic"])
+    assert result == 0
+    mock_set.assert_called_once_with("anthropic")
+
+
+@pytest.mark.asyncio
+async def test_provider_set_computer_use_command_dispatches() -> None:
+    with (
+        patch("haindy.main.handle_provider_set_computer_use", return_value=0) as mock_cu,
+        patch("haindy.main.ensure_settings_skeleton"),
+    ):
+        result = await async_main(["provider", "set-computer-use", "google"])
+    assert result == 0
+    mock_cu.assert_called_once_with("google")

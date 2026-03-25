@@ -91,7 +91,7 @@ async def test_interpret_step_adds_mobile_specific_guidance(
 
     captured_prompt: dict[str, str] = {}
 
-    async def _fake_call_openai(
+    async def _fake_call_model(
         messages: list[dict[str, object]],
         response_format: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -118,7 +118,7 @@ async def test_interpret_step_adds_mobile_specific_guidance(
         "_get_interpretation_screenshot",
         _fake_get_interpretation_screenshot,
     )
-    monkeypatch.setattr(runner, "call_model", _fake_call_openai)
+    monkeypatch.setattr(runner, "call_model", _fake_call_model)
 
     actions, _ = await runner._interpret_step(step, case, case_result, use_cache=False)
 
@@ -211,7 +211,7 @@ async def test_interpret_step_includes_setup_steps_in_context(
 
     captured_prompt: dict[str, str] = {}
 
-    async def _fake_call_openai(
+    async def _fake_call_model(
         messages: list[dict[str, object]],
         response_format: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -238,7 +238,7 @@ async def test_interpret_step_includes_setup_steps_in_context(
         "_get_interpretation_screenshot",
         _fake_get_interpretation_screenshot,
     )
-    monkeypatch.setattr(runner, "call_model", _fake_call_openai)
+    monkeypatch.setattr(runner, "call_model", _fake_call_model)
 
     actions, _ = await runner._interpret_step(
         setup_step,

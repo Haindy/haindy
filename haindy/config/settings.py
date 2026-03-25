@@ -371,6 +371,18 @@ class Settings(BaseModel):
         default="gemini-3.1-pro-preview",
         description="Google model for non-CU calls",
     )
+    agent_provider: str = Field(
+        default="openai",
+        description="Provider for non-CU model calls",
+    )
+    anthropic_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Anthropic model for non-CU calls",
+    )
+    google_model: str = Field(
+        default="gemini-3.1-pro-preview",
+        description="Google model for non-CU calls",
+    )
 
     # Desktop Configuration
     automation_backend: str = Field(

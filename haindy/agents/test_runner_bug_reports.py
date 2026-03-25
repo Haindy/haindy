@@ -57,7 +57,7 @@ class TestRunnerBugReportBuilder:
         model_logger: Any,
     ) -> None:
         self._model = model
-        self._call_openai = call_model
+        self._call_model = call_model
         self._model_logger = model_logger
 
     async def build_bug_report(
@@ -195,7 +195,7 @@ Determine:
 
 Respond in JSON format with keys: error_type, severity, bug_description, reasoning"""
 
-        response = await self._call_openai(
+        response = await self._call_model(
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
@@ -364,7 +364,7 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
             "}"
         )
 
-        response = await self._call_openai(
+        response = await self._call_model(
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )

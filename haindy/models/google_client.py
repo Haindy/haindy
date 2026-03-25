@@ -1,100 +1,43 @@
-"""Google Generative AI client wrapper for non-CU agent calls."""
-
+"""Google Gemini API client wrapper for non-CU agent calls."""
 from __future__ import annotations
 
 import json
 import logging
 from typing import Any
 
-try:
-    import google.genai as _genai
-except Exception:  # pragma: no cover
-    _genai = None  # type: ignore[assignment]
-
+from haindy.config.settings import get_settings
+from haindy.models.llm_client import dispatch_observer
 from haindy.models.openai_client import ResponseStreamObserver
 
 logger = logging.getLogger("google_client")
 
 
 class GoogleClient:
-    """Wrapper for Google Generative AI API interactions used by non-CU agents."""
+    """Wrapper for Google Gemini API interactions (non-computer-use)."""
 
-    def __init__(
-        self,
-        model: str = "gemini-2.5-pro-preview-05-06",
-        api_key: str | None = None,
-    ) -> None:
-        if _genai is None:
-            raise RuntimeError(
-                "google-genai package is not installed. "
-                "Install it with: pip install google-genai"
-            )
-        self.model = model
-        self._api_key = api_key
+    def __init__(self) -> None:
+        settings = get_settings()
+        self._api_key = settings.vertex_api_key
+        self._model = settings.google_model
+        self._vertex_project = getattr(settings, "vertex_project", "") or ""
+        self._vertex_location = (
+            getattr(settings, "vertex_location", "us-central1") or "us-central1"
+        )
         self._client: Any | None = None
 
     def _get_client(self) -> Any:
-        if self._client is not None:
-            return self._client
+        if self._client is None:
+            import google.genai as genai
 
-        from haindy.config.settings import get_settings
-
-        settings = get_settings()
-        vertex_project = str(settings.vertex_project or "").strip()
-        vertex_location = str(settings.vertex_location or "").strip()
-        vertex_api_key = self._api_key or str(settings.vertex_api_key or "").strip()
-
-        if vertex_project:
-            self._client = _genai.Client(
-                vertexai=True,
-                project=vertex_project,
-                location=vertex_location or "us-central1",
-            )
-            logger.info(
-                "Initialized Google agent client in Vertex mode",
-                extra={"vertex_project": vertex_project, "vertex_location": vertex_location},
-            )
-        elif vertex_api_key:
-            self._client = _genai.Client(api_key=vertex_api_key)
-            logger.debug("Initialized Google agent client in API key mode")
-        else:
-            raise RuntimeError(
-                "Google provider requires either "
-                "HAINDY_VERTEX_PROJECT+HAINDY_VERTEX_LOCATION or "
-                "HAINDY_VERTEX_API_KEY."
-            )
-
-        return self._client
-
-    def _build_contents(
-        self,
-        messages: list[dict[str, Any]],
-        system_prompt: str | None,
-    ) -> tuple[str | None, list[Any]]:
-        """Convert OpenAI-style messages to Google contents format."""
-        system_parts: list[str] = []
-        if system_prompt:
-            system_parts.append(system_prompt)
-
-        contents: list[Any] = []
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role in {"system", "developer"}:
-                system_parts.append(
-                    content if isinstance(content, str) else str(content)
+            if self._vertex_project:
+                self._client = genai.Client(
+                    vertexai=True,
+                    project=self._vertex_project,
+                    location=self._vertex_location,
                 )
-                continue
-            # Google uses "model" for assistant role
-            google_role = "model" if role == "assistant" else "user"
-            text = content if isinstance(content, str) else str(content)
-            contents.append({"role": google_role, "parts": [{"text": text}]})
-
-        if not contents:
-            contents.append({"role": "user", "parts": [{"text": ""}]})
-
-        combined_system = "\n\n".join(system_parts) if system_parts else None
-        return combined_system, contents
+            else:
+                self._client = genai.Client(api_key=self._api_key)
+        return self._client
 
     async def call(
         self,
@@ -108,171 +51,175 @@ class GoogleClient:
         stream: bool = False,
         stream_observer: ResponseStreamObserver | None = None,
     ) -> dict[str, Any]:
-        """Make a call to the Google Generative AI API."""
+        """Make a call to the Google Gemini API."""
+        import google.genai.types as genai_types
+
+        system_instruction: str | None = system_prompt
+        google_contents: list[Any] = []
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                text = content if isinstance(content, str) else str(content)
+                if system_instruction:
+                    system_instruction = f"{system_instruction}\n\n{text}"
+                else:
+                    system_instruction = text
+                continue
+
+            google_role = "model" if role == "assistant" else "user"
+            text_content = content if isinstance(content, str) else str(content)
+            google_contents.append(
+                genai_types.Content(
+                    role=google_role,
+                    parts=[genai_types.Part(text=text_content)],
+                )
+            )
+
+        if not google_contents:
+            google_contents.append(
+                genai_types.Content(
+                    role="user",
+                    parts=[genai_types.Part(text="")],
+                )
+            )
+
         format_type = response_format.get("type") if response_format else None
-
-        combined_system, contents = self._build_contents(messages, system_prompt)
-
-        # Handle JSON mode.
         if format_type in {"json_object", "json_schema"}:
-            json_hint = "Respond with valid JSON."
-            if combined_system:
-                if "json" not in combined_system.lower():
-                    combined_system = combined_system + "\n\n" + json_hint
+            json_instruction = "Respond with valid JSON only."
+            if system_instruction:
+                system_instruction = f"{system_instruction}\n\n{json_instruction}"
             else:
-                combined_system = json_hint
-
-        from google.genai import types as _types  # type: ignore[import-untyped]
+                system_instruction = json_instruction
 
         config_kwargs: dict[str, Any] = {
             "temperature": temperature,
         }
         if max_tokens:
             config_kwargs["max_output_tokens"] = max_tokens
-        if combined_system:
-            config_kwargs["system_instruction"] = combined_system
+        if system_instruction:
+            config_kwargs["system_instruction"] = system_instruction
 
-        generation_config = _types.GenerateContentConfig(**config_kwargs)
-
+        generation_config = genai_types.GenerateContentConfig(**config_kwargs)
         client = self._get_client()
-
-        logger.debug(
-            "Google API call: model=%s, messages=%d, temperature=%s",
-            self.model,
-            len(contents),
-            temperature,
-        )
 
         if stream or stream_observer is not None:
             return await self._call_streaming(
                 client=client,
-                contents=contents,
-                generation_config=generation_config,
-                format_type=format_type,
+                contents=google_contents,
+                config=generation_config,
+                response_format=response_format,
                 stream_observer=stream_observer,
             )
 
         response = await client.aio.models.generate_content(
-            model=self.model,
-            contents=contents,
+            model=self._model,
+            contents=google_contents,
             config=generation_config,
         )
-        return self._normalize_response(response, format_type)
+
+        content_text = ""
+        if response.candidates:
+            candidate = response.candidates[0]
+            parts = getattr(candidate.content, "parts", None) or []
+            content_text = "".join(
+                getattr(part, "text", "") or "" for part in parts
+            )
+
+        content_value: Any = content_text
+        if format_type in {"json_object", "json_schema"} and content_text:
+            try:
+                content_value = json.loads(content_text)
+            except json.JSONDecodeError:
+                logger.error("Failed to parse JSON response from Google")
+                raise
+
+        usage_meta = getattr(response, "usage_metadata", None)
+        prompt_tokens = getattr(usage_meta, "prompt_token_count", 0) or 0
+        completion_tokens = getattr(usage_meta, "candidates_token_count", 0) or 0
+
+        return {
+            "content": content_value,
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+            "model": self._model,
+            "finish_reason": None,
+        }
 
     async def _call_streaming(
         self,
-        *,
         client: Any,
         contents: list[Any],
-        generation_config: Any,
-        format_type: str | None,
+        config: Any,
+        response_format: dict[str, Any] | None,
         stream_observer: ResponseStreamObserver | None,
     ) -> dict[str, Any]:
-        """Stream a response and gather the final result."""
+        """Make a streaming call to the Google Gemini API."""
         if stream_observer is not None:
-            try:
-                stream_observer.on_stream_start()
-            except Exception:
-                pass
+            dispatch_observer(stream_observer,"on_stream_start")
 
         full_text = ""
-        usage_in: int = 0
-        usage_out: int = 0
+        prompt_tokens = 0
+        completion_tokens = 0
 
-        async for chunk in await client.aio.models.generate_content_stream(
-            model=self.model,
-            contents=contents,
-            config=generation_config,
-        ):
-            chunk_text = ""
-            for candidate in getattr(chunk, "candidates", []) or []:
-                for part in getattr(getattr(candidate, "content", None), "parts", []) or []:
-                    t = getattr(part, "text", None)
-                    if t:
-                        chunk_text += t
-
-            if chunk_text:
-                full_text += chunk_text
-                if stream_observer is not None:
-                    try:
-                        stream_observer.on_text_delta(chunk_text)
-                    except Exception:
-                        pass
-
-            usage = getattr(chunk, "usage_metadata", None)
-            if usage is not None:
-                usage_in = int(getattr(usage, "prompt_token_count", usage_in) or usage_in)
-                usage_out = int(
-                    getattr(usage, "candidates_token_count", usage_out) or usage_out
-                )
-
-        if stream_observer is not None:
-            try:
-                stream_observer.on_stream_end()
-            except Exception:
-                pass
-
-        content_value: Any = full_text
-        if format_type in {"json_object", "json_schema"}:
-            if not full_text:
-                content_value = {}
-            else:
-                try:
-                    content_value = json.loads(full_text)
-                except json.JSONDecodeError:
-                    logger.error(
-                        "Failed to parse JSON streaming response", exc_info=True
+        try:
+            async for chunk in await client.aio.models.generate_content_stream(
+                model=self._model,
+                contents=contents,
+                config=config,
+            ):
+                chunk_text = ""
+                if chunk.candidates:
+                    parts = getattr(chunk.candidates[0].content, "parts", None) or []
+                    chunk_text = "".join(
+                        getattr(part, "text", "") or "" for part in parts
                     )
-                    raise
+                if chunk_text:
+                    full_text += chunk_text
+                    if stream_observer is not None:
+                        dispatch_observer(stream_observer,"on_text_delta", chunk_text)
+
+                usage_meta = getattr(chunk, "usage_metadata", None)
+                if usage_meta is not None:
+                    pt = getattr(usage_meta, "prompt_token_count", 0) or 0
+                    ct = getattr(usage_meta, "candidates_token_count", 0) or 0
+                    if pt:
+                        prompt_tokens = pt
+                    if ct:
+                        completion_tokens = ct
+        except Exception as exc:
+            if stream_observer is not None:
+                dispatch_observer(stream_observer,"on_error", exc)
+            if stream_observer is not None:
+                dispatch_observer(stream_observer,"on_stream_end")
+            raise
+
+        usage_dict = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+        if stream_observer is not None:
+            dispatch_observer(stream_observer,"on_usage_total", usage_dict)
+            dispatch_observer(stream_observer,"on_stream_end")
+
+        format_type = response_format.get("type") if response_format else None
+        content_value: Any = full_text
+        if format_type in {"json_object", "json_schema"} and full_text:
+            try:
+                content_value = json.loads(full_text)
+            except json.JSONDecodeError:
+                logger.error("Failed to parse streaming JSON response from Google")
+                raise
 
         return {
             "content": content_value,
-            "usage": {
-                "prompt_tokens": usage_in,
-                "completion_tokens": usage_out,
-                "total_tokens": usage_in + usage_out,
-            },
-            "model": self.model,
+            "usage": usage_dict,
+            "model": self._model,
             "finish_reason": None,
         }
 
-    def _normalize_response(
-        self, response: Any, format_type: str | None
-    ) -> dict[str, Any]:
-        """Extract text and usage from a Google GenerateContent response."""
-        text_parts: list[str] = []
-        for candidate in getattr(response, "candidates", []) or []:
-            for part in getattr(getattr(candidate, "content", None), "parts", []) or []:
-                t = getattr(part, "text", None)
-                if t:
-                    text_parts.append(t)
-
-        raw_text = "".join(text_parts)
-        content_value: Any = raw_text
-
-        if format_type in {"json_object", "json_schema"}:
-            if not raw_text:
-                content_value = {}
-            else:
-                try:
-                    content_value = json.loads(raw_text)
-                except json.JSONDecodeError:
-                    logger.error("Failed to parse JSON response", exc_info=True)
-                    raise
-
-        usage = getattr(response, "usage_metadata", None)
-        usage_in = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
-        usage_out = (
-            int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
-        )
-
-        return {
-            "content": content_value,
-            "usage": {
-                "prompt_tokens": usage_in,
-                "completion_tokens": usage_out,
-                "total_tokens": usage_in + usage_out,
-            },
-            "model": self.model,
-            "finish_reason": None,
-        }
