@@ -12,6 +12,20 @@ from haindy.models.openai_client import ResponseStreamObserver
 logger = logging.getLogger("google_client")
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """Strip markdown code fences from a string, e.g. ```json\\n{...}\\n```."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # Remove opening fence (e.g. ```json or ```)
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        # Remove closing fence
+        if stripped.endswith("```"):
+            stripped = stripped[:-3].rstrip()
+    return stripped
+
+
 class GoogleClient:
     """Wrapper for Google Gemini API interactions (non-computer-use)."""
 
@@ -100,6 +114,8 @@ class GoogleClient:
             config_kwargs["max_output_tokens"] = max_tokens
         if system_instruction:
             config_kwargs["system_instruction"] = system_instruction
+        if format_type in {"json_object", "json_schema"}:
+            config_kwargs["response_mime_type"] = "application/json"
 
         generation_config = genai_types.GenerateContentConfig(**config_kwargs)
         client = self._get_client()
@@ -130,7 +146,7 @@ class GoogleClient:
         content_value: Any = content_text
         if format_type in {"json_object", "json_schema"} and content_text:
             try:
-                content_value = json.loads(content_text)
+                content_value = json.loads(_strip_markdown_fences(content_text))
             except json.JSONDecodeError:
                 logger.error("Failed to parse JSON response from Google")
                 raise
@@ -211,7 +227,7 @@ class GoogleClient:
         content_value: Any = full_text
         if format_type in {"json_object", "json_schema"} and full_text:
             try:
-                content_value = json.loads(full_text)
+                content_value = json.loads(_strip_markdown_fences(full_text))
             except json.JSONDecodeError:
                 logger.error("Failed to parse streaming JSON response from Google")
                 raise
