@@ -145,14 +145,14 @@ Or set `HAINDY_AUTOMATION_BACKEND=mobile_ios` in the environment.
 **Credentials** (recommended: store in system keychain):
 
 ```bash
-haindy --auth-set openai      # OpenAI API key
-haindy --auth-set google      # Vertex project, location, API key
-haindy --auth-set anthropic   # Anthropic API key
+haindy auth login openai      # OpenAI API key
+haindy auth login google      # Vertex project, location, API key
+haindy auth login anthropic   # Anthropic API key
 ```
 
 Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_VERTEX_API_KEY` as environment variables (highest priority, good for CI/CD).
 
-**Settings file** (`~/.haindy/settings.json`): non-secret configuration. See `haindy --config-show` for the full effective configuration.
+**Settings file** (`~/.haindy/settings.json`): non-secret configuration. See `haindy config show` for the full effective configuration.
 
 Important env vars (still supported, override all other sources):
 

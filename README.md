@@ -62,10 +62,10 @@ If you prefer not to activate the virtual environment, use `.venv/bin/haindy`.
 **Recommended: interactive setup**
 
 ```bash
-haindy --auth-set openai      # prompts for API key; stored in system keychain
-haindy --auth-set google      # prompts for Vertex project, location, and API key
-haindy --auth-set anthropic   # prompts for API key; stored in system keychain
-haindy --auth-status          # shows which providers have credentials configured
+haindy auth login openai      # prompts for API key; stored in system keychain
+haindy auth login google      # prompts for Vertex project, location, and API key
+haindy auth login anthropic   # prompts for API key; stored in system keychain
+haindy auth status            # shows which providers have credentials configured
 ```
 
 **Settings file** (`~/.haindy/settings.json`): create this for persistent non-secret configuration:
@@ -84,8 +84,8 @@ haindy --auth-status          # shows which providers have credentials configure
 **Migrating from .env**: if you have an existing `.env` file:
 
 ```bash
-haindy --config-migrate          # reads .env, splits settings to settings.json and keys to keychain
-haindy --config-show             # verify the effective configuration
+haindy config migrate          # reads .env, splits settings to settings.json and keys to keychain
+haindy config show             # verify the effective configuration
 ```
 
 **CI/CD**: environment variables still work and take the highest priority. Copy `.env.example` to `.env` and fill in values, or export them directly.
@@ -93,9 +93,9 @@ haindy --config-show             # verify the effective configuration
 OpenAI auth modes:
 
 - Default non-CU OpenAI auth uses the stored/env `HAINDY_OPENAI_API_KEY`
-- `--codex-auth login` stores a local encrypted Codex OAuth session for non-CU OpenAI requests
-- `--codex-auth status` shows the active non-CU OpenAI auth mode
-- `--codex-auth logout` clears the stored OAuth session
+- `haindy auth login openai-codex` stores a local encrypted Codex OAuth session for non-CU OpenAI requests
+- `haindy auth status` shows the active non-CU OpenAI auth mode
+- `haindy auth clear openai-codex` clears the stored OAuth session
 
 ## Standard mode
 

@@ -267,7 +267,7 @@ def _reject_secret_fields(data: dict[str, Any], path: Path) -> None:
                     raise ValueError(
                         f"Settings file {path} contains a secret field '{key}'. "
                         "API keys must not be stored in settings files. "
-                        "Use 'haindy --auth-set <provider>' instead."
+                        "Use 'haindy auth login <provider>' instead."
                     )
     # Also check top-level keys (in case someone puts them there directly)
     for key in data:
@@ -275,7 +275,7 @@ def _reject_secret_fields(data: dict[str, Any], path: Path) -> None:
             raise ValueError(
                 f"Settings file {path} contains a secret field '{key}'. "
                 "API keys must not be stored in settings files. "
-                "Use 'haindy --auth-set <provider>' instead."
+                "Use 'haindy auth login <provider>' instead."
             )
 
 

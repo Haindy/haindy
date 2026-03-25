@@ -33,8 +33,8 @@ haindy doctor
 haindy setup --non-interactive
 
 # Configure credentials (stored in system keychain)
-haindy --auth login openai    # or google / anthropic / openai-codex
-haindy --auth status          # verify
+haindy auth login openai    # or google / anthropic / openai-codex
+haindy auth status          # verify
 
 # Optional: create ~/.haindy/settings.json for persistent non-secret settings
 # See .agents/skills/haindy-setup/SKILL.md for full setup guidance
@@ -46,24 +46,24 @@ in the values. Environment variables take priority over all other sources.
 ### Running
 ```bash
 # Standard run (both flags required)
-haindy --plan <requirements_file> --context <context_file>
+haindy run --plan <requirements_file> --context <context_file>
 
 # Mobile ADB backend
-haindy --mobile --plan <plan> --context <context>
+haindy run --mobile --plan <plan> --context <context>
 
 # Debug mode
-haindy --plan <plan> --context <context> --debug
+haindy run --plan <plan> --context <context> --debug
 
 # OAuth auth management
-haindy --auth login openai-codex
-haindy --auth status
-haindy --auth clear openai-codex
+haindy auth login openai-codex
+haindy auth status
+haindy auth clear openai-codex
 
 # API connectivity test
-haindy --test-api
+haindy test-api
 ```
 
-Keep `python -m haindy.main ...` as a local/dev fallback when you intentionally
+Keep `python -m haindy.main run ...` as a local/dev fallback when you intentionally
 need the module entrypoint.
 
 ### Testing

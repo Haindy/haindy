@@ -50,9 +50,9 @@ def _check_api_key(provider: str) -> tuple[Text, str]:
 
         if get_api_key(provider):
             return _ok("")
-        return _missing(f"run: haindy --auth login {provider}")
+        return _missing(f"run: haindy auth login {provider}")
     except Exception:
-        return _missing(f"run: haindy --auth login {provider}")
+        return _missing(f"run: haindy auth login {provider}")
 
 
 def _check_codex_oauth() -> tuple[Text, str]:
@@ -64,12 +64,12 @@ def _check_codex_oauth() -> tuple[Text, str]:
             label = status.oauth_account_label or ""
             if status.oauth_expired:
                 return _missing(
-                    f"token expired ({label}) — run: haindy --auth login openai-codex"
+                    f"token expired ({label}) — run: haindy auth login openai-codex"
                 )
             return _ok(label)
-        return _missing("run: haindy --auth login openai-codex")
+        return _missing("run: haindy auth login openai-codex")
     except Exception:
-        return _missing("run: haindy --auth login openai-codex")
+        return _missing("run: haindy auth login openai-codex")
 
 
 def _check_macos_pynput() -> tuple[Text, str]:

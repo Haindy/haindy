@@ -16,7 +16,7 @@ from rich.table import Table
 
 from haindy.agents import ScopeTriageAgent, SituationalAgent, TestPlannerAgent
 from haindy.auth import OpenAIAuthManager
-from haindy.cli.auth_commands import handle_auth_command
+from haindy.cli.auth_commands import handle_auth_clear, handle_auth_login, handle_auth_status
 from haindy.cli.config_commands import handle_config_migrate, handle_config_show
 from haindy.config.settings import Settings, get_settings
 from haindy.config.settings_file import ensure_settings_skeleton
@@ -52,132 +52,112 @@ def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser."""
     cli_name = public_cli_program_name()
     parser = argparse.ArgumentParser(
-        description="HAINDY - Autonomous AI Testing Agent v0.1.0",
+        description="HAINDY - Autonomous AI Testing Agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Examples:
-  # Full desktop-first execution (required)
-  {cli_name} --plan requirements.md --context execution_context.txt
-
-  # Berserk mode
-  {cli_name} --berserk --plan requirements.md --context execution_context.txt
-
-  # Test your active OpenAI auth configuration
-  {cli_name} --test-api
-
-  # Store API credentials interactively
-  {cli_name} --auth login openai
-  {cli_name} --auth login google
-  {cli_name} --auth login anthropic
-  {cli_name} --auth login openai-codex
-
-  # Show which providers have credentials configured
-  {cli_name} --auth status
-
-  # Clear stored credentials for a provider
-  {cli_name} --auth clear openai
-  {cli_name} --auth clear openai-codex
-
-  # Show effective configuration (secrets redacted)
-  {cli_name} --config-show
-
-  # Migrate an existing .env file to the new config system
-  {cli_name} --config-migrate
-  {cli_name} --config-migrate /path/to/.env
+  {cli_name} run --plan requirements.md --context execution_context.txt
+  {cli_name} run --berserk --plan requirements.md --context execution_context.txt
+  {cli_name} test-api
+  {cli_name} auth login openai
+  {cli_name} auth login openai-codex
+  {cli_name} auth status
+  {cli_name} auth clear openai
+  {cli_name} config show
+  {cli_name} config migrate /path/to/.env
+  {cli_name} doctor
+  {cli_name} setup
 
 Fallback:
-  python -m haindy.main --plan requirements.md --context execution_context.txt
+  python -m haindy.main run --plan requirements.md --context execution_context.txt
         """,
     )
 
-    input_group = parser.add_mutually_exclusive_group()
-    input_group.add_argument(
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    subparsers.add_parser("version", help="Show version information")
+
+    subparsers.add_parser("doctor", help="Check system dependencies and configuration")
+
+    setup_parser = subparsers.add_parser("setup", help="Run the first-time setup wizard")
+    setup_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run without interactive prompts",
+    )
+
+    subparsers.add_parser("test-api", help="Test the active OpenAI API configuration")
+
+    auth_parser = subparsers.add_parser("auth", help="Manage API credentials")
+    auth_sub = auth_parser.add_subparsers(dest="auth_command", metavar="COMMAND")
+    auth_login_parser = auth_sub.add_parser("login", help="Store credentials for a provider")
+    auth_login_parser.add_argument(
+        "provider",
+        choices=["openai", "google", "anthropic", "openai-codex"],
+        help="Provider to configure",
+    )
+    auth_sub.add_parser("status", help="Show which providers have credentials configured")
+    auth_clear_parser = auth_sub.add_parser(
+        "clear", help="Remove stored credentials for a provider"
+    )
+    auth_clear_parser.add_argument(
+        "provider",
+        choices=["openai", "google", "anthropic", "openai-codex"],
+        help="Provider to clear",
+    )
+
+    config_parser = subparsers.add_parser("config", help="Manage configuration")
+    config_sub = config_parser.add_subparsers(dest="config_command", metavar="COMMAND")
+    config_sub.add_parser("show", help="Show effective configuration (secrets redacted)")
+    config_migrate_parser = config_sub.add_parser(
+        "migrate", help="Migrate a .env file to settings.json and keychain"
+    )
+    config_migrate_parser.add_argument(
+        "dotenv_path",
+        nargs="?",
+        default=".env",
+        metavar="DOTENV_PATH",
+        help="Path to .env file (default: .env)",
+    )
+
+    run_parser = subparsers.add_parser("run", help="Run a test")
+    run_parser.add_argument(
         "-p",
         "--plan",
         type=Path,
         help="Path to plain-text test requirements/plan file",
     )
-    input_group.add_argument(
-        "--test-api",
-        action="store_true",
-        help="Test the active non-CU OpenAI auth configuration",
-    )
-    input_group.add_argument(
-        "--version",
-        action="store_true",
-        help="Show version information",
-    )
-    input_group.add_argument(
-        "--auth",
-        nargs="+",
-        metavar=("COMMAND", "PROVIDER"),
-        help=(
-            "Manage credentials. COMMAND is one of: login, status, clear. "
-            "PROVIDER is one of: openai, google, anthropic, openai-codex. "
-            "Examples: --auth login openai  --auth status  --auth clear openai-codex"
-        ),
-    )
-    input_group.add_argument(
-        "--config-show",
-        action="store_true",
-        help="Show the effective configuration (secrets redacted)",
-    )
-    input_group.add_argument(
-        "--config-migrate",
-        nargs="?",
-        const=".env",
-        metavar="DOTENV_PATH",
-        help="Migrate a .env file to settings.json and keychain (default: .env)",
-    )
-    input_group.add_argument(
-        "--setup",
-        action="store_true",
-        help="Run the first-time setup wizard",
-    )
-    input_group.add_argument(
-        "--doctor",
-        action="store_true",
-        help="Check system dependencies and configuration",
-    )
-
-    parser.add_argument(
-        "--non-interactive",
-        action="store_true",
-        help="Run setup wizard without interactive prompts",
-    )
-
-    parser.add_argument(
+    run_parser.add_argument(
         "--context",
         type=Path,
-        help="Path to plain-text execution context file (required for execution)",
+        help="Path to plain-text execution context file (required)",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--mobile",
         action="store_true",
-        help="Use mobile ADB backend for Android (hard override for this run)",
+        help="Use mobile ADB backend for Android",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--ios",
         action="store_true",
-        help="Use iOS idb backend (hard override for this run)",
+        help="Use iOS idb backend",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--berserk",
         action="store_true",
         help="Berserk mode - aggressive autonomous operation without confirmations",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug mode with verbose logging",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose structured logging output (JSON)",
     )
-
-    record_group = parser.add_mutually_exclusive_group()
+    record_group = run_parser.add_mutually_exclusive_group()
     record_group.add_argument(
         "--record",
         action="store_true",
@@ -190,27 +170,26 @@ Fallback:
         dest="record",
         help="Force-disable desktop screen recording for this run",
     )
-    parser.set_defaults(record=None)
-
-    parser.add_argument(
+    run_parser.set_defaults(record=None)
+    run_parser.add_argument(
         "-o",
         "--output",
         type=Path,
         help="Output directory for test results (default: reports/)",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--format",
         choices=["json", "html", "markdown"],
         default="html",
         help="Report format (default: html)",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--timeout",
         type=int,
         default=7200,
         help="Test execution timeout in seconds (default: 7200)",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--max-steps",
         type=int,
         default=50,
@@ -727,7 +706,7 @@ def _validate_auth_for_run(settings: Settings) -> list[str]:
     if not has_noncv:
         issues.append(
             "No OpenAI credentials for non-CU calls (planning, analysis). "
-            "Run: haindy --auth login openai  or  haindy --auth login openai-codex"
+            "Run: haindy auth login openai  or  haindy auth login openai-codex"
         )
 
     provider = str(settings.cu_provider).strip().lower()
@@ -739,7 +718,7 @@ def _validate_auth_for_run(settings: Settings) -> list[str]:
         cu_login_arg = provider if provider in ("google", "anthropic") else "openai"
         issues.append(
             f"No API key for computer-use provider '{provider}'. "
-            f"Run: haindy --auth login {cu_login_arg}"
+            f"Run: haindy auth login {cu_login_arg}"
         )
 
     return issues
@@ -761,10 +740,6 @@ def _is_setup_complete() -> bool:
     return _SETUP_MARKER.exists()
 
 
-def _should_bypass_gate(parsed_args: argparse.Namespace) -> bool:
-    return bool(parsed_args.setup or parsed_args.doctor or parsed_args.version)
-
-
 async def async_main(args: list[str] | None = None) -> int:
     """Async main entrypoint."""
     argv = list(args) if args is not None else sys.argv[1:]
@@ -778,20 +753,32 @@ async def async_main(args: list[str] | None = None) -> int:
     parser = create_parser()
     parsed_args = parser.parse_args(argv)
 
-    if parsed_args.version:
+    command = parsed_args.command
+
+    if command is None:
+        if not _any_auth_configured():
+            console.print(
+                "[yellow]No credentials configured. "
+                "Run: haindy auth login openai (or google / anthropic / openai-codex)[/yellow]"
+            )
+            console.print("")
+        parser.print_help()
+        return 1
+
+    if command == "version":
         return show_version()
 
-    if parsed_args.setup:
+    if command == "setup":
         from haindy.cli.setup_wizard import run_setup_wizard
 
         return run_setup_wizard(non_interactive=parsed_args.non_interactive)
 
-    if parsed_args.doctor:
+    if command == "doctor":
         from haindy.cli.doctor import run_doctor
 
         return run_doctor()
 
-    if not _is_setup_complete() and not _should_bypass_gate(parsed_args):
+    if not _is_setup_complete():
         console.print(
             "Haindy is not set up yet. Run:\n\n"
             "  haindy setup\n\n"
@@ -802,78 +789,92 @@ async def async_main(args: list[str] | None = None) -> int:
         )
         sys.exit(1)
 
-    if parsed_args.test_api:
+    if command == "test-api":
         return await test_api_connection()
 
     settings = get_settings()
-    if parsed_args.debug:
-        settings.debug_mode = True
-        settings.log_level = "DEBUG"
-    settings.log_format = "json" if parsed_args.verbose else "text"
-
     setup_logging(
         log_level=settings.log_level,
         log_format=settings.log_format,
         log_file=settings.log_file,
     )
 
-    # Initialize security components for side effects / parity with existing flow
+    # Initialize security components
     RateLimiter()
     DataSanitizer()
 
-    if parsed_args.auth:
-        return await handle_auth_command(parsed_args.auth)
-    if parsed_args.config_show:
-        return await handle_config_show()
-    if parsed_args.config_migrate is not None:
-        return await handle_config_migrate(Path(parsed_args.config_migrate))
+    if command == "auth":
+        auth_command = getattr(parsed_args, "auth_command", None)
+        if not auth_command:
+            console.print("[red]Usage: haindy auth <login|status|clear> [provider][/red]")
+            return 1
+        if auth_command == "status":
+            return await handle_auth_status()
+        if auth_command == "login":
+            return await handle_auth_login(parsed_args.provider)
+        if auth_command == "clear":
+            return await handle_auth_clear(parsed_args.provider)
 
-    if not parsed_args.plan:
-        if not _any_auth_configured():
+    if command == "config":
+        config_command = getattr(parsed_args, "config_command", None)
+        if not config_command:
+            console.print("[red]Usage: haindy config <show|migrate> [path][/red]")
+            return 1
+        if config_command == "show":
+            return await handle_config_show()
+        if config_command == "migrate":
+            return await handle_config_migrate(Path(parsed_args.dotenv_path))
+
+    if command == "run":
+        if not parsed_args.plan:
+            console.print("[red]Error: --plan is required[/red]")
+            return 1
+        if not parsed_args.context:
             console.print(
-                "[yellow]No credentials configured. "
-                "Run: haindy --auth login openai (or google / anthropic / openai-codex)[/yellow]"
+                "[red]Error: --context is required when running with --plan[/red]"
             )
-            console.print("")
-        parser.print_help()
-        return 1
-    if not parsed_args.context:
-        console.print(
-            "[red]Error: --context is required when running with --plan[/red]"
-        )
-        return 1
+            return 1
 
-    auth_issues = _validate_auth_for_run(settings)
-    if auth_issues:
-        for issue in auth_issues:
-            console.print(f"[red]{issue}[/red]")
-        return 1
+        if parsed_args.debug:
+            settings.debug_mode = True
+            settings.log_level = "DEBUG"
+        if parsed_args.verbose:
+            settings.log_format = "json"
 
-    requirements = await read_plan_file(parsed_args.plan)
-    context_text = await read_context_file(parsed_args.context)
-    automation_backend = (
-        "mobile_ios"
-        if parsed_args.ios
-        else (
-            "mobile_adb"
-            if parsed_args.mobile
-            else normalize_automation_backend(
-                getattr(settings, "automation_backend", "desktop")
+        auth_issues = _validate_auth_for_run(settings)
+        if auth_issues:
+            for issue in auth_issues:
+                console.print(f"[red]{issue}[/red]")
+            return 1
+
+        requirements = await read_plan_file(parsed_args.plan)
+        context_text = await read_context_file(parsed_args.context)
+        automation_backend = (
+            "mobile_ios"
+            if parsed_args.ios
+            else (
+                "mobile_adb"
+                if parsed_args.mobile
+                else normalize_automation_backend(
+                    getattr(settings, "automation_backend", "desktop")
+                )
             )
         )
-    )
 
-    return await run_test(
-        requirements=requirements,
-        context_text=context_text,
-        output_dir=parsed_args.output,
-        report_format=parsed_args.format,
-        timeout=parsed_args.timeout,
-        max_steps=parsed_args.max_steps,
-        berserk=parsed_args.berserk,
-        record_override=parsed_args.record,
-        automation_backend=automation_backend,
-    )
+        return await run_test(
+            requirements=requirements,
+            context_text=context_text,
+            output_dir=parsed_args.output,
+            report_format=parsed_args.format,
+            timeout=parsed_args.timeout,
+            max_steps=parsed_args.max_steps,
+            berserk=parsed_args.berserk,
+            record_override=parsed_args.record,
+            automation_backend=automation_backend,
+        )
+
+    parser.print_help()
+    return 1
 
 
 def main(args: list[str] | None = None) -> int:

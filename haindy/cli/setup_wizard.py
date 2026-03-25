@@ -114,7 +114,7 @@ def _wizard(non_interactive: bool) -> int:
     _console.rule("Step 5: Credential Setup")
     try:
         from haindy.auth.credentials import get_api_key
-        from haindy.cli.auth_commands import handle_auth_command
+        from haindy.cli.auth_commands import handle_auth_login
     except Exception as exc:
         _console.print(
             f"[red]Could not load credentials module ({exc}). Skipping credential setup.[/red]"
@@ -133,11 +133,11 @@ def _wizard(non_interactive: bool) -> int:
 
             _console.print(f"[yellow]{provider} credentials: not configured[/yellow]")
             if non_interactive:
-                _console.print(f"  run: haindy --auth login {provider}")
+                _console.print(f"  run: haindy auth login {provider}")
                 continue
 
             if Confirm.ask(f"Set up {provider} credentials now?", default=True):
-                asyncio.run(handle_auth_command(["login", provider]))
+                asyncio.run(handle_auth_login(provider))
 
     _console.rule("Step 7: Final Check")
     final_code = run_doctor()
@@ -147,7 +147,7 @@ def _wizard(non_interactive: bool) -> int:
         _SETUP_MARKER.touch()
         _console.print(
             "\n[green]Setup complete![/green] Run:\n\n"
-            "  haindy --plan <requirements_file> --context <context_file>\n"
+            "  haindy run --plan <requirements_file> --context <context_file>\n"
         )
         return 0
 

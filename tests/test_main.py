@@ -19,40 +19,62 @@ from haindy.main import (
 class TestCLIParser:
     def test_parser_creation(self) -> None:
         parser = create_parser()
-        actions = {action.dest: action for action in parser._actions}
-        assert "plan" in actions
-        assert "context" in actions
-        assert "mobile" in actions
-        assert "test_api" in actions
-        assert "version" in actions
-        assert "setup" in actions
-        assert "doctor" in actions
-        assert "auth" in actions
+        subcommands = parser._subparsers._actions[-1].choices
+        assert "run" in subcommands
+        assert "auth" in subcommands
+        assert "config" in subcommands
+        assert "doctor" in subcommands
+        assert "setup" in subcommands
+        assert "version" in subcommands
+        assert "test-api" in subcommands
 
-    def test_mutually_exclusive_inputs(self) -> None:
+    def test_run_subcommand_args(self) -> None:
         parser = create_parser()
-        parser.parse_args(["--plan", "test.md", "--context", "ctx.txt"])
-        parser.parse_args(["--test-api"])
-        parser.parse_args(["--version"])
-        parser.parse_args(["--setup"])
-        parser.parse_args(["--doctor"])
-        parser.parse_args(["--auth", "status"])
+        args = parser.parse_args(["run", "--plan", "test.md", "--context", "ctx.txt"])
+        assert args.command == "run"
+        assert args.plan == Path("test.md")
+        assert args.context == Path("ctx.txt")
 
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--plan", "test.md", "--test-api"])
-
-    def test_doctor_flags(self) -> None:
+    def test_auth_subcommands(self) -> None:
         parser = create_parser()
-        args = parser.parse_args(["--doctor", "--include-android", "--include-ios"])
-        assert args.doctor is True
-        assert args.include_android is True
-        assert args.include_ios is True
+        args = parser.parse_args(["auth", "status"])
+        assert args.command == "auth"
+        assert args.auth_command == "status"
+
+        args = parser.parse_args(["auth", "login", "openai"])
+        assert args.command == "auth"
+        assert args.auth_command == "login"
+        assert args.provider == "openai"
+
+        args = parser.parse_args(["auth", "clear", "openai-codex"])
+        assert args.command == "auth"
+        assert args.auth_command == "clear"
+        assert args.provider == "openai-codex"
+
+    def test_config_subcommands(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["config", "show"])
+        assert args.command == "config"
+        assert args.config_command == "show"
+
+        args = parser.parse_args(["config", "migrate", "/path/to/.env"])
+        assert args.command == "config"
+        assert args.config_command == "migrate"
+        assert args.dotenv_path == "/path/to/.env"
 
     def test_setup_non_interactive(self) -> None:
         parser = create_parser()
-        args = parser.parse_args(["--setup", "--non-interactive"])
-        assert args.setup is True
+        args = parser.parse_args(["setup", "--non-interactive"])
+        assert args.command == "setup"
         assert args.non_interactive is True
+
+    def test_run_mobile_flags(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(["run", "--plan", "p.md", "--context", "c.txt", "--mobile"])
+        assert args.mobile is True
+
+        args = parser.parse_args(["run", "--plan", "p.md", "--context", "c.txt", "--ios"])
+        assert args.ios is True
 
 
 class TestFileLoading:
@@ -76,35 +98,37 @@ class TestFileLoading:
 
 class TestFirstRunGate:
     @pytest.mark.asyncio
-    async def test_gate_blocks_plan_when_marker_absent(self, tmp_path: Path) -> None:
+    async def test_gate_blocks_run_when_marker_absent(self, tmp_path: Path) -> None:
         plan_file = tmp_path / "plan.txt"
         context_file = tmp_path / "context.txt"
         plan_file.write_text("Test requirement")
         context_file.write_text("target: web\nurl: https://example.com")
 
         with (
-            patch("src.main._SETUP_MARKER", tmp_path / "does_not_exist"),
+            patch("haindy.main._SETUP_MARKER", tmp_path / "does_not_exist"),
             pytest.raises(SystemExit) as exc_info,
         ):
-            await async_main(["--plan", str(plan_file), "--context", str(context_file)])
+            await async_main(
+                ["run", "--plan", str(plan_file), "--context", str(context_file)]
+            )
 
         assert exc_info.value.code == 1
 
     @pytest.mark.asyncio
     async def test_gate_bypassed_for_version(self, tmp_path: Path) -> None:
-        with patch("src.main._SETUP_MARKER", tmp_path / "does_not_exist"):
-            result = await async_main(["--version"])
+        with patch("haindy.main._SETUP_MARKER", tmp_path / "does_not_exist"):
+            result = await async_main(["version"])
         assert result == 0
 
     @pytest.mark.asyncio
     async def test_gate_bypassed_for_doctor(self, tmp_path: Path) -> None:
         mock_module = MagicMock()
-        mock_module.run_doctor = lambda include_android=False, include_ios=False: 0
+        mock_module.run_doctor = lambda: 0
         with (
-            patch("src.main._SETUP_MARKER", tmp_path / "does_not_exist"),
-            patch.dict("sys.modules", {"src.cli.doctor": mock_module}),
+            patch("haindy.main._SETUP_MARKER", tmp_path / "does_not_exist"),
+            patch.dict("sys.modules", {"haindy.cli.doctor": mock_module}),
         ):
-            result = await async_main(["--doctor"])
+            result = await async_main(["doctor"])
         assert result == 0
 
     @pytest.mark.asyncio
@@ -112,10 +136,10 @@ class TestFirstRunGate:
         mock_module = MagicMock()
         mock_module.run_setup_wizard = lambda non_interactive=False: 0
         with (
-            patch("src.main._SETUP_MARKER", tmp_path / "does_not_exist"),
-            patch.dict("sys.modules", {"src.cli.setup_wizard": mock_module}),
+            patch("haindy.main._SETUP_MARKER", tmp_path / "does_not_exist"),
+            patch.dict("sys.modules", {"haindy.cli.setup_wizard": mock_module}),
         ):
-            result = await async_main(["--setup"])
+            result = await async_main(["setup"])
         assert result == 0
 
 
@@ -126,8 +150,8 @@ class TestMainFlow:
     ) -> None:
         marker = tmp_path / "setup_complete"
         marker.touch()
-        with patch("src.main._SETUP_MARKER", marker):
-            result = await async_main(["--plan", "requirements.md"])
+        with patch("haindy.main._SETUP_MARKER", marker):
+            result = await async_main(["run", "--plan", "requirements.md"])
         captured = capsys.readouterr()
         assert result == 1
         assert "--context is required" in captured.out
@@ -147,7 +171,7 @@ class TestMainFlow:
         ):
             mock_run.return_value = 0
             result = await async_main(
-                ["--plan", str(plan_file), "--context", str(context_file)]
+                ["run", "--plan", str(plan_file), "--context", str(context_file)]
             )
 
         assert result == 0
@@ -171,7 +195,14 @@ class TestMainFlow:
         ):
             mock_run.return_value = 0
             result = await async_main(
-                ["--plan", str(plan_file), "--context", str(context_file), "--mobile"]
+                [
+                    "run",
+                    "--plan",
+                    str(plan_file),
+                    "--context",
+                    str(context_file),
+                    "--mobile",
+                ]
             )
 
         assert result == 0
@@ -179,15 +210,20 @@ class TestMainFlow:
         assert kwargs["automation_backend"] == "mobile_adb"
 
     @pytest.mark.asyncio
-    async def test_auth_command_dispatches_without_plan(self) -> None:
-        with patch(
-            "haindy.main.handle_auth_command",
-            new=AsyncMock(return_value=0),
-        ) as mock_auth:
-            result = await async_main(["--auth", "status"])
+    async def test_auth_status_dispatches_without_plan(self) -> None:
+        marker = Path.home() / ".haindy" / "setup_complete"
+        with (
+            patch("haindy.main._SETUP_MARKER", marker),
+            patch("haindy.main._is_setup_complete", return_value=True),
+            patch(
+                "haindy.main.handle_auth_status",
+                new=AsyncMock(return_value=0),
+            ) as mock_auth_status,
+        ):
+            result = await async_main(["auth", "status"])
 
         assert result == 0
-        mock_auth.assert_awaited_once_with(["status"])
+        mock_auth_status.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_tool_call_cli_commands_dispatch_before_legacy_parser(self) -> None:
@@ -345,7 +381,7 @@ async def test_create_coordinator_stack_stops_desktop_on_start_failure() -> None
 
     with (
         patch("haindy.main.sys") as mock_sys,
-        patch("haindy.main.DesktopController", FailingDesktopController),
+        patch("haindy.main.DesktopController", FailingController),
     ):
         mock_sys.platform = "linux"
         with pytest.raises(RuntimeError, match="desktop start failed"):

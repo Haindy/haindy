@@ -14,7 +14,7 @@ Settings live in `~/.haindy/settings.json`.
 ## Step 1 — Check what is already configured
 
 ```bash
-haindy --auth status
+haindy auth status
 ```
 
 Shows which providers have API keys stored and Codex OAuth status.
@@ -25,13 +25,13 @@ Run the relevant command for the provider you want to use. Each flow guides you
 through what is needed and warns about any missing complementary credentials.
 
 ```bash
-haindy --auth login openai        # API key — covers both non-CU and CU calls
-haindy --auth login openai-codex  # OAuth — covers non-CU calls only
-haindy --auth login google        # Vertex API key — CU only; prompts for OpenAI too
-haindy --auth login anthropic     # Anthropic API key — CU only; prompts for OpenAI too
+haindy auth login openai        # API key — covers both non-CU and CU calls
+haindy auth login openai-codex  # OAuth — covers non-CU calls only
+haindy auth login google        # Vertex API key — CU only; prompts for OpenAI too
+haindy auth login anthropic     # Anthropic API key — CU only; prompts for OpenAI too
 ```
 
-Re-run `haindy --auth status` to confirm.
+Re-run `haindy auth status` to confirm.
 
 ## Step 3 — Settings file
 
@@ -71,7 +71,7 @@ Key sections:
 ## Step 4 — Verify the effective configuration
 
 ```bash
-haindy --config-show
+haindy config show
 ```
 
 Prints the full resolved configuration with all API key values redacted.
@@ -79,8 +79,8 @@ Prints the full resolved configuration with all API key values redacted.
 ## Migrating from a legacy .env file
 
 ```bash
-haindy --config-migrate          # reads .env in the current directory
-haindy --config-migrate /path/to/.env
+haindy config migrate          # reads .env in the current directory
+haindy config migrate /path/to/.env
 ```
 
 Routes API keys to the keychain and writes all other settings to
@@ -89,10 +89,10 @@ Routes API keys to the keychain and writes all other settings to
 ## Clearing credentials
 
 ```bash
-haindy --auth clear openai
-haindy --auth clear anthropic
-haindy --auth clear google
-haindy --auth clear openai-codex
+haindy auth clear openai
+haindy auth clear anthropic
+haindy auth clear google
+haindy auth clear openai-codex
 ```
 
 ## Priority chain (lowest to highest)
@@ -106,13 +106,13 @@ Environment variables always win, so CI/CD pipelines that set `HAINDY_OPENAI_API
 
 ## Troubleshooting
 
-**Keychain not available (headless server):** `--auth login` falls back silently to
+**Keychain not available (headless server):** `haindy auth login` falls back silently to
 an AES-GCM encrypted file at `~/.local/state/haindy/auth/api_keys.enc`. No action
 needed.
 
-**Settings file ignored:** Check for JSON syntax errors — `haindy --config-show`
+**Settings file ignored:** Check for JSON syntax errors — `haindy config show`
 will report a parse error if the file is malformed.
 
 **Secrets rejected from settings file:** API key fields (`openai_api_key`,
 `anthropic_api_key`, `vertex_api_key`) are not allowed in JSON settings files.
-Use `haindy --auth login <provider>` instead.
+Use `haindy auth login <provider>` instead.

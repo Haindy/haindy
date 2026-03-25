@@ -4,7 +4,7 @@
 
 Haindy has two distinct operating modes. Understanding the difference is essential before reading anything else in this document.
 
-**Standard mode** (existing): A batch pipeline designed for human operators. The human writes a requirements file and an execution context file, runs `haindy --plan requirements.md --context context.txt`, and reads the generated HTML report when it finishes. The entire planning, execution, and reporting pipeline runs as a single unattended process. The human is outside the loop during execution.
+**Standard mode** (existing): A batch pipeline designed for human operators. The human writes a requirements file and an execution context file, runs `haindy run --plan requirements.md --context context.txt`, and reads the generated HTML report when it finishes. The entire planning, execution, and reporting pipeline runs as a single unattended process. The human is outside the loop during execution.
 
 **Tool call mode** (this document): A session-based, command-driven interface designed for AI coding agents (Codex, Claude Code, etc.). Instead of a batch pipeline, the coding agent opens a persistent session and issues individual commands in real time, reading structured JSON responses and making decisions based on them. The coding agent replaces the human operator: it decides what to test, interprets results, and determines what to do next.
 
