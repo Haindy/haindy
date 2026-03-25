@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from PIL import Image
 
-import src.agents.computer_use.session as cu_session_module
-from src.agents.computer_use.visual_state import encode_png
+import haindy.agents.computer_use.session as cu_session_module
+from haindy.agents.computer_use.visual_state import encode_png
 from tests.computer_use_session_support import make_google_client, make_session
 
 pytest_plugins = ("tests.computer_use_session_support",)
@@ -403,7 +403,7 @@ async def test_google_interactions_failure_logs_payload_summary(
         google_client=make_google_client(interactions_create_mock=interactions_create),
     )
 
-    with caplog.at_level(logging.ERROR, logger="src.agents.computer_use.session"):
+    with caplog.at_level(logging.ERROR, logger="haindy.agents.computer_use.session"):
         with pytest.raises(RuntimeError, match="Invalid input received"):
             await session._create_google_response(
                 {

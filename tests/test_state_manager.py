@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.types import TestPlan, TestState, TestStatus, TestStep
-from src.orchestration.state_manager import StateManager, StateTransition
+from haindy.core.types import TestPlan, TestState, TestStatus, TestStep
+from haindy.orchestration.state_manager import StateManager, StateTransition
 
 
 @pytest.fixture

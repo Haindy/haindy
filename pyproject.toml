@@ -63,7 +63,7 @@ dev = [
 ]
 
 [project.scripts]
-haindy = "src.main:main"
+haindy = "haindy.main:main"
 
 [project.urls]
 Homepage = "https://github.com/Haindy/haindy"
@@ -72,7 +72,7 @@ Issues = "https://github.com/Haindy/haindy/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["haindy*"]
 
 [tool.setuptools.package-data]
 "haindy.skills" = ["**/*.md"]

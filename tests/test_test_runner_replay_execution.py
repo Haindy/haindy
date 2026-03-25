@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from src.core.types import StepIntent, TestStatus
+from haindy.core.types import StepIntent, TestStatus
 from tests.support_test_runner import (
     _build_test_case,
     make_capture_test_step_screenshot,
@@ -47,12 +47,12 @@ async def test_replay_verification_waits_when_model_requests_it(
         Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
     )
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.replay_driver_actions",
+        "haindy.runtime.execution_replay_service.replay_driver_actions",
         AsyncMock(),
     )
     sleep_mock = AsyncMock()
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.asyncio.sleep", sleep_mock
+        "haindy.runtime.execution_replay_service.asyncio.sleep", sleep_mock
     )
 
     verify_mock = AsyncMock(
@@ -137,12 +137,12 @@ async def test_replay_verification_uses_budget_cap_and_falls_back(
     invalidate_mock = Mock()
     monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.replay_driver_actions",
+        "haindy.runtime.execution_replay_service.replay_driver_actions",
         AsyncMock(),
     )
     sleep_mock = AsyncMock()
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.asyncio.sleep", sleep_mock
+        "haindy.runtime.execution_replay_service.asyncio.sleep", sleep_mock
     )
 
     verify_mock = AsyncMock(
@@ -241,7 +241,7 @@ async def test_replay_fallback_captures_failure_screenshot_for_retry(
     invalidate_mock = Mock()
     monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.replay_driver_actions",
+        "haindy.runtime.execution_replay_service.replay_driver_actions",
         AsyncMock(),
     )
     verify_mock = AsyncMock(
@@ -310,7 +310,7 @@ async def test_replay_setup_step_uses_ai_verification(
         Mock(return_value=SimpleNamespace(actions=[{"type": "click", "x": 1, "y": 2}])),
     )
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.replay_driver_actions",
+        "haindy.runtime.execution_replay_service.replay_driver_actions",
         AsyncMock(),
     )
     verify_mock = AsyncMock(
@@ -375,7 +375,7 @@ async def test_replay_setup_step_fail_invalidates_cache(
     invalidate_mock = Mock()
     monkeypatch.setattr(runner._execution_replay_cache, "invalidate", invalidate_mock)
     monkeypatch.setattr(
-        "src.runtime.execution_replay_service.replay_driver_actions",
+        "haindy.runtime.execution_replay_service.replay_driver_actions",
         AsyncMock(),
     )
     verify_mock = AsyncMock(

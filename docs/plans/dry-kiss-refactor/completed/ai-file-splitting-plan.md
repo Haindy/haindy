@@ -6,8 +6,8 @@
 - Keep the work behavior-preserving: no prompt contract, cache format, or report schema changes unless required to keep existing tests passing.
 
 ## Public Interfaces
-- Keep `from src.agents.computer_use import ComputerUseSession, ComputerUseSessionResult, ComputerUseExecutionError` unchanged.
-- Keep `from src.agents.test_runner import TestRunner` unchanged.
+- Keep `from haindy.agents.computer_use import ComputerUseSession, ComputerUseSessionResult, ComputerUseExecutionError` unchanged.
+- Keep `from haindy.agents.test_runner import TestRunner` unchanged.
 - Keep `EnhancedReporter.generate_report(test_state, output_dir, action_storage=None)` unchanged.
 
 ## Implementation Changes

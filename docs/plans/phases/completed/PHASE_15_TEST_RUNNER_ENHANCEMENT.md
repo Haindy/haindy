@@ -108,7 +108,7 @@ class TestReport:
     test_cases: List[TestCaseResult]
     summary: TestSummary
     bugs: List[BugReport]
-    
+
 @dataclass
 class TestCaseResult:
     test_case_id: str
@@ -116,7 +116,7 @@ class TestCaseResult:
     status: TestStatus
     steps: List[StepResult]
     error: Optional[str]
-    
+
 @dataclass
 class BugReport:
     step_id: str

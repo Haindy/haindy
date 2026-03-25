@@ -7,12 +7,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.error_handling.exceptions import (
+from haindy.error_handling.exceptions import (
     NonRetryableError,
     RecoveryError,
     RetryableError,
 )
-from src.error_handling.recovery import (
+from haindy.error_handling.recovery import (
     ExponentialBackoffStrategy,
     LinearBackoffStrategy,
     RecoveryContext,

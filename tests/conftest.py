@@ -18,12 +18,12 @@ def _isolate_config_layers(monkeypatch: pytest.MonkeyPatch) -> None:
     these themselves as needed.
     """
     monkeypatch.setattr(
-        "src.config.settings.load_settings_file",
+        "haindy.config.settings.load_settings_file",
         lambda _path: {},
         raising=False,
     )
     monkeypatch.setattr(
-        "src.config.settings.get_api_key",
+        "haindy.config.settings.get_api_key",
         lambda _provider: None,
         raising=False,
     )

@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from src.tool_call_mode.cli import (
+from haindy.tool_call_mode.cli import (
     _handle_session_list,
     _handle_session_new,
     create_tool_call_parser,
     run_tool_call_cli,
 )
-from src.tool_call_mode.launcher import ToolCallDaemonLaunch
-from src.tool_call_mode.models import SessionMetadata
-from src.tool_call_mode.paths import (
+from haindy.tool_call_mode.launcher import ToolCallDaemonLaunch
+from haindy.tool_call_mode.models import SessionMetadata
+from haindy.tool_call_mode.paths import (
     get_session_dir,
     save_session_metadata,
     write_pid_file,
@@ -108,7 +108,7 @@ def test_handle_session_list_filters_dead_sessions(monkeypatch, tmp_path: Path) 
     write_pid_file(dead_session, 999999)
 
     monkeypatch.setattr(
-        "src.tool_call_mode.cli.is_process_alive", lambda pid: pid == 4321
+        "haindy.tool_call_mode.cli.is_process_alive", lambda pid: pid == 4321
     )
 
     envelope, exit_code = _handle_session_list()
@@ -153,13 +153,15 @@ async def test_handle_session_new_launches_daemon_with_expected_settings(
             readiness_fd=read_fd,
         )
 
-    monkeypatch.setattr("src.tool_call_mode.cli.cleanup_stale_sessions", lambda: None)
     monkeypatch.setattr(
-        "src.tool_call_mode.cli.ensure_session_layout", lambda value: None
+        "haindy.tool_call_mode.cli.cleanup_stale_sessions", lambda: None
     )
-    monkeypatch.setattr("src.tool_call_mode.cli.uuid4", lambda: session_id)
     monkeypatch.setattr(
-        "src.tool_call_mode.cli.get_settings",
+        "haindy.tool_call_mode.cli.ensure_session_layout", lambda value: None
+    )
+    monkeypatch.setattr("haindy.tool_call_mode.cli.uuid4", lambda: session_id)
+    monkeypatch.setattr(
+        "haindy.tool_call_mode.cli.get_settings",
         lambda: type(
             "Settings",
             (),
@@ -167,11 +169,11 @@ async def test_handle_session_new_launches_daemon_with_expected_settings(
         )(),
     )
     monkeypatch.setattr(
-        "src.tool_call_mode.cli.launch_tool_call_daemon",
+        "haindy.tool_call_mode.cli.launch_tool_call_daemon",
         fake_launch_tool_call_daemon,
     )
     monkeypatch.setattr(
-        "src.tool_call_mode.cli.load_session_metadata",
+        "haindy.tool_call_mode.cli.load_session_metadata",
         lambda _: SessionMetadata.new(
             session_id=session_id,
             backend="mobile_adb",
@@ -180,7 +182,7 @@ async def test_handle_session_new_launches_daemon_with_expected_settings(
             android_app="co.playerup.flutterApp",
         ).model_copy(update={"pid": 1234}),
     )
-    monkeypatch.setattr("src.tool_call_mode.cli.is_process_alive", lambda pid: True)
+    monkeypatch.setattr("haindy.tool_call_mode.cli.is_process_alive", lambda pid: True)
 
     envelope, exit_code = await _handle_session_new(
         create_tool_call_parser().parse_args(

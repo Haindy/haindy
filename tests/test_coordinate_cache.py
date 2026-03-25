@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.desktop.cache import CoordinateCache
+from haindy.desktop.cache import CoordinateCache
 
 
 def test_coordinate_cache_add_lookup_and_invalidate(tmp_path: Path) -> None:

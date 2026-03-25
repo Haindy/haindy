@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main import (
+from haindy.main import (
     _create_coordinator_stack,
     async_main,
     create_parser,
@@ -27,6 +27,7 @@ class TestCLIParser:
         assert "version" in actions
         assert "setup" in actions
         assert "doctor" in actions
+        assert "auth" in actions
 
     def test_mutually_exclusive_inputs(self) -> None:
         parser = create_parser()
@@ -35,6 +36,7 @@ class TestCLIParser:
         parser.parse_args(["--version"])
         parser.parse_args(["--setup"])
         parser.parse_args(["--doctor"])
+        parser.parse_args(["--auth", "status"])
 
         with pytest.raises(SystemExit):
             parser.parse_args(["--plan", "test.md", "--test-api"])
@@ -140,8 +142,8 @@ class TestMainFlow:
         marker.touch()
 
         with (
-            patch("src.main._SETUP_MARKER", marker),
-            patch("src.main.run_test", new_callable=AsyncMock) as mock_run,
+            patch("haindy.main._SETUP_MARKER", marker),
+            patch("haindy.main.run_test", new_callable=AsyncMock) as mock_run,
         ):
             mock_run.return_value = 0
             result = await async_main(
@@ -164,8 +166,8 @@ class TestMainFlow:
         marker.touch()
 
         with (
-            patch("src.main._SETUP_MARKER", marker),
-            patch("src.main.run_test", new_callable=AsyncMock) as mock_run,
+            patch("haindy.main._SETUP_MARKER", marker),
+            patch("haindy.main.run_test", new_callable=AsyncMock) as mock_run,
         ):
             mock_run.return_value = 0
             result = await async_main(
@@ -177,9 +179,20 @@ class TestMainFlow:
         assert kwargs["automation_backend"] == "mobile_adb"
 
     @pytest.mark.asyncio
+    async def test_auth_command_dispatches_without_plan(self) -> None:
+        with patch(
+            "haindy.main.handle_auth_command",
+            new=AsyncMock(return_value=0),
+        ) as mock_auth:
+            result = await async_main(["--auth", "status"])
+
+        assert result == 0
+        mock_auth.assert_awaited_once_with(["status"])
+
+    @pytest.mark.asyncio
     async def test_tool_call_cli_commands_dispatch_before_legacy_parser(self) -> None:
         with patch(
-            "src.main.run_tool_call_cli",
+            "haindy.main.run_tool_call_cli",
             new=AsyncMock(return_value=0),
         ) as mock_tool_call:
             result = await async_main(["session", "list"])
@@ -192,7 +205,7 @@ class TestMainFlow:
         self,
     ) -> None:
         with patch(
-            "src.main.run_tool_call_daemon_cli",
+            "haindy.main.run_tool_call_daemon_cli",
             new=AsyncMock(return_value=0),
         ) as mock_daemon:
             result = await async_main(
@@ -220,8 +233,8 @@ class TestMainFlow:
 @pytest.mark.asyncio
 async def test_run_test_blocks_on_insufficient_context() -> None:
     with (
-        patch("src.main.initialize_debug_logger") as mock_debug_logger,
-        patch("src.main._create_planning_agents") as mock_create_agents,
+        patch("haindy.main.initialize_debug_logger") as mock_debug_logger,
+        patch("haindy.main._create_planning_agents") as mock_create_agents,
     ):
         debug_instance = type("Debug", (), {"reports_dir": Path("reports")})()
         mock_debug_logger.return_value = debug_instance
@@ -254,8 +267,8 @@ async def test_run_test_blocks_on_insufficient_context() -> None:
 @pytest.mark.asyncio
 async def test_run_test_mobile_backend_rejects_non_mobile_assessment() -> None:
     with (
-        patch("src.main.initialize_debug_logger") as mock_debug_logger,
-        patch("src.main._create_planning_agents") as mock_create_agents,
+        patch("haindy.main.initialize_debug_logger") as mock_debug_logger,
+        patch("haindy.main._create_planning_agents") as mock_create_agents,
     ):
         debug_instance = type("Debug", (), {"reports_dir": Path("reports")})()
         mock_debug_logger.return_value = debug_instance
@@ -303,7 +316,7 @@ async def test_run_test_rejects_openai_cu_without_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "src.main.get_settings",
+        "haindy.main.get_settings",
         lambda: SimpleNamespace(
             cu_provider="openai",
             openai_api_key="",
@@ -323,7 +336,7 @@ async def test_run_test_rejects_openai_cu_without_api_key(
 async def test_create_coordinator_stack_stops_desktop_on_start_failure() -> None:
     created: list[object] = []
 
-    class FailingDesktopController:
+    class FailingController:
         def __init__(self) -> None:
             self.start = AsyncMock(side_effect=RuntimeError("desktop start failed"))
             self.stop = AsyncMock()
@@ -331,15 +344,15 @@ async def test_create_coordinator_stack_stops_desktop_on_start_failure() -> None
             created.append(self)
 
     with (
-        patch("src.main.sys") as mock_sys,
-        patch("src.main.DesktopController", FailingDesktopController),
+        patch("haindy.main.sys") as mock_sys,
+        patch("haindy.main.DesktopController", FailingDesktopController),
     ):
         mock_sys.platform = "linux"
         with pytest.raises(RuntimeError, match="desktop start failed"):
             await _create_coordinator_stack(max_steps=1)
 
     controller = created[0]
-    assert isinstance(controller, FailingDesktopController)
+    assert isinstance(controller, FailingController)
     controller.stop.assert_awaited_once()
 
 
@@ -357,8 +370,8 @@ async def test_create_coordinator_stack_uses_mobile_controller() -> None:
     coordinator = type("CoordinatorStub", (), {"initialize": AsyncMock()})()
 
     with (
-        patch("src.main.MobileController", MobileControllerStub),
-        patch("src.main.WorkflowCoordinator", return_value=coordinator),
+        patch("haindy.main.MobileController", MobileControllerStub),
+        patch("haindy.main.WorkflowCoordinator", return_value=coordinator),
     ):
         controller, _ = await _create_coordinator_stack(
             max_steps=1, backend="mobile_adb"
@@ -412,21 +425,21 @@ async def test_run_test_stops_desktop_even_if_coordinator_cleanup_fails(
     mock_scope_pipeline = AsyncMock(return_value=(object(), object()))
 
     with (
-        patch("src.main.initialize_debug_logger", return_value=debug_instance),
+        patch("haindy.main.initialize_debug_logger", return_value=debug_instance),
         patch(
-            "src.main._create_planning_agents",
+            "haindy.main._create_planning_agents",
             return_value=(triage_agent, planner, situational),
         ),
         patch(
-            "src.main.run_scope_triage_and_plan",
+            "haindy.main.run_scope_triage_and_plan",
             new=mock_scope_pipeline,
         ),
         patch(
-            "src.main._create_coordinator_stack",
+            "haindy.main._create_coordinator_stack",
             new=AsyncMock(return_value=(desktop_controller, coordinator)),
         ),
         patch(
-            "src.main._run_with_timeout",
+            "haindy.main._run_with_timeout",
             new=AsyncMock(side_effect=RuntimeError("runner failed")),
         ),
     ):

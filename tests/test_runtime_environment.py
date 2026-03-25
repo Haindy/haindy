@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.runtime.environment import (
+from haindy.runtime.environment import (
     coordinate_cache_path_for_environment,
     normalize_automation_backend,
     normalize_runtime_environment_name,

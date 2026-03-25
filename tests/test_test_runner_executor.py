@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.agents.test_runner_executor import (
+from haindy.agents.test_runner_executor import (
     StepActionExecutionRequest,
     TestRunnerExecutor,
 )
-from src.core.types import StepIntent, TestStep
+from haindy.core.types import StepIntent, TestStep
 
 
 class _ResetDriver:

@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import keyring.errors
-import pytest
 
-from src.auth.credentials import (
+from haindy.auth.credentials import (
     KEYRING_SERVICE,
     delete_api_key,
     get_api_key,
     list_configured_providers,
     set_api_key,
 )
-from src.auth.store import EncryptedJsonFileStore
+from haindy.auth.store import EncryptedJsonFileStore
 
 
 def _make_store(tmp_path: Path) -> EncryptedJsonFileStore:
@@ -31,9 +30,15 @@ class TestApiKeyViaFileFallback:
     def test_set_and_get_key(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         with (
-            patch("src.auth.credentials.keyring.set_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials.keyring.get_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials._file_store", return_value=store),
+            patch(
+                "haindy.auth.credentials.keyring.set_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch(
+                "haindy.auth.credentials.keyring.get_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch("haindy.auth.credentials._file_store", return_value=store),
         ):
             set_api_key("openai", "sk-test-key")
             result = get_api_key("openai")
@@ -43,10 +48,19 @@ class TestApiKeyViaFileFallback:
     def test_delete_key(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         with (
-            patch("src.auth.credentials.keyring.set_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials.keyring.get_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials.keyring.delete_password", side_effect=Exception()),
-            patch("src.auth.credentials._file_store", return_value=store),
+            patch(
+                "haindy.auth.credentials.keyring.set_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch(
+                "haindy.auth.credentials.keyring.get_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch(
+                "haindy.auth.credentials.keyring.delete_password",
+                side_effect=Exception(),
+            ),
+            patch("haindy.auth.credentials._file_store", return_value=store),
         ):
             set_api_key("anthropic", "ant-key")
             delete_api_key("anthropic")
@@ -57,8 +71,11 @@ class TestApiKeyViaFileFallback:
     def test_get_missing_key_returns_none(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         with (
-            patch("src.auth.credentials.keyring.get_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials._file_store", return_value=store),
+            patch(
+                "haindy.auth.credentials.keyring.get_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch("haindy.auth.credentials._file_store", return_value=store),
         ):
             result = get_api_key("vertex")
 
@@ -67,9 +84,15 @@ class TestApiKeyViaFileFallback:
     def test_multiple_providers_stored_independently(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         with (
-            patch("src.auth.credentials.keyring.set_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials.keyring.get_password", side_effect=keyring.errors.NoKeyringError()),
-            patch("src.auth.credentials._file_store", return_value=store),
+            patch(
+                "haindy.auth.credentials.keyring.set_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch(
+                "haindy.auth.credentials.keyring.get_password",
+                side_effect=keyring.errors.NoKeyringError(),
+            ),
+            patch("haindy.auth.credentials._file_store", return_value=store),
         ):
             set_api_key("openai", "openai-key")
             set_api_key("anthropic", "anthropic-key")
@@ -93,8 +116,8 @@ class TestApiKeyViaKeychain:
             return in_memory.get((service, account))
 
         with (
-            patch("src.auth.credentials.keyring.set_password", side_effect=fake_set),
-            patch("src.auth.credentials.keyring.get_password", side_effect=fake_get),
+            patch("haindy.auth.credentials.keyring.set_password", side_effect=fake_set),
+            patch("haindy.auth.credentials.keyring.get_password", side_effect=fake_get),
         ):
             set_api_key("openai", "sk-from-keychain")
             result = get_api_key("openai")
@@ -107,8 +130,11 @@ class TestApiKeyViaKeychain:
         store.set("openai_api_key", "from-file")
 
         with (
-            patch("src.auth.credentials.keyring.get_password", return_value="from-keychain"),
-            patch("src.auth.credentials._file_store", return_value=store),
+            patch(
+                "haindy.auth.credentials.keyring.get_password",
+                return_value="from-keychain",
+            ),
+            patch("haindy.auth.credentials._file_store", return_value=store),
         ):
             result = get_api_key("openai")
 
@@ -124,9 +150,12 @@ class TestApiKeyViaKeychain:
             deleted.append((service, account))
 
         with (
-            patch("src.auth.credentials.keyring.delete_password", side_effect=fake_delete),
-            patch("src.auth.credentials.keyring.get_password", return_value=None),
-            patch("src.auth.credentials._file_store", return_value=store),
+            patch(
+                "haindy.auth.credentials.keyring.delete_password",
+                side_effect=fake_delete,
+            ),
+            patch("haindy.auth.credentials.keyring.get_password", return_value=None),
+            patch("haindy.auth.credentials._file_store", return_value=store),
         ):
             delete_api_key("openai")
             result = get_api_key("openai")
@@ -137,7 +166,7 @@ class TestApiKeyViaKeychain:
 
 class TestListConfiguredProviders:
     def test_all_unconfigured(self) -> None:
-        with patch("src.auth.credentials.get_api_key", return_value=None):
+        with patch("haindy.auth.credentials.get_api_key", return_value=None):
             result = list_configured_providers()
 
         assert result == {"openai": False, "anthropic": False, "vertex": False}
@@ -146,7 +175,7 @@ class TestListConfiguredProviders:
         def fake_get(provider: str) -> str | None:
             return "key" if provider == "openai" else None
 
-        with patch("src.auth.credentials.get_api_key", side_effect=fake_get):
+        with patch("haindy.auth.credentials.get_api_key", side_effect=fake_get):
             result = list_configured_providers()
 
         assert result == {"openai": True, "anthropic": False, "vertex": False}

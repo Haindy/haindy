@@ -26,7 +26,7 @@ The Evaluator Agent is already deprecated in the main execution flow and provide
   - Matches current reality
   - Less code to maintain
   - No coordination overhead
-  
+
 - **Removal Risks:**
   - None - already not used
   - No breaking changes

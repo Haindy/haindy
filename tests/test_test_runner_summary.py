@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from src.core.types import TestReport as RunnerTestReport
-from src.core.types import TestStatus
+from haindy.core.types import TestReport as RunnerTestReport
+from haindy.core.types import TestStatus
 from tests.support_test_runner import (
     _build_multi_case_plan,
     make_case_result,

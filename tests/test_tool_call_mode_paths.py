@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from src.tool_call_mode.models import SessionMetadata
-from src.tool_call_mode.paths import (
+from haindy.tool_call_mode.models import SessionMetadata
+from haindy.tool_call_mode.paths import (
     get_haindy_home,
     get_session_dir,
     load_session_metadata,

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import src.agents.computer_use.session as cu_session_module
-from src.core.enhanced_types import ComputerToolTurn
+import haindy.agents.computer_use.session as cu_session_module
+from haindy.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     make_session,
     openai_computer_call,

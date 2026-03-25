@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.runtime.planning_cache import (
+from haindy.runtime.planning_cache import (
     PLANNING_CACHE_VERSION,
     PlanningCache,
     build_planning_cache_key_payload,

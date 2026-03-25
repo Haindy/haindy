@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config.settings import (
+from haindy.config.settings import (
     AgentModelConfig,
     ConfigManager,
     Settings,

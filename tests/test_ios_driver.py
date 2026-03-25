@@ -4,8 +4,8 @@ from collections.abc import Sequence
 
 import pytest
 
-from src.mobile.idb_client import IDBClient, IDBClientProtocol, IDBCommandResult
-from src.mobile.ios_driver import IOSDriver
+from haindy.mobile.idb_client import IDBClient, IDBClientProtocol, IDBCommandResult
+from haindy.mobile.ios_driver import IOSDriver
 
 
 def _png_bytes(width: int, height: int) -> bytes:
@@ -287,7 +287,7 @@ async def test_idb_client_parse_targets_text() -> None:
         "iPhone 14 Pro | 12345678-1234-1234-1234-123456789012 | Booted | simulator | iOS 17.0\n"
         "My iPhone | 00008030-0012-3456-7890-ABCDEF012345 | Connected | device | iOS 16.0\n"
     )
-    from src.mobile.idb_client import IDBClient
+    from haindy.mobile.idb_client import IDBClient
 
     client = IDBClient()
     targets = client._parse_targets_text(text)

@@ -77,7 +77,7 @@ need the module entrypoint.
 ```bash
 .venv/bin/ruff check .
 .venv/bin/ruff format .
-.venv/bin/mypy src
+.venv/bin/mypy haindy
 ```
 
 ## Architecture

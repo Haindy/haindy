@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.agents.computer_use.common import (
+from haindy.agents.computer_use.common import (
     extract_assistant_text,
     extract_google_function_call_envelopes,
     normalize_response,

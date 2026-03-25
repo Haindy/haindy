@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.agents.test_runner import TestRunner
-from src.core.enhanced_types import (
+from haindy.agents.test_runner import TestRunner
+from haindy.core.enhanced_types import (
     EnhancedActionResult,
     ExecutionResult,
     ValidationResult,
 )
-from src.core.types import (
+from haindy.core.types import (
     StepIntent,
     StepResult,
     TestCase,
@@ -24,7 +24,7 @@ from src.core.types import (
     TestStatus,
     TestStep,
 )
-from src.runtime.execution_replay_cache import ExecutionReplayCacheKey
+from haindy.runtime.execution_replay_cache import ExecutionReplayCacheKey
 
 
 class _StubAutomationDriver:
@@ -139,13 +139,13 @@ def _patch_runner_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         mobile_keyboard_layout="us",
         max_screenshots=None,
     )
-    monkeypatch.setattr("src.agents.test_runner.get_settings", lambda: settings)
+    monkeypatch.setattr("haindy.agents.test_runner.get_settings", lambda: settings)
     monkeypatch.setattr(
-        "src.agents.test_runner.get_model_logger",
+        "haindy.agents.test_runner.get_model_logger",
         lambda *args, **kwargs: SimpleNamespace(log_call=AsyncMock()),
     )
-    monkeypatch.setattr("src.agents.test_runner.get_run_id", lambda: "test-run")
-    monkeypatch.setattr("src.agents.test_runner.RunTraceWriter", _StubTraceWriter)
+    monkeypatch.setattr("haindy.agents.test_runner.get_run_id", lambda: "test-run")
+    monkeypatch.setattr("haindy.agents.test_runner.RunTraceWriter", _StubTraceWriter)
 
 
 def runner_factory(

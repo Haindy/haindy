@@ -1,8 +1,8 @@
 """Pattern matcher tests with provider-neutral coordinate metadata."""
 
-from src.core.types import ActionType
-from src.journal.models import ActionRecord, PatternType
-from src.journal.pattern_matcher import PatternMatcher
+from haindy.core.types import ActionType
+from haindy.journal.models import ActionRecord, PatternType
+from haindy.journal.pattern_matcher import PatternMatcher
 
 
 def _pattern() -> ActionRecord:

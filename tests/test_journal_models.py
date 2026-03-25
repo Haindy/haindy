@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from src.journal.models import ExecutionJournal, ExecutionMode, JournalEntry
+from haindy.journal.models import ExecutionJournal, ExecutionMode, JournalEntry
 
 
 def test_journal_entry_supports_coordinate_metadata() -> None:

@@ -1,6 +1,6 @@
 """Tests for tool-call session variable handling."""
 
-from src.tool_call_mode.variables import SessionVariableStore
+from haindy.tool_call_mode.variables import SessionVariableStore
 
 
 def test_variable_store_interpolates_known_variables_and_preserves_unknowns() -> None:

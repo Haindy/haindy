@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.core.types import ActionType, StepIntent, TestState, TestStatus
-from src.runtime.execution_replay_service import ReplayExecutionResult
+from haindy.core.types import ActionType, StepIntent, TestState, TestStatus
+from haindy.runtime.execution_replay_service import ReplayExecutionResult
 from tests.support_test_runner import (
     _build_test_case,
     _StubActionAgent,

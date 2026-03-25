@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config.settings_file import (
+from haindy.config.settings_file import (
     _JSON_TO_FIELD,
     flat_to_nested,
     flatten_settings_dict,
@@ -94,15 +94,19 @@ class TestFlattenSettingsDict:
         assert result == {}
 
     def test_unknown_key_within_known_section_ignored(self) -> None:
-        result = flatten_settings_dict({"desktop": {"nonexistent_key": "value", "keyboard_layout": "us"}})
+        result = flatten_settings_dict(
+            {"desktop": {"nonexistent_key": "value", "keyboard_layout": "us"}}
+        )
         assert result == {"desktop_keyboard_layout": "us"}
 
     def test_multiple_sections(self) -> None:
-        result = flatten_settings_dict({
-            "desktop": {"keyboard_layout": "es"},
-            "logging": {"level": "WARNING"},
-            "execution": {"max_test_steps": 50},
-        })
+        result = flatten_settings_dict(
+            {
+                "desktop": {"keyboard_layout": "es"},
+                "logging": {"level": "WARNING"},
+                "execution": {"max_test_steps": 50},
+            }
+        )
         assert result == {
             "desktop_keyboard_layout": "es",
             "log_level": "WARNING",
@@ -114,7 +118,8 @@ class TestFlattenSettingsDict:
         assert result == {}
 
     def test_all_json_keys_map_to_known_fields(self) -> None:
-        from src.config.settings import Settings
+        from haindy.config.settings import Settings
+
         settings_fields = set(Settings.model_fields.keys())
         for json_path, field_name in _JSON_TO_FIELD.items():
             assert field_name in settings_fields, (
@@ -139,7 +144,9 @@ class TestWriteSettingsFile:
         existing = {"desktop": {"keyboard_layout": "es"}, "logging": {"level": "INFO"}}
         path.write_text(json.dumps(existing), encoding="utf-8")
 
-        write_settings_file(path, {"logging": {"level": "DEBUG"}, "cache": {"enable_planning": False}})
+        write_settings_file(
+            path, {"logging": {"level": "DEBUG"}, "cache": {"enable_planning": False}}
+        )
 
         result = json.loads(path.read_text(encoding="utf-8"))
         assert result["desktop"]["keyboard_layout"] == "es"
@@ -149,7 +156,14 @@ class TestWriteSettingsFile:
     def test_deep_merge_preserves_sibling_keys(self, tmp_path: Path) -> None:
         path = tmp_path / "settings.json"
         path.write_text(
-            json.dumps({"desktop": {"keyboard_layout": "es", "prefer_resolution": [1920, 1080]}}),
+            json.dumps(
+                {
+                    "desktop": {
+                        "keyboard_layout": "es",
+                        "prefer_resolution": [1920, 1080],
+                    }
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -162,10 +176,12 @@ class TestWriteSettingsFile:
 
 class TestFlatToNested:
     def test_basic_conversion(self) -> None:
-        result = flat_to_nested({
-            "desktop_keyboard_layout": "es",
-            "log_level": "DEBUG",
-        })
+        result = flat_to_nested(
+            {
+                "desktop_keyboard_layout": "es",
+                "log_level": "DEBUG",
+            }
+        )
         assert result == {
             "desktop": {"keyboard_layout": "es"},
             "logging": {"level": "DEBUG"},
@@ -184,7 +200,7 @@ class TestFlatToNested:
 class TestIntegration:
     def test_flatten_output_is_valid_settings_input(self) -> None:
         """Flat dict from flatten_settings_dict contains only known Settings fields."""
-        from src.config.settings import Settings
+        from haindy.config.settings import Settings
 
         nested = {
             "desktop": {"keyboard_layout": "es", "enable_resolution_switch": False},

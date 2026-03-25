@@ -21,7 +21,7 @@ It narrows the next work item to one concrete V1 reliability gap: keeping the to
 Tool-call mode currently assumes that spawning the daemon with `start_new_session=True` is enough to detach it from the `haindy session new` process.
 That is not reliable in some coding-agent terminal harnesses.
 
-Separately, the repository already declares a `haindy` console script in packaging metadata, but much of the repo-facing guidance still teaches `.venv/bin/python -m src.main ...`.
+Separately, the repository already declares a `haindy` console script in packaging metadata, but much of the repo-facing guidance still teaches `.venv/bin/python -m haindy.main ...`.
 That makes Haindy feel like an internal module entrypoint instead of a first-class CLI tool and keeps the install/PATH story under-specified.
 
 Observed failure mode:
@@ -44,7 +44,7 @@ This breaks the main V1 value proposition of session reuse and makes tool-call m
 - [pyproject.toml](/home/fkeegan/src/haindy/haindy/pyproject.toml) already declares:
   - `[project.scripts]`
   - `haindy = "src.main:main"`
-- [README.md](/home/fkeegan/src/haindy/haindy/README.md) and [docs/RUNBOOK.md](/home/fkeegan/src/haindy/haindy/docs/RUNBOOK.md) still primarily show `.venv/bin/python -m src.main ...` examples.
+- [README.md](/home/fkeegan/src/haindy/haindy/README.md) and [docs/RUNBOOK.md](/home/fkeegan/src/haindy/haindy/docs/RUNBOOK.md) still primarily show `.venv/bin/python -m haindy.main ...` examples.
 - [src/tool_call_mode/daemon.py](/home/fkeegan/src/haindy/haindy/src/tool_call_mode/daemon.py) correctly owns session startup, socket binding, idle timeout, and graceful close once it is alive.
 - [tests/test_tool_call_mode_cli.py](/home/fkeegan/src/haindy/haindy/tests/test_tool_call_mode_cli.py) verifies spawn flags, but not daemon survival after the parent command exits.
 - The bundled HAINDY skill already documents this as a known wrapper-lifetime issue.
@@ -92,7 +92,7 @@ After the fix:
 3. Unexpected daemon death leaves a diagnosable trace in the session log, including shutdown reason where available.
 4. The hidden direct daemon mode remains usable from a long-lived PTY for wrappers that cannot support detached daemons safely.
 5. Existing commands and exit codes remain unchanged for callers.
-6. Repo docs and examples use `haindy ...` as the canonical invocation, with `python -m src.main ...` demoted to an internal/dev fallback.
+6. Repo docs and examples use `haindy ...` as the canonical invocation, with `python -m haindy.main ...` demoted to an internal/dev fallback.
 7. After installation, users can invoke `haindy` from PATH in the same style as tools such as `gh` or `aws`.
 
 ## Implementation Plan
@@ -162,7 +162,7 @@ Documentation goals:
 3. The docs include a simple PATH-based install story, such as:
    - editable dev install plus activated virtualenv
    - or a user install path such as `pipx` once the project is ready for it
-4. `python -m src.main ...` is retained only as a fallback/debugging note, not the primary UX.
+4. `python -m haindy.main ...` is retained only as a fallback/debugging note, not the primary UX.
 
 ### 5. Harden daemon shutdown observability
 
@@ -181,7 +181,7 @@ This does not prevent every hostile wrapper from killing the daemon, but it make
 
 Do not remove the direct hidden entrypoint:
 
-- `python -m src.main __tool_call_daemon ...`
+- `python -m haindy.main __tool_call_daemon ...`
 
 Document it as the fallback path for:
 

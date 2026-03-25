@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.utils.model_logging import ModelCallLogger
+from haindy.utils.model_logging import ModelCallLogger
 
 
 @pytest.mark.asyncio

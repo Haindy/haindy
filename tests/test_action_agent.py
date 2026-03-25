@@ -6,20 +6,20 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.agents.action_agent import ActionAgent
-from src.agents.computer_use.types import ComputerUseSessionResult
-from src.agents.computer_use.visual_state import VisualBounds, VisualFrame
-from src.core.enhanced_types import (
+from haindy.agents.action_agent import ActionAgent
+from haindy.agents.computer_use.types import ComputerUseSessionResult
+from haindy.agents.computer_use.visual_state import VisualBounds, VisualFrame
+from haindy.core.enhanced_types import (
     EnhancedActionResult,
     ExecutionResult,
     ValidationResult,
 )
-from src.core.types import ActionInstruction, ActionType, TestCase, TestStep
+from haindy.core.types import ActionInstruction, ActionType, TestCase, TestStep
 
 
 def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "src.agents.action_agent.get_settings",
+        "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
             desktop_coordinate_cache_path=Path(
                 "data/desktop_cache/test_coordinates.json"
@@ -151,7 +151,7 @@ def test_new_computer_use_session_skips_openai_client_for_google(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "src.agents.action_agent.get_settings",
+        "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
             desktop_coordinate_cache_path=Path(
                 "data/desktop_cache/test_coordinates.json"
@@ -173,7 +173,7 @@ def test_new_computer_use_session_skips_openai_client_for_google(
             captured.update(kwargs)
             self.provider = "google"
 
-    monkeypatch.setattr("src.agents.action_agent.ComputerUseSession", _FakeSession)
+    monkeypatch.setattr("haindy.agents.action_agent.ComputerUseSession", _FakeSession)
 
     agent = ActionAgent(automation_driver=object())  # type: ignore[arg-type]
 
@@ -246,7 +246,7 @@ async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings(monkeypatch)
-    monkeypatch.setattr("src.agents.action_agent.get_debug_logger", lambda: None)
+    monkeypatch.setattr("haindy.agents.action_agent.get_debug_logger", lambda: None)
 
     visual_patch = VisualFrame(
         frame_id="patch_1",

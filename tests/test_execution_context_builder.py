@@ -1,7 +1,7 @@
 """Tests for shared execution-context builders."""
 
-from src.agents.situational_agent import SetupInstructions, SituationalAssessment
-from src.runtime.execution_context_builder import build_execution_context_bundle
+from haindy.agents.situational_agent import SetupInstructions, SituationalAssessment
+from haindy.runtime.execution_context_builder import build_execution_context_bundle
 
 
 def test_build_execution_context_bundle_preserves_expected_shapes() -> None:
