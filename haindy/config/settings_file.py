@@ -124,6 +124,10 @@ _JSON_TO_FIELD: dict[str, str] = {
     "dev.debug_mode": "debug_mode",
     "dev.save_agent_conversations": "save_agent_conversations",
     "dev.haindy_home": "haindy_home",
+    # agent section
+    "agent.provider": "agent_provider",
+    "agent.anthropic_model": "anthropic_model",
+    "agent.google_model": "google_model",
 }
 
 # Reverse mapping: Settings field name -> "section.json_key"

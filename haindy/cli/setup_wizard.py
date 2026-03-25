@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.prompt import Confirm
 
 from haindy.cli.doctor import run_doctor
+from haindy.config.settings_file import write_settings_file
 
 _console = Console()
 
@@ -138,6 +139,86 @@ def _wizard(non_interactive: bool) -> int:
 
             if Confirm.ask(f"Set up {provider} credentials now?", default=True):
                 asyncio.run(handle_auth_login(provider))
+
+    _console.rule("Step 6: Provider Selection")
+    try:
+        from haindy.auth import OpenAIAuthManager
+        from haindy.auth.credentials import list_configured_providers
+
+        configured = list_configured_providers()
+        codex_status = OpenAIAuthManager().get_status()
+        available: list[str] = []
+        if configured.get("openai") or (
+            codex_status.oauth_connected and not codex_status.oauth_expired
+        ):
+            available.append("openai")
+        if configured.get("anthropic"):
+            available.append("anthropic")
+        if configured.get("vertex"):
+            available.append("google")
+
+        _sp = Path("~/.haindy/settings.json").expanduser()
+        if available:
+            if len(available) == 1:
+                chosen = available[0]
+                _console.print(
+                    f"Using [bold]{chosen}[/bold] for all AI calls "
+                    "(only configured provider)."
+                )
+                write_settings_file(
+                    _sp,
+                    {
+                        "agent": {"provider": chosen},
+                        "computer_use": {"provider": chosen},
+                    },
+                )
+            elif not non_interactive:
+                _console.print("Which provider should handle planning and analysis?")
+                for i, p in enumerate(available, 1):
+                    _console.print(f"  [{i}] {p}")
+                _console.print("  [s] Skip -- keep current setting")
+                choice_ncu = input(f"Choice (1-{len(available)}/s): ").strip()
+
+                _console.print("Which provider should handle computer use?")
+                for i, p in enumerate(available, 1):
+                    _console.print(f"  [{i}] {p}")
+                _console.print("  [s] Skip -- keep current setting")
+                choice_cu = input(f"Choice (1-{len(available)}/s): ").strip()
+
+                ncu_prov = (
+                    available[int(choice_ncu) - 1]
+                    if choice_ncu.isdigit() and 1 <= int(choice_ncu) <= len(available)
+                    else None
+                )
+                cu_prov = (
+                    available[int(choice_cu) - 1]
+                    if choice_cu.isdigit() and 1 <= int(choice_cu) <= len(available)
+                    else None
+                )
+                patch: dict[str, object] = {}
+                if ncu_prov:
+                    patch["agent"] = {"provider": ncu_prov}
+                    _console.print(f"[dim]Non-CU provider set to {ncu_prov!r}.[/dim]")
+                if cu_prov:
+                    patch["computer_use"] = {"provider": cu_prov}
+                    _console.print(f"[dim]CU provider set to {cu_prov!r}.[/dim]")
+                if patch:
+                    write_settings_file(_sp, patch)
+
+                _console.print("")
+                _console.print(
+                    "[dim]Change later with: haindy provider set <provider>[/dim]"
+                )
+                _console.print(
+                    "[dim]                   haindy provider set-computer-use <provider>[/dim]"
+                )
+        else:
+            _console.print(
+                "[dim]No providers configured yet. "
+                "Run: haindy auth login <provider>[/dim]"
+            )
+    except Exception as exc:
+        _console.print(f"[yellow]Provider selection skipped ({exc}).[/yellow]")
 
     _console.rule("Step 7: Final Check")
     final_code = run_doctor()

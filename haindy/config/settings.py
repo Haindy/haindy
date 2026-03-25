@@ -134,6 +134,9 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "debug_mode": "HAINDY_DEBUG_MODE",
     "save_agent_conversations": "HAINDY_SAVE_AGENT_CONVERSATIONS",
     "haindy_home": "HAINDY_HOME",
+    "agent_provider": "HAINDY_AGENT_PROVIDER",
+    "anthropic_model": "HAINDY_ANTHROPIC_MODEL",
+    "google_model": "HAINDY_GOOGLE_MODEL",
 }
 
 OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
@@ -355,6 +358,18 @@ class Settings(BaseModel):
     agent_models: dict[str, AgentModelConfig] = Field(
         default_factory=dict,
         description="Per-agent model configuration",
+    )
+    agent_provider: str = Field(
+        default="openai",
+        description="Provider for non-CU model calls (openai, anthropic, google)",
+    )
+    anthropic_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Anthropic model for non-CU calls",
+    )
+    google_model: str = Field(
+        default="gemini-3.1-pro-preview",
+        description="Google model for non-CU calls",
     )
 
     # Desktop Configuration

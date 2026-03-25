@@ -18,7 +18,6 @@ from haindy.auth import (
 )
 from haindy.auth.credentials import (
     delete_api_key,
-    get_api_key,
     list_configured_providers,
     set_api_key,
 )
@@ -28,8 +27,6 @@ _CONSOLE = Console()
 
 _API_PROVIDERS = ("openai", "google", "anthropic")
 _ALL_PROVIDERS = (*_API_PROVIDERS, "openai-codex")
-_CU_ONLY_PROVIDERS = ("google", "anthropic")
-
 
 
 async def handle_auth_login(provider: str) -> int:
@@ -43,7 +40,7 @@ async def handle_auth_login(provider: str) -> int:
     if provider == "openai":
         rc = await _set_openai()
         if rc == 0:
-            _apply_cu_provider("openai")
+            _apply_provider("openai")
         return rc
 
     if provider == "openai-codex":
@@ -52,8 +49,19 @@ async def handle_auth_login(provider: str) -> int:
             await _prompt_cu_setup_after_codex()
         return rc
 
-    if provider in _CU_ONLY_PROVIDERS:
-        return await _setup_cu_only_provider(provider)
+    if provider == "google":
+        rc = await _set_google()
+        if rc == 0:
+            _apply_provider("google")
+            _print_provider_hint("google")
+        return rc
+
+    if provider == "anthropic":
+        rc = await _set_anthropic()
+        if rc == 0:
+            _apply_provider("anthropic")
+            _print_provider_hint("anthropic")
+        return rc
 
     return 1  # unreachable
 
@@ -139,49 +147,6 @@ async def handle_auth_clear(provider: str) -> int:
 # --- provider setup flows ---
 
 
-async def _setup_cu_only_provider(provider: str) -> int:
-    """Full login flow for a CU-only provider (google or anthropic)."""
-    provider_label = "Google Vertex" if provider == "google" else "Anthropic"
-
-    if not _openai_noncv_configured():
-        _CONSOLE.print(
-            f"[yellow]{provider_label} is only supported for computer use.[/yellow]"
-        )
-        _CONSOLE.print(
-            "[yellow]Non-CU calls (planning, analysis) require OpenAI credentials "
-            "(API key or Codex OAuth).[/yellow]"
-        )
-        _CONSOLE.print("")
-        _CONSOLE.print("Set up OpenAI first?")
-        _CONSOLE.print("  [1] OpenAI API key")
-        _CONSOLE.print("  [2] OpenAI Codex OAuth")
-        _CONSOLE.print("  [3] Skip — add it later")
-        choice = input("Choice (1/2/3): ").strip()
-        if choice == "1":
-            await _set_openai()
-            # Don't write provider here — we're about to set it to google/anthropic below
-        elif choice == "2":
-            await _login_with_codex_oauth()
-
-    if provider == "google":
-        rc = await _set_google()
-    else:
-        rc = await _set_anthropic()
-
-    if rc == 0:
-        _apply_cu_provider(provider)
-        if not _openai_noncv_configured():
-            _CONSOLE.print("")
-            _CONSOLE.print(
-                "[yellow]OpenAI credentials are still missing. Non-CU calls will fail.[/yellow]"
-            )
-            _CONSOLE.print(
-                "Run: haindy auth login openai  or  haindy auth login openai-codex"
-            )
-
-    return rc
-
-
 async def _prompt_cu_setup_after_codex() -> None:
     """After Codex login, prompt the user to set up a CU provider if none has a key."""
     configured = list_configured_providers()
@@ -209,42 +174,38 @@ async def _prompt_cu_setup_after_codex() -> None:
     if choice == "1":
         rc = await _set_openai()
         if rc == 0:
-            _apply_cu_provider("openai")
+            _apply_provider("openai")
     elif choice == "2":
         rc = await _set_google()
         if rc == 0:
-            _apply_cu_provider("google")
+            _apply_provider("google")
     elif choice == "3":
         rc = await _set_anthropic()
         if rc == 0:
-            _apply_cu_provider("anthropic")
+            _apply_provider("anthropic")
 
 
-def _apply_cu_provider(provider: str) -> None:
-    """Write computer_use.provider to settings.
-
-    If a provider was already explicitly configured, warn instead of silently overwriting.
-    """
+def _apply_provider(provider: str) -> None:
+    """Write both agent.provider and computer_use.provider to settings."""
     settings_path = Path("~/.haindy/settings.json").expanduser()
-    existing = load_settings_file(settings_path)
-    already_set = "provider" in existing.get("computer_use", {})
-    write_settings_file(settings_path, {"computer_use": {"provider": provider}})
-    if already_set:
-        _CONSOLE.print(
-            f"[dim]CU provider updated to {provider!r} in ~/.haindy/settings.json[/dim]"
-        )
-    else:
-        _CONSOLE.print(
-            f"[dim]CU provider set to {provider!r} in ~/.haindy/settings.json[/dim]"
-        )
+    write_settings_file(
+        settings_path,
+        {
+            "agent": {"provider": provider},
+            "computer_use": {"provider": provider},
+        },
+    )
+    _CONSOLE.print(
+        f"[dim]Provider set to {provider!r} in ~/.haindy/settings.json[/dim]"
+    )
 
 
-def _openai_noncv_configured() -> bool:
-    """Return True if an OpenAI API key or active Codex OAuth session is available."""
-    if get_api_key("openai"):
-        return True
-    status = OpenAIAuthManager().get_status()
-    return bool(status.oauth_connected and not status.oauth_expired)
+def _print_provider_hint(provider: str) -> None:
+    """Print a hint about using haindy provider set after auth login."""
+    _CONSOLE.print(
+        f"[dim]Run 'haindy provider set {provider}' "
+        "to use this provider for all calls.[/dim]"
+    )
 
 
 # --- credential input helpers ---
