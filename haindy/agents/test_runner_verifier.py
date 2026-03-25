@@ -8,6 +8,7 @@ import traceback
 from typing import Any
 
 from haindy.agents.computer_use.visual_state import VisualBounds, crop_to_bounds
+from haindy.agents.structured_output_schemas import STEP_VERIFICATION_RESPONSE_FORMAT
 from haindy.core.types import TestCase, TestCaseResult, TestStatus, TestStep
 from haindy.monitoring.logger import get_logger
 
@@ -201,41 +202,10 @@ Respond with JSON:
 
         try:
             response = await self._runner.call_model(
-                messages=messages, response_format={"type": "json_object"}
-            )
-
-            log_messages: list[dict[str, Any]] = [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": prompt_text}],
-                }
-            ]
-            if verification_before:
-                log_messages[0]["content"].append(
-                    {"type": "image_url", "image_url": "<<attached screenshot>>"}
-                )
-            if verification_after:
-                log_messages[0]["content"].append(
-                    {"type": "image_url", "image_url": "<<attached screenshot>>"}
-                )
-
-            screenshots: list[tuple[str, bytes]] = []
-            if verification_before:
-                screenshots.append(("verification_before", verification_before))
-            if verification_after:
-                screenshots.append(("verification_after", verification_after))
-
-            await self._runner._model_logger.log_call(
-                agent="test_runner.verify_step",
-                model=self._runner.model,
-                prompt=prompt_text,
-                request_payload={
-                    "messages": log_messages,
-                    "response_format": {"type": "json_object"},
-                },
-                response=response,
-                screenshots=screenshots or None,
-                metadata={
+                messages=messages,
+                response_format=STEP_VERIFICATION_RESPONSE_FORMAT,
+                log_agent="test_runner.verify_step",
+                log_metadata={
                     "step_number": step.step_number,
                     "test_case": test_case.name,
                 },

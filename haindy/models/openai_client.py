@@ -18,6 +18,8 @@ from haindy.auth import (
     ResolvedOpenAIAuth,
 )
 from haindy.config.settings import get_settings
+from haindy.models.errors import ModelCallError
+from haindy.models.structured_output import extract_json_schema_definition
 
 SUPPORTED_OPENAI_MODEL = "gpt-5.4"
 
@@ -347,12 +349,19 @@ class OpenAIClient:
             else:
                 try:
                     content_value = json.loads(content_text)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
                     self.logger.error(
                         "Failed to parse JSON response",
                         exc_info=True,
                     )
-                    raise
+                    raise ModelCallError(
+                        "Failed to parse JSON response from OpenAI.",
+                        failure_kind="response_parse_error",
+                        response_payload={
+                            "provider_response": response,
+                            "content_text": content_text,
+                        },
+                    ) from exc
         usage = getattr(response, "usage", None)
 
         usage_dict = {
@@ -516,9 +525,17 @@ class OpenAIClient:
             else:
                 try:
                     content_value = json.loads(content_text)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
                     self.logger.error("Failed to parse JSON response", exc_info=True)
-                    raise
+                    raise ModelCallError(
+                        "Failed to parse streaming JSON response from OpenAI.",
+                        failure_kind="response_parse_error",
+                        response_payload={
+                            "provider_response": final_response,
+                            "content_text": content_text,
+                            "usage": combined_usage,
+                        },
+                    ) from exc
 
         finish_reason = getattr(final_response, "status", None)
 
@@ -741,9 +758,18 @@ class OpenAIClient:
             return {"format": {"type": "json_object"}}
 
         if format_type == "json_schema":
-            schema = response_format.get("json_schema")
-            if schema:
-                return {"format": {"type": "json_schema", "json_schema": schema}}
+            schema_payload = extract_json_schema_definition(response_format)
+            if schema_payload:
+                return {
+                    "format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": schema_payload["name"],
+                            "schema": schema_payload["schema"],
+                            "strict": schema_payload["strict"],
+                        },
+                    }
+                }
 
         if format_type == "text":
             return {"format": {"type": "text"}}

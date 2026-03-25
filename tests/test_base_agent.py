@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from haindy.agents.base_agent import BaseAgent
 from haindy.core.types import AgentMessage, ConfidenceLevel
 from haindy.models.anthropic_client import AnthropicClient
+from haindy.models.errors import ModelCallError
 from haindy.models.google_client import GoogleClient
 from haindy.models.openai_client import OpenAIClient
 
@@ -19,6 +22,7 @@ def _make_settings(
     openai_codex_model: str = "gpt-5.4",
     anthropic_model: str = "claude-sonnet-4-6",
     google_model: str = "gemini-3-flash-preview",
+    model_log_path: Path | None = None,
 ) -> MagicMock:
     s = MagicMock()
     s.agent_provider = provider
@@ -26,6 +30,8 @@ def _make_settings(
     s.openai_codex_model = openai_codex_model
     s.anthropic_model = anthropic_model
     s.google_model = google_model
+    s.model_log_path = model_log_path
+    s.max_screenshots = None
     provider_models = {
         "openai": openai_model,
         "openai-codex": openai_codex_model,
@@ -231,6 +237,73 @@ class TestBaseAgent:
             stream=False,
             stream_observer=None,
         )
+
+    @pytest.mark.asyncio
+    async def test_call_model_logs_failure_payload(self, tmp_path: Path):
+        log_path = tmp_path / "model_calls.jsonl"
+        settings = _make_settings("openai", model_log_path=log_path)
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent", temperature=0.8)
+
+        mock_client = AsyncMock()
+        mock_client.call.side_effect = ModelCallError(
+            "Failed to parse JSON response from OpenAI.",
+            failure_kind="response_parse_error",
+            response_payload={"content_text": "{invalid json}"},
+        )
+        agent._client = mock_client
+        agent._client_provider = "openai"
+
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            with pytest.raises(ModelCallError):
+                await agent.call_model(
+                    [{"role": "user", "content": "Hello"}],
+                    log_agent="test_runner.interpret_step",
+                    log_metadata={"step_number": 3},
+                )
+
+        entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+        assert entry["outcome"] == "failure"
+        assert entry["failure_kind"] == "response_parse_error"
+        assert entry["agent"] == "test_runner.interpret_step"
+        assert entry["metadata"]["step_number"] == 3
+        assert entry["response"]["content_text"] == "{invalid json}"
+
+    @pytest.mark.asyncio
+    async def test_call_model_logs_stream_failure_with_partial_output(
+        self, tmp_path: Path
+    ):
+        log_path = tmp_path / "model_calls.jsonl"
+        settings = _make_settings("openai", model_log_path=log_path)
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent")
+
+        async def _raise_after_partial(**kwargs):
+            observer = kwargs["stream_observer"]
+            observer.on_stream_start()
+            observer.on_text_delta("hello ")
+            observer.on_usage_total({"input_tokens": 4, "output_tokens": 2})
+            observer.on_error(RuntimeError("stream blew up"))
+            raise RuntimeError("stream blew up")
+
+        mock_client = AsyncMock()
+        mock_client.call.side_effect = _raise_after_partial
+        agent._client = mock_client
+        agent._client_provider = "openai"
+
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            with pytest.raises(RuntimeError, match="stream blew up"):
+                await agent.call_model(
+                    [{"role": "user", "content": "Hello"}],
+                    stream=True,
+                    log_agent="planner.stream",
+                )
+
+        entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+        assert entry["outcome"] == "failure"
+        assert entry["response"]["content_text"] == "hello "
+        assert entry["response"]["usage"]["input_tokens"] == 4
+        assert entry["response"]["usage"]["output_tokens"] == 2
 
     # -----------------------------------------------------------------------
     # process / message handling

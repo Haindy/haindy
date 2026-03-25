@@ -7,6 +7,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from haindy.agents.structured_output_schemas import (
+    BUG_CLASSIFICATION_RESPONSE_FORMAT,
+    BUG_PLAN_ASSESSMENT_RESPONSE_FORMAT,
+)
 from haindy.core.types import (
     BugReport,
     BugSeverity,
@@ -197,18 +201,9 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
 
         response = await self._call_model(
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        await self._model_logger.log_call(
-            agent="test_runner.bug_report",
-            model=self._model,
-            prompt=prompt,
-            request_payload={
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-            response=response,
-            metadata={
+            response_format=BUG_CLASSIFICATION_RESPONSE_FORMAT,
+            log_agent="test_runner.bug_report",
+            log_metadata={
                 "step_number": request.step.step_number,
                 "test_case": request.test_case.name,
             },
@@ -366,18 +361,9 @@ Respond in JSON format with keys: error_type, severity, bug_description, reasoni
 
         response = await self._call_model(
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        await self._model_logger.log_call(
-            agent="test_runner.bug_plan_assessment",
-            model=self._model,
-            prompt=prompt,
-            request_payload={
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-            response=response,
-            metadata={
+            response_format=BUG_PLAN_ASSESSMENT_RESPONSE_FORMAT,
+            log_agent="test_runner.bug_plan_assessment",
+            log_metadata={
                 "step_number": request.step.step_number,
                 "test_case": request.test_case.name,
             },

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from haindy.agents.structured_output_schemas import TEST_PLAN_RESPONSE_FORMAT
 from haindy.agents.test_planner import TestPlannerAgent
 from haindy.core.types import (
     TestCase,
@@ -567,7 +568,7 @@ class TestTestPlannerAgent:
         agent.call_model.assert_called_once()
         call_args = agent.call_model.call_args
         assert "response_format" in call_args.kwargs
-        assert call_args.kwargs["response_format"] == {"type": "json_object"}
+        assert call_args.kwargs["response_format"] == TEST_PLAN_RESPONSE_FORMAT
         assert call_args.kwargs["temperature"] == 0.3
         assert call_args.kwargs["stream"] is False
         assert call_args.kwargs["stream_observer"] is None

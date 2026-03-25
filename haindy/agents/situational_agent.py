@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from haindy.agents.base_agent import BaseAgent
+from haindy.agents.structured_output_schemas import (
+    SITUATIONAL_ASSESSMENT_RESPONSE_FORMAT,
+)
 from haindy.config.agent_prompts import SITUATIONAL_SYSTEM_PROMPT
 from haindy.config.settings import get_settings
 from haindy.core.interfaces import AutomationDriver
@@ -385,11 +388,6 @@ class SituationalAgent(BaseAgent):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
         ]
-        request_payload = {
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "temperature": 0.1,
-        }
         response: dict[str, Any] | None = None
         parsed_payload: dict[str, Any] = {}
         error_message: str | None = None
@@ -397,8 +395,10 @@ class SituationalAgent(BaseAgent):
         try:
             response = await self.call_model(
                 messages=messages,
-                response_format={"type": "json_object"},
+                response_format=SITUATIONAL_ASSESSMENT_RESPONSE_FORMAT,
                 temperature=0.1,
+                log_agent="situational.assessment",
+                log_metadata={"phase": "situational_assessment"},
             )
             content = response.get("content", {})
             if isinstance(content, str):
@@ -426,7 +426,6 @@ class SituationalAgent(BaseAgent):
 
         await self._log_assessment_interaction(
             prompt=prompt,
-            request_payload=request_payload,
             response_payload=response,
             parsed_payload=parsed_payload,
             error_message=error_message,
@@ -437,12 +436,21 @@ class SituationalAgent(BaseAgent):
         self,
         *,
         prompt: str,
-        request_payload: dict[str, Any],
         response_payload: dict[str, Any] | None,
         parsed_payload: dict[str, Any],
         error_message: str | None,
     ) -> None:
-        """Persist situational prompt/response details for run forensics."""
+        """Persist situational debug details for run forensics."""
+        response_for_log: dict[str, Any]
+        if response_payload is None:
+            response_for_log = {"content": parsed_payload or {}, "error": error_message}
+        else:
+            response_for_log = response_payload
+
+        debug_logger = get_debug_logger()
+        if not debug_logger:
+            return
+
         metadata: dict[str, Any] = {
             "phase": "situational_assessment",
             "fallback_used": bool(error_message),
@@ -450,31 +458,6 @@ class SituationalAgent(BaseAgent):
         }
         if parsed_payload.get("target_type"):
             metadata["target_type"] = parsed_payload.get("target_type")
-
-        response_for_log: dict[str, Any]
-        if response_payload is None:
-            response_for_log = {"content": parsed_payload or {}, "error": error_message}
-        else:
-            response_for_log = response_payload
-
-        try:
-            await self._model_logger.log_call(
-                agent="situational.assessment",
-                model=self.model,
-                prompt=prompt,
-                request_payload=request_payload,
-                response=response_for_log,
-                metadata=metadata,
-            )
-        except Exception:  # pragma: no cover - logging should never be fatal
-            logger.debug(
-                "Failed to persist situational assessment model call",
-                exc_info=True,
-            )
-
-        debug_logger = get_debug_logger()
-        if not debug_logger:
-            return
 
         response_content = response_for_log.get("content", response_for_log)
         try:

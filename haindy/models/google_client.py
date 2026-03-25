@@ -8,6 +8,7 @@ from inspect import isawaitable
 from typing import Any
 
 from haindy.config.settings import get_settings
+from haindy.models.errors import ModelCallError
 from haindy.models.llm_client import dispatch_observer
 from haindy.models.openai_client import ResponseStreamObserver
 
@@ -217,9 +218,16 @@ class GoogleClient:
         if format_type in {"json_object", "json_schema"} and content_text:
             try:
                 content_value = json.loads(_strip_markdown_fences(content_text))
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
                 logger.error("Failed to parse JSON response from Google")
-                raise
+                raise ModelCallError(
+                    "Failed to parse JSON response from Google.",
+                    failure_kind="response_parse_error",
+                    response_payload={
+                        "provider_response": response,
+                        "content_text": content_text,
+                    },
+                ) from exc
 
         usage_meta = getattr(response, "usage_metadata", None)
         prompt_tokens = getattr(usage_meta, "prompt_token_count", 0) or 0
@@ -302,9 +310,16 @@ class GoogleClient:
         if format_type in {"json_object", "json_schema"} and full_text:
             try:
                 content_value = json.loads(_strip_markdown_fences(full_text))
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
                 logger.error("Failed to parse streaming JSON response from Google")
-                raise
+                raise ModelCallError(
+                    "Failed to parse streaming JSON response from Google.",
+                    failure_kind="response_parse_error",
+                    response_payload={
+                        "content_text": full_text,
+                        "usage": usage_dict,
+                    },
+                ) from exc
 
         return {
             "content": content_value,

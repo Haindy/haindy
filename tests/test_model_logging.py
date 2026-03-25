@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from haindy.utils.model_logging import ModelCallLogger
+from haindy.utils.model_logging import ModelCallLogger, log_model_call_failure
 
 
 @pytest.mark.asyncio
@@ -85,3 +85,64 @@ async def test_model_call_logger_suppresses_model_dump_warnings(
     )
 
     assert response.calls == [{"warnings": "none"}]
+
+
+@pytest.mark.asyncio
+async def test_model_call_logger_records_failure_outcome(tmp_path: Path) -> None:
+    class ProviderError(RuntimeError):
+        def __init__(self) -> None:
+            super().__init__("provider rejected request")
+            self.status_code = 500
+            self.code = "internal_error"
+            self.body = {"error": {"message": "boom"}}
+
+    log_path = tmp_path / "model_calls.jsonl"
+    logger = ModelCallLogger(log_path)
+
+    await log_model_call_failure(
+        logger,
+        agent="test-agent",
+        model="test-model",
+        prompt="hello",
+        request_payload={"api_key": "hunter2"},
+        exception=ProviderError(),
+        response={"error": {"message": "boom"}},
+        metadata={"note": "failed"},
+    )
+
+    entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+    assert entry["outcome"] == "failure"
+    assert entry["failure_kind"] == "provider_http_error"
+    assert entry["error"]["type"] == "ProviderError"
+    assert entry["error"]["status_code"] == 500
+    assert entry["error"]["provider_code"] == "internal_error"
+    assert entry["response"]["error"]["message"] == "boom"
+    assert entry["metadata"]["note"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_model_call_logger_suppresses_retryable_rate_limit_failures(
+    tmp_path: Path,
+) -> None:
+    class RateLimitError(RuntimeError):
+        def __init__(self) -> None:
+            super().__init__("429 RESOURCE_EXHAUSTED")
+            self.status_code = 429
+            self.code = "RESOURCE_EXHAUSTED"
+            self.body = {"error": {"status": "RESOURCE_EXHAUSTED"}}
+
+    log_path = tmp_path / "model_calls.jsonl"
+    logger = ModelCallLogger(log_path)
+
+    logged = await log_model_call_failure(
+        logger,
+        agent="test-agent",
+        model="test-model",
+        prompt="hello",
+        request_payload={},
+        exception=RateLimitError(),
+        metadata={},
+    )
+
+    assert logged is False
+    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""

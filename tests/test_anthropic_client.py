@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from haindy.models.anthropic_client import AnthropicClient, _flatten_message_content
+from haindy.models.errors import ModelCallError
+from haindy.models.structured_output import build_json_schema_response_format
 
 
 @pytest.fixture()
@@ -21,11 +24,15 @@ def patched_settings():
         yield settings
 
 
-def _make_response(text: str = "Hello", stop_reason: str = "end_turn") -> Any:
-    block = SimpleNamespace(text=text)
+def _make_response(
+    text: str = "Hello",
+    stop_reason: str = "end_turn",
+    blocks: list[Any] | None = None,
+) -> Any:
     usage = SimpleNamespace(input_tokens=10, output_tokens=5)
+    response_blocks = blocks or [SimpleNamespace(text=text)]
     return SimpleNamespace(
-        content=[block],
+        content=response_blocks,
         stop_reason=stop_reason,
         usage=usage,
         model="claude-sonnet-4-6",
@@ -105,12 +112,22 @@ class TestAnthropicClientCall:
         call_kwargs = mock_instance.messages.create.call_args.kwargs
         assert "system" in call_kwargs
         assert "System instruction." in call_kwargs["system"]
-        # Only user message should appear in messages array
         assert all(m["role"] != "system" for m in call_kwargs["messages"])
 
     @pytest.mark.asyncio
-    async def test_json_mode_parses_response(self, patched_settings: Any) -> None:
+    async def test_json_schema_parses_response_and_sets_output_config(
+        self, patched_settings: Any
+    ) -> None:
         response = _make_response('{"key": "value"}')
+        response_format = build_json_schema_response_format(
+            "haindy_test_schema_v1",
+            {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        )
         with patch("anthropic.AsyncAnthropic") as mock_cls:
             mock_instance = AsyncMock()
             mock_instance.messages.create = AsyncMock(return_value=response)
@@ -119,13 +136,20 @@ class TestAnthropicClientCall:
             client = AnthropicClient()
             result = await client.call(
                 messages=[{"role": "user", "content": "output json"}],
-                response_format={"type": "json_object"},
+                response_format=response_format,
             )
 
         assert result["content"] == {"key": "value"}
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert call_kwargs["output_config"] == {
+            "format": {
+                "type": "json_schema",
+                "schema": response_format["json_schema"]["schema"],
+            }
+        }
 
     @pytest.mark.asyncio
-    async def test_json_mode_appends_json_to_system(
+    async def test_json_object_compatibility_uses_permissive_schema(
         self, patched_settings: Any
     ) -> None:
         response = _make_response("{}")
@@ -141,11 +165,64 @@ class TestAnthropicClientCall:
             )
 
         call_kwargs = mock_instance.messages.create.call_args.kwargs
-        system_text = call_kwargs.get("system", "")
-        assert "Respond with valid JSON" in system_text
+        assert call_kwargs["output_config"] == {
+            "format": {
+                "type": "json_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": True,
+                },
+            }
+        }
 
     @pytest.mark.asyncio
-    async def test_reasoning_level_silently_ignored(
+    async def test_multimodal_content_is_normalized_to_anthropic_blocks(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response("ok")
+        encoded = base64.b64encode(b"fake-image").decode("ascii")
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient()
+            await client.call(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect this screenshot"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{encoded}",
+                            },
+                        ],
+                    }
+                ]
+            )
+
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert call_kwargs["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Inspect this screenshot"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": encoded,
+                        },
+                    },
+                ],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_anthropic_native_image_blocks_pass_through(
         self, patched_settings: Any
     ) -> None:
         response = _make_response("ok")
@@ -155,15 +232,37 @@ class TestAnthropicClientCall:
             mock_cls.return_value = mock_instance
 
             client = AnthropicClient()
-            result = await client.call(
-                messages=[{"role": "user", "content": "hi"}],
-                reasoning_level="high",
+            await client.call(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Inspect"},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "url",
+                                    "url": "https://example.com/image.png",
+                                },
+                            },
+                        ],
+                    }
+                ]
             )
 
-        assert result["content"] == "ok"
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert call_kwargs["messages"][0]["content"][1] == {
+            "type": "image",
+            "source": {
+                "type": "url",
+                "url": "https://example.com/image.png",
+            },
+        }
 
     @pytest.mark.asyncio
-    async def test_modalities_silently_ignored(self, patched_settings: Any) -> None:
+    async def test_reasoning_level_maps_to_effort_on_supported_models(
+        self, patched_settings: Any
+    ) -> None:
         response = _make_response("ok")
         with patch("anthropic.AsyncAnthropic") as mock_cls:
             mock_instance = AsyncMock()
@@ -171,12 +270,125 @@ class TestAnthropicClientCall:
             mock_cls.return_value = mock_instance
 
             client = AnthropicClient()
-            result = await client.call(
+            await client.call(
+                messages=[{"role": "user", "content": "hi"}],
+                reasoning_level="xhigh",
+            )
+
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert call_kwargs["output_config"] == {"effort": "max"}
+
+    @pytest.mark.asyncio
+    async def test_unsupported_modalities_raise_request_validation_error(
+        self, patched_settings: Any
+    ) -> None:
+        client = AnthropicClient()
+        with pytest.raises(ModelCallError) as exc_info:
+            await client.call(
                 messages=[{"role": "user", "content": "hi"}],
                 modalities={"text", "audio"},
             )
 
-        assert result["content"] == "ok"
+        assert exc_info.value.failure_kind == "request_validation_error"
+        assert exc_info.value.response_payload == {"unsupported_modalities": ["audio"]}
+
+    @pytest.mark.asyncio
+    async def test_multiple_text_blocks_are_flattened(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response(
+            blocks=[SimpleNamespace(text="hello"), SimpleNamespace(text="world")]
+        )
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient()
+            result = await client.call(messages=[{"role": "user", "content": "hi"}])
+
+        assert result["content"] == "hello\nworld"
+
+    @pytest.mark.asyncio
+    async def test_structured_output_refusal_raises_typed_error(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response('{"key":"value"}', stop_reason="refusal")
+        response_format = build_json_schema_response_format(
+            "haindy_test_schema_v1",
+            {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        )
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient()
+            with pytest.raises(ModelCallError) as exc_info:
+                await client.call(
+                    messages=[{"role": "user", "content": "output json"}],
+                    response_format=response_format,
+                )
+
+        assert exc_info.value.failure_kind == "response_refusal"
+
+    @pytest.mark.asyncio
+    async def test_structured_output_truncation_raises_typed_error(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response('{"key":"value"}', stop_reason="max_tokens")
+        response_format = build_json_schema_response_format(
+            "haindy_test_schema_v1",
+            {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        )
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient()
+            with pytest.raises(ModelCallError) as exc_info:
+                await client.call(
+                    messages=[{"role": "user", "content": "output json"}],
+                    response_format=response_format,
+                )
+
+        assert exc_info.value.failure_kind == "response_truncated"
+
+    @pytest.mark.asyncio
+    async def test_structured_output_prefill_rejected(
+        self, patched_settings: Any
+    ) -> None:
+        response_format = build_json_schema_response_format(
+            "haindy_test_schema_v1",
+            {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        )
+        client = AnthropicClient()
+        with pytest.raises(ModelCallError) as exc_info:
+            await client.call(
+                messages=[
+                    {"role": "user", "content": "Question"},
+                    {"role": "assistant", "content": "{"},
+                ],
+                response_format=response_format,
+            )
+
+        assert exc_info.value.failure_kind == "request_validation_error"
 
     @pytest.mark.asyncio
     async def test_max_tokens_defaults_to_8192(self, patched_settings: Any) -> None:
@@ -272,7 +484,6 @@ class TestAnthropicClientStreaming:
             model="claude-sonnet-4-6",
         )
 
-        # Build a fake async text_stream and stream context manager
         async def _text_stream():
             yield "hello "
             yield "world"
@@ -302,13 +513,60 @@ class TestAnthropicClientStreaming:
         assert "world" in deltas
         assert result["content"] == "hello world"
 
+    @pytest.mark.asyncio
+    async def test_streaming_structured_output_parses_json(
+        self, patched_settings: Any
+    ) -> None:
+        response_format = build_json_schema_response_format(
+            "haindy_test_schema_v1",
+            {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        )
+        final_msg = SimpleNamespace(
+            content=[SimpleNamespace(text='{"key":"value"}')],
+            stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=4, output_tokens=2),
+            model="claude-sonnet-4-6",
+        )
+
+        async def _text_stream():
+            yield '{"key":'
+            yield '"value"}'
+
+        fake_stream = MagicMock()
+        fake_stream.text_stream = _text_stream()
+        fake_stream.get_final_message = AsyncMock(return_value=final_msg)
+        fake_stream.__aenter__ = AsyncMock(return_value=fake_stream)
+        fake_stream.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.messages.stream = MagicMock(return_value=fake_stream)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient()
+            result = await client.call(
+                messages=[{"role": "user", "content": "hi"}],
+                response_format=response_format,
+                stream=True,
+            )
+
+        assert result["content"] == {"key": "value"}
+
 
 class TestFlattenMessageContent:
     def test_string_content_returned_as_is(self) -> None:
         assert _flatten_message_content("hello") == "hello"
 
     def test_list_content_joined(self) -> None:
-        content = [{"type": "text", "text": "foo"}, {"type": "text", "text": "bar"}]
+        content = [
+            {"type": "text", "text": "foo"},
+            {"type": "input_text", "text": "bar"},
+        ]
         assert _flatten_message_content(content) == "foo\nbar"
 
     def test_non_string_content_stringified(self) -> None:
