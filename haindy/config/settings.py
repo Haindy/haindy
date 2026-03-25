@@ -40,6 +40,7 @@ ALLOWED_REASONING_LEVELS: set[str] = {
     "high",
     "xhigh",
 }
+ALLOWED_AGENT_PROVIDERS: set[str] = {"openai", "google", "anthropic"}
 ALLOWED_OPENAI_CU_TRANSPORTS: set[str] = {"responses_websocket", "responses_http"}
 ALLOWED_CU_VISUAL_MODES: set[str] = {"keyframe_patch", "legacy_full_frame"}
 
@@ -131,6 +132,9 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "debug_mode": "HAINDY_DEBUG_MODE",
     "save_agent_conversations": "HAINDY_SAVE_AGENT_CONVERSATIONS",
     "haindy_home": "HAINDY_HOME",
+    "agent_provider": "HAINDY_AGENT_PROVIDER",
+    "anthropic_model": "HAINDY_ANTHROPIC_MODEL",
+    "google_model": "HAINDY_GOOGLE_MODEL",
 }
 
 OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
@@ -149,20 +153,10 @@ LIST_FIELDS = {
 class AgentModelConfig(BaseModel):
     """Per-agent model configuration."""
 
-    model: str
+    model: str | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     reasoning_level: str = Field(default="medium")
     modalities: set[str] = Field(default_factory=lambda: {"text"})
-
-    @field_validator("model")
-    @classmethod
-    def validate_model(cls, value: str) -> str:
-        if value != SUPPORTED_OPENAI_MODEL:
-            raise ValueError(
-                f"Unsupported OpenAI model '{value}'. "
-                f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
-            )
-        return value
 
     @field_validator("reasoning_level")
     @classmethod
@@ -183,26 +177,10 @@ class AgentModelConfig(BaseModel):
 
 
 DEFAULT_AGENT_MODELS: dict[str, AgentModelConfig] = {
-    "scope_triage": AgentModelConfig(
-        model="gpt-5.4",
-        temperature=0.15,
-        reasoning_level="high",
-    ),
-    "test_planner": AgentModelConfig(
-        model="gpt-5.4",
-        temperature=0.35,
-        reasoning_level="high",
-    ),
-    "test_runner": AgentModelConfig(
-        model="gpt-5.4",
-        temperature=0.55,
-        reasoning_level="medium",
-    ),
-    "situational_agent": AgentModelConfig(
-        model="gpt-5.4",
-        temperature=0.1,
-        reasoning_level="high",
-    ),
+    "scope_triage": AgentModelConfig(temperature=0.15, reasoning_level="high"),
+    "test_planner": AgentModelConfig(temperature=0.35, reasoning_level="high"),
+    "test_runner": AgentModelConfig(temperature=0.55, reasoning_level="medium"),
+    "situational_agent": AgentModelConfig(temperature=0.1, reasoning_level="high"),
 }
 
 
@@ -353,7 +331,19 @@ class Settings(BaseModel):
     )
     agent_models: dict[str, AgentModelConfig] = Field(
         default_factory=dict,
-        description="Per-agent OpenAI model configuration",
+        description="Per-agent model configuration",
+    )
+    agent_provider: str = Field(
+        default="openai",
+        description="Provider for non-CU model calls (openai, anthropic, google)",
+    )
+    anthropic_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Anthropic model for non-CU calls",
+    )
+    google_model: str = Field(
+        default="gemini-3.1-pro-preview",
+        description="Google model for non-CU calls",
     )
 
     # Desktop Configuration
@@ -764,11 +754,22 @@ class Settings(BaseModel):
     @classmethod
     def normalize_cu_provider(cls, value: str) -> str:
         normalized = (value or "").strip().lower()
-        if normalized not in {"openai", "google", "anthropic"}:
+        if normalized not in ALLOWED_AGENT_PROVIDERS:
             raise ValueError(
                 "Unsupported cu_provider "
                 f"'{value}'. Supported providers are 'openai', 'google', and "
                 "'anthropic'."
+            )
+        return normalized
+
+    @field_validator("agent_provider")
+    @classmethod
+    def normalize_agent_provider(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in ALLOWED_AGENT_PROVIDERS:
+            raise ValueError(
+                f"Unsupported agent_provider '{value}'. "
+                "Supported providers are 'openai', 'google', and 'anthropic'."
             )
         return normalized
 

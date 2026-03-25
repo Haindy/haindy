@@ -21,6 +21,10 @@ _SECRET_FIELD_NAMES = frozenset(
 # Explicit mapping from "section.json_key" -> Settings field name.
 # Covers every non-secret, non-agent_models field in Settings.
 _JSON_TO_FIELD: dict[str, str] = {
+    # agent section
+    "agent.provider": "agent_provider",
+    "agent.anthropic_model": "anthropic_model",
+    "agent.google_model": "google_model",
     # openai section
     "openai.model": "openai_model",
     "openai.max_retries": "openai_max_retries",
@@ -123,6 +127,9 @@ _FIELD_TO_JSON: dict[str, str] = {v: k for k, v in _JSON_TO_FIELD.items()}
 
 
 _SETTINGS_SKELETON: dict[str, Any] = {
+    "agent": {
+        "provider": "openai",
+    },
     "computer_use": {
         "model": "gpt-5.4",
     },
