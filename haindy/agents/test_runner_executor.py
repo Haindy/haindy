@@ -280,16 +280,16 @@ class TestRunnerExecutor:
                 result.environment_state_before
                 and result.environment_state_before.screenshot_path
             ):
-                action_data["screenshots"][
-                    "before"
-                ] = result.environment_state_before.screenshot_path
+                action_data["screenshots"]["before"] = (
+                    result.environment_state_before.screenshot_path
+                )
             if (
                 result.environment_state_after
                 and result.environment_state_after.screenshot_path
             ):
-                action_data["screenshots"][
-                    "after"
-                ] = result.environment_state_after.screenshot_path
+                action_data["screenshots"]["after"] = (
+                    result.environment_state_after.screenshot_path
+                )
             if (
                 self._artifacts is not None
                 and result.environment_state_after

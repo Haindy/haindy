@@ -53,9 +53,9 @@ class TestExecutionReport:
         self.journal = journal
         self.config = config or ReportConfig()
         self.generated_at = datetime.now(timezone.utc)
-        self.bug_reports: list[dict[str, Any]] = (
-            []
-        )  # Will be populated after initialization
+        self.bug_reports: list[
+            dict[str, Any]
+        ] = []  # Will be populated after initialization
         self.artifacts = artifacts or {}
 
     def to_dict(self) -> dict[str, Any]:

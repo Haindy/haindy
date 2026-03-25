@@ -214,9 +214,9 @@ class OpenAIComputerUseMixin:
                 )
                 if acknowledged_safety_checks:
                     turns[0].acknowledged = True
-                    turns[0].metadata[
-                        "acknowledged_safety_checks"
-                    ] = acknowledged_safety_checks
+                    turns[0].metadata["acknowledged_safety_checks"] = (
+                        acknowledged_safety_checks
+                    )
 
                 processed_turns: list[ComputerToolTurn] = []
                 for action_index, turn in enumerate(turns, start=1):

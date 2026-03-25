@@ -41,12 +41,12 @@ LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
 DEFAULT_NON_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_MODEL,
     "openai-codex": SUPPORTED_OPENAI_MODEL,
-    "google": "gemini-3.1-pro-preview",
+    "google": "gemini-3-flash-preview",
     "anthropic": "claude-sonnet-4-6",
 }
 DEFAULT_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
-    "google": "gemini-2.5-computer-use-preview-10-2025",
+    "google": "gemini-3-flash-preview",
     "anthropic": "claude-sonnet-4-6",
 }
 

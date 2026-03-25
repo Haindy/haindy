@@ -155,9 +155,7 @@ class ComputerUseSession(
         self._google_model = (
             model
             if model and self._provider == "google"
-            else getattr(
-                settings, "google_cu_model", "gemini-2.5-computer-use-preview-10-2025"
-            )
+            else getattr(settings, "google_cu_model", "gemini-3-flash-preview")
         )
         self._anthropic_model = (
             model

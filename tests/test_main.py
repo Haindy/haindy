@@ -53,12 +53,12 @@ class TestCLIParser:
     def test_provider_set_model_subcommand(self) -> None:
         parser = create_parser()
         args = parser.parse_args(
-            ["provider", "set-model", "google", "gemini-3.1-pro-preview"]
+            ["provider", "set-model", "google", "gemini-3-flash-preview"]
         )
         assert args.command == "provider"
         assert args.provider_command == "set-model"
         assert args.provider == "google"
-        assert args.model == "gemini-3.1-pro-preview"
+        assert args.model == "gemini-3-flash-preview"
         assert args.computer_use is False
 
     def test_provider_set_model_computer_use_flag(self) -> None:
@@ -68,7 +68,7 @@ class TestCLIParser:
                 "provider",
                 "set-model",
                 "google",
-                "gemini-2.5-computer-use-preview-10-2025",
+                "gemini-3-flash-preview",
                 "--computer-use",
             ]
         )
@@ -705,11 +705,11 @@ async def test_provider_set_model_command_dispatches() -> None:
         patch("haindy.main.ensure_settings_skeleton"),
     ):
         result = await async_main(
-            ["provider", "set-model", "google", "gemini-3.1-pro-preview"]
+            ["provider", "set-model", "google", "gemini-3-flash-preview"]
         )
     assert result == 0
     mock_set_model.assert_called_once_with(
         "google",
-        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
         computer_use=False,
     )

@@ -176,7 +176,7 @@ class TestSettings:
 
     def test_settings_has_google_model_default(self):
         settings = Settings()
-        assert settings.google_model == "gemini-3.1-pro-preview"
+        assert settings.google_model == "gemini-3-flash-preview"
 
     def test_settings_env_vars_contains_agent_provider(self):
         assert "agent_provider" in SETTINGS_ENV_VARS

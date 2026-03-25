@@ -76,8 +76,8 @@ Examples:
   {cli_name} config show
   {cli_name} config migrate /path/to/.env
   {cli_name} provider set openai
-  {cli_name} provider set-model google gemini-3.1-pro-preview
-  {cli_name} provider set-model google gemini-2.5-computer-use-preview-10-2025 --computer-use
+  {cli_name} provider set-model google gemini-3-flash-preview
+  {cli_name} provider set-model google gemini-3-flash-preview --computer-use
   {cli_name} doctor
   {cli_name} setup
 

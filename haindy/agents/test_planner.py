@@ -50,7 +50,7 @@ class TestPlannerAgent(BaseAgent):
             messages=messages,
             temperature=kwargs.get("temperature", self.temperature),
             response_format=kwargs.get("response_format"),
-            stream=True,
+            stream=stream_observer is not None,
             stream_observer=stream_observer,
         )
 

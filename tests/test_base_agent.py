@@ -18,7 +18,7 @@ def _make_settings(
     openai_model: str = "gpt-5.4",
     openai_codex_model: str = "gpt-5.4",
     anthropic_model: str = "claude-sonnet-4-6",
-    google_model: str = "gemini-3.1-pro-preview",
+    google_model: str = "gemini-3-flash-preview",
 ) -> MagicMock:
     s = MagicMock()
     s.agent_provider = provider
@@ -58,7 +58,11 @@ class TestBaseAgent:
 
     def test_default_initialization(self):
         """Test agent initialization with defaults."""
-        agent = BaseAgent(name="TestAgent")
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai"),
+        ):
+            agent = BaseAgent(name="TestAgent")
 
         assert agent.name == "TestAgent"
         assert agent.model == "gpt-5.4"
@@ -169,14 +173,17 @@ class TestBaseAgent:
     @pytest.mark.asyncio
     async def test_call_model(self):
         """call_model should delegate to the client with correct arguments."""
-        agent = BaseAgent(name="TestAgent", temperature=0.8)
+        settings = _make_settings("openai")
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent", temperature=0.8)
         mock_client = AsyncMock()
         mock_client.call.return_value = {"result": "test"}
         agent._client = mock_client
         agent._client_provider = "openai"
 
         messages = [{"role": "user", "content": "Hello"}]
-        result = await agent.call_model(messages)
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            result = await agent.call_model(messages)
 
         assert result == {"result": "test"}
         mock_client.call.assert_called_once_with(
@@ -194,7 +201,9 @@ class TestBaseAgent:
     @pytest.mark.asyncio
     async def test_call_model_with_overrides(self):
         """call_model should honour per-call temperature and format overrides."""
-        agent = BaseAgent(name="TestAgent", temperature=0.8)
+        settings = _make_settings("openai")
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            agent = BaseAgent(name="TestAgent", temperature=0.8)
         mock_client = AsyncMock()
         mock_client.call.return_value = {"result": "test"}
         agent._client = mock_client
@@ -203,11 +212,12 @@ class TestBaseAgent:
         messages = [{"role": "user", "content": "Hello"}]
         response_format = {"type": "json_object"}
 
-        result = await agent.call_model(
-            messages,
-            temperature=0.3,
-            response_format=response_format,
-        )
+        with patch("haindy.agents.base_agent.get_settings", return_value=settings):
+            result = await agent.call_model(
+                messages,
+                temperature=0.3,
+                response_format=response_format,
+            )
 
         assert result == {"result": "test"}
         mock_client.call.assert_called_once_with(

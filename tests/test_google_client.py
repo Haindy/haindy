@@ -52,7 +52,7 @@ class TestGoogleClientInit:
         from haindy.models.google_client import GoogleClient
 
         client = GoogleClient()
-        assert client.model == "gemini-3.1-pro-preview"
+        assert client.model == "gemini-3-flash-preview"
 
     def test_custom_model_is_stored(self, patched_settings: Any) -> None:
         from haindy.models.google_client import GoogleClient
@@ -122,7 +122,7 @@ class TestGoogleClientGetClient:
                 with pytest.raises(RuntimeError, match="HAINDY_VERTEX"):
                     client._get_client()
 
-    def test_vertex_mode_missing_location_raises(self) -> None:
+    def test_vertex_mode_missing_location_falls_back_to_default(self) -> None:
         settings = _make_settings(
             vertex_project="my-project",
             vertex_location="",
@@ -132,10 +132,15 @@ class TestGoogleClientGetClient:
             from haindy.models.google_client import GoogleClient
 
             with patch("haindy.models.google_client.genai") as mock_genai:
-                mock_genai.Client = MagicMock()
+                mock_genai.Client = MagicMock(return_value=MagicMock())
                 client = GoogleClient()
-                with pytest.raises(RuntimeError, match="HAINDY_VERTEX_LOCATION"):
-                    client._get_client()
+                client._get_client()
+
+        mock_genai.Client.assert_called_once_with(
+            vertexai=True,
+            project="my-project",
+            location="us-central1",
+        )
 
 
 class TestGoogleClientCall:
@@ -351,6 +356,46 @@ class TestGoogleClientCall:
         assert "Hello " in deltas or "World" in deltas
         assert result["content"] == "Hello World"
 
+    @pytest.mark.asyncio
+    async def test_streaming_accepts_awaitable_stream(
+        self, patched_settings: Any
+    ) -> None:
+        from haindy.models.google_client import GoogleClient
+
+        chunk = _make_genai_response("Hello")
+
+        async def _stream():
+            yield chunk
+
+        async def _fake_stream(**kwargs: Any):
+            return _stream()
+
+        with (
+            patch("haindy.models.google_client.genai") as mock_genai,
+            patch("haindy.models.google_client.genai_types") as mock_types,
+        ):
+            mock_types.GenerateContentConfig = MagicMock(return_value=MagicMock())
+            mock_types.Content = MagicMock(
+                side_effect=lambda role, parts: SimpleNamespace(role=role, parts=parts)
+            )
+            mock_types.Part = MagicMock()
+            mock_types.Part.from_text = MagicMock(
+                return_value=SimpleNamespace(text="x")
+            )
+            mock_client = MagicMock()
+            mock_client.aio = MagicMock()
+            mock_client.aio.models = MagicMock()
+            mock_client.aio.models.generate_content_stream = _fake_stream
+            mock_genai.Client = MagicMock(return_value=mock_client)
+
+            client = GoogleClient()
+            result = await client.call(
+                messages=[{"role": "user", "content": "hi"}],
+                stream=True,
+            )
+
+        assert result["content"] == "Hello"
+
 
 class TestGoogleClientBuildContents:
     def test_system_messages_extracted(self, patched_settings: Any) -> None:
@@ -407,6 +452,26 @@ class TestGoogleClientBuildContents:
         assert system_instruction is not None
         assert "Base prompt." in system_instruction
         assert "Extra." in system_instruction
+
+    def test_duplicate_system_prompt_is_deduped(self, patched_settings: Any) -> None:
+        from haindy.models.google_client import GoogleClient
+
+        with patch("haindy.models.google_client.genai_types") as mock_types:
+            mock_types.Content = MagicMock(
+                side_effect=lambda role, parts: SimpleNamespace(role=role, parts=parts)
+            )
+            mock_types.Part = MagicMock()
+            mock_types.Part.from_text = MagicMock(
+                return_value=SimpleNamespace(text="x")
+            )
+
+            client = GoogleClient()
+            _, system_instruction = client._build_contents(
+                [{"role": "system", "content": "Base prompt."}],
+                system_prompt="Base prompt.",
+            )
+
+        assert system_instruction == "Base prompt."
 
     def test_assistant_role_mapped_to_model(self, patched_settings: Any) -> None:
         from haindy.models.google_client import GoogleClient

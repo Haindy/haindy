@@ -37,7 +37,7 @@ def session_settings(tmp_path):
         scroll_max_magnitude=600,
         cu_provider="openai",
         computer_use_model="gpt-5.4",
-        google_cu_model="gemini-2.5-computer-use-preview-10-2025",
+        google_cu_model="gemini-3-flash-preview",
         anthropic_api_key="",
         anthropic_cu_model="claude-sonnet-4-6",
         anthropic_cu_beta="computer-use-2025-11-24",

@@ -33,9 +33,7 @@ class TestScopeTriageAgent:
             "blocking_questions": [],
         }
 
-        agent.call_model = AsyncMock(
-            return_value={"content": json.dumps(mock_payload)}
-        )
+        agent.call_model = AsyncMock(return_value={"content": json.dumps(mock_payload)})
 
         result = await agent.triage_scope("Test requirements text")
 
@@ -57,9 +55,7 @@ class TestScopeTriageAgent:
             "blocking_questions": "Need staging URL before executing.",
         }
 
-        agent.call_model = AsyncMock(
-            return_value={"content": json.dumps(mock_payload)}
-        )
+        agent.call_model = AsyncMock(return_value={"content": json.dumps(mock_payload)})
 
         result = await agent.triage_scope("requirements")
 

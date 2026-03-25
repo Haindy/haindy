@@ -222,8 +222,7 @@ class TestHandleProviderSetComputerUse:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         assert data.get("computer_use", {}).get("provider") == "google"
         assert (
-            data.get("google", {}).get("computer_use_model")
-            == "gemini-2.5-computer-use-preview-10-2025"
+            data.get("google", {}).get("computer_use_model") == "gemini-3-flash-preview"
         )
 
     def test_set_cu_without_key_returns_1(self, tmp_path):
@@ -260,11 +259,11 @@ class TestHandleProviderSetModel:
         settings_path.write_text("{}", encoding="utf-8")
 
         with patch.object(pcm, "_SETTINGS_PATH", settings_path):
-            result = pcm.handle_provider_set_model("google", "gemini-3.1-pro-preview")
+            result = pcm.handle_provider_set_model("google", "gemini-3-flash-preview")
 
         assert result == 0
         data = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert data.get("google", {}).get("model") == "gemini-3.1-pro-preview"
+        assert data.get("google", {}).get("model") == "gemini-3-flash-preview"
 
     def test_set_cu_model_writes_provider_specific_cu_model(self, tmp_path):
         import haindy.cli.provider_commands as pcm
