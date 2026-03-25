@@ -389,7 +389,11 @@ Respond with a JSON object containing an "actions" array where every item follow
             )
 
             content = response.get("content", {})
-            if not isinstance(content, dict):
+            if isinstance(content, list):
+                # Some models (e.g. Google Gemini) return the actions array
+                # directly as a top-level JSON array instead of wrapping it.
+                content = {"actions": content}
+            elif not isinstance(content, dict):
                 raise TypeError(f"Expected dict content but got {type(content)}")
 
             actions = content.get("actions", [])
