@@ -1,4 +1,5 @@
 """Google Gemini API client wrapper for non-CU agent calls."""
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,7 @@ def _strip_markdown_fences(text: str) -> str:
         # Remove opening fence (e.g. ```json or ```)
         first_newline = stripped.find("\n")
         if first_newline != -1:
-            stripped = stripped[first_newline + 1:]
+            stripped = stripped[first_newline + 1 :]
         # Remove closing fence
         if stripped.endswith("```"):
             stripped = stripped[:-3].rstrip()
@@ -29,10 +30,11 @@ def _strip_markdown_fences(text: str) -> str:
 class GoogleClient:
     """Wrapper for Google Gemini API interactions (non-computer-use)."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
         settings = get_settings()
         self._api_key = settings.vertex_api_key
-        self._model = settings.google_model
+        self._model = model or settings.google_model
+        self.model = self._model
         self._vertex_project = getattr(settings, "vertex_project", "") or ""
         self._vertex_location = (
             getattr(settings, "vertex_location", "us-central1") or "us-central1"
@@ -139,9 +141,7 @@ class GoogleClient:
         if response.candidates:
             candidate = response.candidates[0]
             parts = getattr(candidate.content, "parts", None) or []
-            content_text = "".join(
-                getattr(part, "text", "") or "" for part in parts
-            )
+            content_text = "".join(getattr(part, "text", "") or "" for part in parts)
 
         content_value: Any = content_text
         if format_type in {"json_object", "json_schema"} and content_text:
@@ -176,7 +176,7 @@ class GoogleClient:
     ) -> dict[str, Any]:
         """Make a streaming call to the Google Gemini API."""
         if stream_observer is not None:
-            dispatch_observer(stream_observer,"on_stream_start")
+            dispatch_observer(stream_observer, "on_stream_start")
 
         full_text = ""
         prompt_tokens = 0
@@ -197,7 +197,7 @@ class GoogleClient:
                 if chunk_text:
                     full_text += chunk_text
                     if stream_observer is not None:
-                        dispatch_observer(stream_observer,"on_text_delta", chunk_text)
+                        dispatch_observer(stream_observer, "on_text_delta", chunk_text)
 
                 usage_meta = getattr(chunk, "usage_metadata", None)
                 if usage_meta is not None:
@@ -209,9 +209,9 @@ class GoogleClient:
                         completion_tokens = ct
         except Exception as exc:
             if stream_observer is not None:
-                dispatch_observer(stream_observer,"on_error", exc)
+                dispatch_observer(stream_observer, "on_error", exc)
             if stream_observer is not None:
-                dispatch_observer(stream_observer,"on_stream_end")
+                dispatch_observer(stream_observer, "on_stream_end")
             raise
 
         usage_dict = {
@@ -220,8 +220,8 @@ class GoogleClient:
             "total_tokens": prompt_tokens + completion_tokens,
         }
         if stream_observer is not None:
-            dispatch_observer(stream_observer,"on_usage_total", usage_dict)
-            dispatch_observer(stream_observer,"on_stream_end")
+            dispatch_observer(stream_observer, "on_usage_total", usage_dict)
+            dispatch_observer(stream_observer, "on_stream_end")
 
         format_type = response_format.get("type") if response_format else None
         content_value: Any = full_text
@@ -238,4 +238,3 @@ class GoogleClient:
             "model": self._model,
             "finish_reason": None,
         }
-

@@ -26,6 +26,7 @@ from haindy.cli.provider_commands import (
     handle_provider_list,
     handle_provider_set,
     handle_provider_set_computer_use,
+    handle_provider_set_model,
 )
 from haindy.config.settings import Settings, get_settings
 from haindy.config.settings_file import ensure_settings_skeleton
@@ -74,6 +75,9 @@ Examples:
   {cli_name} auth clear openai
   {cli_name} config show
   {cli_name} config migrate /path/to/.env
+  {cli_name} provider set openai
+  {cli_name} provider set-model google gemini-3.1-pro-preview
+  {cli_name} provider set-model google gemini-2.5-computer-use-preview-10-2025 --computer-use
   {cli_name} doctor
   {cli_name} setup
 
@@ -88,7 +92,9 @@ Fallback:
 
     subparsers.add_parser("doctor", help="Check system dependencies and configuration")
 
-    setup_parser = subparsers.add_parser("setup", help="Run the first-time setup wizard")
+    setup_parser = subparsers.add_parser(
+        "setup", help="Run the first-time setup wizard"
+    )
     setup_parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -99,13 +105,17 @@ Fallback:
 
     auth_parser = subparsers.add_parser("auth", help="Manage API credentials")
     auth_sub = auth_parser.add_subparsers(dest="auth_command", metavar="COMMAND")
-    auth_login_parser = auth_sub.add_parser("login", help="Store credentials for a provider")
+    auth_login_parser = auth_sub.add_parser(
+        "login", help="Store credentials for a provider"
+    )
     auth_login_parser.add_argument(
         "provider",
         choices=["openai", "google", "anthropic", "openai-codex"],
         help="Provider to configure",
     )
-    auth_sub.add_parser("status", help="Show which providers have credentials configured")
+    auth_sub.add_parser(
+        "status", help="Show which providers have credentials configured"
+    )
     auth_clear_parser = auth_sub.add_parser(
         "clear", help="Remove stored credentials for a provider"
     )
@@ -117,7 +127,9 @@ Fallback:
 
     config_parser = subparsers.add_parser("config", help="Manage configuration")
     config_sub = config_parser.add_subparsers(dest="config_command", metavar="COMMAND")
-    config_sub.add_parser("show", help="Show effective configuration (secrets redacted)")
+    config_sub.add_parser(
+        "show", help="Show effective configuration (secrets redacted)"
+    )
     config_migrate_parser = config_sub.add_parser(
         "migrate", help="Migrate a .env file to settings.json and keychain"
     )
@@ -129,8 +141,12 @@ Fallback:
         help="Path to .env file (default: .env)",
     )
 
-    provider_parser = subparsers.add_parser("provider", help="Manage AI provider selection")
-    provider_sub = provider_parser.add_subparsers(dest="provider_command", metavar="COMMAND")
+    provider_parser = subparsers.add_parser(
+        "provider", help="Manage AI provider selection"
+    )
+    provider_sub = provider_parser.add_subparsers(
+        dest="provider_command", metavar="COMMAND"
+    )
     provider_sub.add_parser("list", help="List available providers and their status")
     provider_set_parser = provider_sub.add_parser(
         "set", help="Set the active provider for all calls"
@@ -147,6 +163,24 @@ Fallback:
         "provider",
         choices=["openai", "google", "anthropic"],
         help="Provider to use for computer-use",
+    )
+    provider_set_model_parser = provider_sub.add_parser(
+        "set-model",
+        help="Set the configured model for one provider",
+    )
+    provider_set_model_parser.add_argument(
+        "provider",
+        choices=["openai", "openai-codex", "google", "anthropic"],
+        help="Provider whose model should be updated",
+    )
+    provider_set_model_parser.add_argument(
+        "model",
+        help="Model name to persist for the provider",
+    )
+    provider_set_model_parser.add_argument(
+        "--computer-use",
+        action="store_true",
+        help="Update the provider's computer-use model instead of its non-CU model",
     )
 
     run_parser = subparsers.add_parser("run", help="Run a test")
@@ -830,7 +864,9 @@ async def async_main(args: list[str] | None = None) -> int:
     if command == "auth":
         auth_command = getattr(parsed_args, "auth_command", None)
         if not auth_command:
-            console.print("[red]Usage: haindy auth <login|status|clear> [provider][/red]")
+            console.print(
+                "[red]Usage: haindy auth <login|status|clear> [provider][/red]"
+            )
             return 1
         if auth_command == "status":
             return await handle_auth_status()
@@ -853,7 +889,7 @@ async def async_main(args: list[str] | None = None) -> int:
         provider_command = getattr(parsed_args, "provider_command", None)
         if not provider_command:
             console.print(
-                "[red]Usage: haindy provider <list|set|set-computer-use> [provider][/red]"
+                "[red]Usage: haindy provider <list|set|set-computer-use|set-model> ...[/red]"
             )
             return 1
         if provider_command == "list":
@@ -862,6 +898,12 @@ async def async_main(args: list[str] | None = None) -> int:
             return handle_provider_set(parsed_args.provider)
         if provider_command == "set-computer-use":
             return handle_provider_set_computer_use(parsed_args.provider)
+        if provider_command == "set-model":
+            return handle_provider_set_model(
+                parsed_args.provider,
+                parsed_args.model,
+                computer_use=parsed_args.computer_use,
+            )
 
     if command == "run":
         if not _is_setup_complete():

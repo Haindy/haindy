@@ -73,6 +73,24 @@ class TestFlattenSettingsDict:
         result = flatten_settings_dict({"computer_use": {"provider": "anthropic"}})
         assert result == {"cu_provider": "anthropic"}
 
+    def test_provider_specific_openai_model(self) -> None:
+        result = flatten_settings_dict({"openai": {"model": "gpt-5.4"}})
+        assert result == {"openai_model": "gpt-5.4"}
+
+    def test_provider_specific_openai_codex_model(self) -> None:
+        result = flatten_settings_dict({"openai-codex": {"model": "gpt-5.4"}})
+        assert result == {"openai_codex_model": "gpt-5.4"}
+
+    def test_provider_specific_google_cu_model(self) -> None:
+        result = flatten_settings_dict(
+            {
+                "google": {
+                    "computer_use_model": "gemini-2.5-computer-use-preview-10-2025"
+                }
+            }
+        )
+        assert result == {"google_cu_model": "gemini-2.5-computer-use-preview-10-2025"}
+
     def test_execution_actions_max_turns(self) -> None:
         result = flatten_settings_dict({"execution": {"actions_max_turns": 20}})
         assert result == {"actions_computer_tool_max_turns": 20}
@@ -140,11 +158,35 @@ class TestFlattenSettingsDict:
         result = flatten_settings_dict({"agent": {"google_model": "gemini-3.1-pro"}})
         assert result == {"google_model": "gemini-3.1-pro"}
 
+    def test_legacy_computer_use_model_routes_to_provider_specific_field(self) -> None:
+        result = flatten_settings_dict(
+            {
+                "computer_use": {
+                    "provider": "google",
+                    "model": "gemini-legacy-cu",
+                }
+            }
+        )
+        assert result == {
+            "cu_provider": "google",
+            "google_cu_model": "gemini-legacy-cu",
+        }
+
 
 class TestSettingsSkeleton:
     def test_skeleton_includes_agent_provider(self) -> None:
         assert "agent" in _SETTINGS_SKELETON
         assert _SETTINGS_SKELETON["agent"].get("provider") == "openai"
+
+    def test_skeleton_includes_provider_specific_models(self) -> None:
+        assert _SETTINGS_SKELETON["openai"]["model"] == "gpt-5.4"
+        assert _SETTINGS_SKELETON["openai"]["computer_use_model"] == "gpt-5.4"
+        assert _SETTINGS_SKELETON["openai-codex"]["model"] == "gpt-5.4"
+        assert _SETTINGS_SKELETON["google"]["model"] == "gemini-3.1-pro-preview"
+        assert (
+            _SETTINGS_SKELETON["google"]["computer_use_model"]
+            == "gemini-2.5-computer-use-preview-10-2025"
+        )
 
 
 class TestWriteSettingsFile:
@@ -204,6 +246,28 @@ class TestFlatToNested:
         assert result == {
             "desktop": {"keyboard_layout": "es"},
             "logging": {"level": "DEBUG"},
+        }
+
+    def test_provider_models_convert_to_provider_sections(self) -> None:
+        result = flat_to_nested(
+            {
+                "openai_model": "gpt-5.4",
+                "openai_codex_model": "gpt-5.4",
+                "google_model": "gemini-3.1-pro-preview",
+                "google_cu_model": "gemini-2.5-computer-use-preview-10-2025",
+                "computer_use_model": "gpt-5.4",
+            }
+        )
+        assert result == {
+            "openai": {
+                "model": "gpt-5.4",
+                "computer_use_model": "gpt-5.4",
+            },
+            "openai-codex": {"model": "gpt-5.4"},
+            "google": {
+                "model": "gemini-3.1-pro-preview",
+                "computer_use_model": "gemini-2.5-computer-use-preview-10-2025",
+            },
         }
 
     def test_unknown_field_dropped(self) -> None:

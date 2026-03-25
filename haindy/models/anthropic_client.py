@@ -1,4 +1,5 @@
 """Anthropic API client wrapper for non-CU agent calls."""
+
 from __future__ import annotations
 
 import json
@@ -15,10 +16,11 @@ logger = logging.getLogger("anthropic_client")
 class AnthropicClient:
     """Wrapper for Anthropic API interactions (non-computer-use)."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
         settings = get_settings()
         self._api_key = settings.anthropic_api_key
-        self._model = settings.anthropic_model
+        self._model = model or settings.anthropic_model
+        self.model = self._model
         self._client: Any | None = None
 
     def _get_client(self) -> Any:
@@ -142,7 +144,7 @@ class AnthropicClient:
             kwargs["system"] = system
 
         if stream_observer is not None:
-            dispatch_observer(stream_observer,"on_stream_start")
+            dispatch_observer(stream_observer, "on_stream_start")
 
         full_text = ""
         input_tokens = 0
@@ -155,7 +157,7 @@ class AnthropicClient:
                 async for text_chunk in stream.text_stream:
                     full_text += text_chunk
                     if stream_observer is not None:
-                        dispatch_observer(stream_observer,"on_text_delta", text_chunk)
+                        dispatch_observer(stream_observer, "on_text_delta", text_chunk)
 
                 final_message = await stream.get_final_message()
                 model_name = getattr(final_message, "model", self._model)
@@ -166,9 +168,9 @@ class AnthropicClient:
                     output_tokens = getattr(usage, "output_tokens", 0)
         except Exception as exc:
             if stream_observer is not None:
-                dispatch_observer(stream_observer,"on_error", exc)
+                dispatch_observer(stream_observer, "on_error", exc)
             if stream_observer is not None:
-                dispatch_observer(stream_observer,"on_stream_end")
+                dispatch_observer(stream_observer, "on_stream_end")
             raise
 
         usage_dict = {
@@ -177,8 +179,8 @@ class AnthropicClient:
             "total_tokens": input_tokens + output_tokens,
         }
         if stream_observer is not None:
-            dispatch_observer(stream_observer,"on_usage_total", usage_dict)
-            dispatch_observer(stream_observer,"on_stream_end")
+            dispatch_observer(stream_observer, "on_usage_total", usage_dict)
+            dispatch_observer(stream_observer, "on_stream_end")
 
         format_type = response_format.get("type") if response_format else None
         content_value: Any = full_text
@@ -195,4 +197,3 @@ class AnthropicClient:
             "model": model_name,
             "finish_reason": stop_reason,
         }
-

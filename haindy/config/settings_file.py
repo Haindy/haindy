@@ -14,28 +14,33 @@ import json
 from pathlib import Path
 from typing import Any
 
+from haindy.config.settings import (
+    DEFAULT_CU_PROVIDER_MODELS,
+    DEFAULT_NON_CU_PROVIDER_MODELS,
+)
+
 _SECRET_FIELD_NAMES = frozenset(
     {"openai_api_key", "anthropic_api_key", "vertex_api_key"}
 )
 
-# Explicit mapping from "section.json_key" -> Settings field name.
+# Canonical mapping from "section.json_key" -> Settings field name.
 # Covers every non-secret, non-agent_models field in Settings.
 _JSON_TO_FIELD: dict[str, str] = {
     # agent section
     "agent.provider": "agent_provider",
-    "agent.anthropic_model": "anthropic_model",
-    "agent.google_model": "google_model",
-    # openai section
+    # provider sections
     "openai.model": "openai_model",
+    "openai.computer_use_model": "computer_use_model",
+    "openai-codex.model": "openai_codex_model",
+    "google.model": "google_model",
+    "google.computer_use_model": "google_cu_model",
+    "anthropic.model": "anthropic_model",
+    "anthropic.computer_use_model": "anthropic_cu_model",
+    # openai section
     "openai.max_retries": "openai_max_retries",
     "openai.request_timeout_seconds": "openai_request_timeout_seconds",
-    # agent section
-    "agent.provider": "agent_provider",
-    "agent.anthropic_model": "anthropic_model",
-    "agent.google_model": "google_model",
     # computer_use section
     "computer_use.provider": "cu_provider",
-    "computer_use.model": "computer_use_model",
     "computer_use.anthropic_beta": "anthropic_cu_beta",
     "computer_use.anthropic_max_tokens": "anthropic_cu_max_tokens",
     "computer_use.vertex_project": "vertex_project",
@@ -124,10 +129,13 @@ _JSON_TO_FIELD: dict[str, str] = {
     "dev.debug_mode": "debug_mode",
     "dev.save_agent_conversations": "save_agent_conversations",
     "dev.haindy_home": "haindy_home",
-    # agent section
-    "agent.provider": "agent_provider",
+}
+
+# Legacy aliases that are still accepted on read, but are not emitted on write.
+_LEGACY_JSON_TO_FIELD: dict[str, str] = {
     "agent.anthropic_model": "anthropic_model",
     "agent.google_model": "google_model",
+    "computer_use.model": "computer_use_model",
 }
 
 # Reverse mapping: Settings field name -> "section.json_key"
@@ -138,8 +146,23 @@ _SETTINGS_SKELETON: dict[str, Any] = {
     "agent": {
         "provider": "openai",
     },
+    "openai": {
+        "model": DEFAULT_NON_CU_PROVIDER_MODELS["openai"],
+        "computer_use_model": DEFAULT_CU_PROVIDER_MODELS["openai"],
+    },
+    "openai-codex": {
+        "model": DEFAULT_NON_CU_PROVIDER_MODELS["openai-codex"],
+    },
+    "google": {
+        "model": DEFAULT_NON_CU_PROVIDER_MODELS["google"],
+        "computer_use_model": DEFAULT_CU_PROVIDER_MODELS["google"],
+    },
+    "anthropic": {
+        "model": DEFAULT_NON_CU_PROVIDER_MODELS["anthropic"],
+        "computer_use_model": DEFAULT_CU_PROVIDER_MODELS["anthropic"],
+    },
     "computer_use": {
-        "model": "gpt-5.4",
+        "provider": "google",
     },
     "execution": {
         "automation_backend": "desktop",
@@ -193,15 +216,14 @@ _PROVIDER_MODEL_FIELD: dict[str, str] = {
 }
 
 
-def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
-    """Convert the nested settings JSON structure to the flat dict ``Settings`` expects.
-
-    ``computer_use.model`` is routed to the provider-specific model field based on
-    ``computer_use.provider`` in the same dict. The ``agent_models`` section passes
-    through as-is. Unknown section keys are silently ignored (forward-compatibility).
-    """
-    flat: dict[str, Any] = {}
-
+def _flatten_mapped_sections(
+    nested: dict[str, Any],
+    flat: dict[str, Any],
+    mapping: dict[str, str],
+    *,
+    skip_existing: bool = False,
+) -> None:
+    """Apply one section->field mapping into the flat payload."""
     for section, contents in nested.items():
         if section == "agent_models":
             flat["agent_models"] = contents
@@ -212,16 +234,32 @@ def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
 
         for json_key, value in contents.items():
             mapping_key = f"{section}.{json_key}"
-            field_name = _JSON_TO_FIELD.get(mapping_key)
-            if field_name is not None:
-                flat[field_name] = value
+            field_name = mapping.get(mapping_key)
+            if field_name is None:
+                continue
+            if skip_existing and field_name in flat:
+                continue
+            flat[field_name] = value
 
-    # Route computer_use.model to the correct provider-specific field.
-    # This must run after the full dict is built so provider is resolved first.
+
+def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
+    """Convert the nested settings JSON structure to the flat dict ``Settings`` expects.
+
+    Canonical provider sections are read directly. Legacy aliases are still
+    accepted for backwards compatibility. Unknown section keys are silently
+    ignored (forward-compatibility).
+    """
+    flat: dict[str, Any] = {}
+
+    _flatten_mapped_sections(nested, flat, _JSON_TO_FIELD)
+    _flatten_mapped_sections(nested, flat, _LEGACY_JSON_TO_FIELD, skip_existing=True)
+
+    # Route the legacy computer_use.model key to the correct provider-specific
+    # field only when a canonical provider-specific value is not already set.
     if "computer_use_model" in flat:
         provider = str(flat.get("cu_provider", "openai")).strip().lower()
         target_field = _PROVIDER_MODEL_FIELD.get(provider, "computer_use_model")
-        if target_field != "computer_use_model":
+        if target_field != "computer_use_model" and target_field not in flat:
             flat[target_field] = flat.pop("computer_use_model")
 
     return flat

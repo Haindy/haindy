@@ -53,13 +53,16 @@ The most commonly changed fields:
 }
 ```
 
-`computer_use.model` is always the model for whichever `provider` is set.
+Provider models are stored per provider. Use `openai.model`, `openai-codex.model`,
+`google.model`, `anthropic.model`, plus provider-specific
+`<provider>.computer_use_model` entries for CU-capable providers.
 
 Key sections:
 
 | Section | Fields |
 |---------|--------|
-| `computer_use` | `provider` (openai\|google\|anthropic), `model`, `visual_mode`, `safety_policy` |
+| `computer_use` | `provider` (openai\|google\|anthropic), `visual_mode`, `safety_policy` |
+| `openai` / `openai-codex` / `google` / `anthropic` | `model`, and `computer_use_model` for CU-capable providers |
 | `execution` | `automation_backend` (desktop\|mobile_adb\|mobile_ios), `max_test_steps` |
 | `desktop` | `prefer_resolution`, `keyboard_layout` (us\|es) |
 | `macos` | `keyboard_layout` (us\|es), `key_delay_ms`, `clipboard_timeout_seconds` |

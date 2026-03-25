@@ -28,9 +28,27 @@ AGENT_ENV_PREFIX: dict[str, str] = {
     "test_runner": "HAINDY_TEST_RUNNER",
     "situational_agent": "HAINDY_SITUATIONAL_AGENT",
 }
+SUPPORTED_AGENT_PROVIDERS: tuple[str, ...] = (
+    "openai",
+    "openai-codex",
+    "google",
+    "anthropic",
+)
+SUPPORTED_CU_PROVIDERS: tuple[str, ...] = ("openai", "google", "anthropic")
 SUPPORTED_OPENAI_MODEL = "gpt-5.4"
 SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.4"
 LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
+DEFAULT_NON_CU_PROVIDER_MODELS: dict[str, str] = {
+    "openai": SUPPORTED_OPENAI_MODEL,
+    "openai-codex": SUPPORTED_OPENAI_MODEL,
+    "google": "gemini-3.1-pro-preview",
+    "anthropic": "claude-sonnet-4-6",
+}
+DEFAULT_CU_PROVIDER_MODELS: dict[str, str] = {
+    "openai": SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
+    "google": "gemini-2.5-computer-use-preview-10-2025",
+    "anthropic": "claude-sonnet-4-6",
+}
 
 ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
@@ -46,6 +64,7 @@ ALLOWED_CU_VISUAL_MODES: set[str] = {"keyframe_patch", "legacy_full_frame"}
 SETTINGS_ENV_VARS: dict[str, str] = {
     "openai_api_key": "HAINDY_OPENAI_API_KEY",
     "openai_model": "HAINDY_OPENAI_MODEL",
+    "openai_codex_model": "HAINDY_OPENAI_CODEX_MODEL",
     "agent_provider": "HAINDY_AGENT_PROVIDER",
     "anthropic_model": "HAINDY_ANTHROPIC_MODEL",
     "google_model": "HAINDY_GOOGLE_MODEL",
@@ -134,9 +153,6 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "debug_mode": "HAINDY_DEBUG_MODE",
     "save_agent_conversations": "HAINDY_SAVE_AGENT_CONVERSATIONS",
     "haindy_home": "HAINDY_HOME",
-    "agent_provider": "HAINDY_AGENT_PROVIDER",
-    "anthropic_model": "HAINDY_ANTHROPIC_MODEL",
-    "google_model": "HAINDY_GOOGLE_MODEL",
 }
 
 OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
@@ -150,6 +166,48 @@ LIST_FIELDS = {
     "actions_computer_tool_allowed_domains",
     "actions_computer_tool_blocked_domains",
 }
+
+_NON_CU_PROVIDER_MODEL_FIELDS: dict[str, str] = {
+    "openai": "openai_model",
+    "openai-codex": "openai_codex_model",
+    "google": "google_model",
+    "anthropic": "anthropic_model",
+}
+_CU_PROVIDER_MODEL_FIELDS: dict[str, str] = {
+    "openai": "computer_use_model",
+    "google": "google_cu_model",
+    "anthropic": "anthropic_cu_model",
+}
+
+
+def get_default_provider_model(provider: str, *, computer_use: bool = False) -> str:
+    """Return the built-in default model for a provider."""
+    normalized = str(provider or "").strip().lower()
+    defaults = (
+        DEFAULT_CU_PROVIDER_MODELS if computer_use else DEFAULT_NON_CU_PROVIDER_MODELS
+    )
+    if normalized not in defaults:
+        scope = "computer-use" if computer_use else "non-CU"
+        raise ValueError(
+            f"Unsupported {scope} provider '{provider}'. "
+            f"Supported providers are {sorted(defaults)}."
+        )
+    return defaults[normalized]
+
+
+def get_provider_model_field_name(provider: str, *, computer_use: bool = False) -> str:
+    """Return the Settings field name that stores a provider's configured model."""
+    normalized = str(provider or "").strip().lower()
+    fields = (
+        _CU_PROVIDER_MODEL_FIELDS if computer_use else _NON_CU_PROVIDER_MODEL_FIELDS
+    )
+    if normalized not in fields:
+        scope = "computer-use" if computer_use else "non-CU"
+        raise ValueError(
+            f"Unsupported {scope} provider '{provider}'. "
+            f"Supported providers are {sorted(fields)}."
+        )
+    return fields[normalized]
 
 
 class AgentModelConfig(BaseModel):
@@ -332,9 +390,16 @@ class Settings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # OpenAI Configuration
+    # Provider Configuration
     openai_api_key: str = Field(default="", description="OpenAI API key")
-    openai_model: str = Field(default="gpt-5.4", description="Default OpenAI model")
+    openai_model: str = Field(
+        default=DEFAULT_NON_CU_PROVIDER_MODELS["openai"],
+        description="Default OpenAI model for non-CU agent calls",
+    )
+    openai_codex_model: str = Field(
+        default=DEFAULT_NON_CU_PROVIDER_MODELS["openai-codex"],
+        description="Default OpenAI model when using openai-codex auth for non-CU agent calls",
+    )
     openai_max_retries: int = Field(
         default=3, ge=1, description="Maximum API retry attempts"
     )
@@ -345,43 +410,19 @@ class Settings(BaseModel):
     )
     agent_provider: str = Field(
         default="openai",
-        description="AI provider for non-CU agent calls (openai, anthropic, or google)",
+        description="AI provider for non-CU agent calls (openai, openai-codex, anthropic, or google)",
     )
     anthropic_model: str = Field(
-        default="claude-sonnet-4-6",
+        default=DEFAULT_NON_CU_PROVIDER_MODELS["anthropic"],
         description="Anthropic model for non-CU agent calls",
     )
     google_model: str = Field(
-        default="gemini-2.5-pro-preview-05-06",
+        default=DEFAULT_NON_CU_PROVIDER_MODELS["google"],
         description="Google model for non-CU agent calls",
     )
     agent_models: dict[str, AgentModelConfig] = Field(
         default_factory=dict,
         description="Per-agent model configuration",
-    )
-    agent_provider: str = Field(
-        default="openai",
-        description="Provider for non-CU model calls (openai, anthropic, google)",
-    )
-    anthropic_model: str = Field(
-        default="claude-sonnet-4-6",
-        description="Anthropic model for non-CU calls",
-    )
-    google_model: str = Field(
-        default="gemini-3.1-pro-preview",
-        description="Google model for non-CU calls",
-    )
-    agent_provider: str = Field(
-        default="openai",
-        description="Provider for non-CU model calls",
-    )
-    anthropic_model: str = Field(
-        default="claude-sonnet-4-6",
-        description="Anthropic model for non-CU calls",
-    )
-    google_model: str = Field(
-        default="gemini-3.1-pro-preview",
-        description="Google model for non-CU calls",
     )
 
     # Desktop Configuration
@@ -565,9 +606,19 @@ class Settings(BaseModel):
             )
         return value
 
+    @field_validator("openai_codex_model")
+    @classmethod
+    def validate_openai_codex_model(cls, value: str) -> str:
+        if value != SUPPORTED_OPENAI_MODEL:
+            raise ValueError(
+                f"Unsupported OpenAI model '{value}' for openai_codex_model. "
+                f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
+            )
+        return value
+
     # Computer Use Configuration
     computer_use_model: str = Field(
-        default=SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
+        default=DEFAULT_CU_PROVIDER_MODELS["openai"],
         description="OpenAI model for computer-use execution",
     )
     cu_provider: str = Field(
@@ -575,7 +626,7 @@ class Settings(BaseModel):
         description="Computer-use provider to run actions (openai, google, or anthropic)",
     )
     google_cu_model: str = Field(
-        default="gemini-2.5-computer-use-preview-10-2025",
+        default=DEFAULT_CU_PROVIDER_MODELS["google"],
         description="Google Gemini computer-use model name",
     )
     anthropic_api_key: str = Field(
@@ -583,7 +634,7 @@ class Settings(BaseModel):
         description="Anthropic API key for Claude computer-use",
     )
     anthropic_cu_model: str = Field(
-        default="claude-sonnet-4-6",
+        default=DEFAULT_CU_PROVIDER_MODELS["anthropic"],
         description="Anthropic Claude computer-use model name",
     )
     anthropic_cu_beta: str = Field(
@@ -792,10 +843,11 @@ class Settings(BaseModel):
     @classmethod
     def normalize_agent_provider(cls, value: str) -> str:
         normalized = (value or "").strip().lower()
-        if normalized not in {"openai", "anthropic", "google"}:
+        if normalized not in SUPPORTED_AGENT_PROVIDERS:
             raise ValueError(
                 f"Unsupported agent_provider '{value}'. "
-                "Supported providers are 'openai', 'anthropic', and 'google'."
+                "Supported providers are 'openai', 'openai-codex', "
+                "'anthropic', and 'google'."
             )
         return normalized
 
@@ -803,7 +855,7 @@ class Settings(BaseModel):
     @classmethod
     def normalize_cu_provider(cls, value: str) -> str:
         normalized = (value or "").strip().lower()
-        if normalized not in {"openai", "google", "anthropic"}:
+        if normalized not in SUPPORTED_CU_PROVIDERS:
             raise ValueError(
                 "Unsupported cu_provider "
                 f"'{value}'. Supported providers are 'openai', 'google', and "
@@ -940,6 +992,11 @@ class Settings(BaseModel):
             temperature=0.7,
             reasoning_level="medium",
         )
+
+    def get_provider_model(self, provider: str, *, computer_use: bool = False) -> str:
+        """Return the configured model for a provider."""
+        field_name = get_provider_model_field_name(provider, computer_use=computer_use)
+        return str(getattr(self, field_name))
 
 
 class ConfigManager(ConfigProvider):

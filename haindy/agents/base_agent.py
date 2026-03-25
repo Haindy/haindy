@@ -1,7 +1,7 @@
 """Base implementation for AI agents in the HAINDY framework."""
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from haindy.config.settings import get_settings
 from haindy.core.interfaces import Agent
@@ -32,7 +32,11 @@ class BaseAgent(Agent):
             reasoning_level: Reasoning effort level
             modalities: Set of modalities to use
         """
-        effective_model = model if model is not None else "gpt-5.4"
+        if model is not None:
+            effective_model = model
+        else:
+            settings = get_settings()
+            effective_model = settings.get_provider_model(settings.agent_provider)
         super().__init__(name, effective_model)
         self.logger = logging.getLogger(f"agent.{name}")
         self.system_prompt = system_prompt or self._get_default_system_prompt()
@@ -40,6 +44,8 @@ class BaseAgent(Agent):
         self.reasoning_level = reasoning_level
         self.modalities = modalities or {"text"}
         self._client: Any | None = None
+        self._client_provider: str | None = None
+        self._model_override = model is not None
 
     def _get_default_system_prompt(self) -> str:
         """Get default system prompt for the agent."""
@@ -52,23 +58,27 @@ class BaseAgent(Agent):
     @property
     def client(self) -> Any:
         """Lazy-load the appropriate LLM client based on agent_provider setting."""
-        if self._client is None:
-            settings = get_settings()
-            provider = str(settings.agent_provider).strip().lower()
+        settings = get_settings()
+        provider = str(settings.agent_provider).strip().lower()
+
+        if self._client is None or self._client_provider != provider:
+            if not self._model_override:
+                self.model = settings.get_provider_model(provider)
             if provider == "anthropic":
                 from haindy.models.anthropic_client import AnthropicClient
 
-                self._client = AnthropicClient()
+                self._client = AnthropicClient(model=self.model)
             elif provider == "google":
                 from haindy.models.google_client import GoogleClient
 
-                self._client = GoogleClient()
+                self._client = GoogleClient(model=self.model)
             else:
                 self._client = OpenAIClient(
                     model=self.model,
                     reasoning_level=self.reasoning_level,
                     modalities=self.modalities,
                 )
+            self._client_provider = provider
         return self._client
 
     async def process(self, message: AgentMessage) -> AgentMessage | None:
@@ -168,6 +178,7 @@ class BaseAgent(Agent):
         self,
         messages: list[dict[str, Any]],
         temperature: float | None = None,
+        max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         reasoning_level: str | None = None,
         modalities: set[str] | None = None,
@@ -187,9 +198,10 @@ class BaseAgent(Agent):
         Returns:
             API response
         """
-        return await self.client.call(
+        response = await self.client.call(
             messages=messages,
             temperature=temperature or self.temperature,
+            max_tokens=max_tokens,
             system_prompt=self.system_prompt,
             response_format=response_format,
             reasoning_level=reasoning_level or self.reasoning_level,
@@ -197,12 +209,13 @@ class BaseAgent(Agent):
             stream=stream,
             stream_observer=stream_observer,
         )
+        return cast(dict[str, Any], response)
 
     def update_reasoning_level(self, level: str) -> None:
         """Update reasoning level for future calls."""
         self.reasoning_level = level
-        if self._client:
-            self._client.reasoning_level = level
+        self._client = None
+        self._client_provider = None
 
     def build_messages(
         self,

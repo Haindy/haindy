@@ -16,14 +16,25 @@ from haindy.models.openai_client import OpenAIClient
 def _make_settings(
     provider: str = "openai",
     openai_model: str = "gpt-5.4",
+    openai_codex_model: str = "gpt-5.4",
     anthropic_model: str = "claude-sonnet-4-6",
-    google_model: str = "gemini-2.5-pro-preview-05-06",
+    google_model: str = "gemini-3.1-pro-preview",
 ) -> MagicMock:
     s = MagicMock()
     s.agent_provider = provider
     s.openai_model = openai_model
+    s.openai_codex_model = openai_codex_model
     s.anthropic_model = anthropic_model
     s.google_model = google_model
+    provider_models = {
+        "openai": openai_model,
+        "openai-codex": openai_codex_model,
+        "anthropic": anthropic_model,
+        "google": google_model,
+    }
+    s.get_provider_model.side_effect = lambda provider_name, computer_use=False: (
+        provider_models[provider_name]
+    )
     return s
 
 
@@ -50,7 +61,7 @@ class TestBaseAgent:
         agent = BaseAgent(name="TestAgent")
 
         assert agent.name == "TestAgent"
-        assert agent.model is None
+        assert agent.model == "gpt-5.4"
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
@@ -88,6 +99,15 @@ class TestBaseAgent:
             agent = BaseAgent(name="TestAgent")
             assert isinstance(agent.client, GoogleClient)
 
+    def test_client_dispatches_openai_codex(self):
+        """agent_provider='openai-codex' should still produce an OpenAIClient."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai-codex"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            assert isinstance(agent.client, OpenAIClient)
+
     def test_client_uses_model_override(self):
         """Explicit model passed to BaseAgent should override settings default."""
         with patch(
@@ -103,7 +123,9 @@ class TestBaseAgent:
         """When model=None, the provider's settings model is used."""
         with patch(
             "haindy.agents.base_agent.get_settings",
-            return_value=_make_settings("anthropic", anthropic_model="claude-haiku-3-5"),
+            return_value=_make_settings(
+                "anthropic", anthropic_model="claude-haiku-3-5"
+            ),
         ):
             agent = BaseAgent(name="TestAgent")
             client = agent.client
@@ -126,7 +148,9 @@ class TestBaseAgent:
         openai_settings = _make_settings("openai")
         anthropic_settings = _make_settings("anthropic")
 
-        with patch("haindy.agents.base_agent.get_settings", return_value=openai_settings):
+        with patch(
+            "haindy.agents.base_agent.get_settings", return_value=openai_settings
+        ):
             agent = BaseAgent(name="TestAgent")
             first = agent.client
             assert isinstance(first, OpenAIClient)
