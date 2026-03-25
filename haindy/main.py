@@ -16,7 +16,11 @@ from rich.table import Table
 
 from haindy.agents import ScopeTriageAgent, SituationalAgent, TestPlannerAgent
 from haindy.auth import OpenAIAuthManager
-from haindy.cli.auth_commands import handle_auth_clear, handle_auth_login, handle_auth_status
+from haindy.cli.auth_commands import (
+    handle_auth_clear,
+    handle_auth_login,
+    handle_auth_status,
+)
 from haindy.cli.config_commands import handle_config_migrate, handle_config_show
 from haindy.config.settings import Settings, get_settings
 from haindy.config.settings_file import ensure_settings_skeleton
@@ -65,6 +69,9 @@ Examples:
   {cli_name} auth clear openai
   {cli_name} config show
   {cli_name} config migrate /path/to/.env
+  {cli_name} provider list
+  {cli_name} provider set anthropic
+  {cli_name} provider set-computer-use google
   {cli_name} doctor
   {cli_name} setup
 
@@ -79,7 +86,9 @@ Fallback:
 
     subparsers.add_parser("doctor", help="Check system dependencies and configuration")
 
-    setup_parser = subparsers.add_parser("setup", help="Run the first-time setup wizard")
+    setup_parser = subparsers.add_parser(
+        "setup", help="Run the first-time setup wizard"
+    )
     setup_parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -90,13 +99,17 @@ Fallback:
 
     auth_parser = subparsers.add_parser("auth", help="Manage API credentials")
     auth_sub = auth_parser.add_subparsers(dest="auth_command", metavar="COMMAND")
-    auth_login_parser = auth_sub.add_parser("login", help="Store credentials for a provider")
+    auth_login_parser = auth_sub.add_parser(
+        "login", help="Store credentials for a provider"
+    )
     auth_login_parser.add_argument(
         "provider",
         choices=["openai", "google", "anthropic", "openai-codex"],
         help="Provider to configure",
     )
-    auth_sub.add_parser("status", help="Show which providers have credentials configured")
+    auth_sub.add_parser(
+        "status", help="Show which providers have credentials configured"
+    )
     auth_clear_parser = auth_sub.add_parser(
         "clear", help="Remove stored credentials for a provider"
     )
@@ -108,7 +121,9 @@ Fallback:
 
     config_parser = subparsers.add_parser("config", help="Manage configuration")
     config_sub = config_parser.add_subparsers(dest="config_command", metavar="COMMAND")
-    config_sub.add_parser("show", help="Show effective configuration (secrets redacted)")
+    config_sub.add_parser(
+        "show", help="Show effective configuration (secrets redacted)"
+    )
     config_migrate_parser = config_sub.add_parser(
         "migrate", help="Migrate a .env file to settings.json and keychain"
     )
@@ -118,6 +133,28 @@ Fallback:
         default=".env",
         metavar="DOTENV_PATH",
         help="Path to .env file (default: .env)",
+    )
+
+    provider_parser = subparsers.add_parser(
+        "provider", help="Manage AI provider settings"
+    )
+    provider_sub = provider_parser.add_subparsers(
+        dest="provider_command", metavar="COMMAND"
+    )
+    provider_sub.add_parser(
+        "list", help="List available providers and current settings"
+    )
+    provider_set_parser = provider_sub.add_parser(
+        "set", help="Set provider for all calls (CU and non-CU)"
+    )
+    provider_set_parser.add_argument(
+        "provider", choices=["openai", "anthropic", "google", "openai-codex"]
+    )
+    provider_set_cu_parser = provider_sub.add_parser(
+        "set-computer-use", help="Set provider for computer use only"
+    )
+    provider_set_cu_parser.add_argument(
+        "provider", choices=["openai", "anthropic", "google"]
     )
 
     run_parser = subparsers.add_parser("run", help="Run a test")
@@ -637,32 +674,67 @@ def _render_plan_table(test_plan: TestPlan) -> None:
 
 
 async def test_api_connection() -> int:
-    """Test OpenAI API connection."""
-    console.print("\n[bold cyan]Testing OpenAI API Connection[/bold cyan]")
-    try:
-        from haindy.models.openai_client import OpenAIClient
+    """Test the active AI provider API connection."""
+    from haindy.config.settings import get_settings
 
-        auth_status = OpenAIAuthManager().get_status()
-        client = OpenAIClient()
-        response = await client.call(
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Say 'API test successful' and nothing else.",
-                }
-            ],
-        )
-        if "API test successful" in response["content"]:
-            console.print("[green]✓ OpenAI API connection successful![/green]")
-            console.print(f"[dim]Model: {response['model']}[/dim]")
-            console.print(
-                f"[dim]Auth mode: {auth_status.active_mode.replace('_', ' ')}[/dim]"
+    settings = get_settings()
+    provider = str(settings.agent_provider or "openai").strip().lower()
+    console.print(f"\n[bold cyan]Testing {provider} API Connection[/bold cyan]")
+
+    try:
+        if provider == "anthropic":
+            try:
+                from haindy.models.anthropic_client import AnthropicClient
+
+                client: object = AnthropicClient()
+            except ImportError:
+                console.print("[red]AnthropicClient not available in this build.[/red]")
+                return 1
+            response = await client.call(  # type: ignore[union-attr]
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Say 'API test successful' and nothing else.",
+                    }
+                ],
             )
+        elif provider == "google":
+            try:
+                from haindy.models.google_client import GoogleClient
+
+                client = GoogleClient()
+            except ImportError:
+                console.print("[red]GoogleClient not available in this build.[/red]")
+                return 1
+            response = await client.call(  # type: ignore[union-attr]
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Say 'API test successful' and nothing else.",
+                    }
+                ],
+            )
+        else:
+            from haindy.models.openai_client import OpenAIClient
+
+            client = OpenAIClient()
+            response = await client.call(  # type: ignore[union-attr]
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Say 'API test successful' and nothing else.",
+                    }
+                ],
+            )
+
+        if "API test successful" in str(response.get("content", "")):  # type: ignore[union-attr]
+            console.print(f"[green]+ {provider} API connection successful![/green]")
+            console.print(f"[dim]Model: {response.get('model', 'unknown')}[/dim]")  # type: ignore[union-attr]
             return 0
-        console.print("[red]✗ Unexpected API response[/red]")
+        console.print("[red]- Unexpected API response[/red]")
         return 1
     except Exception as exc:
-        console.print(f"[red]✗ API test failed: {exc}[/red]")
+        console.print(f"[red]- API test failed: {exc}[/red]")
         return 1
 
 
@@ -700,15 +772,39 @@ def _validate_auth_for_run(settings: Settings) -> list[str]:
 
     auth_manager = OpenAIAuthManager()
     codex_status = auth_manager.get_status()
-    has_noncv = bool(settings.openai_api_key) or (
-        codex_status.oauth_connected and not codex_status.oauth_expired
-    )
-    if not has_noncv:
-        issues.append(
-            "No OpenAI credentials for non-CU calls (planning, analysis). "
-            "Run: haindy auth login openai  or  haindy auth login openai-codex"
-        )
 
+    # Check non-CU (planning) credentials
+    agent_prov = str(settings.agent_provider or "openai").strip().lower()
+    if agent_prov == "openai":
+        has_noncv = bool(settings.openai_api_key) or (
+            codex_status.oauth_connected and not codex_status.oauth_expired
+        )
+        if not has_noncv:
+            issues.append(
+                "No credentials for non-CU calls (agent_provider=openai). "
+                "Run: haindy auth login openai  or  haindy auth login openai-codex"
+            )
+    elif agent_prov == "anthropic":
+        if not settings.anthropic_api_key:
+            issues.append(
+                "No Anthropic API key for non-CU calls (agent_provider=anthropic). "
+                "Run: haindy auth login anthropic"
+            )
+    elif agent_prov in ("google", "vertex"):
+        if not settings.vertex_api_key:
+            issues.append(
+                "No Google Vertex API key for non-CU calls (agent_provider=google). "
+                "Run: haindy auth login google"
+            )
+    elif agent_prov == "openai-codex":
+        has_codex = codex_status.oauth_connected and not codex_status.oauth_expired
+        if not has_codex:
+            issues.append(
+                "No active Codex OAuth session for non-CU calls (agent_provider=openai-codex). "
+                "Run: haindy auth login openai-codex"
+            )
+
+    # Check CU credentials
     provider = str(settings.cu_provider).strip().lower()
     _cu_key_field = {"google": "vertex_api_key", "anthropic": "anthropic_api_key"}.get(
         provider, "openai_api_key"
@@ -784,7 +880,9 @@ async def async_main(args: list[str] | None = None) -> int:
     if command == "auth":
         auth_command = getattr(parsed_args, "auth_command", None)
         if not auth_command:
-            console.print("[red]Usage: haindy auth <login|status|clear> [provider][/red]")
+            console.print(
+                "[red]Usage: haindy auth <login|status|clear> [provider][/red]"
+            )
             return 1
         if auth_command == "status":
             return await handle_auth_status()
@@ -802,6 +900,26 @@ async def async_main(args: list[str] | None = None) -> int:
             return await handle_config_show()
         if config_command == "migrate":
             return await handle_config_migrate(Path(parsed_args.dotenv_path))
+
+    if command == "provider":
+        from haindy.cli.provider_commands import (
+            handle_provider_list,
+            handle_provider_set,
+            handle_provider_set_computer_use,
+        )
+
+        provider_command = getattr(parsed_args, "provider_command", None)
+        if not provider_command:
+            console.print(
+                "[red]Usage: haindy provider <list|set|set-computer-use>[/red]"
+            )
+            return 1
+        if provider_command == "list":
+            return await handle_provider_list()
+        if provider_command == "set":
+            return await handle_provider_set(parsed_args.provider)
+        if provider_command == "set-computer-use":
+            return await handle_provider_set_computer_use(parsed_args.provider)
 
     if command == "run":
         if not _is_setup_complete():
