@@ -64,7 +64,7 @@ class TestRunnerInterpreter:
         trace: RunTraceWriter | None,
         model_logger: Any,
         model: str,
-        call_openai: Callable[..., Awaitable[dict[str, Any]]],
+        call_model: Callable[..., Awaitable[dict[str, Any]]],
     ) -> None:
         self._automation_driver = automation_driver
         self._get_interpretation_screenshot = get_interpretation_screenshot
@@ -72,7 +72,7 @@ class TestRunnerInterpreter:
         self._trace = trace
         self._model_logger = model_logger
         self._model = model
-        self._call_openai = call_openai
+        self._call_openai = call_model
 
     async def interpret_step(
         self,

@@ -55,7 +55,7 @@ class ScopeTriageAgent(BaseAgent):
             },
         ]
 
-        response = await self.call_openai(
+        response = await self.call_model(
             messages=messages,
             response_format={"type": "json_object"},
             temperature=self.temperature,

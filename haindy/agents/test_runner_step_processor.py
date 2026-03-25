@@ -563,7 +563,7 @@ class TestRunnerStepProcessor:
             trace=runner._trace,
             model_logger=runner._model_logger,
             model=runner.model,
-            call_openai=runner.call_openai,
+            call_model=runner.call_model,
         )
         interpretation = await runner._interpreter.interpret_step(
             StepInterpretationRequest(

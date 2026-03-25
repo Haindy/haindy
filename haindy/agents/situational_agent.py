@@ -395,7 +395,7 @@ class SituationalAgent(BaseAgent):
         error_message: str | None = None
         logged_exception = False
         try:
-            response = await self.call_openai(
+            response = await self.call_model(
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.1,

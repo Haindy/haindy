@@ -21,7 +21,7 @@ from haindy.monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
-CallOpenAIFunc = Callable[..., Awaitable[dict[str, Any]]]
+CallModelFunc = Callable[..., Awaitable[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -53,11 +53,11 @@ class TestRunnerBugReportBuilder:
         self,
         *,
         model: str,
-        call_openai: CallOpenAIFunc,
+        call_model: CallModelFunc,
         model_logger: Any,
     ) -> None:
         self._model = model
-        self._call_openai = call_openai
+        self._call_openai = call_model
         self._model_logger = model_logger
 
     async def build_bug_report(

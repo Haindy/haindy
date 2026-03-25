@@ -40,13 +40,15 @@ ALLOWED_REASONING_LEVELS: set[str] = {
     "high",
     "xhigh",
 }
-ALLOWED_AGENT_PROVIDERS: set[str] = {"openai", "google", "anthropic"}
 ALLOWED_OPENAI_CU_TRANSPORTS: set[str] = {"responses_websocket", "responses_http"}
 ALLOWED_CU_VISUAL_MODES: set[str] = {"keyframe_patch", "legacy_full_frame"}
 
 SETTINGS_ENV_VARS: dict[str, str] = {
     "openai_api_key": "HAINDY_OPENAI_API_KEY",
     "openai_model": "HAINDY_OPENAI_MODEL",
+    "agent_provider": "HAINDY_AGENT_PROVIDER",
+    "anthropic_model": "HAINDY_ANTHROPIC_MODEL",
+    "google_model": "HAINDY_GOOGLE_MODEL",
     "openai_max_retries": "HAINDY_OPENAI_MAX_RETRIES",
     "openai_request_timeout_seconds": "HAINDY_OPENAI_REQUEST_TIMEOUT_SECONDS",
     "automation_backend": "HAINDY_AUTOMATION_BACKEND",
@@ -132,9 +134,6 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "debug_mode": "HAINDY_DEBUG_MODE",
     "save_agent_conversations": "HAINDY_SAVE_AGENT_CONVERSATIONS",
     "haindy_home": "HAINDY_HOME",
-    "agent_provider": "HAINDY_AGENT_PROVIDER",
-    "anthropic_model": "HAINDY_ANTHROPIC_MODEL",
-    "google_model": "HAINDY_GOOGLE_MODEL",
 }
 
 OPTIONAL_STRING_FIELDS = {"desktop_display", "log_file"}
@@ -177,10 +176,22 @@ class AgentModelConfig(BaseModel):
 
 
 DEFAULT_AGENT_MODELS: dict[str, AgentModelConfig] = {
-    "scope_triage": AgentModelConfig(temperature=0.15, reasoning_level="high"),
-    "test_planner": AgentModelConfig(temperature=0.35, reasoning_level="high"),
-    "test_runner": AgentModelConfig(temperature=0.55, reasoning_level="medium"),
-    "situational_agent": AgentModelConfig(temperature=0.1, reasoning_level="high"),
+    "scope_triage": AgentModelConfig(
+        temperature=0.15,
+        reasoning_level="high",
+    ),
+    "test_planner": AgentModelConfig(
+        temperature=0.35,
+        reasoning_level="high",
+    ),
+    "test_runner": AgentModelConfig(
+        temperature=0.55,
+        reasoning_level="medium",
+    ),
+    "situational_agent": AgentModelConfig(
+        temperature=0.1,
+        reasoning_level="high",
+    ),
 }
 
 
@@ -329,21 +340,21 @@ class Settings(BaseModel):
         ge=60,
         description="Request timeout for OpenAI API calls in seconds",
     )
-    agent_models: dict[str, AgentModelConfig] = Field(
-        default_factory=dict,
-        description="Per-agent model configuration",
-    )
     agent_provider: str = Field(
         default="openai",
-        description="Provider for non-CU model calls (openai, anthropic, google)",
+        description="AI provider for non-CU agent calls (openai, anthropic, or google)",
     )
     anthropic_model: str = Field(
         default="claude-sonnet-4-6",
-        description="Anthropic model for non-CU calls",
+        description="Anthropic model for non-CU agent calls",
     )
     google_model: str = Field(
-        default="gemini-3.1-pro-preview",
-        description="Google model for non-CU calls",
+        default="gemini-2.5-pro-preview-05-06",
+        description="Google model for non-CU agent calls",
+    )
+    agent_models: dict[str, AgentModelConfig] = Field(
+        default_factory=dict,
+        description="Per-agent model configuration",
     )
 
     # Desktop Configuration
@@ -750,26 +761,26 @@ class Settings(BaseModel):
             return value.expanduser()
         return Path(str(value or "~/.haindy")).expanduser()
 
-    @field_validator("cu_provider")
-    @classmethod
-    def normalize_cu_provider(cls, value: str) -> str:
-        normalized = (value or "").strip().lower()
-        if normalized not in ALLOWED_AGENT_PROVIDERS:
-            raise ValueError(
-                "Unsupported cu_provider "
-                f"'{value}'. Supported providers are 'openai', 'google', and "
-                "'anthropic'."
-            )
-        return normalized
-
     @field_validator("agent_provider")
     @classmethod
     def normalize_agent_provider(cls, value: str) -> str:
         normalized = (value or "").strip().lower()
-        if normalized not in ALLOWED_AGENT_PROVIDERS:
+        if normalized not in {"openai", "anthropic", "google"}:
             raise ValueError(
                 f"Unsupported agent_provider '{value}'. "
-                "Supported providers are 'openai', 'google', and 'anthropic'."
+                "Supported providers are 'openai', 'anthropic', and 'google'."
+            )
+        return normalized
+
+    @field_validator("cu_provider")
+    @classmethod
+    def normalize_cu_provider(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"openai", "google", "anthropic"}:
+            raise ValueError(
+                "Unsupported cu_provider "
+                f"'{value}'. Supported providers are 'openai', 'google', and "
+                "'anthropic'."
             )
         return normalized
 
@@ -899,7 +910,6 @@ class Settings(BaseModel):
             return self.agent_models[agent_name]
 
         return AgentModelConfig(
-            model=self.openai_model,
             temperature=0.7,
             reasoning_level="medium",
         )
