@@ -29,6 +29,10 @@ _JSON_TO_FIELD: dict[str, str] = {
     "openai.model": "openai_model",
     "openai.max_retries": "openai_max_retries",
     "openai.request_timeout_seconds": "openai_request_timeout_seconds",
+    # agent section
+    "agent.provider": "agent_provider",
+    "agent.anthropic_model": "anthropic_model",
+    "agent.google_model": "google_model",
     # computer_use section
     "computer_use.provider": "cu_provider",
     "computer_use.model": "computer_use_model",

@@ -33,7 +33,7 @@ class TestScopeTriageAgent:
             "blocking_questions": [],
         }
 
-        agent.call_openai = AsyncMock(
+        agent.call_model = AsyncMock(
             return_value={"content": json.dumps(mock_payload)}
         )
 
@@ -57,7 +57,7 @@ class TestScopeTriageAgent:
             "blocking_questions": "Need staging URL before executing.",
         }
 
-        agent.call_openai = AsyncMock(
+        agent.call_model = AsyncMock(
             return_value={"content": json.dumps(mock_payload)}
         )
 

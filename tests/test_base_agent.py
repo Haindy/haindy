@@ -1,13 +1,30 @@
-"""
-Unit tests for base agent implementation.
-"""
+"""Unit tests for base agent implementation."""
 
-from unittest.mock import AsyncMock, patch
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from haindy.agents.base_agent import BaseAgent
 from haindy.core.types import AgentMessage, ConfidenceLevel
+from haindy.models.anthropic_client import AnthropicClient
+from haindy.models.google_client import GoogleClient
+from haindy.models.openai_client import OpenAIClient
+
+
+def _make_settings(
+    provider: str = "openai",
+    openai_model: str = "gpt-5.4",
+    anthropic_model: str = "claude-sonnet-4-6",
+    google_model: str = "gemini-2.5-pro-preview-05-06",
+) -> MagicMock:
+    s = MagicMock()
+    s.agent_provider = provider
+    s.openai_model = openai_model
+    s.anthropic_model = anthropic_model
+    s.google_model = google_model
+    return s
 
 
 class TestBaseAgent:
@@ -33,40 +50,161 @@ class TestBaseAgent:
         agent = BaseAgent(name="TestAgent")
 
         assert agent.name == "TestAgent"
-        assert agent.model == "gpt-5.4"
+        assert agent.model is None
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
         assert agent.reasoning_level == "medium"
         assert agent.modalities == {"text"}
 
-    @patch("haindy.agents.base_agent.OpenAIClient")
-    def test_client_lazy_loading(self, mock_client_class):
-        """Test lazy loading of OpenAI client."""
-        agent = BaseAgent(name="TestAgent")
+    # -----------------------------------------------------------------------
+    # Provider dispatch
+    # -----------------------------------------------------------------------
 
-        # Client should not be created yet
-        mock_client_class.assert_not_called()
+    def test_client_dispatches_openai_by_default(self):
+        """Default provider should produce an OpenAIClient."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            assert isinstance(agent.client, OpenAIClient)
 
-        # Access client property
-        client = agent.client
+    def test_client_dispatches_anthropic(self):
+        """agent_provider='anthropic' should produce an AnthropicClient."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("anthropic"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            assert isinstance(agent.client, AnthropicClient)
 
-        # Now client should be created
-        mock_client_class.assert_called_once_with(
-            model="gpt-5.4",
+    def test_client_dispatches_google(self):
+        """agent_provider='google' should produce a GoogleClient."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("google"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            assert isinstance(agent.client, GoogleClient)
+
+    def test_client_uses_model_override(self):
+        """Explicit model passed to BaseAgent should override settings default."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("anthropic"),
+        ):
+            agent = BaseAgent(name="TestAgent", model="claude-opus-4-5")
+            client = agent.client
+            assert isinstance(client, AnthropicClient)
+            assert client.model == "claude-opus-4-5"
+
+    def test_client_uses_settings_model_when_none(self):
+        """When model=None, the provider's settings model is used."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("anthropic", anthropic_model="claude-haiku-3-5"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            client = agent.client
+            assert isinstance(client, AnthropicClient)
+            assert client.model == "claude-haiku-3-5"
+
+    def test_client_is_cached(self):
+        """The same client instance should be returned on repeated accesses."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            c1 = agent.client
+            c2 = agent.client
+            assert c1 is c2
+
+    def test_client_is_recreated_when_provider_changes(self):
+        """Changing provider setting should produce a new client."""
+        openai_settings = _make_settings("openai")
+        anthropic_settings = _make_settings("anthropic")
+
+        with patch("haindy.agents.base_agent.get_settings", return_value=openai_settings):
+            agent = BaseAgent(name="TestAgent")
+            first = agent.client
+            assert isinstance(first, OpenAIClient)
+
+        with patch(
+            "haindy.agents.base_agent.get_settings", return_value=anthropic_settings
+        ):
+            second = agent.client
+            assert isinstance(second, AnthropicClient)
+            assert second is not first
+
+    # -----------------------------------------------------------------------
+    # call_model
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_call_model(self):
+        """call_model should delegate to the client with correct arguments."""
+        agent = BaseAgent(name="TestAgent", temperature=0.8)
+        mock_client = AsyncMock()
+        mock_client.call.return_value = {"result": "test"}
+        agent._client = mock_client
+        agent._client_provider = "openai"
+
+        messages = [{"role": "user", "content": "Hello"}]
+        result = await agent.call_model(messages)
+
+        assert result == {"result": "test"}
+        mock_client.call.assert_called_once_with(
+            messages=messages,
+            temperature=0.8,
+            max_tokens=None,
+            system_prompt=agent.system_prompt,
+            response_format=None,
             reasoning_level="medium",
             modalities={"text"},
+            stream=False,
+            stream_observer=None,
         )
-        assert client == mock_client_class.return_value
 
-        # Second access should return same instance
-        client2 = agent.client
-        assert client2 == client
-        mock_client_class.assert_called_once()  # Still only called once
+    @pytest.mark.asyncio
+    async def test_call_model_with_overrides(self):
+        """call_model should honour per-call temperature and format overrides."""
+        agent = BaseAgent(name="TestAgent", temperature=0.8)
+        mock_client = AsyncMock()
+        mock_client.call.return_value = {"result": "test"}
+        agent._client = mock_client
+        agent._client_provider = "openai"
+
+        messages = [{"role": "user", "content": "Hello"}]
+        response_format = {"type": "json_object"}
+
+        result = await agent.call_model(
+            messages,
+            temperature=0.3,
+            response_format=response_format,
+        )
+
+        assert result == {"result": "test"}
+        mock_client.call.assert_called_once_with(
+            messages=messages,
+            temperature=0.3,
+            max_tokens=None,
+            system_prompt=agent.system_prompt,
+            response_format=response_format,
+            reasoning_level="medium",
+            modalities={"text"},
+            stream=False,
+            stream_observer=None,
+        )
+
+    # -----------------------------------------------------------------------
+    # process / message handling
+    # -----------------------------------------------------------------------
 
     @pytest.mark.asyncio
     async def test_process_message_no_response_required(self):
-        """Test processing message that doesn't require response."""
+        """Test processing message that does not require a response."""
         agent = BaseAgent(name="TestAgent")
 
         message = AgentMessage(
@@ -85,7 +223,7 @@ class TestBaseAgent:
 
     @pytest.mark.asyncio
     async def test_process_message_with_response(self):
-        """Test processing message that requires response."""
+        """Test processing message that requires a response."""
         agent = BaseAgent(name="TestAgent")
 
         message = AgentMessage(
@@ -108,8 +246,11 @@ class TestBaseAgent:
             assert result.content == {"answer": "response"}
             assert result.correlation_id == message.message_id
 
-            # Both messages should be in history
             assert len(agent._message_history) == 2
+
+    # -----------------------------------------------------------------------
+    # Confidence helpers
+    # -----------------------------------------------------------------------
 
     def test_calculate_confidence_level(self):
         """Test confidence level calculation."""
@@ -146,63 +287,9 @@ class TestBaseAgent:
         assert agent.should_refine(ConfidenceLevel.LOW) is False
         assert agent.should_refine(ConfidenceLevel.VERY_LOW) is False
 
-    @pytest.mark.asyncio
-    async def test_call_openai(self):
-        """Test OpenAI API call."""
-        agent = BaseAgent(name="TestAgent", temperature=0.8)
-
-        mock_client = AsyncMock()
-        mock_client.call.return_value = {"result": "test"}
-
-        # Mock the _client attribute directly
-        agent._client = mock_client
-
-        messages = [{"role": "user", "content": "Hello"}]
-        result = await agent.call_openai(messages)
-
-        assert result == {"result": "test"}
-        mock_client.call.assert_called_once_with(
-            messages=messages,
-            temperature=0.8,
-            system_prompt=agent.system_prompt,
-            response_format=None,
-            reasoning_level="medium",
-            modalities={"text"},
-            stream=False,
-            stream_observer=None,
-        )
-
-    @pytest.mark.asyncio
-    async def test_call_openai_with_overrides(self):
-        """Test OpenAI API call with parameter overrides."""
-        agent = BaseAgent(name="TestAgent", temperature=0.8)
-
-        mock_client = AsyncMock()
-        mock_client.call.return_value = {"result": "test"}
-
-        # Mock the _client attribute directly
-        agent._client = mock_client
-
-        messages = [{"role": "user", "content": "Hello"}]
-        response_format = {"type": "json_object"}
-
-        result = await agent.call_openai(
-            messages,
-            temperature=0.3,
-            response_format=response_format,
-        )
-
-        assert result == {"result": "test"}
-        mock_client.call.assert_called_once_with(
-            messages=messages,
-            temperature=0.3,  # Override temperature
-            system_prompt=agent.system_prompt,
-            response_format=response_format,
-            reasoning_level="medium",
-            modalities={"text"},
-            stream=False,
-            stream_observer=None,
-        )
+    # -----------------------------------------------------------------------
+    # build_messages
+    # -----------------------------------------------------------------------
 
     def test_build_messages_simple(self):
         """Test building simple message list."""
@@ -218,7 +305,6 @@ class TestBaseAgent:
         """Test building messages with history."""
         agent = BaseAgent(name="TestAgent")
 
-        # Add some history
         agent.add_to_history(
             AgentMessage(
                 from_agent="OtherAgent",
@@ -245,14 +331,35 @@ class TestBaseAgent:
         assert "Previous answer" in str(messages[1]["content"])
         assert messages[2] == {"role": "user", "content": "New question"}
 
+    # -----------------------------------------------------------------------
+    # update_reasoning_level
+    # -----------------------------------------------------------------------
+
+    def test_update_reasoning_level_invalidates_client_cache(self):
+        """Updating reasoning level should clear the cached client."""
+        with patch(
+            "haindy.agents.base_agent.get_settings",
+            return_value=_make_settings("openai"),
+        ):
+            agent = BaseAgent(name="TestAgent")
+            _ = agent.client  # populate cache
+
+        assert agent._client is not None
+        agent.update_reasoning_level("high")
+        assert agent._client is None
+        assert agent._client_provider is None
+        assert agent.reasoning_level == "high"
+
+    # -----------------------------------------------------------------------
+    # message history
+    # -----------------------------------------------------------------------
+
     def test_message_history_management(self):
         """Test message history management."""
         agent = BaseAgent(name="TestAgent")
 
-        # Initially empty
         assert agent.get_history() == []
 
-        # Add a message
         message = AgentMessage(
             from_agent="Sender",
             to_agent="TestAgent",
@@ -261,11 +368,9 @@ class TestBaseAgent:
         )
         agent.add_to_history(message)
 
-        # Check history
         history = agent.get_history()
         assert len(history) == 1
         assert history[0] == message
 
-        # Ensure it's a copy
         history.append("dummy")
-        assert len(agent.get_history()) == 1  # Original unchanged
+        assert len(agent.get_history()) == 1

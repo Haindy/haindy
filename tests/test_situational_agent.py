@@ -227,7 +227,7 @@ async def test_assess_context_persists_model_and_debug_logs(
 
     cache = SituationalCache(tmp_path / "situational_cache.json")
     agent = SituationalAgent(model_logger=model_logger, situational_cache=cache)
-    agent.call_openai = AsyncMock(
+    agent.call_model = AsyncMock(
         return_value={
             "content": {
                 "target_type": "desktop_app",
@@ -271,7 +271,7 @@ async def test_assess_context_logs_fallback_when_model_call_fails(
 
     cache = SituationalCache(tmp_path / "situational_cache.json")
     agent = SituationalAgent(model_logger=model_logger, situational_cache=cache)
-    agent.call_openai = AsyncMock(side_effect=RuntimeError("simulated API failure"))
+    agent.call_model = AsyncMock(side_effect=RuntimeError("simulated API failure"))
 
     assessment = await agent.assess_context(
         requirements="Target desktop app flow.",
@@ -295,7 +295,7 @@ async def test_assess_context_logs_fallback_when_model_call_fails(
 async def test_assess_context_cache_hit_skips_model_call(tmp_path) -> None:
     cache = SituationalCache(tmp_path / "situational_cache.json")
     agent = SituationalAgent(situational_cache=cache)
-    agent.call_openai = AsyncMock(
+    agent.call_model = AsyncMock(
         return_value={
             "content": {
                 "target_type": "desktop_app",
@@ -321,14 +321,14 @@ async def test_assess_context_cache_hit_skips_model_call(tmp_path) -> None:
 
     assert first.sufficient is True
     assert second.sufficient is True
-    assert agent.call_openai.await_count == 1
+    assert agent.call_model.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_assess_context_cache_replays_insufficient_assessment(tmp_path) -> None:
     cache = SituationalCache(tmp_path / "situational_cache.json")
     agent = SituationalAgent(situational_cache=cache)
-    agent.call_openai = AsyncMock(
+    agent.call_model = AsyncMock(
         return_value={
             "content": {
                 "target_type": "web",
@@ -355,14 +355,14 @@ async def test_assess_context_cache_replays_insufficient_assessment(tmp_path) ->
     assert first.sufficient is False
     assert second.sufficient is False
     assert second.missing_items == ["web_url"]
-    assert agent.call_openai.await_count == 1
+    assert agent.call_model.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_assess_context_does_not_cache_fallback_only_results(tmp_path) -> None:
     cache = SituationalCache(tmp_path / "situational_cache.json")
     agent = SituationalAgent(situational_cache=cache)
-    agent.call_openai = AsyncMock(side_effect=RuntimeError("simulated API failure"))
+    agent.call_model = AsyncMock(side_effect=RuntimeError("simulated API failure"))
 
     requirements = "Target desktop app flow."
     context_text = "app_name: Calculator"
@@ -377,7 +377,7 @@ async def test_assess_context_does_not_cache_fallback_only_results(tmp_path) -> 
 
     assert first.target_type == "desktop_app"
     assert second.target_type == "desktop_app"
-    assert agent.call_openai.await_count == 2
+    assert agent.call_model.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -386,7 +386,7 @@ async def test_assess_context_invalid_cached_payload_falls_back_to_model(
 ) -> None:
     cache = SituationalCache(tmp_path / "situational_cache.json")
     agent = SituationalAgent(situational_cache=cache)
-    agent.call_openai = AsyncMock(
+    agent.call_model = AsyncMock(
         return_value={
             "content": {
                 "target_type": "desktop_app",
@@ -431,7 +431,7 @@ async def test_assess_context_invalid_cached_payload_falls_back_to_model(
     )
 
     assert assessment.sufficient is True
-    assert agent.call_openai.await_count == 1
+    assert agent.call_model.await_count == 1
 
 
 @pytest.mark.asyncio

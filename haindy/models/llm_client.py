@@ -9,7 +9,7 @@ from haindy.models.openai_client import ResponseStreamObserver
 
 @runtime_checkable
 class LLMClient(Protocol):
-    """Protocol that all non-CU LLM clients must satisfy."""
+    """Common interface for non-CU LLM provider clients."""
 
     async def call(
         self,

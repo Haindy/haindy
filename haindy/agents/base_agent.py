@@ -3,18 +3,22 @@
 import logging
 from typing import Any
 
+from haindy.config.settings import get_settings
 from haindy.core.interfaces import Agent
 from haindy.core.types import AgentMessage, ConfidenceLevel
+from haindy.models.anthropic_client import AnthropicClient
+from haindy.models.google_client import GoogleClient
+from haindy.models.llm_client import LLMClient
 from haindy.models.openai_client import OpenAIClient, ResponseStreamObserver
 
 
 class BaseAgent(Agent):
-    """Base implementation of an AI agent with OpenAI integration."""
+    """Base implementation of an AI agent with multi-provider support."""
 
     def __init__(
         self,
         name: str,
-        model: str = "gpt-5.4",
+        model: str | None = None,
         system_prompt: str | None = None,
         temperature: float = 0.7,
         reasoning_level: str = "medium",
@@ -25,9 +29,11 @@ class BaseAgent(Agent):
 
         Args:
             name: Name identifier for the agent
-            model: OpenAI model to use
+            model: Optional model override; if None the provider default is used
             system_prompt: System prompt for the agent
             temperature: Temperature for model responses
+            reasoning_level: Reasoning effort level for supported providers
+            modalities: Set of output modalities (defaults to text)
         """
         super().__init__(name, model)
         self.logger = logging.getLogger(f"agent.{name}")
@@ -35,7 +41,8 @@ class BaseAgent(Agent):
         self.temperature = temperature
         self.reasoning_level = reasoning_level
         self.modalities = modalities or {"text"}
-        self._client: OpenAIClient | None = None
+        self._client: LLMClient | None = None
+        self._client_provider: str | None = None
 
     def _get_default_system_prompt(self) -> str:
         """Get default system prompt for the agent."""
@@ -46,14 +53,31 @@ class BaseAgent(Agent):
         )
 
     @property
-    def client(self) -> OpenAIClient:
-        """Lazy-load OpenAI client."""
-        if self._client is None:
-            self._client = OpenAIClient(
-                model=self.model,
-                reasoning_level=self.reasoning_level,
-                modalities=self.modalities,
-            )
+    def client(self) -> LLMClient:
+        """Lazy-load and return an LLM client for the configured provider."""
+        settings = get_settings()
+        provider = str(settings.agent_provider or "openai").strip().lower()
+
+        if self._client is None or self._client_provider != provider:
+            model = self.model
+            if provider == "anthropic":
+                self._client = AnthropicClient(
+                    model=model or settings.anthropic_model,
+                    reasoning_level=self.reasoning_level,
+                    modalities=self.modalities,
+                )
+            elif provider == "google":
+                self._client = GoogleClient(
+                    model=model or settings.google_model,
+                )
+            else:
+                self._client = OpenAIClient(
+                    model=model or settings.openai_model,
+                    reasoning_level=self.reasoning_level,
+                    modalities=self.modalities,
+                )
+            self._client_provider = provider
+
         return self._client
 
     async def process(self, message: AgentMessage) -> AgentMessage | None:
@@ -149,7 +173,7 @@ class BaseAgent(Agent):
         """
         return confidence_level == ConfidenceLevel.MEDIUM
 
-    async def call_openai(
+    async def call_model(
         self,
         messages: list[dict[str, Any]],
         temperature: float | None = None,
@@ -160,13 +184,15 @@ class BaseAgent(Agent):
         stream_observer: ResponseStreamObserver | None = None,
     ) -> dict[str, Any]:
         """
-        Make a call to OpenAI API.
+        Make a call to the configured AI provider.
 
         Args:
             messages: List of message dictionaries
             temperature: Override default temperature
             response_format: Optional response format specification
-            stream: Enable streaming Responses API integration
+            reasoning_level: Override reasoning effort level
+            modalities: Override output modalities
+            stream: Enable streaming
             stream_observer: Optional observer for streaming events
 
         Returns:
@@ -175,6 +201,7 @@ class BaseAgent(Agent):
         return await self.client.call(
             messages=messages,
             temperature=temperature or self.temperature,
+            max_tokens=None,
             system_prompt=self.system_prompt,
             response_format=response_format,
             reasoning_level=reasoning_level or self.reasoning_level,
@@ -186,8 +213,8 @@ class BaseAgent(Agent):
     def update_reasoning_level(self, level: str) -> None:
         """Update reasoning level for future calls."""
         self.reasoning_level = level
-        if self._client:
-            self._client.reasoning_level = level
+        self._client = None
+        self._client_provider = None
 
     def build_messages(
         self,
@@ -196,7 +223,7 @@ class BaseAgent(Agent):
         include_history: bool = False,
     ) -> list[dict[str, str]]:
         """
-        Build message list for OpenAI API.
+        Build message list for the AI provider.
 
         Args:
             user_content: User message content

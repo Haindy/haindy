@@ -152,7 +152,7 @@ class TestRunner(BaseAgent):
         """Build a bug-report helper using the runner's current model hooks."""
         return TestRunnerBugReportBuilder(
             model=self.model,
-            call_openai=self.call_openai,
+            call_model=self.call_model,
             model_logger=self._model_logger,
         )
 

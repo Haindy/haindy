@@ -14,7 +14,7 @@ from haindy.core.types import TestCase, TestStep
 @pytest.mark.asyncio
 async def test_verify_expected_outcome_scopes_prompt_to_current_step() -> None:
     runner = SimpleNamespace(
-        call_openai=AsyncMock(
+        call_model=AsyncMock(
             return_value={
                 "content": {
                     "verdict": "PASS",
@@ -59,7 +59,7 @@ async def test_verify_expected_outcome_scopes_prompt_to_current_step() -> None:
         next_test_case=None,
     )
 
-    prompt = runner.call_openai.await_args.kwargs["messages"][0]["content"][0]["text"]
+    prompt = runner.call_model.await_args.kwargs["messages"][0]["content"][0]["text"]
 
     assert "Test case description:" not in prompt
     assert (

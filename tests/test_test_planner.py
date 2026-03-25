@@ -134,7 +134,7 @@ class TestTestPlannerAgent:
     async def test_create_test_plan_basic(self, agent, mock_openai_response):
         """Test creating a basic test plan."""
         # Mock the OpenAI call
-        agent.call_openai = AsyncMock(return_value=mock_openai_response)
+        agent.call_model = AsyncMock(return_value=mock_openai_response)
 
         requirements = "Test the login functionality"
         test_plan = await agent.create_test_plan(requirements)
@@ -161,7 +161,7 @@ class TestTestPlannerAgent:
     @pytest.mark.asyncio
     async def test_create_test_plan_with_context(self, agent, mock_openai_response):
         """Test creating a test plan with additional context."""
-        agent.call_openai = AsyncMock(return_value=mock_openai_response)
+        agent.call_model = AsyncMock(return_value=mock_openai_response)
 
         requirements = "Test the login functionality"
         context = {"application": "E-commerce platform", "user_type": "Customer"}
@@ -174,7 +174,7 @@ class TestTestPlannerAgent:
     @pytest.mark.asyncio
     async def test_test_plan_steps_structure(self, agent, mock_openai_response):
         """Test that test plan steps have correct structure."""
-        agent.call_openai = AsyncMock(return_value=mock_openai_response)
+        agent.call_model = AsyncMock(return_value=mock_openai_response)
 
         requirements = "Test the login functionality"
         test_plan = await agent.create_test_plan(requirements)
@@ -429,7 +429,7 @@ class TestTestPlannerAgent:
             }
         )
 
-        agent.call_openai = AsyncMock(return_value={"content": refined_response})
+        agent.call_model = AsyncMock(return_value={"content": refined_response})
 
         feedback = "Add error case testing"
         refined_plan = await agent.refine_test_plan(initial_plan, feedback)
@@ -506,7 +506,7 @@ class TestTestPlannerAgent:
             }
         )
 
-        agent.call_openai = AsyncMock(return_value={"content": scenarios_response})
+        agent.call_model = AsyncMock(return_value={"content": scenarios_response})
 
         requirements = "Test complete login functionality including error cases"
         scenarios = await agent.extract_test_scenarios(requirements)
@@ -519,7 +519,7 @@ class TestTestPlannerAgent:
     @pytest.mark.asyncio
     async def test_extract_test_scenarios_error(self, agent):
         """Test error handling when extracting scenarios fails."""
-        agent.call_openai = AsyncMock(return_value={"content": "invalid json"})
+        agent.call_model = AsyncMock(return_value={"content": "invalid json"})
 
         requirements = "Test requirements"
         scenarios = await agent.extract_test_scenarios(requirements)
@@ -559,13 +559,13 @@ class TestTestPlannerAgent:
             }
         )
 
-        agent.call_openai = AsyncMock(return_value={"content": mock_response})
+        agent.call_model = AsyncMock(return_value={"content": mock_response})
 
         await agent.create_test_plan("Test requirements")
 
         # Verify call parameters
-        agent.call_openai.assert_called_once()
-        call_args = agent.call_openai.call_args
+        agent.call_model.assert_called_once()
+        call_args = agent.call_model.call_args
         assert "response_format" in call_args.kwargs
         assert call_args.kwargs["response_format"] == {"type": "json_object"}
         assert call_args.kwargs["temperature"] == 0.3

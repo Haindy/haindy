@@ -200,7 +200,7 @@ Respond with JSON:
             )
 
         try:
-            response = await self._runner.call_openai(
+            response = await self._runner.call_model(
                 messages=messages, response_format={"type": "json_object"}
             )
 
