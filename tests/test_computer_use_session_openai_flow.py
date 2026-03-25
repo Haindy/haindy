@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -572,3 +573,33 @@ async def test_openai_step_reflection_uses_json_output_without_tools(
     )
     assert reflection["response_ids"] == ["resp_3"]
     assert '"verdict":"PASS"' in reflection["raw_text"]
+
+
+@pytest.mark.asyncio
+async def test_openai_computer_use_logs_failed_request_attempt(
+    mock_client, mock_browser, session_settings
+):
+    mock_client.responses.create.side_effect = RuntimeError("openai transport failed")
+
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+
+    with pytest.raises(RuntimeError, match="openai transport failed"):
+        await session._create_response(
+            {"model": "gpt-5.4", "input": "hello", "tools": [{"type": "computer"}]},
+            agent="computer_use.openai.initial",
+            prompt="Click the button",
+            request_payload_for_log={"request": "sanitized"},
+            metadata={"environment": "desktop"},
+        )
+
+    entry = json.loads(
+        session_settings.model_log_path.read_text(encoding="utf-8").strip()
+    )
+    assert entry["outcome"] == "failure"
+    assert entry["agent"] == "computer_use.openai.initial"
+    assert entry["metadata"]["provider"] == "openai"
+    assert entry["metadata"]["environment"] == "desktop"

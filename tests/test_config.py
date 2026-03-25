@@ -41,6 +41,10 @@ class TestSettings:
         with pytest.raises(ValueError):
             Settings(log_level="invalid")
 
+    def test_default_log_format_is_text(self):
+        settings = Settings()
+        assert settings.log_format == "text"
+
     def test_default_openai_model(self):
         settings = Settings()
         assert settings.openai_model == "gpt-5.4"

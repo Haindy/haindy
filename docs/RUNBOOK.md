@@ -226,6 +226,19 @@ haindy test "complete checkout and verify the order summary" --session <SESSION_
 haindy session close --session <SESSION_ID>
 ```
 
+## Model-call artifacts
+
+Durable model-call logs are written to `data/model_logs/model_calls.jsonl`.
+Entries include both successful calls and non-rate-limit failed attempts across
+standard mode and computer-use flows.
+
+By policy, rate-limit-style retry noise is not written as durable failed-call
+entries. This includes HTTP `429`, `resource_exhausted`, and equivalent provider
+signals. Related runtime logger output and retry handling still occur normally.
+
+When a logged call includes attached screenshots, the image files are stored
+under `data/model_logs/screenshots/`.
+
 ## Troubleshooting
 
 Run `haindy doctor` first. It checks all required OS dependencies, credentials,

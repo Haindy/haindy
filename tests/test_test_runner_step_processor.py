@@ -94,8 +94,9 @@ async def test_interpret_step_adds_mobile_specific_guidance(
     async def _fake_call_model(
         messages: list[dict[str, object]],
         response_format: dict[str, str] | None = None,
+        **kwargs: object,
     ) -> dict[str, object]:
-        del response_format
+        del response_format, kwargs
         content = messages[0]["content"]
         assert isinstance(content, list)
         captured_prompt["text"] = str(content[0]["text"])
@@ -214,8 +215,9 @@ async def test_interpret_step_includes_setup_steps_in_context(
     async def _fake_call_model(
         messages: list[dict[str, object]],
         response_format: dict[str, str] | None = None,
+        **kwargs: object,
     ) -> dict[str, object]:
-        del response_format
+        del response_format, kwargs
         content = messages[0]["content"]
         assert isinstance(content, list)
         captured_prompt["text"] = str(content[0]["text"])

@@ -215,11 +215,6 @@ Fallback:
         action="store_true",
         help="Enable debug mode with verbose logging",
     )
-    run_parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose structured logging output (JSON)",
-    )
     record_group = run_parser.add_mutually_exclusive_group()
     record_group.add_argument(
         "--record",
@@ -930,8 +925,6 @@ async def async_main(args: list[str] | None = None) -> int:
         if parsed_args.debug:
             settings.debug_mode = True
             settings.log_level = "DEBUG"
-        if parsed_args.verbose:
-            settings.log_format = "json"
         setup_logging(
             log_level=settings.log_level,
             log_format=settings.log_format,
