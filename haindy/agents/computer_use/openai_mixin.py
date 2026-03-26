@@ -314,9 +314,18 @@ class OpenAIComputerUseMixin:
 
             if stop_after_actions:
                 # Tool-call act mode: the coding agent handles validation.
-                # Skip the follow-up API call entirely — action_agent will
+                # Skip the follow-up API call entirely -- action_agent will
                 # take a fresh screenshot from the driver.
-                break
+                # However, if the only actions this turn were screenshots,
+                # the model hasn't actually performed anything yet -- let it
+                # see the screen and respond with a real action first.
+                has_real_action = any(
+                    turn.action_type != "screenshot"
+                    for call_turns in completed_call_turns
+                    for turn in call_turns
+                )
+                if has_real_action:
+                    break
 
             follow_up_payload, follow_up_batch = await self._build_follow_up_request(
                 previous_response_id=current_response_id,
