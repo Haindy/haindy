@@ -200,15 +200,24 @@ class AutomationDriver(ABC):
         pass
 
     @abstractmethod
-    async def scroll(self, direction: str, amount: int) -> None:
-        """Scroll in given direction."""
+    async def scroll(
+        self,
+        direction: str,
+        amount: int,
+        origin: tuple[int, int] | None = None,
+    ) -> None:
+        """Scroll in given direction, optionally starting from *origin* (x, y)."""
         pass
 
     @abstractmethod
     async def scroll_by_pixels(
-        self, x: int = 0, y: int = 0, smooth: bool = True
+        self,
+        x: int = 0,
+        y: int = 0,
+        smooth: bool = True,
+        origin: tuple[int, int] | None = None,
     ) -> None:
-        """Scroll by a specific number of pixels."""
+        """Scroll by a specific number of pixels, optionally from *origin*."""
         pass
 
     @abstractmethod

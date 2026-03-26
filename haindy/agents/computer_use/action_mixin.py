@@ -381,7 +381,9 @@ class ComputerUseActionMixin:
                     turn.metadata["scroll_direction"] = direction
                     turn.metadata["scroll_magnitude"] = magnitude
                     await self._automation_driver.move_mouse(x, y, steps=1)
-                    await self._automation_driver.scroll(direction, magnitude)
+                    await self._automation_driver.scroll(
+                        direction, magnitude, origin=(x, y)
+                    )
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "type":

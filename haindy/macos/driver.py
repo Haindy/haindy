@@ -202,7 +202,12 @@ class MacOSDriver(AutomationDriver):
         await handler.press_key(key)
         self._capture_call("press_key", {"key": key})
 
-    async def scroll(self, direction: str, amount: int) -> None:
+    async def scroll(
+        self,
+        direction: str,
+        amount: int,
+        origin: tuple[int, int] | None = None,
+    ) -> None:
         normalized = str(direction or "").strip().lower()
         if normalized not in {"up", "down", "left", "right"}:
             raise ValueError(f"Invalid scroll direction: {direction!r}")
@@ -214,7 +219,8 @@ class MacOSDriver(AutomationDriver):
         )
 
     async def scroll_by_pixels(
-        self, x: int = 0, y: int = 0, smooth: bool = True
+        self, x: int = 0, y: int = 0, smooth: bool = True,
+        origin: tuple[int, int] | None = None,
     ) -> None:
         await self._ensure_ready()
         handler = self.input_handler

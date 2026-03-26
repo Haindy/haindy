@@ -1005,7 +1005,11 @@ class ComputerUseSupportMixin:
         return cast(str | None, screenshot_path)
 
     def _wrap_goal_for_google(
-        self: _ComputerUseSession, goal: str, env_mode: str
+        self: _ComputerUseSession,
+        goal: str,
+        env_mode: str,
+        viewport_width: int = 0,
+        viewport_height: int = 0,
     ) -> str:
         """Wrap the goal with context for Google CU per environment."""
         requires_json = self._goal_requires_json(goal)
@@ -1035,12 +1039,33 @@ class ComputerUseSupportMixin:
 
         if env_mode == "mobile_adb":
             goal = self._strip_mobile_goal_wrapper(goal)
+            orientation = (
+                "portrait"
+                if viewport_height >= viewport_width
+                else "landscape"
+            )
+            device_line = ""
+            if viewport_width and viewport_height:
+                device_line = (
+                    f"- Device: Android phone, {viewport_width}x{viewport_height}, {orientation}\n"
+                )
             mobile_context = (
-                "IMPORTANT: You are controlling an Android mobile app through ADB-backed screenshots.\n"
-                "- Treat coordinates as positions on the provided mobile screenshot.\n"
+                "IMPORTANT: You are controlling an Android phone through ADB-backed screenshots.\n"
+                + device_line
+                + "- Treat coordinates as positions on the provided mobile screenshot.\n"
                 "- Use mobile interactions only: click_at, type_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at, go_home, and open_app when needed.\n"
                 "- Browser-style actions such as open_web_browser, search, navigate, hover_at, go_forward, scroll_document, drag_and_drop, and key_combination are unavailable in this mobile flow.\n"
-                "- For system navigation, prefer the custom go_home helper for the launcher and direct visual taps for in-app navigation.\n"
+                "\n"
+                "GESTURE NAVIGATION:\n"
+                "- To go to the home screen, use the go_home helper.\n"
+                "- To go back, use scroll_at with direction=right at the left edge of the screen.\n"
+                "- There are no on-screen navigation buttons; this device uses gesture navigation.\n"
+                "\n"
+                "SWIPE GESTURES:\n"
+                "- scroll_at is also used for swipe gestures on list items (e.g. swipe left/right on an email row).\n"
+                "- When swiping a specific list item, set the scroll_at coordinates to the vertical center of that item's row. Precise Y targeting matters.\n"
+                "\n"
+                "GENERAL RULES:\n"
                 "- Do not use desktop assumptions, browser navigation actions, or desktop shortcuts like ctrl+a.\n"
                 "- For text entry, use type_text_at directly. Set press_enter=true only when the task explicitly says to submit or press Enter.\n"
                 "- If masked password dots are visible after typing, treat the field as filled and stop retrying.\n\n"

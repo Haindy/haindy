@@ -186,7 +186,12 @@ class DesktopDriver(AutomationDriver):
             {"key": list(key) if isinstance(key, (list, tuple, set)) else key},
         )
 
-    async def scroll(self, direction: str, amount: int) -> None:
+    async def scroll(
+        self,
+        direction: str,
+        amount: int,
+        origin: tuple[int, int] | None = None,
+    ) -> None:
         normalized_direction = str(direction or "").strip().lower()
         if normalized_direction not in {"up", "down", "left", "right"}:
             raise ValueError(f"Invalid scroll direction: {direction!r}")
@@ -198,7 +203,8 @@ class DesktopDriver(AutomationDriver):
         )
 
     async def scroll_by_pixels(
-        self, x: int = 0, y: int = 0, smooth: bool = True
+        self, x: int = 0, y: int = 0, smooth: bool = True,
+        origin: tuple[int, int] | None = None,
     ) -> None:
         await self._ensure_ready()
         virtual_input = self.virtual_input

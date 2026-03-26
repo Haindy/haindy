@@ -269,7 +269,12 @@ class IOSDriver(AutomationDriver):
         )
         self._capture_call("press_key", {"key": key, "keycodes": keycodes})
 
-    async def scroll(self, direction: str, amount: int) -> None:
+    async def scroll(
+        self,
+        direction: str,
+        amount: int,
+        origin: tuple[int, int] | None = None,
+    ) -> None:
         normalized_direction = str(direction or "").strip().lower()
         if normalized_direction not in {"up", "down", "left", "right"}:
             raise ValueError(f"Invalid scroll direction: {direction!r}")
@@ -278,6 +283,7 @@ class IOSDriver(AutomationDriver):
         await self.scroll_by_pixels(
             y=delta if normalized_direction in {"up", "down"} else 0,
             x=delta if normalized_direction in {"left", "right"} else 0,
+            origin=origin,
         )
 
     async def scroll_by_pixels(
@@ -285,14 +291,22 @@ class IOSDriver(AutomationDriver):
         x: int = 0,
         y: int = 0,
         smooth: bool = True,
+        origin: tuple[int, int] | None = None,
     ) -> None:
         await self._ensure_ready()
         # Use logical point dimensions for swipe coordinates sent to idb.
         width, height = await self._fetch_logical_size()
         scaled_x, scaled_y = self._scale_deltas_to_device(x, y, (width, height))
 
-        start_x = width // 2
-        start_y = height // 2
+        if origin is not None:
+            mapped_ox, mapped_oy = await self._map_point_to_device(
+                origin[0], origin[1]
+            )
+            start_x = mapped_ox
+            start_y = mapped_oy
+        else:
+            start_x = width // 2
+            start_y = height // 2
         end_x = self._clamp(start_x - scaled_x, 0, max(width - 1, 0))
         end_y = self._clamp(start_y - scaled_y, 0, max(height - 1, 0))
 

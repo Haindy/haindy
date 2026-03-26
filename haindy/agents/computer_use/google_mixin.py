@@ -155,7 +155,9 @@ class GoogleComputerUseMixin:
         goal = self._apply_interaction_mode_guidance(goal, metadata)
         goal = self._apply_localization_protocol_guidance(goal, metadata)
         wrapped_goal = (
-            self._wrap_goal_for_google(goal, environment)
+            self._wrap_goal_for_google(
+                goal, environment, viewport_width, viewport_height
+            )
             if previous_interaction_id is None
             else goal
         )
