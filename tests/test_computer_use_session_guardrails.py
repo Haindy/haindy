@@ -357,3 +357,37 @@ def test_loop_detection_still_detects_repeated_wait_actions(
     loop_detection = session._update_loop_history(turns[2], history, 3)
     assert loop_detection is not None
     assert "wait" in loop_detection["message"]
+
+
+def test_loop_detection_preserves_history_on_failed_turn(
+    mock_client, mock_browser, session_settings
+):
+    """A failed turn must not clear loop history so the window can still fill."""
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+    history: deque[tuple[tuple[str, ...], str]] = deque(maxlen=3)
+
+    executed_turn = ComputerToolTurn(
+        call_id="call_ok",
+        action_type="click",
+        parameters={"type": "click", "x": 10, "y": 20},
+        status="executed",
+        metadata={"screenshot_base64": "same"},
+    )
+    failed_turn = ComputerToolTurn(
+        call_id="call_fail",
+        action_type="click",
+        parameters={"type": "click", "x": 10, "y": 20},
+        status="failed",
+        metadata={"screenshot_base64": "same"},
+    )
+
+    session._update_loop_history(executed_turn, history, 3)
+    assert len(history) == 1
+
+    session._update_loop_history(failed_turn, history, 3)
+    # History must still contain the previously executed entry
+    assert len(history) == 1
