@@ -119,7 +119,8 @@ async def test_mobile_driver_type_and_press_key_mapping() -> None:
 
     assert ("shell", "input", "text", "hello%sworld\\&ok") in stub.commands
     assert ("shell", "input", "keyevent", "113", "40") in stub.commands
-    assert ("shell", "input", "keyevent", "57", "21") in stub.commands
+    # Alt+ArrowLeft is mapped to Android back (keycode 4)
+    assert ("shell", "input", "keyevent", "4") in stub.commands
 
     with pytest.raises(ValueError, match="Unsupported Android key"):
         await driver.press_key("unknown_key")

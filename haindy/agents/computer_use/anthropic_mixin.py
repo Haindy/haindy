@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import logging
 from collections import deque
 from typing import TYPE_CHECKING, Any
@@ -61,22 +62,47 @@ class AnthropicComputerUseMixin:
             viewport_width,
             viewport_height,
         ) = await self._automation_driver.get_viewport_size()
-        goal = self._wrap_goal_for_mobile(
-            goal, environment, viewport_width, viewport_height
-        )
-        goal = self._apply_interaction_mode_guidance(goal, metadata)
-        goal = self._apply_localization_protocol_guidance(goal, metadata)
+        # Cartography/localization is not used for Anthropic CU: the model
+        # navigates from the full-screen screenshot directly without needing
+        # to emit a JSON coordinate map.
         screenshot = initial_screenshot or await self._automation_driver.screenshot()
         self._prime_initial_visual_state_for_request(
             screenshot,
             source="initial_screenshot",
         )
+        # Use actual screenshot dimensions rather than wm_size so the model's
+        # coordinate space matches what _map_point_to_device expects.
+        if (
+            self._current_keyframe is not None
+            and self._current_keyframe.screen_size[0] > 0
+        ):
+            viewport_width, viewport_height = self._current_keyframe.screen_size
+        # Downscale the screenshot for the API to reduce coordinate-mapping
+        # errors caused by the model's internal image rendering.  The original
+        # viewport size is preserved so coordinates can be scaled back.
+        api_screenshot, original_size, api_size = (
+            self._downscale_screenshot_for_anthropic(
+                screenshot, self._ANTHROPIC_MAX_SCREENSHOT_LONG_EDGE
+            )
+        )
+        # Fall back to the raw viewport when PIL cannot decode the screenshot.
+        if api_size[0] <= 0:
+            original_size = (viewport_width, viewport_height)
+            api_size = original_size
+            api_screenshot = screenshot
+        api_width, api_height = api_size
+        # Wrap the goal text AFTER determining the API dimensions so the
+        # resolution mentioned in the prompt matches the tool definition.
+        goal = self._wrap_goal_for_mobile(
+            goal, environment, api_width, api_height
+        )
+        goal = self._apply_interaction_mode_guidance(goal, metadata)
 
         request_payload = self._build_anthropic_initial_request(
             goal=goal,
-            screenshot_bytes=screenshot,
-            viewport_width=viewport_width,
-            viewport_height=viewport_height,
+            screenshot_bytes=api_screenshot,
+            viewport_width=api_width,
+            viewport_height=api_height,
             metadata=metadata,
             model=model,
         )
@@ -107,12 +133,7 @@ class AnthropicComputerUseMixin:
 
         while True:
             calls = extract_anthropic_computer_calls(response_dict)
-            assistant_text = self._consume_localization_response(
-                extract_assistant_text(response_dict),
-                metadata=metadata,
-                provider="anthropic",
-                model=model,
-            )
+            assistant_text = extract_assistant_text(response_dict)
             if assistant_text:
                 result.final_output = assistant_text
                 last_assistant_text = assistant_text
@@ -127,6 +148,19 @@ class AnthropicComputerUseMixin:
                 translated_action = self._translate_anthropic_action(
                     call.get("action") or {}
                 )
+                # Scale coordinates from the API image space back to the
+                # original device viewport so the driver taps land correctly.
+                if api_size != original_size:
+                    for key_x, key_y in (("x", "y"), ("start_x", "start_y"), ("end_x", "end_y")):
+                        if key_x in translated_action and key_y in translated_action:
+                            translated_action[key_x], translated_action[key_y] = (
+                                self._rescale_coordinates(
+                                    int(translated_action[key_x]),
+                                    int(translated_action[key_y]),
+                                    from_size=api_size,
+                                    to_size=original_size,
+                                )
+                            )
                 turn = ComputerToolTurn(
                     call_id=str(call.get("id") or ""),
                     action_type=str(translated_action.get("type") or "unknown"),
@@ -160,6 +194,20 @@ class AnthropicComputerUseMixin:
                     )
 
                 self._update_last_pointer_position(turn)
+                # _last_pointer_position is now in device-space but
+                # _translate_anthropic_action uses it as a fallback for the
+                # *next* model turn.  Convert back to API-space so the
+                # rescaling step above doesn't double-scale.
+                if (
+                    api_size != original_size
+                    and self._last_pointer_position is not None
+                ):
+                    self._last_pointer_position = self._rescale_coordinates(
+                        self._last_pointer_position[0],
+                        self._last_pointer_position[1],
+                        from_size=original_size,
+                        to_size=api_size,
+                    )
                 result.actions.append(turn)
                 executed_turns.append(turn)
 
@@ -266,6 +314,8 @@ class AnthropicComputerUseMixin:
             (
                 follow_up_payload,
                 follow_up_screenshot,
+                original_size,
+                api_size,
             ) = await self._build_anthropic_follow_up_request(
                 history_messages=history_messages,
                 previous_response=response_dict,
@@ -388,15 +438,51 @@ class AnthropicComputerUseMixin:
         turns: list[ComputerToolTurn],
         metadata: dict[str, Any],
         model: str | None = None,
-    ) -> tuple[dict[str, Any], bytes | None]:
+    ) -> tuple[dict[str, Any], bytes | None, tuple[int, int], tuple[int, int]]:
+        """Build follow-up and return *(payload, screenshot, original_size, api_size)*."""
         follow_up_batch = await self._build_follow_up_batch(
             call_groups=[[turn] for turn in turns],
             metadata=metadata,
+            skip_localization=True,
         )
-        (
-            viewport_width,
-            viewport_height,
-        ) = await self._automation_driver.get_viewport_size()
+        # Anthropic always expects full-screen screenshots. When the visual
+        # pipeline chose a patch frame, fall back to the stored full keyframe so
+        # the model's coordinate space matches the actual display.
+        display_frame = (
+            follow_up_batch.artifact_frame
+            if (
+                follow_up_batch.visual_frame is not None
+                and follow_up_batch.visual_frame.kind == "patch"
+                and follow_up_batch.artifact_frame is not None
+            )
+            else follow_up_batch.visual_frame
+        )
+        # Use actual screenshot dimensions so display_width_px/height_px
+        # matches the coordinate space the model is seeing.
+        if display_frame is not None and display_frame.screen_size[0] > 0:
+            viewport_width, viewport_height = display_frame.screen_size
+        else:
+            viewport_width, viewport_height = (
+                await self._automation_driver.get_viewport_size()
+            )
+        display_bytes = (
+            display_frame.image_bytes
+            if display_frame is not None
+            else follow_up_batch.screenshot_bytes
+        )
+        # Downscale for the API to improve coordinate accuracy.
+        api_screenshot, fu_original_size, fu_api_size = (
+            self._downscale_screenshot_for_anthropic(
+                display_bytes, self._ANTHROPIC_MAX_SCREENSHOT_LONG_EDGE
+            )
+        )
+        if fu_api_size[0] <= 0:
+            fu_original_size = (viewport_width, viewport_height)
+            fu_api_size = fu_original_size
+            api_screenshot = display_bytes
+        api_width, api_height = fu_api_size
+        display_b64 = encode_png_base64(api_screenshot)
+
         tool_results: list[dict[str, Any]] = []
         extra_content: list[dict[str, Any]] = []
 
@@ -413,6 +499,7 @@ class AnthropicComputerUseMixin:
 
             if action_result.status != "executed":
                 error_text = action_result.error_message or "Action execution failed."
+                # Anthropic API requires text-only content when is_error is true.
                 tool_result_block["content"] = [
                     {"type": "text", "text": f"Execution error: {error_text}"}
                 ]
@@ -424,7 +511,7 @@ class AnthropicComputerUseMixin:
                         "source": {
                             "type": "base64",
                             "media_type": "image/png",
-                            "data": follow_up_batch.screenshot_base64,
+                            "data": display_b64,
                         },
                     }
                 ]
@@ -438,12 +525,8 @@ class AnthropicComputerUseMixin:
             extra_content.append(
                 {"type": "text", "text": follow_up_batch.reminder_text}
             )
-        localization_prompt = self._build_follow_up_localization_prompt(
-            follow_up_batch,
-            metadata,
-        )
-        if localization_prompt:
-            extra_content.append({"type": "text", "text": localization_prompt})
+        # Cartography/localization is not used for Anthropic CU: the model
+        # navigates from the full-screen screenshot directly.
 
         messages: list[dict[str, Any]] = list(history_messages)
         assistant_content = previous_response.get("content") or []
@@ -458,13 +541,13 @@ class AnthropicComputerUseMixin:
                 {
                     "type": self._anthropic_tool_type,
                     "name": self._anthropic_tool_name,
-                    "display_width_px": viewport_width,
-                    "display_height_px": viewport_height,
+                    "display_width_px": api_width,
+                    "display_height_px": api_height,
                 }
             ],
             "messages": messages,
         }
-        return payload, follow_up_batch.screenshot_bytes
+        return payload, display_bytes, fu_original_size, fu_api_size
 
     async def _create_anthropic_response(
         self: _ComputerUseSession,
@@ -594,7 +677,9 @@ class AnthropicComputerUseMixin:
         }:
             if coord_pair is None and self._last_pointer_position is not None:
                 translated["x"], translated["y"] = self._last_pointer_position
-            if normalized_name == "middle_click":
+            if normalized_name == "left_click":
+                translated["type"] = "click"
+            elif normalized_name == "middle_click":
                 translated["type"] = "click"
                 translated["button"] = "middle"
             elif normalized_name == "triple_click":
@@ -658,6 +743,15 @@ class AnthropicComputerUseMixin:
             }
         elif normalized_name == "screenshot":
             translated = {"type": "screenshot"}
+        elif normalized_name == "left_mouse_down":
+            translated["type"] = "click"
+            if coord_pair is None and self._last_pointer_position is not None:
+                translated["x"], translated["y"] = self._last_pointer_position
+        elif normalized_name == "left_mouse_up":
+            translated = {"type": "screenshot"}
+        elif normalized_name == "hold_key":
+            key_value = raw_action.get("text") or raw_action.get("key")
+            translated = {"type": "keypress", "key": str(key_value or "")}
 
         return translated
 
@@ -679,6 +773,62 @@ class AnthropicComputerUseMixin:
                 except (TypeError, ValueError):
                     return None
         return None
+
+    # Maximum long-edge pixels for screenshots sent to Anthropic.  The model
+    # internally downscales images to fit its context window and then must map
+    # coordinates back to the declared ``display_width_px x display_height_px``
+    # space.  On high-resolution mobile devices the internal rendering can
+    # differ significantly from the declared display size, causing systematic
+    # coordinate errors.  Sending a pre-scaled screenshot whose dimensions
+    # match what the model will actually render eliminates this bias.
+    _ANTHROPIC_MAX_SCREENSHOT_LONG_EDGE: int = 1280
+
+    @staticmethod
+    def _downscale_screenshot_for_anthropic(
+        screenshot_bytes: bytes,
+        max_long_edge: int,
+    ) -> tuple[bytes, tuple[int, int], tuple[int, int]]:
+        """Return *(resized_png, original_size, resized_size)*.
+
+        If neither dimension exceeds *max_long_edge* the original bytes are
+        returned unchanged.  Falls back gracefully if PIL cannot decode the
+        image (e.g. minimal stubs used in tests).
+        """
+        try:
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(screenshot_bytes))
+            original_size: tuple[int, int] = (img.width, img.height)
+        except Exception:
+            # Cannot decode -- pass through unchanged.
+            return screenshot_bytes, (0, 0), (0, 0)
+
+        long_edge = max(img.width, img.height)
+        if long_edge <= max_long_edge:
+            return screenshot_bytes, original_size, original_size
+
+        scale = max_long_edge / long_edge
+        new_w = max(int(round(img.width * scale)), 1)
+        new_h = max(int(round(img.height * scale)), 1)
+        resized = img.resize((new_w, new_h), Image.LANCZOS)
+        buf = io.BytesIO()
+        resized.save(buf, format="PNG")
+        return buf.getvalue(), original_size, (new_w, new_h)
+
+    @staticmethod
+    def _rescale_coordinates(
+        x: int,
+        y: int,
+        from_size: tuple[int, int],
+        to_size: tuple[int, int],
+    ) -> tuple[int, int]:
+        """Scale *(x, y)* from one coordinate space to another."""
+        if from_size == to_size or from_size[0] <= 0 or from_size[1] <= 0:
+            return x, y
+        return (
+            round(x * to_size[0] / from_size[0]),
+            round(y * to_size[1] / from_size[1]),
+        )
 
     def _update_last_pointer_position(
         self: _ComputerUseSession, turn: ComputerToolTurn

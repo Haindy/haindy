@@ -69,18 +69,22 @@ class VisualStatePlanner:
         turns_since_keyframe: int,
         turns_since_cartography_refresh: int,
         cartography: CartographyMap | None,
+        skip_localization: bool = False,
     ) -> VisualPlanResult:
         """Return the frame to send plus the current full keyframe state."""
         target_text = str(metadata.get("target") or "").strip()
         interaction_mode = str(metadata.get("interaction_mode") or "").strip().lower()
         matched_target = self._match_target(cartography, metadata)
-        localization_reason = self._resolve_localization_requirement(
-            metadata=metadata,
-            action_types=action_types,
-            cartography=cartography,
-            matched_target=matched_target,
-            turns_since_cartography_refresh=turns_since_cartography_refresh,
-        )
+        if skip_localization:
+            localization_reason = None
+        else:
+            localization_reason = self._resolve_localization_requirement(
+                metadata=metadata,
+                action_types=action_types,
+                cartography=cartography,
+                matched_target=matched_target,
+                turns_since_cartography_refresh=turns_since_cartography_refresh,
+            )
         carried_cartography = None if localization_reason else cartography
         current_full = build_keyframe(
             screenshot_bytes,
@@ -125,6 +129,7 @@ class VisualStatePlanner:
             previous_keyframe=previous_keyframe,
             turns_since_keyframe=turns_since_keyframe,
             cartography=carried_cartography,
+            skip_localization=skip_localization,
         )
         if force_keyframe_reason is not None or localization_reason is not None:
             self._log_visual_decision(
@@ -278,12 +283,13 @@ class VisualStatePlanner:
         previous_keyframe: VisualFrame | None,
         turns_since_keyframe: int,
         cartography: CartographyMap | None,
+        skip_localization: bool = False,
     ) -> str | None:
         if previous_keyframe is None:
             return "missing_previous_keyframe"
         if turns_since_keyframe >= self.keyframe_max_turns:
             return "keyframe_refresh_interval"
-        if cartography is None:
+        if cartography is None and not skip_localization:
             return "missing_session_cartography"
         if (
             str(metadata.get("interaction_mode") or "").strip().lower()

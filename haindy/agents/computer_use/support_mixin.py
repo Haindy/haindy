@@ -71,7 +71,6 @@ class ComputerUseSupportMixin:
         if window < 2:
             return None
         if turn.status != "executed":
-            history.clear()
             return None
 
         signature = self._compute_turn_signature(turn)
@@ -536,6 +535,7 @@ class ComputerUseSupportMixin:
         *,
         call_groups: list[list[ComputerToolTurn]],
         metadata: dict[str, Any],
+        skip_localization: bool = False,
     ) -> ComputerUseFollowUpBatch:
         """Capture one fresh follow-up state and build the shared batch model."""
         screenshot_bytes = await self._automation_driver.screenshot()
@@ -561,6 +561,7 @@ class ComputerUseSupportMixin:
                 if self._current_keyframe is not None
                 else None
             ),
+            skip_localization=skip_localization,
         )
         self._current_keyframe = plan.current_keyframe
         self._last_visual_frame = plan.visual_frame

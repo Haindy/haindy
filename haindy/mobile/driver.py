@@ -275,6 +275,14 @@ class MobileDriver(AutomationDriver):
             await self.adb.run_adb("shell", "input", "text", escaped)
         self._capture_call("type_text", {"length": len(text)})
 
+    # Desktop key combos that have direct Android equivalents.
+    _COMBO_ALIASES: ClassVar[dict[tuple[str, ...], str]] = {
+        ("alt", "left"): "back",
+        ("alt", "arrowleft"): "back",
+        ("alt", "right"): "app_switch",
+        ("alt", "arrowright"): "app_switch",
+    }
+
     async def press_key(self, key: str) -> None:
         await self._ensure_ready()
         tokens = [
@@ -284,6 +292,10 @@ class MobileDriver(AutomationDriver):
         ]
         if not tokens:
             raise ValueError("Key must not be empty.")
+        # Map desktop key combos to their Android equivalents.
+        combo_key = tuple(tokens)
+        if combo_key in self._COMBO_ALIASES:
+            tokens = [self._COMBO_ALIASES[combo_key]]
         keycodes = [self._keycode_for_token(token) for token in tokens]
         await self.adb.run_adb(
             "shell",
@@ -485,6 +497,16 @@ class MobileDriver(AutomationDriver):
             "arrowright": "right",
             "arrowup": "up",
             "arrowdown": "down",
+            # Desktop-style modifier names with no Android equivalent; map to
+            # the closest Android key so the action degrades gracefully.
+            "super": "meta",
+            "windows": "meta",
+            "win": "meta",
+            "command": "cmd",
+            # Escape is not useful on Android; map to back which is the
+            # closest behavioral equivalent (dismiss dialogs/keyboards).
+            "escape": "back",
+            "esc": "back",
         }
         return alias_map.get(normalized, normalized)
 

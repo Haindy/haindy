@@ -165,7 +165,7 @@ async def test_anthropic_error_tool_result_uses_text_only_content(
         error_message="click failed",
     )
 
-    payload, _ = await session._build_anthropic_follow_up_request(
+    payload, _, _, _ = await session._build_anthropic_follow_up_request(
         history_messages=[
             {"role": "user", "content": [{"type": "text", "text": "go"}]}
         ],
@@ -212,7 +212,7 @@ async def test_anthropic_follow_up_adds_shared_grounding_text_and_preserves_turn
         },
     )
 
-    payload, screenshot_bytes = await session._build_anthropic_follow_up_request(
+    payload, screenshot_bytes, _, _ = await session._build_anthropic_follow_up_request(
         history_messages=[
             {"role": "user", "content": [{"type": "text", "text": "go"}]}
         ],
@@ -287,3 +287,50 @@ async def test_anthropic_computer_use_logs_failed_request_attempt(
     assert entry["outcome"] == "failure"
     assert entry["agent"] == "computer_use.anthropic.initial"
     assert entry["metadata"]["provider"] == "anthropic"
+
+
+def test_translate_anthropic_action_left_mouse_down(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    result = session._translate_anthropic_action(
+        {"action": "left_mouse_down", "coordinate": [100, 200]}
+    )
+    assert result["type"] == "click"
+    assert result["x"] == 100
+    assert result["y"] == 200
+
+
+def test_translate_anthropic_action_left_mouse_up(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    result = session._translate_anthropic_action({"action": "left_mouse_up"})
+    assert result["type"] == "screenshot"
+
+
+def test_translate_anthropic_action_hold_key(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    result = session._translate_anthropic_action({"action": "hold_key", "key": "Return"})
+    assert result["type"] == "keypress"
+    assert result["key"] == "Return"
