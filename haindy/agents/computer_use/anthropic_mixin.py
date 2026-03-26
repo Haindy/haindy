@@ -690,7 +690,11 @@ class AnthropicComputerUseMixin:
                 translated["x"], translated["y"] = self._last_pointer_position
         elif normalized_name == "left_click_drag":
             translated["type"] = "drag"
-            if self._last_pointer_position is not None:
+            start_coordinate = raw_action.get("start_coordinate")
+            start_pair = self._extract_anthropic_coordinate_pair(start_coordinate)
+            if start_pair is not None:
+                translated["start_x"], translated["start_y"] = start_pair
+            elif self._last_pointer_position is not None:
                 translated["start_x"], translated["start_y"] = (
                     self._last_pointer_position
                 )

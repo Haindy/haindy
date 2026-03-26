@@ -321,6 +321,51 @@ def test_translate_anthropic_action_left_mouse_up(
     assert result["type"] == "screenshot"
 
 
+def test_translate_anthropic_action_left_click_drag_uses_start_coordinate(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    result = session._translate_anthropic_action(
+        {
+            "action": "left_click_drag",
+            "start_coordinate": [400, 275],
+            "coordinate": [50, 275],
+        }
+    )
+    assert result["type"] == "drag"
+    assert result["start_x"] == 400
+    assert result["start_y"] == 275
+    assert result["end_x"] == 50
+    assert result["end_y"] == 275
+
+
+def test_translate_anthropic_action_left_click_drag_falls_back_to_pointer(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    session._last_pointer_position = (100, 200)
+    result = session._translate_anthropic_action(
+        {"action": "left_click_drag", "coordinate": [300, 200]}
+    )
+    assert result["type"] == "drag"
+    assert result["start_x"] == 100
+    assert result["start_y"] == 200
+    assert result["end_x"] == 300
+    assert result["end_y"] == 200
+
+
 def test_translate_anthropic_action_hold_key(
     mock_client, mock_browser, session_settings
 ):
