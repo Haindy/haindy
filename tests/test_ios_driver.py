@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from collections.abc import Sequence
 
 import pytest
@@ -261,6 +262,9 @@ async def test_ios_driver_screenshot_validates_png() -> None:
     assert driver._last_screenshot_size == (1170, 2532)
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin", reason="macOS only: simctl fallback requires xcrun"
+)
 @pytest.mark.asyncio
 async def test_ios_driver_screenshot_invalid_png_raises() -> None:
     stub = StubIDBClient(screenshot_path_bytes=b"not a png")

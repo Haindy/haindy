@@ -218,6 +218,7 @@ class TestMainFlow:
 
         with (
             patch("haindy.main._SETUP_MARKER", marker),
+            patch("haindy.main._validate_auth_for_run", return_value=[]),
             patch("haindy.main.run_test", new_callable=AsyncMock) as mock_run,
         ):
             mock_run.return_value = 0
@@ -242,6 +243,7 @@ class TestMainFlow:
 
         with (
             patch("haindy.main._SETUP_MARKER", marker),
+            patch("haindy.main._validate_auth_for_run", return_value=[]),
             patch("haindy.main.run_test", new_callable=AsyncMock) as mock_run,
         ):
             mock_run.return_value = 0

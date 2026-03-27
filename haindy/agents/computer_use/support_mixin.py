@@ -1040,15 +1040,11 @@ class ComputerUseSupportMixin:
         if env_mode == "mobile_adb":
             goal = self._strip_mobile_goal_wrapper(goal)
             orientation = (
-                "portrait"
-                if viewport_height >= viewport_width
-                else "landscape"
+                "portrait" if viewport_height >= viewport_width else "landscape"
             )
             device_line = ""
             if viewport_width and viewport_height:
-                device_line = (
-                    f"- Device: Android phone, {viewport_width}x{viewport_height}, {orientation}\n"
-                )
+                device_line = f"- Device: Android phone, {viewport_width}x{viewport_height}, {orientation}\n"
             mobile_context = (
                 "IMPORTANT: You are controlling an Android phone through ADB-backed screenshots.\n"
                 + device_line
