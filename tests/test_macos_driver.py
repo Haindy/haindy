@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import struct
+import sys
 import zlib
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+if sys.platform != "darwin":
+    pytest.skip("macOS only", allow_module_level=True)
 
 from haindy.macos.driver import MacOSDriver, _parse_png_size
 from haindy.macos.input_handler import MacOSInputHandler

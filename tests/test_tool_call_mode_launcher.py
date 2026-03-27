@@ -254,11 +254,11 @@ def test_installed_haindy_help_smoke() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert f"{public_cli_program_name()} --plan requirements.md" in result.stdout
-    assert "python -m haindy.main --plan requirements.md" in result.stdout
+    assert f"{public_cli_program_name()} run --plan requirements.md" in result.stdout
+    assert "python -m haindy.main run --plan requirements.md" in result.stdout
     assert result.stdout.index(
-        f"{public_cli_program_name()} --plan"
-    ) < result.stdout.index("python -m haindy.main --plan")
+        f"{public_cli_program_name()} run --plan"
+    ) < result.stdout.index("python -m haindy.main run --plan")
 
 
 def _haindy_cli_path() -> Path:
