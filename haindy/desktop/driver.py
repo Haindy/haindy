@@ -203,7 +203,10 @@ class DesktopDriver(AutomationDriver):
         )
 
     async def scroll_by_pixels(
-        self, x: int = 0, y: int = 0, smooth: bool = True,
+        self,
+        x: int = 0,
+        y: int = 0,
+        smooth: bool = True,
         origin: tuple[int, int] | None = None,
     ) -> None:
         await self._ensure_ready()

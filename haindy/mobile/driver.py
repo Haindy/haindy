@@ -334,9 +334,7 @@ class MobileDriver(AutomationDriver):
         scaled_x, scaled_y = self._scale_deltas_to_device(x, y, (width, height))
 
         if origin is not None:
-            mapped_ox, mapped_oy = await self._map_point_to_device(
-                origin[0], origin[1]
-            )
+            mapped_ox, mapped_oy = await self._map_point_to_device(origin[0], origin[1])
             start_x = mapped_ox
             start_y = mapped_oy
         else:

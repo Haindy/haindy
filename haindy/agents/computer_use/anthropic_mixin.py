@@ -93,9 +93,7 @@ class AnthropicComputerUseMixin:
         api_width, api_height = api_size
         # Wrap the goal text AFTER determining the API dimensions so the
         # resolution mentioned in the prompt matches the tool definition.
-        goal = self._wrap_goal_for_mobile(
-            goal, environment, api_width, api_height
-        )
+        goal = self._wrap_goal_for_mobile(goal, environment, api_width, api_height)
         goal = self._apply_interaction_mode_guidance(goal, metadata)
 
         request_payload = self._build_anthropic_initial_request(
@@ -151,7 +149,11 @@ class AnthropicComputerUseMixin:
                 # Scale coordinates from the API image space back to the
                 # original device viewport so the driver taps land correctly.
                 if api_size != original_size:
-                    for key_x, key_y in (("x", "y"), ("start_x", "start_y"), ("end_x", "end_y")):
+                    for key_x, key_y in (
+                        ("x", "y"),
+                        ("start_x", "start_y"),
+                        ("end_x", "end_y"),
+                    ):
                         if key_x in translated_action and key_y in translated_action:
                             translated_action[key_x], translated_action[key_y] = (
                                 self._rescale_coordinates(
@@ -462,9 +464,10 @@ class AnthropicComputerUseMixin:
         if display_frame is not None and display_frame.screen_size[0] > 0:
             viewport_width, viewport_height = display_frame.screen_size
         else:
-            viewport_width, viewport_height = (
-                await self._automation_driver.get_viewport_size()
-            )
+            (
+                viewport_width,
+                viewport_height,
+            ) = await self._automation_driver.get_viewport_size()
         display_bytes = (
             display_frame.image_bytes
             if display_frame is not None
@@ -814,7 +817,7 @@ class AnthropicComputerUseMixin:
         scale = max_long_edge / long_edge
         new_w = max(int(round(img.width * scale)), 1)
         new_h = max(int(round(img.height * scale)), 1)
-        resized = img.resize((new_w, new_h), Image.LANCZOS)
+        resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
         buf = io.BytesIO()
         resized.save(buf, format="PNG")
         return buf.getvalue(), original_size, (new_w, new_h)

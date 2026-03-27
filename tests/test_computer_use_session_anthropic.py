@@ -376,6 +376,8 @@ def test_translate_anthropic_action_hold_key(
         provider="anthropic",
         anthropic_client=object(),
     )
-    result = session._translate_anthropic_action({"action": "hold_key", "key": "Return"})
+    result = session._translate_anthropic_action(
+        {"action": "hold_key", "key": "Return"}
+    )
     assert result["type"] == "keypress"
     assert result["key"] == "Return"
