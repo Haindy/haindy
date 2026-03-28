@@ -235,6 +235,8 @@ class VirtualInput:
             )
 
         self._viewport = viewport
+        self._last_x: int = viewport[0] // 2
+        self._last_y: int = viewport[1] // 2
         self._keyboard_layout = self._normalize_layout(keyboard_layout)
         self._emit_scancodes = emit_scancodes
         self._key_delay = max(key_delay_ms, 0) / 1000.0
@@ -250,19 +252,36 @@ class VirtualInput:
             },
         )
 
+    async def _interpolated_move(self, target_x: int, target_y: int) -> None:
+        """Move pointer from current position to target via intermediate ABS
+        events so that toolkits (GTK, Qt) register proper enter/leave crossing
+        events -- required for hover-triggered submenus, tooltips, etc."""
+        assert self._ui is not None
+        dx = target_x - self._last_x
+        dy = target_y - self._last_y
+        distance = max(abs(dx), abs(dy))
+        step_size = 8
+        num_steps = max(distance // step_size, 1)
+        for i in range(1, num_steps + 1):
+            progress = i / num_steps
+            ix = int(self._last_x + dx * progress)
+            iy = int(self._last_y + dy * progress)
+            self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, ix)
+            self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, iy)
+            self._ui.syn()
+            await asyncio.sleep(0.002)
+        self._last_x = target_x
+        self._last_y = target_y
+
     async def move(self, x: int, y: int, steps: int = 1) -> None:
         """Move pointer to absolute coordinates."""
         x_clamped, y_clamped = self._clamp(x, y)
         if self._ui is None:
             await self._xdotool_move(x_clamped, y_clamped)
+            self._last_x, self._last_y = x_clamped, y_clamped
             return
 
-        for _ in range(max(steps, 1)):
-            self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, x_clamped)
-            self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, y_clamped)
-            self._ui.syn()
-            if steps > 1:
-                await asyncio.sleep(0.01)
+        await self._interpolated_move(x_clamped, y_clamped)
 
     async def click(
         self,
@@ -274,6 +293,16 @@ class VirtualInput:
     ) -> None:
         """Click at absolute coordinates, optionally holding modifier keys."""
         x_clamped, y_clamped = self._clamp(x, y)
+        logger.debug(
+            "click dispatch: (%d, %d) -> clamped (%d, %d), button=%s, count=%d, uinput=%s",
+            x,
+            y,
+            x_clamped,
+            y_clamped,
+            button,
+            click_count,
+            self._ui is not None,
+        )
         if self._ui is None:
             await self._xdotool_click(
                 x_clamped,
@@ -284,15 +313,14 @@ class VirtualInput:
             )
             return
 
+        await self._interpolated_move(x_clamped, y_clamped)
+
         code = self._button_code(button)
         modifier_codes = self._modifier_codes(modifiers)
         for mc in modifier_codes:
             self._ui.write(ecodes.EV_KEY, mc, 1)
             self._ui.syn()
         for _ in range(max(click_count, 1)):
-            self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, x_clamped)
-            self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, y_clamped)
-            self._ui.syn()
             self._ui.write(ecodes.EV_KEY, code, 1)
             self._ui.syn()
             self._ui.write(ecodes.EV_KEY, code, 0)
@@ -310,11 +338,10 @@ class VirtualInput:
         end_x, end_y = self._clamp(*end)
         if self._ui is None:
             await self._xdotool_drag((start_x, start_y), (end_x, end_y), steps=steps)
+            self._last_x, self._last_y = end_x, end_y
             return
 
-        self._ui.write(ecodes.EV_ABS, ecodes.ABS_X, start_x)
-        self._ui.write(ecodes.EV_ABS, ecodes.ABS_Y, start_y)
-        self._ui.syn()
+        await self._interpolated_move(start_x, start_y)
         self._ui.write(ecodes.EV_KEY, ecodes.BTN_LEFT, 1)
         self._ui.syn()
 
@@ -329,6 +356,7 @@ class VirtualInput:
 
         self._ui.write(ecodes.EV_KEY, ecodes.BTN_LEFT, 0)
         self._ui.syn()
+        self._last_x, self._last_y = end_x, end_y
 
     async def scroll(self, x: int = 0, y: int = 0) -> None:
         """Scroll by pixel deltas using wheel events."""
