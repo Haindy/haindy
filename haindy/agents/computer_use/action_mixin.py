@@ -131,6 +131,17 @@ class ComputerUseActionMixin:
                     modifiers = [str(m).lower() for m in raw_modifiers if m]
                     if implicit_modifier and implicit_modifier not in modifiers:
                         modifiers = [implicit_modifier] + modifiers
+                    logger.debug(
+                        "Dispatching click to automation driver",
+                        extra={
+                            "x": x,
+                            "y": y,
+                            "button": button,
+                            "click_count": click_count,
+                            "modifiers": modifiers,
+                            "call_id": turn.call_id,
+                        },
+                    )
                     await asyncio.wait_for(
                         self._automation_driver.click(
                             x,
@@ -195,6 +206,15 @@ class ComputerUseActionMixin:
                             steps = 1
                     if steps <= 0:
                         steps = 1
+                    logger.debug(
+                        "Dispatching move/hover to automation driver",
+                        extra={
+                            "x": x,
+                            "y": y,
+                            "steps": steps,
+                            "call_id": turn.call_id,
+                        },
+                    )
                     await asyncio.wait_for(
                         self._automation_driver.move_mouse(x, y, steps=steps),
                         timeout=self._action_timeout_seconds,
