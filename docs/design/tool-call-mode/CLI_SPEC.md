@@ -6,9 +6,11 @@
 haindy <subcommand> [options]
 ```
 
-All tool call mode subcommands are grouped under two top-level subcommands:
+All tool call mode subcommands are grouped under:
 - `session` - manage sessions and session variables
-- Direct action subcommands: `act`, `test`
+- Synchronous action subcommands: `act`, `screenshot`
+- Async dispatch subcommands: `test`, `explore`
+- Status poll subcommands: `test-status`, `explore-status`
 
 Commands that operate on an existing session require an explicit `--session <id>` flag.
 `haindy session new` does not take `--session` because it creates the session.
@@ -34,18 +36,20 @@ Start a new session. Spawns the daemon process, initializes the device connectio
 For desktop sessions, tool call mode does not own project startup. The coding agent is responsible for making sure the target site or native desktop app is already running before or around session start; Haindy owns the UI interaction after that point.
 
 ```
-haindy session new [--android | --desktop] [options]
+haindy session new [--android | --ios | --desktop] [options]
 ```
 
 **Flags:**
 
 | Flag | Default | Description |
 |---|---|---|
-| `--android` | | Use Android ADB backend. Mutually exclusive with `--desktop`. |
+| `--android` | | Use Android ADB backend. Mutually exclusive with `--ios` and `--desktop`. |
 | `--android-serial <serial>` | | Target a specific Android device or emulator by ADB serial (e.g. `emulator-5554`). Optional; uses the only connected device if omitted. |
 | `--android-app <package>` | | Android package name to launch on session start (e.g. `com.example.app`). Optional. |
-| `--desktop` | | Use the desktop backend (computer use: OS screen capture + AI-driven input). Mutually exclusive with `--android`. Default if neither specified and no env config. |
-| `--url <url>` | | URL to open on session start (desktop only). Optional. |
+| `--ios` | | Use iOS idb backend. Mutually exclusive with `--android` and `--desktop`. |
+| `--ios-udid <udid>` | | Target a specific iOS device or simulator by UDID. Optional; uses the only connected device if omitted. |
+| `--ios-app <bundle_id>` | | iOS bundle identifier to launch on session start (e.g. `com.example.app`). Optional. |
+| `--desktop` | | Use the desktop backend (computer use: OS screen capture + AI-driven input). Mutually exclusive with `--android` and `--ios`. Default if neither specified and no env config. |
 | `--idle-timeout <seconds>` | 1800 | Kill daemon after this many seconds without a command. |
 
 **Stdout on success:**
@@ -70,11 +74,12 @@ haindy session status --session <SESSION_ID>
 haindy test "open the app and verify the dashboard appears" --session <SESSION_ID>
 ```
 
-**Desktop startup guidance:**
+**Device startup guidance:**
 
 - Web project: make sure the site or dev server is already running before `haindy session new --desktop`. If a browser is not open yet, instruct Haindy to open one and navigate to the URL like a human would. Prefer a maximized browser window.
 - Native desktop app: make sure the app is already running before `haindy session new --desktop`. If needed, instruct Haindy to bring it to the foreground using normal desktop UI actions. Prefer a maximized app window when possible.
-- Android mobile: start the session against a device or emulator that ADB can reach, and pass `--android-serial` / `--android-app` when needed.
+- Android: start the session against a device or emulator that ADB can reach, and pass `--android-serial` / `--android-app` when needed.
+- iOS: start the session against a device or simulator that idb can reach, and pass `--ios-udid` / `--ios-app` when needed.
 - Desktop sessions may downshift resolution for speed and token savings, so maximizing the target browser or app window helps keep screenshots focused on the app instead of surrounding desktop noise.
 
 ---
@@ -262,9 +267,11 @@ haindy session vars --session <id>
 
 ---
 
-## Action Subcommands
+## Synchronous Action Subcommands
 
-All action subcommands share this behavior:
+These commands block until the operation completes and return the result directly.
+
+Shared behavior:
 - Require an explicit `--session <id>`.
 - Support `--timeout <seconds>`. If the timeout is reached, the command ends with `meta.exit_reason: command_timeout`.
 - Return a single JSON object on stdout (the standard envelope, see OVERVIEW.md).
@@ -330,9 +337,23 @@ haindy act "press the back button" --session <SESSION_ID>
 
 ---
 
+## Async Dispatch Subcommands
+
+These commands dispatch work to the daemon's background task runner and return immediately. The coding agent polls for progress using the corresponding status command (`test-status` or `explore-status`).
+
+Shared behavior:
+- Require an explicit `--session <id>`.
+- Return immediately with `meta.exit_reason: dispatched` and exit 0.
+- The daemon runs one background task at a time per session. If a background task is already running, the dispatch returns `status: error` with `meta.exit_reason: session_busy`.
+- The `--timeout` flag sets the wall-clock budget for the background task, not for the dispatch itself.
+
+---
+
 ### `haindy test`
 
-Run a full test scenario. The Test Planner generates a structured plan from the description, then the Test Runner executes each step and validates outcomes. Maps to Test Planner + Test Runner.
+Dispatch a test scenario for background execution. The Test Planner generates a structured plan from the description, then the Test Runner executes each step and validates outcomes. The coding agent polls `test-status` for progress and results.
+
+The scenario description must be detailed and unambiguous. Vague or high-level descriptions produce unreliable plans. The coding agent should provide explicit steps, specific UI elements to interact with, concrete values to enter, and clear expected outcomes. If the coding agent does not have enough detail to write an unambiguous scenario, it should use `explore` or `session status` first to understand the current state.
 
 ```
 haindy test "<scenario>" --session <id> [--max-steps <n>] [--timeout <seconds>]
@@ -340,74 +361,308 @@ haindy test "<scenario>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 
 **Argument:**
 
-`<scenario>` - A natural language description of a complete test scenario. May be multi-sentence. Should describe the goal, the actions, and the expected end state.
+`<scenario>` - A detailed, unambiguous description of the test scenario. Must include: what actions to perform, in what order, what values to use, and what the expected outcome is. May be multi-sentence.
 
 **Flags:**
 
 | Flag | Default | Description |
 |---|---|---|
-| `--max-steps <n>` | 20 | Maximum number of steps the Test Runner may execute. |
-| `--timeout <seconds>` | 300 | Maximum wall-clock time for the command before Haindy stops execution and returns `meta.exit_reason: command_timeout`. |
+| `--max-steps <n>` | 20 | Maximum number of steps the Test Runner may execute before returning `max_steps_reached`. |
+| `--timeout <seconds>` | 300 | Maximum wall-clock time for the background task. When reached, the test stops with `timeout`. |
 
 **Examples:**
 
 ```bash
-haindy test "sign in with user@example.com and password hunter2, navigate to Settings, change the display name to 'Bob', save, and verify the new name appears in the profile header" --session <SESSION_ID>
+# Good: detailed, unambiguous, explicit steps and expected outcomes
+haindy test "Step 1: Tap the email field and type 'alice@example.com'. Step 2: Tap the password field and type '{{PASSWORD}}'. Step 3: Tap the 'Sign In' button. Step 4: Verify the dashboard screen appears with the text 'Welcome, Alice' in the header." --session <SESSION_ID>
 
-haindy test "attempt to sign in with an incorrect password three times and verify that the account lockout screen appears after the third attempt" --session <SESSION_ID>
+# Good: clear precondition, specific action, explicit assertion
+haindy test "Starting from the Settings screen, tap 'Change Password', enter 'oldpass123' in the current password field and 'newpass456' in the new password field, tap 'Save', and verify a success toast appears saying 'Password updated'." --session <SESSION_ID>
+
+# Bad: vague, no specific steps or expected outcomes
+# haindy test "test the login flow" --session <SESSION_ID>
 ```
 
-**Stdout on success:**
+**Stdout (dispatch acknowledgement):**
 
 ```json
 {
   "session_id": "a3f9c2d1-...",
   "command": "test",
   "status": "success",
-  "response": "Test passed in 6 steps. Successfully signed in, navigated to Settings, updated the display name to 'Bob', saved changes. The profile header confirmed 'Bob' as the display name.",
-  "steps_total": 6,
-  "steps_passed": 6,
-  "steps_failed": 0,
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_012.png",
-  "meta": {"exit_reason": "completed", "duration_ms": 18420, "actions_taken": 14}
+  "response": "Test dispatched. Poll test-status for progress.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_005.png",
+  "meta": {"exit_reason": "dispatched", "duration_ms": 52, "actions_taken": 1}
 }
 ```
 
-**Stdout on failure:**
+The dispatch takes an initial screenshot before starting the background task. This captures the device state at the moment the test was accepted and provides visual context in the dispatch response.
+
+**When to use:** When the coding agent has a well-defined scenario with explicit steps and expected outcomes. The scenario should be detailed enough that a human tester could follow it without asking questions. For open-ended goals or unknown screen states, use `explore` instead.
+
+---
+
+### `haindy test-status`
+
+Poll the progress of a running or completed `test` background task.
+
+```
+haindy test-status --session <id>
+```
+
+If no test has been dispatched in this session, returns `status: error` with `meta.exit_reason: completed` and a response explaining no test is active.
+
+**Stdout (test in progress):**
 
 ```json
 {
   "session_id": "a3f9c2d1-...",
-  "command": "test",
-  "status": "failure",
-  "response": "Test failed at step 4 of 6. Steps 1-3 (sign in, navigate to Settings, enter new name) passed. Step 4 failed: tapping 'Save' showed a validation error 'Display name must be at least 3 characters'. The name 'Bob' was rejected.",
+  "command": "test-status",
+  "status": "success",
+  "response": "Test in progress. Completed step 3 of 6: typed 'alice@example.com' into the email field. Currently executing step 4: tap the 'Sign In' button.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_008.png",
+  "test_status": "in_progress",
+  "current_step": "Step 4: Tap the 'Sign In' button and wait for the dashboard to load.",
   "steps_total": 6,
-  "steps_passed": 3,
-  "steps_failed": 1,
-  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_009.png",
-  "meta": {"exit_reason": "assertion_failed", "duration_ms": 11230, "actions_taken": 9}
+  "steps_completed": 3,
+  "steps_failed": 0,
+  "issues_found": {},
+  "elapsed_time_seconds": 14,
+  "meta": {"exit_reason": "completed", "duration_ms": 5, "actions_taken": 7}
 }
 ```
 
-Note: `test` adds `steps_total`, `steps_passed`, and `steps_failed` fields to the standard envelope.
+**Stdout (test passed):**
 
-**When to use:** For anything that requires outcome validation - single interactions with expected results, multi-step journeys, regression checks, and open-ended scenarios. This is the primary command in tool call mode.
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "test-status",
+  "status": "success",
+  "response": "Test passed. All 6 steps completed successfully. The dashboard shows 'Welcome, Alice' as expected.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_012.png",
+  "test_status": "passed",
+  "current_step": null,
+  "steps_total": 6,
+  "steps_completed": 6,
+  "steps_failed": 0,
+  "issues_found": {},
+  "elapsed_time_seconds": 42,
+  "meta": {"exit_reason": "completed", "duration_ms": 4, "actions_taken": 14}
+}
+```
+
+**Stdout (test failed):**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "test-status",
+  "status": "success",
+  "response": "Test failed at step 4 of 6. Steps 1-3 passed. Step 4 failed: after tapping 'Sign In', the screen showed 'Invalid credentials' instead of the dashboard.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_009.png",
+  "test_status": "failed",
+  "current_step": null,
+  "steps_total": 6,
+  "steps_completed": 3,
+  "steps_failed": 1,
+  "issues_found": {
+    "step_4": "Expected dashboard with 'Welcome, Alice'. Observed: error message 'Invalid credentials' on the sign-in screen."
+  },
+  "elapsed_time_seconds": 31,
+  "meta": {"exit_reason": "assertion_failed", "duration_ms": 3, "actions_taken": 9}
+}
+```
+
+**Extended fields for `test-status`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `test_status` | string | `in_progress`, `passed`, `failed`, `error`, `timeout`, `max_steps_reached`. |
+| `current_step` | string or null | Description of the step currently being executed. `null` when test is finished. |
+| `steps_total` | integer | Total steps in the planned test. |
+| `steps_completed` | integer | Steps that have passed so far. |
+| `steps_failed` | integer | Steps that have failed. |
+| `issues_found` | object | Map of step identifiers to failure descriptions. Empty when no failures. |
+| `elapsed_time_seconds` | integer | Wall-clock time since the test was dispatched. |
+
+Note: `meta.exit_reason` on a `test-status` poll reflects the background task state, not the poll itself. While in progress, it is `completed` (the poll succeeded). When the test finishes, it reflects the test outcome (`completed`, `assertion_failed`, `max_steps_reached`, `timeout`, `agent_error`, `device_error`).
+
+Note: `screenshot_path` reflects the latest screenshot taken by the background task. The coding agent should take its own screenshots via `screenshot` at its own timing if it needs to verify device state independently, because Haindy's screenshots may not capture the exact moment the agent needs.
 
 ---
 
-### `haindy explore` (v2 - not available in v1)
+### `haindy explore`
 
-> **Not implemented in v1.** Use `test` for open-ended goals in the meantime - it accepts natural language scenarios and plans them automatically.
+Dispatch an open-ended exploration goal for background execution. The Situational Agent assesses the current screen, the Test Planner builds a mini-plan based on what is visible, and the Test Runner executes it. This cycle repeats until the goal is reached, the agent gets stuck, or the optional timeout fires. The coding agent polls `explore-status` for progress.
 
-Blocked on: extending the Situational Agent from text-context gating to live-screen assessment (screenshot in, device state description out).
+Unlike `test`, `explore` does not require detailed step-by-step instructions. The coding agent provides a goal, and Haindy autonomously figures out how to navigate the device to achieve it. Any additional context the coding agent provides (current app state, relevant features, expected layout) improves the quality of exploration.
 
-**Planned interface:**
+The goal should be achievable by looking at the screens and interacting with the app. It should not require knowledge that is not discoverable from the UI itself.
 
 ```
 haindy explore "<goal>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 ```
 
-**Intended use case:** When the coding agent does not know the current device state and cannot write a `test` scenario without first knowing what screen it is on. `explore` will take a screenshot, assess the situation, build a mini-plan, and execute it autonomously.
+**Argument:**
+
+`<goal>` - A natural language description of what to explore or achieve. Should be focused and realistic -- achievable by navigating and interacting with visible UI elements.
+
+**Flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--max-steps <n>` | 50 | Maximum number of steps before returning `max_steps_reached`. |
+| `--timeout <seconds>` | none | Optional wall-clock budget for the background task. If omitted, explore runs until the goal is reached, the agent gets stuck, or max-steps is hit. |
+
+**Examples:**
+
+```bash
+# Focused, achievable goal
+haindy explore "find and open the notification settings screen" --session <SESSION_ID>
+
+# Goal with helpful context
+haindy explore "navigate to the order history and find the most recent order. The app should have a bottom navigation bar with an 'Orders' tab." --session <SESSION_ID>
+
+# Open-ended discovery
+haindy explore "explore the settings menu and report what configuration options are available" --session <SESSION_ID>
+```
+
+**Stdout (dispatch acknowledgement):**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "explore",
+  "status": "success",
+  "response": "Explore dispatched. Poll explore-status for progress.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_003.png",
+  "meta": {"exit_reason": "dispatched", "duration_ms": 48, "actions_taken": 1}
+}
+```
+
+The dispatch takes an initial screenshot before starting the background task. This is the same screenshot the Situational Agent uses for its first screen assessment.
+
+**When to use:** When the coding agent does not know the current device state, cannot write an unambiguous `test` scenario, or wants to discover what the app looks like and what options are available. Use `explore` for reconnaissance and `test` for verification.
+
+---
+
+### `haindy explore-status`
+
+Poll the progress of a running or completed `explore` background task.
+
+```
+haindy explore-status --session <id>
+```
+
+If no explore has been dispatched in this session, returns `status: error` with a response explaining no explore is active.
+
+**Stdout (explore in progress):**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "explore-status",
+  "status": "success",
+  "response": "Exploring. Currently looking at the Settings main screen after navigating from the home screen via the gear icon.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_005.png",
+  "explore_status": "in_progress",
+  "current_focus": "Examining the Settings main screen to find notification-related options.",
+  "observations": [
+    "Home screen has a bottom navigation bar with Home, Search, Orders, Profile tabs.",
+    "Profile tab contains a gear icon that leads to Settings.",
+    "Settings main screen shows: Account, Notifications, Privacy, About."
+  ],
+  "elapsed_time_seconds": 18,
+  "meta": {"exit_reason": "completed", "duration_ms": 4, "actions_taken": 5}
+}
+```
+
+**Stdout (goal reached):**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "explore-status",
+  "status": "success",
+  "response": "Goal reached. Found and opened the notification settings screen. It contains toggles for push notifications, email notifications, and SMS alerts.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_008.png",
+  "explore_status": "goal_reached",
+  "current_focus": null,
+  "observations": [
+    "Home screen has a bottom navigation bar with Home, Search, Orders, Profile tabs.",
+    "Profile tab contains a gear icon that leads to Settings.",
+    "Settings main screen shows: Account, Notifications, Privacy, About.",
+    "Notification settings screen has toggles: Push Notifications (on), Email Notifications (on), SMS Alerts (off)."
+  ],
+  "elapsed_time_seconds": 27,
+  "meta": {"exit_reason": "goal_reached", "duration_ms": 3, "actions_taken": 8}
+}
+```
+
+**Stdout (stuck):**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "explore-status",
+  "status": "success",
+  "response": "Exploration ended. Could not find a way to reach the notification settings. After navigating to Settings, all sub-menus were explored but none contained notification options. The app may not have a dedicated notification settings screen.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_015.png",
+  "explore_status": "stuck",
+  "current_focus": null,
+  "observations": [
+    "Settings contains: Account, Display, Language, About.",
+    "Account sub-menu has: Email, Password, Delete Account.",
+    "Display sub-menu has: Theme, Font Size.",
+    "No notification-related options found in any settings sub-menu."
+  ],
+  "elapsed_time_seconds": 45,
+  "meta": {"exit_reason": "stuck", "duration_ms": 4, "actions_taken": 15}
+}
+```
+
+**Extended fields for `explore-status`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `explore_status` | string | `in_progress`, `goal_reached`, `stuck`, `timeout`, `max_steps_reached`, `error`. |
+| `current_focus` | string or null | What Haindy is currently trying to do. `null` when explore is finished. |
+| `observations` | list of strings | Accumulating list of things Haindy has observed during exploration. Each entry is a factual observation about the app state or navigation structure. |
+| `elapsed_time_seconds` | integer | Wall-clock time since explore was dispatched. |
+
+Note: `explore_status` avoids the terms "passed" and "failed" because exploration is not a pass/fail assertion. It either reaches the goal (`goal_reached`), determines it cannot proceed (`stuck`), or is bounded by limits (`timeout`, `max_steps_reached`).
+
+Note: `screenshot_path` reflects the latest screenshot taken by the background task. The coding agent should take its own screenshots via `screenshot` at its own timing if it needs to verify device state independently.
+
+---
+
+### `haindy session prune`
+
+Delete session directories older than a given age. Does not affect live sessions with running daemons.
+
+```
+haindy session prune --older-than <days>
+```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--older-than <days>` | Required. Delete session directories whose `created_at` is older than this many days. |
+
+**Stdout:**
+
+```json
+{
+  "session_id": null,
+  "command": "session",
+  "status": "success",
+  "response": "Pruned 3 session directories older than 7 days. 2 active sessions were skipped.",
+  "screenshot_path": null,
+  "meta": {"exit_reason": "completed", "duration_ms": 45, "actions_taken": 0}
+}
+```
 
 ---
 
@@ -416,7 +671,7 @@ haindy explore "<goal>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 | Variable | Description |
 |---|---|
 | `HAINDY_HOME` | Override the base directory (default: `~/.haindy`). Useful in CI. |
-| `HAINDY_BACKEND` | Default backend for new sessions: `desktop` or `android`. Overridden by `--android`/`--desktop`. |
+| `HAINDY_BACKEND` | Default backend for new sessions: `desktop`, `android`, or `ios`. Overridden by `--android`/`--ios`/`--desktop`. |
 
 ---
 
@@ -433,32 +688,56 @@ haindy explore "<goal>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 
 ## Full JSON Contract Reference
 
-### Standard Envelope (all action subcommands)
+### Standard Envelope (all commands)
 
 ```json
 {
   "session_id": "string (UUID) | null",
-  "command": "act | test | session",
+  "command": "act | screenshot | test | test-status | explore | explore-status | session",
   "status": "success | failure | error",
   "response": "string (natural language, always present)",
   "screenshot_path": "string (absolute path) | null",
   "meta": {
-    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | command_timeout | agent_error | device_error | session_busy",
+    "exit_reason": "string (see exit_reason values below)",
     "duration_ms": "integer",
     "actions_taken": "integer"
   }
 }
 ```
 
-`actions_taken` counts device operations performed to satisfy the command. A fresh screenshot taken for `session status` counts as 1. Session startup and shutdown bookkeeping does not.
+`actions_taken` counts device operations performed. For sync commands, this is the count from the command itself. For async dispatch, this is 1 (the initial screenshot). For status polls, this is the background task's running total. A fresh screenshot taken for `session status` counts as 1. Session startup and shutdown bookkeeping does not.
 
-### Extended fields for `test`
+### exit_reason values
+
+| Context | Values |
+|---|---|
+| Sync commands (`act`, `screenshot`, `session *`) | `completed`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, `session_busy` |
+| Async dispatch (`test`, `explore`) | `dispatched`, `session_busy` |
+| `test-status` (terminal) | `completed`, `assertion_failed`, `max_steps_reached`, `timeout`, `agent_error`, `device_error` |
+| `explore-status` (terminal) | `goal_reached`, `stuck`, `goal_unreachable`, `max_steps_reached`, `timeout`, `agent_error`, `device_error` |
+
+### Extended fields for `test-status`
 
 ```json
 {
+  "test_status": "in_progress | passed | failed | error | timeout | max_steps_reached",
+  "current_step": "string | null",
   "steps_total": "integer",
-  "steps_passed": "integer",
-  "steps_failed": "integer"
+  "steps_completed": "integer",
+  "steps_failed": "integer",
+  "issues_found": {"step_N": "string"},
+  "elapsed_time_seconds": "integer"
+}
+```
+
+### Extended fields for `explore-status`
+
+```json
+{
+  "explore_status": "in_progress | goal_reached | stuck | timeout | max_steps_reached | error",
+  "current_focus": "string | null",
+  "observations": ["string"],
+  "elapsed_time_seconds": "integer"
 }
 ```
 
@@ -469,7 +748,7 @@ haindy explore "<goal>" --session <id> [--max-steps <n>] [--timeout <seconds>]
   "sessions": [
     {
       "session_id": "string",
-      "backend": "desktop | android",
+      "backend": "desktop | android | ios",
       "created_at": "ISO 8601 datetime",
       "steps_executed": "integer",
       "idle_seconds": "integer"

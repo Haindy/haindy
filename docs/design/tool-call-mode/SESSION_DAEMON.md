@@ -22,17 +22,30 @@ stateDiagram-v2
     Spawning --> Initializing : independently launched daemon started
     Initializing --> Ready : device connected
 
-    Ready --> Executing : command received
-    Executing --> Ready : command complete (response sent)
-    Executing --> Ready : command failed (failure response sent)
-    Executing --> Error : unrecoverable exception
+    Ready --> SyncExec : sync command (act, screenshot, session *)
+    SyncExec --> Ready : response sent
+
+    Ready --> BgRunning : async dispatch (test, explore)
+    BgRunning --> BgRunning : status poll / session vars / screenshot
+    BgRunning --> Ready : background task completes
+
+    SyncExec --> Error : unrecoverable exception
+    BgRunning --> Error : unrecoverable exception
 
     Ready --> Closing : haindy session close
     Ready --> Closing : idle timeout reached
+    BgRunning --> Closing : haindy session close (cancels bg task)
     Error --> Closing : forced shutdown
 
     Closing --> [*] : daemon exits, socket removed
 ```
+
+The daemon distinguishes between synchronous commands (which block until done) and background tasks (which run asynchronously). While a background task is running:
+
+- **Allowed**: `test-status`, `explore-status`, `session set/unset/vars`, `session close`, `screenshot` (passive screen capture that does not interact with the device).
+- **Rejected**: `act`, `session status`, `test`, `explore`. These either interact with the device (conflicting with the background task) or attempt to start a second background task. The daemon returns `session_busy`.
+
+This ensures the background task has exclusive access to the device for interaction, while the coding agent can still poll progress, manage variables, and take passive screenshots.
 
 ---
 
@@ -96,23 +109,31 @@ sequenceDiagram
 
 ---
 
-## Command Dispatch Sequence: `test`
+## Command Dispatch Sequence: `test` (async)
 
 ```mermaid
 sequenceDiagram
     participant CA as Coding Agent
     participant CLI as haindy CLI
     participant D as Session Daemon
+    participant BG as Background Task
     participant TP as Test Planner
     participant TR as Test Runner
     participant AA as Action Agent
     participant DEV as Device
 
-    CA->>CLI: haindy test "sign in and verify dashboard"
+    CA->>CLI: haindy test "Step 1: tap email... Step 2: type..."
     CLI->>D: {command: "test", instruction: "..."}
-    D->>TP: plan(instruction)
-    TP-->>D: TestPlan(steps[])
-    D->>TR: execute_plan(plan)
+    D->>DEV: Take initial screenshot
+    DEV-->>D: entry_screen.png
+    D->>BG: spawn background task (with initial screenshot)
+    D-->>CLI: {"status": "success", "screenshot_path": "...", "meta": {"exit_reason": "dispatched"}}
+    CLI-->>CA: Test dispatched (with screenshot of entry state)
+
+    Note over BG,DEV: Background execution (async)
+    BG->>TP: plan(instruction, initial_screenshot)
+    TP-->>BG: TestPlan(steps[])
+    BG->>TR: execute_plan(plan)
 
     loop For each step in plan
         TR->>DEV: Take screenshot
@@ -122,24 +143,81 @@ sequenceDiagram
         DEV-->>AA: Done
         AA-->>TR: ActionResult
         TR->>TR: Verify step expected outcome
-        alt Step passed
-            TR->>TR: Advance to next step
-        else Step failed
-            TR-->>D: PlanResult(failed, failed_step_summary)
-        end
+        TR->>BG: Update progress (current_step, steps_completed)
     end
 
-    TR-->>D: PlanResult(status, summary)
-    D->>FS: Save final screenshot
-    D-->>CLI: JSON response (with meta)
-    CLI-->>CA: {"status": "success|failure", "response": "...", "meta": {...}}
+    TR-->>BG: PlanResult(status, summary)
+    BG->>BG: Store final result
+
+    Note over CA,CLI: Polling (at coding agent's pace)
+    CA->>CLI: haindy test-status --session <id>
+    CLI->>D: {command: "test_status"}
+    D->>BG: read current state
+    BG-->>D: {test_status, current_step, steps_completed, ...}
+    D-->>CLI: JSON response
+    CLI-->>CA: {"test_status": "in_progress|passed|failed", ...}
 ```
 
 ---
 
-## Command Dispatch Sequence: `explore` (v2 - not yet implemented)
+## Command Dispatch Sequence: `explore` (async)
 
-Placeholder for the v2 `explore` command. Requires live-screen situational assessment: the Situational Agent will take a screenshot, describe the current device state, and feed that into the Test Planner before execution begins. The sequence will be similar to `test` with a Situational Agent assessment step prepended.
+```mermaid
+sequenceDiagram
+    participant CA as Coding Agent
+    participant CLI as haindy CLI
+    participant D as Session Daemon
+    participant BG as Background Task
+    participant SIT as Situational Agent
+    participant TP as Test Planner
+    participant TR as Test Runner
+    participant AA as Action Agent
+    participant DEV as Device
+
+    CA->>CLI: haindy explore "find the notification settings"
+    CLI->>D: {command: "explore", instruction: "..."}
+    D->>DEV: Take initial screenshot
+    DEV-->>D: entry_screen.png
+    D->>BG: spawn background task (with initial screenshot)
+    D-->>CLI: {"status": "success", "screenshot_path": "...", "meta": {"exit_reason": "dispatched"}}
+    CLI-->>CA: Explore dispatched (with screenshot of entry state)
+
+    Note over BG,DEV: Background execution (async, iterative)
+    loop Until goal reached, stuck, or limits hit
+        BG->>SIT: assess(latest_screenshot, goal, observations_so_far)
+        Note over BG: First iteration uses the initial screenshot
+        SIT-->>BG: ScreenAssessment(description, next_actions, goal_status)
+        BG->>BG: Append to observations list
+        BG->>BG: Update current_focus
+
+        alt Goal reached
+            BG->>BG: Store result (goal_reached)
+        else Stuck / cannot proceed
+            BG->>BG: Store result (stuck)
+        else Continue exploring
+            BG->>TP: plan(next_actions)
+            TP-->>BG: MiniPlan(steps[])
+            BG->>TR: execute_plan(mini_plan)
+            loop For each step in mini_plan
+                TR->>AA: execute(step)
+                AA->>DEV: Perform action
+                DEV-->>AA: Done
+                AA-->>TR: ActionResult
+            end
+            TR-->>BG: MiniPlanResult
+        end
+    end
+
+    Note over CA,CLI: Polling (at coding agent's pace)
+    CA->>CLI: haindy explore-status --session <id>
+    CLI->>D: {command: "explore_status"}
+    D->>BG: read current state
+    BG-->>D: {explore_status, current_focus, observations, ...}
+    D-->>CLI: JSON response
+    CLI-->>CA: {"explore_status": "in_progress|goal_reached|stuck", ...}
+```
+
+The `explore` loop is iterative: assess the current screen, decide whether the goal has been reached or if progress is stuck, plan and execute a small batch of actions, then reassess. This continues until the goal is reached, the agent determines it cannot proceed, or an external limit (timeout, max-steps) is hit.
 
 ---
 
@@ -151,8 +229,8 @@ Communication between the CLI client and daemon uses newline-delimited JSON over
 
 ```json
 {
-  "command": "act | test | session_status | session_close | session_set | session_unset | session_vars",
-  "instruction": "string (for act/test)",
+  "command": "act | test | test_status | explore | explore_status | screenshot | session_status | session_close | session_set | session_unset | session_vars",
+  "instruction": "string (for act/test/explore)",
   "options": {
     "max_steps": 20,
     "timeout_seconds": 300,
@@ -201,7 +279,7 @@ process. The launcher:
 
 The daemon receives:
 - `--session-id <uuid>` - its own session ID
-- `--backend <android|desktop>` - device backend to initialize
+- `--backend <android|ios|desktop>` - device backend to initialize
 - A file descriptor number for the readiness pipe (via env var `HAINDY_READINESS_FD`)
 
 ### Idle timeout
@@ -219,7 +297,7 @@ a silent disappearance.
 
 ### Command timeout
 
-Every daemon-handled command is bounded by a wall-clock timeout. The caller may set it explicitly with `--timeout <seconds>`; otherwise the daemon uses the command default (300s for `test`, `act`, and `session status`).
+Synchronous commands (`act`, `screenshot`, `session status`) are bounded by a wall-clock timeout. The caller may set it explicitly with `--timeout <seconds>`; otherwise the daemon uses the command default (300s for `act` and `session status`, 30s for `screenshot`).
 
 If the timeout is reached, the daemon stops the command and returns:
 
@@ -233,6 +311,12 @@ If the timeout is reached, the daemon stops the command and returns:
   "meta": {"exit_reason": "command_timeout", "duration_ms": 300000, "actions_taken": 4}
 }
 ```
+
+### Background task timeout
+
+For async commands (`test`, `explore`), the `--timeout` flag sets the wall-clock budget for the background task, not the dispatch. The dispatch itself is instant. If the background task exceeds its timeout, it stops and records `timeout` as its terminal state. The next `test-status` or `explore-status` poll returns this result.
+
+For `test`, the default timeout is 300s. For `explore`, timeout is optional -- if omitted, explore runs until the goal is reached, the agent gets stuck, or max-steps is hit. The coding agent controls timing at its own level.
 
 ### Clean shutdown
 
@@ -273,32 +357,44 @@ This is an operational fallback, not the primary V1 path.
         daemon.log     # Rotating structured log for this session.
 ```
 
-Session directories are not automatically deleted after close. They serve as an audit trail. A separate `haindy session prune --older-than <days>` command can clean them up.
+Session directories are not automatically deleted after close. They serve as an audit trail. Use `haindy session prune --older-than <days>` to clean up old sessions (see CLI_SPEC.md).
 
 ---
 
 ## Concurrency
 
-The daemon is single-threaded per session. It processes one command at a time. If a second CLI process connects while a command is executing, it receives a `status: error` response:
+The daemon uses a single asyncio event loop. Device interaction is inherently sequential, so only one device-interacting operation runs at a time.
+
+**Sync command locking**: Sync commands (`act`, `screenshot`, `session status`) acquire a command lock. If a sync command is already executing, subsequent sync requests receive `session_busy`.
+
+**Background task exclusivity**: Only one background task (`test` or `explore`) runs at a time. Dispatching a second async command while one is active returns `session_busy`.
+
+**Coexistence rules while a background task is running**:
+- `test-status`, `explore-status`: always accepted (read-only state query).
+- `session set/unset/vars`: always accepted (metadata, no device interaction).
+- `screenshot`: accepted (passive screen capture, serialized with the background task's device access).
+- `session close`: accepted (cancels the background task and shuts down).
+- `act`, `session status`: rejected with `session_busy` (these interact with the device and would conflict with the background task).
+- `test`, `explore`: rejected with `session_busy` (only one background task at a time).
 
 ```json
 {
   "session_id": "...",
   "command": "...",
   "status": "error",
-  "response": "Session is busy executing a previous command. Retry when the current command completes.",
+  "response": "Session is busy executing a background task. Use test-status or explore-status to check progress, or session close to cancel.",
   "screenshot_path": null,
   "meta": {"exit_reason": "session_busy", "duration_ms": 0, "actions_taken": 0}
 }
 ```
-
-This is intentional. Device state is inherently sequential. Parallel commands on the same session would produce undefined behavior.
 
 ---
 
 ## Implementation Notes
 
 - The daemon is implemented as a Python asyncio server using `asyncio.start_unix_server`.
-- Agent instances (ActionAgent, TestRunner, etc.) are created once at daemon startup and reused across commands, preserving any in-memory caches (e.g., coordinate caches).
+- Agent instances (ActionAgent, TestRunner, SituationalAgent, etc.) are created once at daemon startup and reused across commands, preserving any in-memory caches (e.g., coordinate caches).
 - The `WorkflowCoordinator` is not used in tool call mode. The daemon dispatches directly to agents. This avoids the planning overhead that is part of the full `run_test` flow.
-- Screenshots are taken by the daemon (not the CLI) and written to the session screenshots directory. The response includes the absolute path. The coding agent is responsible for reading the file if it needs the image content.
+- Background tasks (`test`, `explore`) run as asyncio tasks within the daemon's event loop. The daemon maintains a reference to the active background task and its progress state. Status polls read this state without blocking.
+- The `explore` command uses an iterative loop: the Situational Agent assesses the screen, the Test Planner creates a small action plan, the Test Runner executes it, and the cycle repeats. Each iteration updates the `observations` list and `current_focus` field visible to `explore-status`.
+- Screenshots are taken by the daemon (not the CLI) and written to the session screenshots directory. The response includes the absolute path. The coding agent is responsible for reading the file if it needs the image content. The coding agent can also take its own screenshots via the `screenshot` command at its own timing.
