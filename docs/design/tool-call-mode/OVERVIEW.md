@@ -62,7 +62,7 @@ flowchart TD
         AA[Action Agent]
         TR[Test Runner]
         TP[Test Planner]
-        SIT[Situational Agent]
+        AWA[Awareness Agent]
     end
 
     subgraph DEVICE ["Device"]
@@ -79,11 +79,11 @@ flowchart TD
     DISP -->|test| BG
     DISP -->|explore| BG
     BG -->|test| TP
-    BG -->|explore| SIT
+    BG -->|explore| AWA
 
-    SIT --> TP
     TP --> TR
     TR --> AA
+    AWA --> AA
     AA --> DEVICE
 
     DISP -->|JSON response| CLI
@@ -104,7 +104,7 @@ flowchart TD
 
 **Test Planner**: Accepts a detailed scenario description with explicit steps and expected outcomes, and produces a structured sequence of steps. Used by the `test` command. Requires unambiguous, detailed input from the coding agent.
 
-**Situational Agent**: Assesses live device state from a screenshot to determine the current screen context and decide how to proceed. Used by the `explore` command to handle unknown or changing screen states during open-ended exploration.
+**Awareness Agent**: Drives the `explore` loop. On each iteration it examines the latest screenshot, maintains a living TODO list of concrete actions, detects human intervention or device loss, and decides whether to continue, stop at the goal, give up as stuck, or abort. The Awareness Agent calls the Action Agent directly with the next TODO item -- there is no Test Planner or Test Runner in the explore path. This keeps the loop tight (one model call per iteration for perception + decision) and lets the agent freely backtrack by editing the TODO instead of treating an initial plan as gospel. The standard-mode Situational Agent (text-based context gating for the batch pipeline) is unrelated and unused in tool call mode.
 
 ---
 
@@ -113,9 +113,9 @@ flowchart TD
 Each command maps to a different level of the agent stack:
 
 ```
-explore       ──►  Situational Agent + Test Planner + Test Runner + Action Agent  (async)
-test          ──►  Test Planner + Test Runner + Action Agent                      (async)
-act           ──►  Action Agent only                                              (sync)
+explore       ──►  Awareness Agent + Action Agent                   (async)
+test          ──►  Test Planner + Test Runner + Action Agent        (async)
+act           ──►  Action Agent only                                (sync)
 ```
 
 The coding agent should pick the right level of abstraction:
@@ -220,7 +220,9 @@ Exit codes mirror status: 0 for `success`, 1 for `failure` or `error`.
 | **IPC** | Inter-process communication between CLI client and daemon, over a Unix domain socket. |
 | **act** | A single direct device interaction with no outcome validation. Synchronous. |
 | **test** | A detailed, unambiguous scenario dispatched to the Test Planner and Test Runner. Asynchronous -- returns immediately; poll `test-status` for progress and results. |
-| **explore** | An open-ended goal handled by the Situational Agent + Test Planner + Test Runner. Asynchronous -- returns immediately; poll `explore-status` for progress and observations. |
+| **explore** | An open-ended goal handled by the Awareness Agent driving the Action Agent directly in a tight loop. Asynchronous -- returns immediately; poll `explore-status` for progress, TODO, and observations. |
 | **test-status** | Polls the progress of a running or completed `test` background task. |
 | **explore-status** | Polls the progress of a running or completed `explore` background task. |
-| **exit_reason** | The `meta` field explaining why a command terminated. Sync commands: `completed`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, `session_busy`. Async dispatch: `dispatched`. Background task results: `completed`, `assertion_failed`, `max_steps_reached`, `stuck`, `goal_reached`, `goal_unreachable`, `timeout`, `agent_error`, `device_error`. |
+| **Awareness Agent** | The agent that owns the `explore` loop. Maintains a living TODO list, assesses each screenshot, detects human intervention, and calls the Action Agent directly. Only used in tool call mode. |
+| **TODO list** | A mutable list of concrete actions the Awareness Agent plans to take next. Items have a status (`pending`, `in_progress`, `done`, `skipped`) and the Awareness Agent may add, reorder, or skip items on every iteration as it learns more about the app. Exposed via the `explore-status` response. |
+| **exit_reason** | The `meta` field explaining why a command terminated. Sync commands: `completed`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, `session_busy`. Async dispatch: `dispatched`. Background task results: `completed`, `assertion_failed`, `max_steps_reached`, `stuck`, `goal_reached`, `aborted`, `timeout`, `agent_error`, `device_error`. |

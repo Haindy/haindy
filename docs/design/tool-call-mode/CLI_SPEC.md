@@ -494,7 +494,11 @@ Note: `screenshot_path` reflects the latest screenshot taken by the background t
 
 ### `haindy explore`
 
-Dispatch an open-ended exploration goal for background execution. The Situational Agent assesses the current screen, the Test Planner builds a mini-plan based on what is visible, and the Test Runner executes it. This cycle repeats until the goal is reached, the agent gets stuck, or the optional timeout fires. The coding agent polls `explore-status` for progress.
+Dispatch an open-ended exploration goal for background execution. The Awareness Agent owns a tight loop: it examines the latest screenshot, maintains a living TODO list of concrete next actions, calls the Action Agent directly to execute the next item, and reassesses after every action. The loop continues until the goal is reached, the agent gives up as stuck, human intervention is detected, or a limit is hit (`max_steps`, optional `timeout`). The coding agent polls `explore-status` for progress.
+
+Unlike `test`, `explore` does not build a fixed plan up front and does not use the Test Planner or Test Runner. The Awareness Agent is free to edit, reorder, skip, and add TODO items on every iteration as it learns more about the app. This makes exploration resilient to wrong assumptions: if a screen does not look like the agent expected, it simply updates the TODO instead of recording an assertion failure.
+
+On every iteration the Awareness Agent also watches for signs of human intervention or device loss -- the device was moved to a different app, the emulator shut down, a notification or consent dialog appeared, or the screen is otherwise in a state the agent did not cause. Notifications and dialogs are handled inline by adding TODO items to dismiss or respond to them. Unrecoverable interventions (device gone, foreign app in focus) end the loop with `aborted` so the coding agent can diagnose and decide whether to retry.
 
 Unlike `test`, `explore` does not require detailed step-by-step instructions. The coding agent provides a goal, and Haindy autonomously figures out how to navigate the device to achieve it. Any additional context the coding agent provides (current app state, relevant features, expected layout) improves the quality of exploration.
 
@@ -541,7 +545,7 @@ haindy explore "explore the settings menu and report what configuration options 
 }
 ```
 
-The dispatch takes an initial screenshot before starting the background task. This is the same screenshot the Situational Agent uses for its first screen assessment.
+The dispatch takes an initial screenshot before starting the background task. This is the same screenshot the Awareness Agent uses to build its initial TODO list.
 
 **When to use:** When the coding agent does not know the current device state, cannot write an unambiguous `test` scenario, or wants to discover what the app looks like and what options are available. Use `explore` for reconnaissance and `test` for verification.
 
@@ -568,6 +572,12 @@ If no explore has been dispatched in this session, returns `status: error` with 
   "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_005.png",
   "explore_status": "in_progress",
   "current_focus": "Examining the Settings main screen to find notification-related options.",
+  "todo": [
+    {"action": "Open the Profile tab from the bottom navigation bar", "status": "done"},
+    {"action": "Tap the gear icon on the Profile screen", "status": "done"},
+    {"action": "Tap the 'Notifications' row on the Settings main screen", "status": "in_progress"},
+    {"action": "Read the notification toggles and summarize the options available", "status": "pending"}
+  ],
   "observations": [
     "Home screen has a bottom navigation bar with Home, Search, Orders, Profile tabs.",
     "Profile tab contains a gear icon that leads to Settings.",
@@ -589,6 +599,12 @@ If no explore has been dispatched in this session, returns `status: error` with 
   "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_008.png",
   "explore_status": "goal_reached",
   "current_focus": null,
+  "todo": [
+    {"action": "Open the Profile tab from the bottom navigation bar", "status": "done"},
+    {"action": "Tap the gear icon on the Profile screen", "status": "done"},
+    {"action": "Tap the 'Notifications' row on the Settings main screen", "status": "done"},
+    {"action": "Read the notification toggles and summarize the options available", "status": "done"}
+  ],
   "observations": [
     "Home screen has a bottom navigation bar with Home, Search, Orders, Profile tabs.",
     "Profile tab contains a gear icon that leads to Settings.",
@@ -611,6 +627,13 @@ If no explore has been dispatched in this session, returns `status: error` with 
   "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_015.png",
   "explore_status": "stuck",
   "current_focus": null,
+  "todo": [
+    {"action": "Open the Profile tab", "status": "done"},
+    {"action": "Tap the gear icon on the Profile screen", "status": "done"},
+    {"action": "Look for a 'Notifications' row on the Settings main screen", "status": "done"},
+    {"action": "Check every Settings sub-menu for notification-related options", "status": "done"},
+    {"action": "Locate the notification settings screen", "status": "skipped"}
+  ],
   "observations": [
     "Settings contains: Account, Display, Language, About.",
     "Account sub-menu has: Email, Password, Delete Account.",
@@ -622,16 +645,47 @@ If no explore has been dispatched in this session, returns `status: error` with 
 }
 ```
 
+**Stdout (aborted -- human intervention or device loss):**
+
+```json
+{
+  "session_id": "a3f9c2d1-...",
+  "command": "explore-status",
+  "status": "success",
+  "response": "Exploration aborted. The device is no longer showing the target app. The screen is now on the Android home launcher, which Haindy did not cause. Something external (a user interaction, another app taking focus, or the emulator restarting) moved the device out of the exploration context.",
+  "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_011.png",
+  "explore_status": "aborted",
+  "current_focus": null,
+  "todo": [
+    {"action": "Open the Profile tab", "status": "done"},
+    {"action": "Tap the gear icon on the Profile screen", "status": "done"},
+    {"action": "Tap the 'Notifications' row on the Settings main screen", "status": "in_progress"},
+    {"action": "Read the notification toggles and summarize the options available", "status": "pending"}
+  ],
+  "observations": [
+    "Home screen has a bottom navigation bar with Home, Search, Orders, Profile tabs.",
+    "Profile tab contains a gear icon that leads to Settings.",
+    "Settings main screen shows: Account, Notifications, Privacy, About.",
+    "Device unexpectedly returned to Android launcher after the last action."
+  ],
+  "elapsed_time_seconds": 22,
+  "meta": {"exit_reason": "aborted", "duration_ms": 4, "actions_taken": 11}
+}
+```
+
 **Extended fields for `explore-status`:**
 
 | Field | Type | Description |
 |---|---|---|
-| `explore_status` | string | `in_progress`, `goal_reached`, `stuck`, `timeout`, `max_steps_reached`, `error`. |
-| `current_focus` | string or null | What Haindy is currently trying to do. `null` when explore is finished. |
-| `observations` | list of strings | Accumulating list of things Haindy has observed during exploration. Each entry is a factual observation about the app state or navigation structure. |
+| `explore_status` | string | `in_progress`, `goal_reached`, `stuck`, `aborted`, `timeout`, `max_steps_reached`, `error`. |
+| `current_focus` | string or null | What the Awareness Agent is currently trying to do. `null` when explore is finished. |
+| `todo` | list of objects | The Awareness Agent's living TODO list. Each entry is `{"action": string, "status": "pending" \| "in_progress" \| "done" \| "skipped"}`. The list is mutable across iterations -- items may be added, reordered, or skipped as the agent learns more. Completed, skipped, and pending items are all shown so the coding agent can reconstruct the trajectory. |
+| `observations` | list of strings | Accumulating list of things the Awareness Agent has observed during exploration. Each entry is a factual observation about the app state or navigation structure. |
 | `elapsed_time_seconds` | integer | Wall-clock time since explore was dispatched. |
 
-Note: `explore_status` avoids the terms "passed" and "failed" because exploration is not a pass/fail assertion. It either reaches the goal (`goal_reached`), determines it cannot proceed (`stuck`), or is bounded by limits (`timeout`, `max_steps_reached`).
+Note: `explore_status` avoids the terms "passed" and "failed" because exploration is not a pass/fail assertion. It either reaches the goal (`goal_reached`), determines it cannot proceed on its own (`stuck`), is interrupted by something outside Haindy's control (`aborted`), or is bounded by limits (`timeout`, `max_steps_reached`).
+
+`aborted` specifically means the Awareness Agent detected that the device is no longer in a state Haindy produced -- e.g. the target app lost focus, the emulator restarted, or a user touched the device. It is distinct from `stuck`, which means Haindy tried and could not find a way forward on its own.
 
 Note: `screenshot_path` reflects the latest screenshot taken by the background task. The coding agent should take its own screenshots via `screenshot` at its own timing if it needs to verify device state independently.
 
@@ -714,7 +768,7 @@ haindy session prune --older-than <days>
 | Sync commands (`act`, `screenshot`, `session *`) | `completed`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, `session_busy` |
 | Async dispatch (`test`, `explore`) | `dispatched`, `session_busy` |
 | `test-status` (terminal) | `completed`, `assertion_failed`, `max_steps_reached`, `timeout`, `agent_error`, `device_error` |
-| `explore-status` (terminal) | `goal_reached`, `stuck`, `goal_unreachable`, `max_steps_reached`, `timeout`, `agent_error`, `device_error` |
+| `explore-status` (terminal) | `goal_reached`, `stuck`, `aborted`, `max_steps_reached`, `timeout`, `agent_error`, `device_error` |
 
 ### Extended fields for `test-status`
 
@@ -734,8 +788,11 @@ haindy session prune --older-than <days>
 
 ```json
 {
-  "explore_status": "in_progress | goal_reached | stuck | timeout | max_steps_reached | error",
+  "explore_status": "in_progress | goal_reached | stuck | aborted | timeout | max_steps_reached | error",
   "current_focus": "string | null",
+  "todo": [
+    {"action": "string", "status": "pending | in_progress | done | skipped"}
+  ],
   "observations": ["string"],
   "elapsed_time_seconds": "integer"
 }

@@ -168,9 +168,7 @@ sequenceDiagram
     participant CLI as haindy CLI
     participant D as Session Daemon
     participant BG as Background Task
-    participant SIT as Situational Agent
-    participant TP as Test Planner
-    participant TR as Test Runner
+    participant AWA as Awareness Agent
     participant AA as Action Agent
     participant DEV as Device
 
@@ -182,29 +180,26 @@ sequenceDiagram
     D-->>CLI: {"status": "success", "screenshot_path": "...", "meta": {"exit_reason": "dispatched"}}
     CLI-->>CA: Explore dispatched (with screenshot of entry state)
 
-    Note over BG,DEV: Background execution (async, iterative)
-    loop Until goal reached, stuck, or limits hit
-        BG->>SIT: assess(latest_screenshot, goal, observations_so_far)
-        Note over BG: First iteration uses the initial screenshot
-        SIT-->>BG: ScreenAssessment(description, next_actions, goal_status)
-        BG->>BG: Append to observations list
-        BG->>BG: Update current_focus
+    Note over BG,DEV: Background execution (async, tight loop)
+    BG->>AWA: bootstrap(goal, initial_screenshot)
+    AWA-->>BG: Initial state {todo[], current_focus, observations[]}
 
-        alt Goal reached
-            BG->>BG: Store result (goal_reached)
-        else Stuck / cannot proceed
-            BG->>BG: Store result (stuck)
-        else Continue exploring
-            BG->>TP: plan(next_actions)
-            TP-->>BG: MiniPlan(steps[])
-            BG->>TR: execute_plan(mini_plan)
-            loop For each step in mini_plan
-                TR->>AA: execute(step)
-                AA->>DEV: Perform action
-                DEV-->>AA: Done
-                AA-->>TR: ActionResult
-            end
-            TR-->>BG: MiniPlanResult
+    loop Until terminal state or limits hit
+        BG->>AWA: next_action(current_todo)
+        AWA-->>BG: TODO item to execute (or terminal decision)
+
+        alt Terminal decision (goal_reached / stuck / aborted)
+            BG->>BG: Store result and break loop
+        else Continue with next action
+            BG->>AA: execute(todo_item.action)
+            AA->>DEV: Perform action
+            DEV-->>AA: Done
+            AA-->>BG: ActionResult
+            BG->>DEV: Take post-action screenshot
+            DEV-->>BG: screen.png
+            BG->>AWA: assess(screen.png, last_action_result)
+            Note over AWA: Single model call: perception + decision.<br/>Updates TODO (mark done, add items, backtrack),<br/>appends observations, detects human intervention,<br/>decides continue / goal_reached / stuck / aborted.
+            AWA-->>BG: Updated state {todo[], current_focus, observations[], decision}
         end
     end
 
@@ -212,12 +207,16 @@ sequenceDiagram
     CA->>CLI: haindy explore-status --session <id>
     CLI->>D: {command: "explore_status"}
     D->>BG: read current state
-    BG-->>D: {explore_status, current_focus, observations, ...}
+    BG-->>D: {explore_status, current_focus, todo, observations, ...}
     D-->>CLI: JSON response
-    CLI-->>CA: {"explore_status": "in_progress|goal_reached|stuck", ...}
+    CLI-->>CA: {"explore_status": "in_progress|goal_reached|stuck|aborted", ...}
 ```
 
-The `explore` loop is iterative: assess the current screen, decide whether the goal has been reached or if progress is stuck, plan and execute a small batch of actions, then reassess. This continues until the goal is reached, the agent determines it cannot proceed, or an external limit (timeout, max-steps) is hit.
+The `explore` loop is intentionally tight: one Awareness Agent call per iteration that combines perception (what is on the screen), bookkeeping (update TODO and observations), and decision (continue, reach goal, give up, abort). The Awareness Agent calls the Action Agent directly for the next TODO item -- there is no Test Planner or Test Runner in this path, so there is no up-front plan to invalidate when assumptions turn out to be wrong.
+
+The TODO list is the agent's working memory. It is mutable: the Awareness Agent may add new items when it discovers a new screen, reorder items when it finds a shortcut, mark items `skipped` when they turn out to be unnecessary, and backtrack by pushing new items ahead of existing ones. The list is exposed verbatim in `explore-status` so the coding agent can see the trajectory.
+
+The Awareness Agent also watches for signs of human intervention on every iteration. If the screen shows an app or state that Haindy did not cause (foreign app in focus, device returned to the launcher, emulator restarted, unexpected system UI), and it cannot be recovered by adding a TODO item, the agent sets the terminal state to `aborted` and the background task ends. Transient interruptions like notifications or consent dialogs are handled inline by adding TODO items to dismiss or respond to them.
 
 ---
 
@@ -393,8 +392,8 @@ The daemon uses a single asyncio event loop. Device interaction is inherently se
 ## Implementation Notes
 
 - The daemon is implemented as a Python asyncio server using `asyncio.start_unix_server`.
-- Agent instances (ActionAgent, TestRunner, SituationalAgent, etc.) are created once at daemon startup and reused across commands, preserving any in-memory caches (e.g., coordinate caches).
+- Agent instances (ActionAgent, TestPlanner, TestRunner, AwarenessAgent) are created once at daemon startup and reused across commands, preserving any in-memory caches (e.g., coordinate caches). The standard-mode SituationalAgent is not instantiated by the daemon -- tool call mode uses the AwarenessAgent for live-screen perception instead.
 - The `WorkflowCoordinator` is not used in tool call mode. The daemon dispatches directly to agents. This avoids the planning overhead that is part of the full `run_test` flow.
 - Background tasks (`test`, `explore`) run as asyncio tasks within the daemon's event loop. The daemon maintains a reference to the active background task and its progress state. Status polls read this state without blocking.
-- The `explore` command uses an iterative loop: the Situational Agent assesses the screen, the Test Planner creates a small action plan, the Test Runner executes it, and the cycle repeats. Each iteration updates the `observations` list and `current_focus` field visible to `explore-status`.
+- The `explore` command uses a tight two-agent loop: the Awareness Agent maintains a living TODO list and calls the Action Agent directly for each next action, reassessing after every action. There is no Test Planner or Test Runner in the explore path. Each iteration updates `todo`, `observations`, and `current_focus` visible to `explore-status`. The Awareness Agent also detects human intervention (device moved, foreign app focused, emulator restarted) and can terminate the loop with `aborted`.
 - Screenshots are taken by the daemon (not the CLI) and written to the session screenshots directory. The response includes the absolute path. The coding agent is responsible for reading the file if it needs the image content. The coding agent can also take its own screenshots via the `screenshot` command at its own timing.

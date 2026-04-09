@@ -161,10 +161,13 @@ haindy explore-status --session <SESSION_ID>
 - `elapsed_time_seconds`: wall-clock time since dispatch
 
 **`explore-status` response fields:**
-- `explore_status`: `in_progress`, `goal_reached`, `stuck`, `timeout`, `max_steps_reached`, `error`
+- `explore_status`: `in_progress`, `goal_reached`, `stuck`, `aborted`, `timeout`, `max_steps_reached`, `error`
 - `current_focus`: what Haindy is currently trying to do (null when done)
+- `todo`: the Awareness Agent's living TODO list. Each entry is `{"action": string, "status": "pending" | "in_progress" | "done" | "skipped"}`. The list is mutable -- items may be added, reordered, or skipped as the agent learns more. Useful for understanding the trajectory and reconstructing what Haindy tried.
 - `observations`: accumulating list of factual observations about the app
 - `elapsed_time_seconds`: wall-clock time since dispatch
+
+Note: `explore` is driven by an Awareness Agent that maintains the TODO list and calls the Action Agent directly in a tight loop. It does not build a fixed plan up front, so it can freely backtrack when assumptions about the app turn out to be wrong. `aborted` specifically means the Awareness Agent detected that the device is no longer in a state Haindy produced (e.g. the target app lost focus, the emulator restarted, a user touched the device). It is distinct from `stuck`, which means Haindy tried and could not find a way forward on its own.
 
 **Timeout:** `test` defaults to 300s. `explore` has no default timeout -- it runs until the goal is reached, the agent gets stuck, or max-steps is hit. You can pass `--timeout <seconds>` to either command if you want to cap execution time.
 
@@ -200,8 +203,9 @@ Important: use the exact name you passed to `session set`. If you stored it as `
 - `timeout` - increase `--timeout` or split into smaller test calls.
 
 **For `explore`:** Check `explore-status` response fields.
-- `stuck` - the agent could not find a way forward. Read `observations` for what was discovered. Try a different goal or provide more context.
+- `stuck` - the agent tried and could not find a way forward. Read `observations` and the final `todo` for what was discovered and attempted. Try a different goal or provide more context.
 - `goal_reached` - read `observations` for what was discovered along the way.
+- `aborted` - something outside Haindy's control moved the device (user touched the emulator, another app stole focus, the emulator restarted). The session itself is still alive. Read the last screenshot and decide whether to restart the exploration or investigate manually. Do not treat this as a bug in the app under test.
 - `timeout` / `max_steps_reached` - the goal may be too broad. Try a more focused goal.
 
 **General:** `agent_error` or `device_error` means an internal failure. Read `response` for details.
@@ -377,8 +381,12 @@ test and explore return immediately. Poll for progress:
 test-status fields: test_status (in_progress|passed|failed|error|timeout|max_steps_reached),
 current_step, steps_total, steps_completed, steps_failed, issues_found, elapsed_time_seconds.
 
-explore-status fields: explore_status (in_progress|goal_reached|stuck|timeout|max_steps_reached|error),
-current_focus, observations (accumulating list), elapsed_time_seconds.
+explore-status fields: explore_status (in_progress|goal_reached|stuck|aborted|timeout|max_steps_reached|error),
+current_focus, todo (list of {action, status}), observations (accumulating list), elapsed_time_seconds.
+
+explore is driven by an Awareness Agent that maintains a living TODO list and backtracks freely.
+aborted means something external moved the device (user touched it, foreign app in focus, emulator restart).
+It is not an app bug -- diagnose and decide whether to restart the exploration.
 
 ## Screenshots
 
@@ -405,7 +413,9 @@ state at a specific moment -- Haindy's timing may not match yours.
 
 For act: element_not_found means target not visible. Do not retry same act more than twice.
 For test: read test-status. assertion_failed, max_steps_reached, timeout.
-For explore: read explore-status. stuck means agent could not proceed -- try a different goal.
+For explore: read explore-status. stuck means Haindy tried but could not find a way forward --
+try a different goal. aborted means the device left Haindy's control (user touched it, foreign
+app in focus, emulator restart) -- not a bug in the app under test.
 session_busy: a background task is running. Poll its status or close the session.
 ```
 
