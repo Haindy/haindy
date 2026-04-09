@@ -23,7 +23,8 @@ The goal of tool call mode is to expose Haindy as a first-class tool that a codi
 - **CLI over MCP/API**: A well-designed CLI paired with a skill requires less context and has better adoption than an MCP server or custom API. Coding agents are trained to use CLIs and can learn new ones via a skill loaded in-context.
 - **Session-based**: A persistent session daemon keeps the device alive between calls, avoiding expensive re-initialization on every command.
 - **Independent daemon launch**: `session new` returns only after an independently launched daemon is ready on its Unix socket, so later commands are not coupled to the parent CLI process lifetime.
-- **Layered abstraction**: Commands are tiered from direct device actions up to full test plans. The coding agent picks the right level of abstraction for its needs.
+- **Layered abstraction**: Commands are tiered from direct device actions up to open-ended exploration. The coding agent picks the right level of abstraction for its needs.
+- **Async long-running commands**: `test` and `explore` return immediately after dispatch and run in the background. The coding agent polls for status at its own pace, keeping control of its tool-use loop and token budget.
 - **Stable JSON contract**: Every command returns the same JSON envelope. The `status` field is machine-readable. The `response` field is natural language that the coding agent can pass directly to the user or reason about.
 - **Screenshot on every response**: Agents need visual grounding. Every response includes a path to the latest screenshot.
 
@@ -45,26 +46,28 @@ flowchart TD
     CA["Coding Agent\n(Codex / Claude Code / other)"]
 
     subgraph CLI ["haindy CLI (tool call mode)"]
-        SC[session new/close/list/set/vars]
-        ACT[act]
-        TEST[test]
-        EXP[explore - v2]
+        SC[session new/close/list/set/vars/prune]
+        ACT[act / screenshot]
+        TEST[test / test-status]
+        EXP[explore / explore-status]
     end
 
     subgraph DAEMON ["Session Daemon (per session)"]
         SOCK[Unix Socket Listener]
         DISP[Command Dispatcher]
+        BG[Background Task Runner]
     end
 
     subgraph AGENTS ["Haindy Agent Layer"]
         AA[Action Agent]
         TR[Test Runner]
         TP[Test Planner]
-        SIT[Situational Agent - v2]
+        AWA[Awareness Agent]
     end
 
     subgraph DEVICE ["Device"]
         ADB[Android via ADB]
+        IDB[iOS via idb]
         DT[Desktop via CU]
     end
 
@@ -73,12 +76,15 @@ flowchart TD
     SOCK --> DISP
 
     DISP -->|act| AA
-    DISP -->|test| TP
-    DISP -->|test| TR
+    DISP -->|test| BG
+    DISP -->|explore| BG
+    BG -->|test| TP
+    BG -->|explore| AWA
 
-    AA --> DEVICE
-    TR --> AA
     TP --> TR
+    TR --> AA
+    AWA --> AA
+    AA --> DEVICE
 
     DISP -->|JSON response| CLI
     CLI -->|stdout JSON| CA
@@ -88,15 +94,17 @@ flowchart TD
 
 **CLI client** (`haindy <subcommand>`): Thin wrapper. Locates the session daemon socket from the explicit session ID provided on the command, sends the command over IPC, waits for the JSON response, prints to stdout, exits with code 0 (success) or 1 (failure/error).
 
-**Session Daemon**: A long-running Python process launched by `haindy session new` through a dedicated daemonization helper. Owns the device connection for the lifetime of the session. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON.
+**Session Daemon**: A long-running Python process launched by `haindy session new` through a dedicated daemonization helper. Owns the device connection for the lifetime of the session. Listens on a Unix socket at `~/.haindy/sessions/<id>/daemon.sock`. Dispatches incoming commands to the appropriate agent and returns JSON. For long-running commands (`test`, `explore`), the daemon runs the work in a background task and returns an acknowledgement immediately.
+
+**Background Task Runner**: An internal component of the daemon that executes `test` and `explore` commands asynchronously. The daemon accepts the command, starts the background task, and returns a response immediately. The coding agent polls `test-status` or `explore-status` to track progress. Only one background task runs at a time per session (the device is sequential).
 
 **Action Agent**: Receives a natural language instruction, takes a screenshot via computer use, and either executes a single interaction (tap, click, type, scroll) or, for `session status`, observes the current screen and returns a natural-language description without taking action. Returns immediately with the result.
 
-**Test Runner**: Drives the Action Agent through a sequence of structured steps produced by the Test Planner, validating each step's expected outcome. Returns a pass/fail with a summary.
+**Test Runner**: Drives the Action Agent through a sequence of structured steps produced by the Test Planner, validating each step's expected outcome. Runs as a background task; progress is exposed via `test-status`.
 
-**Test Planner**: Accepts a high-level scenario description and produces a structured sequence of steps. Used by the `test` command.
+**Test Planner**: Accepts a detailed scenario description with explicit steps and expected outcomes, and produces a structured sequence of steps. Used by the `test` command. Requires unambiguous, detailed input from the coding agent.
 
-**Situational Agent** (v2): Will assess live device state from a screenshot to handle unknown starting conditions. Not used in v1. Required for the `explore` command.
+**Awareness Agent**: Drives the `explore` loop. On each iteration it examines the latest screenshot, maintains a living TODO list of concrete actions, detects human intervention or device loss, and decides whether to continue, stop at the goal, give up as stuck, or abort. The Awareness Agent calls the Action Agent directly with the next TODO item -- there is no Test Planner or Test Runner in the explore path. This keeps the loop tight (one model call per iteration for perception + decision) and lets the agent freely backtrack by editing the TODO instead of treating an initial plan as gospel. The standard-mode Situational Agent (text-based context gating for the batch pipeline) is unrelated and unused in tool call mode.
 
 ---
 
@@ -105,36 +113,65 @@ flowchart TD
 Each command maps to a different level of the agent stack:
 
 ```
-[v2] explore  ──►  Situational Agent + Test Planner + Test Runner + Action Agent
-     test     ──►  Test Planner + Test Runner + Action Agent
-     act      ──►  Action Agent only
+explore       ──►  Awareness Agent + Action Agent                   (async)
+test          ──►  Test Planner + Test Runner + Action Agent        (async)
+act           ──►  Action Agent only                                (sync)
 ```
 
-The coding agent should pick the lowest level that gives it what it needs:
-- Use `act` when the exact interaction is known and no validation is needed.
-- Use `test` for everything else: single-step validations, multi-step journeys, and open-ended scenarios.
-- `explore` is planned for v2 and requires live-screen situational assessment not yet implemented.
+The coding agent should pick the right level of abstraction:
+- Use `act` when the exact interaction is known and no validation is needed. Synchronous -- returns when the action completes.
+- Use `test` when the scenario is well-defined with explicit steps and expected outcomes. Asynchronous -- returns immediately; poll `test-status` for progress.
+- Use `explore` when the goal is open-ended and the current screen state is unknown or unpredictable. Asynchronous -- returns immediately; poll `explore-status` for progress.
 
 ---
 
 ## JSON Response Envelope
 
-Every command returns a single JSON object on stdout:
+Every command returns a single JSON object on stdout. There are two categories:
+
+### Synchronous commands (`act`, `screenshot`, `session *`)
+
+Return when the operation completes:
 
 ```json
 {
   "session_id": "string",
-  "command": "act | test | session",
+  "command": "act | screenshot | session",
   "status": "success | failure | error",
   "response": "Natural language description of what happened. Always present. Especially detailed on failure.",
   "screenshot_path": "/absolute/path/to/latest/screenshot.png",
   "meta": {
-    "exit_reason": "completed | assertion_failed | max_steps_reached | max_actions_reached | element_not_found | command_timeout | agent_error | device_error | session_busy",
+    "exit_reason": "completed | element_not_found | command_timeout | agent_error | device_error | session_busy",
     "duration_ms": 4821,
     "actions_taken": 7
   }
 }
 ```
+
+### Async dispatch commands (`test`, `explore`)
+
+Return immediately after the daemon accepts the command. The daemon takes an initial screenshot before dispatching the background task, so the response includes `screenshot_path` capturing the device state at the moment the command was received. The actual work runs in the background:
+
+```json
+{
+  "session_id": "string",
+  "command": "test | explore",
+  "status": "success | error",
+  "response": "Test dispatched. Poll test-status for progress.",
+  "screenshot_path": "/absolute/path/to/initial/screenshot.png",
+  "meta": {
+    "exit_reason": "dispatched",
+    "duration_ms": 52,
+    "actions_taken": 1
+  }
+}
+```
+
+### Status poll commands (`test-status`, `explore-status`)
+
+Return the current state of the running background task. See CLI_SPEC.md for the full response shape per command.
+
+### Common envelope fields
 
 | Field | Always present | Notes |
 |---|---|---|
@@ -142,10 +179,10 @@ Every command returns a single JSON object on stdout:
 | `command` | Yes | The subcommand that was run. |
 | `status` | Yes | Machine-readable signal. `error` means Haindy itself failed (bug/crash), `failure` means the action or assertion failed. |
 | `response` | Yes | Human-readable. On success: what happened. On failure: what was expected vs. what was observed. |
-| `screenshot_path` | Yes (when session active) | Absolute path to the latest screenshot. `null` if screenshot could not be taken or command has no device context. |
-| `meta.exit_reason` | Yes | Why the command terminated. Distinguishes `assertion_failed` from `element_not_found` from `command_timeout` from `session_busy` from `agent_error` etc. |
-| `meta.duration_ms` | Yes | Wall-clock time for the command in milliseconds. |
-| `meta.actions_taken` | Yes | Number of atomic device operations performed to satisfy the command. A fresh screenshot taken for `session status` counts as 1. Startup or teardown bookkeeping for `session new` and `session close` does not. |
+| `screenshot_path` | Yes (when session active) | Absolute path to the latest screenshot. `null` only for commands with no device context (e.g. `session list`, `session vars`). Async dispatch includes the initial screenshot taken at accept time. |
+| `meta.exit_reason` | Yes | Why the command terminated. Sync: `completed`, `element_not_found`, etc. Async dispatch: `dispatched`. Status polls: reflects the background task state. |
+| `meta.duration_ms` | Yes | Wall-clock time for the command in milliseconds. For status polls, this is the poll latency, not the background task elapsed time. |
+| `meta.actions_taken` | Yes | Number of atomic device operations performed. For async dispatch this is 1 (the initial screenshot). For status polls this reflects the background task's running total. |
 
 Exit codes mirror status: 0 for `success`, 1 for `failure` or `error`.
 
@@ -177,10 +214,15 @@ Exit codes mirror status: 0 for `success`, 1 for `failure` or `error`.
 | **Coding agent** | An AI coding assistant (Codex, Claude Code, etc.) using Haindy as a tool. |
 | **Session** | A persistent device connection owned by a daemon process, identified by a UUID. |
 | **Session daemon** | The background process that owns the device connection and dispatches commands. |
+| **Background task** | An async execution of `test` or `explore` running inside the daemon. One at a time per session. Polled via `test-status` or `explore-status`. |
 | **Session variable** | A named value stored in the session, referenced as `{{VAR}}` in commands. Secret variables are masked in logs and responses. |
 | **Skill** | A context-injection file that teaches a coding agent how to use `haindy` in tool call mode. Placed per-agent (e.g. `.claude/skills/` for Claude Code). |
 | **IPC** | Inter-process communication between CLI client and daemon, over a Unix domain socket. |
-| **act** | A single direct device interaction with no outcome validation. |
-| **test** | A scenario description run through the Test Planner and Test Runner, returning structured pass/fail. |
-| **explore** | (v2) An open-ended goal handled by the full agent stack including live-screen situational assessment. |
-| **exit_reason** | The `meta` field explaining why a command terminated: `completed`, `assertion_failed`, `max_steps_reached`, `max_actions_reached`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, or `session_busy`. |
+| **act** | A single direct device interaction with no outcome validation. Synchronous. |
+| **test** | A detailed, unambiguous scenario dispatched to the Test Planner and Test Runner. Asynchronous -- returns immediately; poll `test-status` for progress and results. |
+| **explore** | An open-ended goal handled by the Awareness Agent driving the Action Agent directly in a tight loop. Asynchronous -- returns immediately; poll `explore-status` for progress, TODO, and observations. |
+| **test-status** | Polls the progress of a running or completed `test` background task. |
+| **explore-status** | Polls the progress of a running or completed `explore` background task. |
+| **Awareness Agent** | The agent that owns the `explore` loop. Maintains a living TODO list, assesses each screenshot, detects human intervention, and calls the Action Agent directly. Only used in tool call mode. |
+| **TODO list** | A mutable list of concrete actions the Awareness Agent plans to take next. Items have a status (`pending`, `in_progress`, `done`, `skipped`) and the Awareness Agent may add, reorder, or skip items on every iteration as it learns more about the app. Exposed via the `explore-status` response. |
+| **exit_reason** | The `meta` field explaining why a command terminated. Sync commands: `completed`, `element_not_found`, `command_timeout`, `agent_error`, `device_error`, `session_busy`. Async dispatch: `dispatched`. Background task results: `completed`, `assertion_failed`, `max_steps_reached`, `stuck`, `goal_reached`, `aborted`, `timeout`, `agent_error`, `device_error`. |
