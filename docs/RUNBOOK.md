@@ -5,7 +5,7 @@
 This runbook covers the host prerequisites and operational notes for HAINDY's two execution surfaces:
 
 - Standard batch mode via `--plan` and `--context`
-- Tool-call mode via `session`, `act`, and `test`
+- Tool-call mode via `session`, `act`, `test`, and `explore`
 
 ## Quick Install
 
@@ -209,11 +209,15 @@ Operational rules:
 
 - Every tool-call command emits one JSON object to stdout
 - Daemon logs must go to `logs/daemon.log` or stderr when `--debug` is set
-- Session variables are memory-only in V1; secret values should be passed with `--value-file` when possible
+- Session variables are memory-only for the life of the daemon; secret values should be passed with `--value-file` when possible
 - `session status` captures a fresh screenshot and counts as one action
 - `session new` launches the daemon independently and returns only after the socket is ready
-- Desktop `session new --url ...` is not part of V1
-- `explore` is V2 and intentionally absent
+- Desktop `session new --url ...` is still deferred
+- `test` and `explore` are async dispatch commands; poll `test-status` or `explore-status` for terminal results
+- While a background task is active, `act`, `session status`, `test`, and `explore` return `session_busy`
+- While a background task is active, `test-status`, `explore-status`, `screenshot`, `session set`, `session unset`, `session vars`, and `session close` remain available
+- `session close` cancels an active background task before shutting the daemon down
+- `session prune --older-than <days>` removes old dead session directories without touching live sessions
 
 Useful commands:
 
@@ -223,7 +227,11 @@ haindy session list
 haindy session status --session <SESSION_ID>
 haindy act "tap the Login button" --session <SESSION_ID>
 haindy test "complete checkout and verify the order summary" --session <SESSION_ID>
+haindy test-status --session <SESSION_ID>
+haindy explore "find the notification settings screen" --session <SESSION_ID>
+haindy explore-status --session <SESSION_ID>
 haindy session close --session <SESSION_ID>
+haindy session prune --older-than 7
 ```
 
 ## Model-call artifacts

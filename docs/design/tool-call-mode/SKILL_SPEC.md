@@ -51,6 +51,9 @@ haindy session status --session <SESSION_ID>
 
 # End the session when done
 haindy session close --session <SESSION_ID>
+
+# Clean up old dead session directories when needed
+haindy session prune --older-than 7
 ```
 
 Rule: Prefer explicit `--session <SESSION_ID>` in coding-agent and tool-runner workflows.
@@ -77,6 +80,8 @@ haindy screenshot --session <SESSION_ID>                 # capture screen withou
 haindy session status --session <SESSION_ID>             # AI describes current screen state
 haindy session set <NAME> <VALUE> [--secret] --session <SESSION_ID>
 haindy session set <NAME> --value-file <path> [--secret] --session <SESSION_ID>
+haindy session close --session <SESSION_ID>
+haindy session prune --older-than <days>
 ```
 
 **Asynchronous (dispatch and poll):**

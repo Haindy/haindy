@@ -21,14 +21,51 @@ class ExitReason(str, Enum):
     """Machine-readable termination reason."""
 
     COMPLETED = "completed"
+    DISPATCHED = "dispatched"
     ASSERTION_FAILED = "assertion_failed"
     MAX_STEPS_REACHED = "max_steps_reached"
     MAX_ACTIONS_REACHED = "max_actions_reached"
     ELEMENT_NOT_FOUND = "element_not_found"
     COMMAND_TIMEOUT = "command_timeout"
+    TIMEOUT = "timeout"
     AGENT_ERROR = "agent_error"
     DEVICE_ERROR = "device_error"
     SESSION_BUSY = "session_busy"
+    GOAL_REACHED = "goal_reached"
+    STUCK = "stuck"
+    ABORTED = "aborted"
+
+
+class TestTaskStatus(str, Enum):
+    """Background test status values returned by `test-status`."""
+
+    IN_PROGRESS = "in_progress"
+    PASSED = "passed"
+    FAILED = "failed"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    MAX_STEPS_REACHED = "max_steps_reached"
+
+
+class ExploreTaskStatus(str, Enum):
+    """Background explore status values returned by `explore-status`."""
+
+    IN_PROGRESS = "in_progress"
+    GOAL_REACHED = "goal_reached"
+    STUCK = "stuck"
+    ABORTED = "aborted"
+    TIMEOUT = "timeout"
+    MAX_STEPS_REACHED = "max_steps_reached"
+    ERROR = "error"
+
+
+class TodoStatus(str, Enum):
+    """TODO item status for explore polling."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    SKIPPED = "skipped"
 
 
 class ToolCallMeta(BaseModel):
@@ -49,6 +86,13 @@ class SessionListEntry(BaseModel):
     idle_seconds: int = Field(default=0, ge=0)
 
 
+class ExploreTodoItem(BaseModel):
+    """One TODO item in the explore working memory."""
+
+    action: str
+    status: TodoStatus
+
+
 class ToolCallEnvelope(BaseModel):
     """JSON envelope printed by tool-call CLI commands."""
 
@@ -59,8 +103,16 @@ class ToolCallEnvelope(BaseModel):
     screenshot_path: str | None
     meta: ToolCallMeta
     steps_total: int | None = None
-    steps_passed: int | None = None
+    steps_completed: int | None = None
     steps_failed: int | None = None
+    test_status: TestTaskStatus | None = None
+    current_step: str | None = None
+    issues_found: dict[str, str] | None = None
+    elapsed_time_seconds: int | None = None
+    explore_status: ExploreTaskStatus | None = None
+    current_focus: str | None = None
+    todo: list[ExploreTodoItem] | None = None
+    observations: list[str] | None = None
     sessions: list[SessionListEntry] | None = None
     vars: dict[str, str] | None = None
 
@@ -135,8 +187,16 @@ def make_envelope(
     duration_ms: int,
     actions_taken: int,
     steps_total: int | None = None,
-    steps_passed: int | None = None,
+    steps_completed: int | None = None,
     steps_failed: int | None = None,
+    test_status: TestTaskStatus | None = None,
+    current_step: str | None = None,
+    issues_found: dict[str, str] | None = None,
+    elapsed_time_seconds: int | None = None,
+    explore_status: ExploreTaskStatus | None = None,
+    current_focus: str | None = None,
+    todo: list[ExploreTodoItem] | None = None,
+    observations: list[str] | None = None,
     sessions: list[SessionListEntry] | None = None,
     vars_map: dict[str, str] | None = None,
 ) -> ToolCallEnvelope:
@@ -154,8 +214,16 @@ def make_envelope(
             actions_taken=max(int(actions_taken), 0),
         ),
         steps_total=steps_total,
-        steps_passed=steps_passed,
+        steps_completed=steps_completed,
         steps_failed=steps_failed,
+        test_status=test_status,
+        current_step=current_step,
+        issues_found=issues_found,
+        elapsed_time_seconds=elapsed_time_seconds,
+        explore_status=explore_status,
+        current_focus=current_focus,
+        todo=todo,
+        observations=observations,
         sessions=sessions,
         vars=vars_map,
     )
@@ -170,4 +238,4 @@ def envelope_exit_code(envelope: ToolCallEnvelope) -> int:
 def public_command_name(command: str) -> str:
     """Map daemon-internal request names onto the public JSON contract."""
 
-    return "session" if command.startswith("session_") else command
+    return "session" if command.startswith("session_") else command.replace("_", "-")

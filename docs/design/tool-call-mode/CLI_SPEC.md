@@ -105,7 +105,7 @@ haindy session close --session <id> [--force]
   "session_id": "a3f9c2d1-...",
   "command": "session",
   "status": "success",
-  "response": "Session closed. 14 steps were executed during this session.",
+  "response": "Session closed. 14 device actions were executed during this session.",
   "screenshot_path": null,
   "meta": {"exit_reason": "completed", "duration_ms": 43, "actions_taken": 0}
 }
@@ -712,7 +712,7 @@ haindy session prune --older-than <days>
   "session_id": null,
   "command": "session",
   "status": "success",
-  "response": "Pruned 3 session directories older than 7 days. 2 active sessions were skipped.",
+  "response": "Pruned 3 session directories older than 7 day(s).",
   "screenshot_path": null,
   "meta": {"exit_reason": "completed", "duration_ms": 45, "actions_taken": 0}
 }
@@ -725,7 +725,7 @@ haindy session prune --older-than <days>
 | Variable | Description |
 |---|---|
 | `HAINDY_HOME` | Override the base directory (default: `~/.haindy`). Useful in CI. |
-| `HAINDY_BACKEND` | Default backend for new sessions: `desktop`, `android`, or `ios`. Overridden by `--android`/`--ios`/`--desktop`. |
+| `HAINDY_AUTOMATION_BACKEND` | Default backend for new sessions: `desktop`, `mobile_adb`, or `mobile_ios`. Overridden by `--android`/`--ios`/`--desktop`. |
 
 ---
 

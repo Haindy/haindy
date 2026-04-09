@@ -31,13 +31,13 @@ Troubleshooting:
 
 - `session new` should normally survive after the original CLI process exits because HAINDY launches the session daemon independently.
 - If `session new` returns success but the very next command still says `No active session found`, treat it as a harness/process-lifetime issue rather than an app failure.
-- Wrappers that kill the entire process container or cgroup can still defeat detached daemons. In that case, rerun from a normal shell or keep the hidden `python -m src.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging.
+- Wrappers that kill the entire process container or cgroup can still defeat detached daemons. In that case, rerun from a normal shell or keep the hidden `python -m haindy.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging.
 
 Desktop rules:
 
 - Start the target site or desktop app before opening the session
 - Prefer a maximized target window
-- Desktop `session new --url ...` is not part of V1
+- Desktop `session new --url ...` is still deferred
 - On macOS, grant **Accessibility** and **Screen Recording** permissions to the terminal app before starting a session (System Settings > Privacy & Security). A restart of the terminal may be required after granting permissions.
 
 iOS rules:
@@ -52,13 +52,19 @@ iOS rules:
 
 ```bash
 haindy screenshot --session <SESSION_ID>
+haindy session list
 haindy session status --session <SESSION_ID>
 haindy act "<single action>" --session <SESSION_ID>
 haindy test "<scenario with an expected outcome>" --session <SESSION_ID>
+haindy test-status --session <SESSION_ID>
+haindy explore "<goal>" --session <SESSION_ID>
+haindy explore-status --session <SESSION_ID>
 haindy session set <NAME> <VALUE> --session <SESSION_ID>
 haindy session set <NAME> --value-file <PATH> --secret --session <SESSION_ID>
+haindy session unset <NAME> --session <SESSION_ID>
 haindy session vars --session <SESSION_ID>
 haindy session close --session <SESSION_ID>
+haindy session prune --older-than <DAYS>
 ```
 
 Command choice:
@@ -66,9 +72,21 @@ Command choice:
 - Use `screenshot` to capture the current screen cheaply — no AI model is invoked, returns immediately with `screenshot_path`
 - Use `session status` when you also want an AI description of what is on screen
 - Use `act` for one direct interaction when you do not need outcome validation
-- Use `test` when you care whether the result actually happened
+- Use `test` when you care whether the result actually happened and you can describe the scenario precisely
+- Use `explore` when you have a goal but not a reliable step-by-step path yet
 
 Prefer `screenshot` over `session status` whenever you just need to see the screen. Prefer `test` over `act` when the outcome matters.
+
+## Async commands
+
+`test` and `explore` return immediately after dispatch. They do not wait for the full run to finish.
+
+- After `haindy test ...`, poll `haindy test-status --session <SESSION_ID>`
+- After `haindy explore ...`, poll `haindy explore-status --session <SESSION_ID>`
+- Keep polling until the task reaches a terminal state
+- While a background task is active, `act`, `session status`, `test`, and `explore` will return `session_busy`
+- During a background task, `test-status`, `explore-status`, `screenshot`, `session set`, `session unset`, `session vars`, and `session close` are still allowed
+- `session close` cancels any active background task before the daemon exits
 
 ## Session variables
 
@@ -102,15 +120,17 @@ Always inspect:
 Important `exit_reason` values:
 
 - `completed`: command finished normally
+- `dispatched`: async work was accepted; poll the matching `*-status` command
 - `assertion_failed`: the expected result did not occur
 - `element_not_found`: the target was not visible
 - `max_steps_reached` or `max_actions_reached`: the command ran out of budget
 - `command_timeout`: the command hit its wall-clock timeout
-- `session_busy`: another command is already running in that session; wait 5-10 seconds and retry once
+- `goal_reached`, `stuck`, `aborted`, `timeout`: terminal outcomes for `explore`
+- `session_busy`: another command is already running in that session; poll the matching `*-status` command or close the session instead of retrying blindly
 - `agent_error` or `device_error`: HAINDY itself failed
 
-## V1 boundaries
+## Current boundaries
 
-- `explore` is V2 and is not available
 - Tool-call mode does not own desktop app or web-server startup
 - Session variables are memory-only for the life of the daemon
+- Desktop `session new --url ...` is still deferred

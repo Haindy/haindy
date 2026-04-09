@@ -5,6 +5,7 @@ This agent orchestrates test execution with intelligent step interpretation,
 living document reporting, and comprehensive failure handling.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,19 @@ from haindy.runtime.trace import RunTraceWriter, load_model_calls_for_run
 from haindy.utils.model_logging import get_model_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ToolModeTestProgress:
+    """Progress snapshot for tool-call status polling."""
+
+    current_step: str | None
+    steps_total: int
+    steps_completed: int
+    steps_failed: int
+    issues_found: dict[str, str]
+    latest_screenshot_path: str | None
+    actions_taken: int
 
 
 class TestRunner(BaseAgent):
@@ -166,6 +180,65 @@ class TestRunner(BaseAgent):
                 + uuid4().hex[:8]
             )
         return RunTraceWriter(run_id)
+
+    def get_tool_mode_progress(self) -> ToolModeTestProgress | None:
+        """Return a lightweight execution snapshot for tool-call polling."""
+
+        test_state = self._test_state
+        if test_state is None:
+            return None
+
+        report = self._test_report
+        steps_total = 0
+        steps_completed = 0
+        steps_failed = 0
+        issues_found: dict[str, str] = {}
+        latest_screenshot_path: str | None = None
+        actions_taken = 0
+
+        if report is not None:
+            for case in report.test_cases:
+                steps_total += case.steps_total
+                steps_completed += case.steps_completed
+                steps_failed += case.steps_failed
+                for step in [
+                    *case.setup_step_results,
+                    *case.step_results,
+                    *case.cleanup_step_results,
+                ]:
+                    actions_taken += len(step.actions_performed)
+                    if step.status == TestStatus.FAILED:
+                        observed = (
+                            step.actual_result or step.error_message or "Step failed."
+                        )
+                        issues_found[f"step_{step.step_number}"] = (
+                            f"Expected {step.expected_result}. Observed: {observed}"
+                        )
+                    latest_screenshot_path = (
+                        step.screenshot_after
+                        or step.screenshot_before
+                        or latest_screenshot_path
+                    )
+
+        if steps_total == 0:
+            steps_total = len(getattr(test_state.test_plan, "steps", []) or [])
+
+        current_step = None
+        if test_state.current_step is not None:
+            current_step = (
+                f"Step {test_state.current_step.step_number}: "
+                f"{test_state.current_step.description}"
+            )
+
+        return ToolModeTestProgress(
+            current_step=current_step,
+            steps_total=steps_total,
+            steps_completed=steps_completed,
+            steps_failed=steps_failed,
+            issues_found=issues_found,
+            latest_screenshot_path=latest_screenshot_path,
+            actions_taken=actions_taken,
+        )
 
     def _reset_execution_state(self) -> None:
         """Reset run-scoped state so the runner can be reused safely."""
@@ -673,9 +746,15 @@ class TestRunner(BaseAgent):
     async def _execute_test_step(
         self, step: TestStep, test_case: TestCase, case_result: TestCaseResult
     ) -> StepResult:
-        return await self._step_processor.execute_test_step(
-            step, test_case, case_result
-        )
+        if self._test_state is not None:
+            self._test_state.current_step = step
+        try:
+            return await self._step_processor.execute_test_step(
+                step, test_case, case_result
+            )
+        finally:
+            if self._test_state is not None and self._test_state.current_step == step:
+                self._test_state.current_step = None
 
     async def _interpret_step(
         self,

@@ -1,5 +1,6 @@
 """Tests for tool-call session path helpers."""
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from haindy.tool_call_mode.models import SessionMetadata
@@ -7,7 +8,9 @@ from haindy.tool_call_mode.paths import (
     get_haindy_home,
     get_session_dir,
     load_session_metadata,
+    prune_dead_sessions,
     save_session_metadata,
+    write_pid_file,
 )
 
 
@@ -38,3 +41,59 @@ def test_save_and_load_session_metadata_round_trip(monkeypatch, tmp_path: Path) 
     assert loaded.backend == "desktop"
     assert loaded.pid == 1234
     assert loaded.latest_screenshot_path == "/tmp/shot.png"
+
+
+def test_prune_dead_sessions_removes_only_old_dead_sessions(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HAINDY_HOME", str(tmp_path / "haindy-home"))
+
+    old_dead = "old-dead"
+    recent_dead = "recent-dead"
+    live_session = "live-session"
+
+    old_metadata = SessionMetadata.new(
+        session_id=old_dead,
+        backend="desktop",
+        idle_timeout_seconds=1800,
+    ).model_copy(
+        update={
+            "created_at": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        }
+    )
+    recent_metadata = SessionMetadata.new(
+        session_id=recent_dead,
+        backend="desktop",
+        idle_timeout_seconds=1800,
+    ).model_copy(
+        update={
+            "created_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        }
+    )
+    live_metadata = SessionMetadata.new(
+        session_id=live_session,
+        backend="desktop",
+        idle_timeout_seconds=1800,
+    ).model_copy(
+        update={
+            "created_at": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(),
+            "pid": 4321,
+        }
+    )
+
+    for metadata in (old_metadata, recent_metadata, live_metadata):
+        get_session_dir(metadata.session_id).mkdir(parents=True, exist_ok=True)
+        save_session_metadata(metadata)
+    write_pid_file(live_session, 4321)
+
+    monkeypatch.setattr(
+        "haindy.tool_call_mode.paths.is_process_alive",
+        lambda pid: pid == 4321,
+    )
+
+    pruned = prune_dead_sessions(older_than_days=7)
+
+    assert pruned == [old_dead]
+    assert get_session_dir(old_dead).exists() is False
+    assert get_session_dir(recent_dead).exists() is True
+    assert get_session_dir(live_session).exists() is True

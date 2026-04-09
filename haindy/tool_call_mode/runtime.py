@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import time
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from haindy.agents.action_agent import ActionAgent
+from haindy.agents.awareness_agent import (
+    AwarenessAgent,
+    AwarenessAssessment,
+    AwarenessTodoItem,
+)
 from haindy.agents.test_planner import TestPlannerAgent
 from haindy.agents.test_runner import TestRunner
 from haindy.config.settings import Settings, get_settings
@@ -26,16 +34,16 @@ from haindy.security.sanitizer import set_literal_redactions
 from .models import (
     CommandStatus,
     ExitReason,
+    ExploreTaskStatus,
+    ExploreTodoItem,
     SessionMetadata,
+    TestTaskStatus,
+    TodoStatus,
     ToolCallEnvelope,
     ToolCallRequest,
     make_envelope,
 )
-from .paths import (
-    get_logs_dir,
-    get_screenshots_dir,
-    save_session_metadata,
-)
+from .paths import get_logs_dir, get_screenshots_dir, save_session_metadata
 from .variables import SessionVariableStore
 
 logger = get_logger(__name__)
@@ -43,6 +51,40 @@ logger = get_logger(__name__)
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass
+class _BackgroundTaskBase:
+    started_monotonic: float = field(default_factory=time.monotonic)
+    response: str = ""
+    screenshot_path: str | None = None
+    actions_taken: int = 0
+    exit_reason: ExitReason = ExitReason.COMPLETED
+    accounted_actions: int = 0
+    latest_source_screenshot: str | None = None
+
+    def elapsed_seconds(self) -> int:
+        return max(int(time.monotonic() - self.started_monotonic), 0)
+
+
+@dataclass
+class _TestTaskState(_BackgroundTaskBase):
+    scenario: str = ""
+    status: TestTaskStatus = TestTaskStatus.IN_PROGRESS
+    current_step: str | None = None
+    steps_total: int = 0
+    steps_completed: int = 0
+    steps_failed: int = 0
+    issues_found: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class _ExploreTaskState(_BackgroundTaskBase):
+    goal: str = ""
+    status: ExploreTaskStatus = ExploreTaskStatus.IN_PROGRESS
+    current_focus: str | None = None
+    todo: list[ExploreTodoItem] = field(default_factory=list)
+    observations: list[str] = field(default_factory=list)
 
 
 class ToolCallSessionRuntime:
@@ -75,6 +117,7 @@ class ToolCallSessionRuntime:
         self.action_agent: ActionAgent | None = None
         self.test_planner: TestPlannerAgent | None = None
         self.test_runner: TestRunner | None = None
+        self.awareness_agent: AwarenessAgent | None = None
         self.variables = SessionVariableStore()
         self.metadata = SessionMetadata.new(
             session_id=session_id,
@@ -88,6 +131,11 @@ class ToolCallSessionRuntime:
         self._close_requested = False
         self._command_counter = 0
         self._last_activity_monotonic = time.monotonic()
+        self._device_lock = asyncio.Lock()
+        self._background_task: asyncio.Task[None] | None = None
+        self._background_task_kind: str | None = None
+        self._test_task_state: _TestTaskState | None = None
+        self._explore_task_state: _ExploreTaskState | None = None
 
     @property
     def last_activity_monotonic(self) -> float:
@@ -99,6 +147,32 @@ class ToolCallSessionRuntime:
         """Return True when graceful shutdown has been requested."""
 
         return self._close_requested
+
+    def is_background_task_active(self) -> bool:
+        """Return True when a test or explore task is still running."""
+
+        return self._background_task is not None and not self._background_task.done()
+
+    def active_background_kind(self) -> str | None:
+        """Return the active background task kind, if any."""
+
+        if not self.is_background_task_active():
+            return None
+        return self._background_task_kind
+
+    @staticmethod
+    def background_command_allowed(command: str) -> bool:
+        """Return True when a command is allowed during background execution."""
+
+        return command in {
+            "test_status",
+            "explore_status",
+            "session_set",
+            "session_unset",
+            "session_vars",
+            "session_close",
+            "screenshot",
+        }
 
     def set_pid(self, pid: int) -> None:
         """Attach the live daemon pid to metadata."""
@@ -139,10 +213,12 @@ class ToolCallSessionRuntime:
             automation_driver=self.controller.driver
         )
         self.action_agent = agents.action_agent
+        self.action_agent.set_execution_lock(self._device_lock)
         self.test_planner = agents.test_planner
         self.test_runner = agents.test_runner
+        self.awareness_agent = agents.awareness_agent
 
-        screenshot_bytes = await self.controller.driver.screenshot()
+        screenshot_bytes = await self._take_screenshot_bytes()
         screenshot_path = self._store_screenshot_bytes(screenshot_bytes)
         self.metadata.status = "ready"
         self.metadata.last_command_at = _utc_now().isoformat()
@@ -163,11 +239,22 @@ class ToolCallSessionRuntime:
     async def stop(self) -> None:
         """Stop the underlying controller and persist final metadata."""
 
+        await self.cancel_background_task()
         self.metadata.status = "closed"
         self.metadata.closed_at = _utc_now().isoformat()
         save_session_metadata(self.metadata)
         if self.controller is not None:
             await self.controller.stop()
+
+    async def cancel_background_task(self) -> None:
+        """Cancel any active background task and wait for it to unwind."""
+
+        task = self._background_task
+        if task is None:
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
     async def handle_request(self, request: ToolCallRequest) -> ToolCallEnvelope:
         """Handle one validated daemon request."""
@@ -185,10 +272,15 @@ class ToolCallSessionRuntime:
         elif request.command == "act":
             envelope = await self._handle_act(request)
         elif request.command == "test":
-            envelope = await self._handle_test(request)
+            envelope = await self._handle_test_dispatch(request)
+        elif request.command == "test_status":
+            envelope = self._handle_test_status()
+        elif request.command == "explore":
+            envelope = await self._handle_explore_dispatch(request)
+        elif request.command == "explore_status":
+            envelope = self._handle_explore_status()
         elif request.command == "session_status":
             envelope = await self._handle_status(
-                request,
                 previous_command_name=previous_command_name,
                 previous_command_at=previous_command_at,
             )
@@ -199,7 +291,7 @@ class ToolCallSessionRuntime:
         elif request.command == "session_vars":
             envelope = self._handle_vars()
         elif request.command == "session_close":
-            envelope = self._handle_close()
+            envelope = await self._handle_close()
         else:
             envelope = make_envelope(
                 session_id=self.session_id,
@@ -219,17 +311,15 @@ class ToolCallSessionRuntime:
 
     async def _handle_status(
         self,
-        request: ToolCallRequest,
         *,
         previous_command_name: str | None,
         previous_command_at: str | None,
     ) -> ToolCallEnvelope:
-        del request
         self._activate_command_context("session_status")
-        if self.action_agent is None or self.controller is None:
+        if self.action_agent is None:
             raise RuntimeError("ActionAgent is not initialized.")
 
-        screenshot = await self.controller.driver.screenshot()
+        screenshot = await self._take_screenshot_bytes()
         result = await self.action_agent.observe_current_screen(
             test_context=self._tool_context("session_status"),
             screenshot=screenshot,
@@ -269,10 +359,7 @@ class ToolCallSessionRuntime:
 
     async def _handle_screenshot(self) -> ToolCallEnvelope:
         self._activate_command_context("screenshot")
-        if self.controller is None:
-            raise RuntimeError("Controller is not initialized.")
-
-        screenshot_bytes = await self.controller.driver.screenshot()
+        screenshot_bytes = await self._take_screenshot_bytes()
         screenshot_path = self._store_screenshot_bytes(screenshot_bytes)
         return make_envelope(
             session_id=self.session_id,
@@ -321,41 +408,159 @@ class ToolCallSessionRuntime:
             actions_taken=actions_taken,
         )
 
-    async def _handle_test(self, request: ToolCallRequest) -> ToolCallEnvelope:
+    async def _handle_test_dispatch(self, request: ToolCallRequest) -> ToolCallEnvelope:
         self._activate_command_context("test")
         if self.test_planner is None or self.test_runner is None:
             raise RuntimeError("Tool-call test agents are not initialized.")
 
-        max_steps = int(request.options.get("max_steps", 20))
         scenario = self.variables.interpolate(request.instruction or "")
+        max_steps = max(int(request.options.get("max_steps", 20)), 1)
+        timeout_seconds = max(int(request.options.get("timeout_seconds", 300)), 1)
+        screenshot_bytes = await self._take_screenshot_bytes()
+        screenshot_path = self._store_screenshot_bytes(screenshot_bytes)
 
-        try:
-            test_plan = await self.test_planner.create_tool_mode_test_plan(
-                scenario,
+        state = _TestTaskState(
+            scenario=scenario,
+            response="Test dispatched. Poll test-status for progress.",
+            screenshot_path=screenshot_path,
+            actions_taken=1,
+            accounted_actions=1,
+        )
+        self._test_task_state = state
+        self._background_task_kind = "test"
+        self._background_task = asyncio.create_task(
+            self._run_test_task(
+                state=state,
+                scenario=scenario,
                 max_steps=max_steps,
-                context=self._tool_context("test"),
+                timeout_seconds=timeout_seconds,
             )
-        except ValueError as exc:
+        )
+
+        return make_envelope(
+            session_id=self.session_id,
+            command="test",
+            status=CommandStatus.SUCCESS,
+            response=state.response,
+            screenshot_path=screenshot_path,
+            exit_reason=ExitReason.DISPATCHED,
+            duration_ms=0,
+            actions_taken=1,
+        )
+
+    def _handle_test_status(self) -> ToolCallEnvelope:
+        self._activate_command_context("test_status")
+        state = self._test_task_state
+        if state is None:
             return make_envelope(
                 session_id=self.session_id,
-                command="test",
-                status=CommandStatus.FAILURE,
-                response=self._redact(str(exc)),
+                command="test-status",
+                status=CommandStatus.ERROR,
+                response="No test has been dispatched in this session.",
                 screenshot_path=self.metadata.latest_screenshot_path,
-                exit_reason=ExitReason.MAX_STEPS_REACHED,
+                exit_reason=ExitReason.COMPLETED,
                 duration_ms=0,
                 actions_taken=0,
-                steps_total=max_steps,
-                steps_passed=0,
-                steps_failed=0,
             )
 
-        test_state = TestState(
-            test_plan=test_plan,
-            context=self._tool_context("test"),
+        if state.status == TestTaskStatus.IN_PROGRESS:
+            self._refresh_test_progress(state)
+        return make_envelope(
+            session_id=self.session_id,
+            command="test-status",
+            status=CommandStatus.SUCCESS,
+            response=self._redact(self._test_status_response(state)),
+            screenshot_path=state.screenshot_path,
+            exit_reason=state.exit_reason,
+            duration_ms=0,
+            actions_taken=state.actions_taken,
+            test_status=state.status,
+            current_step=self._redact(state.current_step),
+            steps_total=state.steps_total,
+            steps_completed=state.steps_completed,
+            steps_failed=state.steps_failed,
+            issues_found=self._redact_mapping(state.issues_found),
+            elapsed_time_seconds=state.elapsed_seconds(),
         )
-        final_state = await self.test_runner.execute_test_plan(test_state)
-        return self._build_test_envelope(final_state)
+
+    async def _handle_explore_dispatch(
+        self,
+        request: ToolCallRequest,
+    ) -> ToolCallEnvelope:
+        self._activate_command_context("explore")
+        if self.awareness_agent is None or self.action_agent is None:
+            raise RuntimeError("Explore agents are not initialized.")
+
+        goal = self.variables.interpolate(request.instruction or "")
+        max_steps = max(int(request.options.get("max_steps", 50)), 1)
+        timeout_raw = request.options.get("timeout_seconds")
+        if timeout_raw is None or timeout_raw == "":
+            timeout_seconds = None
+        else:
+            timeout_seconds = max(int(timeout_raw), 1)
+        screenshot_bytes = await self._take_screenshot_bytes()
+        screenshot_path = self._store_screenshot_bytes(screenshot_bytes)
+
+        state = _ExploreTaskState(
+            goal=goal,
+            response="Explore dispatched. Poll explore-status for progress.",
+            screenshot_path=screenshot_path,
+            actions_taken=1,
+            accounted_actions=1,
+        )
+        self._explore_task_state = state
+        self._background_task_kind = "explore"
+        self._background_task = asyncio.create_task(
+            self._run_explore_task(
+                state=state,
+                goal=goal,
+                initial_screenshot=screenshot_bytes,
+                max_steps=max_steps,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+
+        return make_envelope(
+            session_id=self.session_id,
+            command="explore",
+            status=CommandStatus.SUCCESS,
+            response=state.response,
+            screenshot_path=screenshot_path,
+            exit_reason=ExitReason.DISPATCHED,
+            duration_ms=0,
+            actions_taken=1,
+        )
+
+    def _handle_explore_status(self) -> ToolCallEnvelope:
+        self._activate_command_context("explore_status")
+        state = self._explore_task_state
+        if state is None:
+            return make_envelope(
+                session_id=self.session_id,
+                command="explore-status",
+                status=CommandStatus.ERROR,
+                response="No explore has been dispatched in this session.",
+                screenshot_path=self.metadata.latest_screenshot_path,
+                exit_reason=ExitReason.COMPLETED,
+                duration_ms=0,
+                actions_taken=0,
+            )
+
+        return make_envelope(
+            session_id=self.session_id,
+            command="explore-status",
+            status=CommandStatus.SUCCESS,
+            response=self._redact(state.response),
+            screenshot_path=state.screenshot_path,
+            exit_reason=state.exit_reason,
+            duration_ms=0,
+            actions_taken=state.actions_taken,
+            explore_status=state.status,
+            current_focus=self._redact(state.current_focus),
+            todo=self._redact_todo_items(state.todo),
+            observations=self._redact_string_list(state.observations),
+            elapsed_time_seconds=state.elapsed_seconds(),
+        )
 
     def _handle_set_var(self, request: ToolCallRequest) -> ToolCallEnvelope:
         name = request.var_name or ""
@@ -414,7 +619,8 @@ class ToolCallSessionRuntime:
             vars_map=vars_map,
         )
 
-    def _handle_close(self) -> ToolCallEnvelope:
+    async def _handle_close(self) -> ToolCallEnvelope:
+        await self.cancel_background_task()
         self._close_requested = True
         return make_envelope(
             session_id=self.session_id,
@@ -430,6 +636,388 @@ class ToolCallSessionRuntime:
             actions_taken=0,
         )
 
+    async def _run_test_task(
+        self,
+        *,
+        state: _TestTaskState,
+        scenario: str,
+        max_steps: int,
+        timeout_seconds: int,
+    ) -> None:
+        try:
+            await asyncio.wait_for(
+                self._execute_test_task(
+                    state=state,
+                    scenario=scenario,
+                    max_steps=max_steps,
+                ),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            self._refresh_test_progress(state)
+            state.status = TestTaskStatus.TIMEOUT
+            state.current_step = None
+            state.exit_reason = ExitReason.TIMEOUT
+            state.response = (
+                f"Test timed out after {timeout_seconds} seconds "
+                f"with {state.steps_completed} completed step(s)."
+            )
+        except asyncio.CancelledError:
+            self._refresh_test_progress(state)
+            state.current_step = None
+            if state.status == TestTaskStatus.IN_PROGRESS:
+                state.status = TestTaskStatus.ERROR
+                state.exit_reason = ExitReason.AGENT_ERROR
+                state.response = "Test cancelled because the session was closed."
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Background test execution failed",
+                extra={"session_id": self.session_id},
+            )
+            self._refresh_test_progress(state)
+            state.status = TestTaskStatus.ERROR
+            state.current_step = None
+            state.exit_reason = ExitReason.AGENT_ERROR
+            state.response = f"Test failed with an internal error: {exc}."
+        finally:
+            self._settle_background_actions(state)
+            if asyncio.current_task() is self._background_task:
+                self._background_task = None
+                self._background_task_kind = None
+
+    async def _execute_test_task(
+        self,
+        *,
+        state: _TestTaskState,
+        scenario: str,
+        max_steps: int,
+    ) -> None:
+        assert self.test_planner is not None
+        assert self.test_runner is not None
+
+        state.response = "Test planning in progress."
+        try:
+            test_plan = await self.test_planner.create_tool_mode_test_plan(
+                scenario,
+                max_steps=max_steps,
+                context=self._tool_context("test"),
+            )
+        except ValueError as exc:
+            state.status = TestTaskStatus.MAX_STEPS_REACHED
+            state.response = self._redact(str(exc))
+            state.steps_total = max_steps
+            state.steps_completed = 0
+            state.steps_failed = 0
+            state.issues_found = {}
+            state.exit_reason = ExitReason.MAX_STEPS_REACHED
+            return
+
+        state.steps_total = len(getattr(test_plan, "steps", []) or [])
+        state.response = "Test in progress."
+
+        final_state = await self.test_runner.execute_test_plan(
+            TestState(
+                test_plan=test_plan,
+                context=self._tool_context("test"),
+            )
+        )
+        summary = self._summarize_test_result(final_state)
+        state.status = summary["status"]
+        state.response = summary["response"]
+        state.current_step = None
+        state.steps_total = summary["steps_total"]
+        state.steps_completed = summary["steps_completed"]
+        state.steps_failed = summary["steps_failed"]
+        state.issues_found = summary["issues_found"]
+        state.exit_reason = summary["exit_reason"]
+        state.actions_taken = max(state.actions_taken, summary["actions_taken"])
+        state.screenshot_path = summary["screenshot_path"] or state.screenshot_path
+
+    async def _run_explore_task(
+        self,
+        *,
+        state: _ExploreTaskState,
+        goal: str,
+        initial_screenshot: bytes,
+        max_steps: int,
+        timeout_seconds: int | None,
+    ) -> None:
+        try:
+            if timeout_seconds is None:
+                await self._execute_explore_task(
+                    state=state,
+                    goal=goal,
+                    initial_screenshot=initial_screenshot,
+                    max_steps=max_steps,
+                )
+            else:
+                await asyncio.wait_for(
+                    self._execute_explore_task(
+                        state=state,
+                        goal=goal,
+                        initial_screenshot=initial_screenshot,
+                        max_steps=max_steps,
+                    ),
+                    timeout=timeout_seconds,
+                )
+        except asyncio.TimeoutError:
+            state.status = ExploreTaskStatus.TIMEOUT
+            state.current_focus = None
+            state.exit_reason = ExitReason.TIMEOUT
+            state.response = f"Exploration timed out after {timeout_seconds} seconds."
+        except asyncio.CancelledError:
+            if state.status == ExploreTaskStatus.IN_PROGRESS:
+                state.status = ExploreTaskStatus.ERROR
+                state.current_focus = None
+                state.exit_reason = ExitReason.AGENT_ERROR
+                state.response = "Exploration cancelled because the session was closed."
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Background explore execution failed",
+                extra={"session_id": self.session_id},
+            )
+            state.status = ExploreTaskStatus.ERROR
+            state.current_focus = None
+            state.exit_reason = ExitReason.AGENT_ERROR
+            state.response = f"Exploration failed with an internal error: {exc}."
+        finally:
+            self._settle_background_actions(state)
+            if asyncio.current_task() is self._background_task:
+                self._background_task = None
+                self._background_task_kind = None
+
+    async def _execute_explore_task(
+        self,
+        *,
+        state: _ExploreTaskState,
+        goal: str,
+        initial_screenshot: bytes,
+        max_steps: int,
+    ) -> None:
+        assert self.awareness_agent is not None
+        assert self.action_agent is not None
+
+        assessment = await self.awareness_agent.bootstrap(
+            goal=goal,
+            screenshot=initial_screenshot,
+            context=self._tool_context("explore"),
+        )
+        self._apply_awareness_assessment(state, assessment)
+        if state.status != ExploreTaskStatus.IN_PROGRESS:
+            return
+
+        steps_taken = 0
+        while steps_taken < max_steps:
+            next_action = self._next_explore_action(state.todo)
+            if next_action is None:
+                state.status = ExploreTaskStatus.STUCK
+                state.current_focus = None
+                state.exit_reason = ExitReason.STUCK
+                state.response = "Exploration ended. No actionable TODO items remained."
+                return
+
+            result = await self.action_agent.execute_tool_instruction(
+                next_action.action,
+                test_context=self._tool_context("explore"),
+            )
+            state.actions_taken += self._count_action_result_actions(result)
+            screenshot_bytes, screenshot_path = await self._background_result_snapshot(
+                result
+            )
+            if screenshot_path:
+                state.screenshot_path = screenshot_path
+
+            last_action_summary = self._describe_action_result(
+                result,
+                instruction=next_action.action,
+            )
+            assessment = await self.awareness_agent.assess(
+                goal=goal,
+                screenshot=screenshot_bytes,
+                todo=self._to_awareness_todo(state.todo),
+                observations=list(state.observations),
+                last_action_summary=last_action_summary,
+                context=self._tool_context("explore"),
+            )
+            self._apply_awareness_assessment(state, assessment)
+            steps_taken += 1
+            if state.status != ExploreTaskStatus.IN_PROGRESS:
+                return
+
+        state.status = ExploreTaskStatus.MAX_STEPS_REACHED
+        state.current_focus = None
+        state.exit_reason = ExitReason.MAX_STEPS_REACHED
+        state.response = (
+            f"Exploration reached the configured max_steps limit of {max_steps}."
+        )
+
+    def _refresh_test_progress(self, state: _TestTaskState) -> None:
+        if self.test_runner is None:
+            return
+        progress = self.test_runner.get_tool_mode_progress()
+        if progress is None:
+            return
+        state.current_step = progress.current_step
+        state.steps_total = max(state.steps_total, progress.steps_total)
+        state.steps_completed = progress.steps_completed
+        state.steps_failed = progress.steps_failed
+        state.issues_found = dict(progress.issues_found)
+        state.actions_taken = max(state.actions_taken, progress.actions_taken)
+        if progress.latest_screenshot_path:
+            state.screenshot_path = self._promote_background_artifact_screenshot(
+                progress.latest_screenshot_path,
+                state,
+            )
+
+    def _apply_awareness_assessment(
+        self,
+        state: _ExploreTaskState,
+        assessment: AwarenessAssessment,
+    ) -> None:
+        state.response = assessment.response or state.response
+        state.current_focus = assessment.current_focus
+        state.todo = self._normalize_todo(
+            [
+                ExploreTodoItem(
+                    action=item.action,
+                    status=self._todo_status_from_text(item.status),
+                )
+                for item in assessment.todo
+                if item.action.strip()
+            ],
+            terminal=assessment.decision != "continue",
+        )
+        state.observations = list(assessment.observations)
+
+        if assessment.decision == "goal_reached":
+            state.status = ExploreTaskStatus.GOAL_REACHED
+            state.current_focus = None
+            state.exit_reason = ExitReason.GOAL_REACHED
+        elif assessment.decision == "stuck":
+            state.status = ExploreTaskStatus.STUCK
+            state.current_focus = None
+            state.exit_reason = ExitReason.STUCK
+        elif assessment.decision == "aborted":
+            state.status = ExploreTaskStatus.ABORTED
+            state.current_focus = None
+            state.exit_reason = ExitReason.ABORTED
+        else:
+            state.status = ExploreTaskStatus.IN_PROGRESS
+            state.exit_reason = ExitReason.COMPLETED
+
+    async def _background_result_snapshot(
+        self,
+        result: EnhancedActionResult,
+    ) -> tuple[bytes, str | None]:
+        screenshot_path = self._promote_result_screenshot(result)
+        after = result.environment_state_after
+        before = result.environment_state_before
+        if after is not None and after.screenshot is not None:
+            return after.screenshot, screenshot_path
+        if before is not None and before.screenshot is not None:
+            return before.screenshot, screenshot_path
+        fresh = await self._take_screenshot_bytes()
+        if screenshot_path is None:
+            screenshot_path = self._store_screenshot_bytes(fresh)
+        return fresh, screenshot_path
+
+    def _summarize_test_result(self, final_state: TestState) -> dict[str, Any]:
+        case_results = (
+            list(final_state.test_report.test_cases) if final_state.test_report else []
+        )
+        steps_total = sum(case.steps_total for case in case_results)
+        steps_completed = sum(case.steps_completed for case in case_results)
+        steps_failed = sum(case.steps_failed for case in case_results)
+        actions_taken = self._count_test_actions(case_results)
+        screenshot_path = self._promote_test_screenshot(case_results)
+        issues_found = self._collect_test_issues(case_results)
+
+        if final_state.status in {TestStatus.PASSED, TestStatus.COMPLETED}:
+            response = (
+                (f"Test passed. All {steps_total} steps completed successfully.")
+                if steps_total
+                else "Test passed."
+            )
+            return {
+                "status": TestTaskStatus.PASSED,
+                "response": self._redact(response),
+                "exit_reason": ExitReason.COMPLETED,
+                "steps_total": steps_total,
+                "steps_completed": steps_completed,
+                "steps_failed": steps_failed,
+                "issues_found": issues_found,
+                "actions_taken": actions_taken,
+                "screenshot_path": screenshot_path,
+            }
+
+        failed_step, failed_case = self._first_failed_step(case_results)
+        failure_reason = self._test_failure_reason(failed_step, failed_case)
+        if failed_step is not None:
+            observed = (
+                failed_step.actual_result
+                or failed_step.error_message
+                or (failed_case.error_message if failed_case else None)
+                or "Step failed."
+            )
+            response = (
+                f"Test failed at step {failed_step.step_number} of {steps_total}. "
+                f"Steps 1-{steps_completed} passed before failure. "
+                f"Expected: {failed_step.expected_result}. "
+                f"Observed: {observed}"
+            )
+        elif failed_case is not None:
+            response = failed_case.error_message or "Test failed."
+        else:
+            response = "Test failed."
+
+        return {
+            "status": (
+                TestTaskStatus.MAX_STEPS_REACHED
+                if failure_reason == ExitReason.MAX_STEPS_REACHED
+                else TestTaskStatus.FAILED
+            ),
+            "response": self._redact(response),
+            "exit_reason": failure_reason,
+            "steps_total": steps_total,
+            "steps_completed": steps_completed,
+            "steps_failed": steps_failed,
+            "issues_found": issues_found,
+            "actions_taken": actions_taken,
+            "screenshot_path": screenshot_path,
+        }
+
+    def _collect_test_issues(
+        self,
+        case_results: list[TestCaseResult],
+    ) -> dict[str, str]:
+        issues: dict[str, str] = {}
+        for case in case_results:
+            for step in [
+                *case.setup_step_results,
+                *case.step_results,
+                *case.cleanup_step_results,
+            ]:
+                if step.status != TestStatus.FAILED:
+                    continue
+                observed = step.actual_result or step.error_message or "Step failed."
+                issues[f"step_{step.step_number}"] = (
+                    f"Expected {step.expected_result}. Observed: {observed}"
+                )
+        return issues
+
+    def _test_status_response(self, state: _TestTaskState) -> str:
+        if state.status == TestTaskStatus.IN_PROGRESS:
+            if state.current_step and state.steps_total:
+                return (
+                    "Test in progress. "
+                    f"Completed {state.steps_completed} of {state.steps_total} step(s). "
+                    f"Currently executing {state.current_step}."
+                )
+            return "Test in progress."
+        return state.response
+
     def _record_command(self, envelope: ToolCallEnvelope) -> None:
         """Persist command-level counters after one handled request."""
 
@@ -437,8 +1025,16 @@ class ToolCallSessionRuntime:
         self.metadata.last_command_at = _utc_now().isoformat()
         self.metadata.last_command_name = envelope.command
         self.metadata.commands_executed += 1
-        self.metadata.actions_executed += envelope.meta.actions_taken
+        if envelope.command not in {"test-status", "explore-status"}:
+            self.metadata.actions_executed += envelope.meta.actions_taken
         save_session_metadata(self.metadata)
+
+    def _settle_background_actions(self, state: _BackgroundTaskBase) -> None:
+        delta = max(state.actions_taken - state.accounted_actions, 0)
+        if delta:
+            self.metadata.actions_executed += delta
+            state.accounted_actions += delta
+            save_session_metadata(self.metadata)
 
     def _activate_command_context(self, command_name: str) -> None:
         """Set per-command logging/debug context within the live session."""
@@ -487,6 +1083,12 @@ class ToolCallSessionRuntime:
         if self.ios_app:
             context["bundle_id"] = self.ios_app
         return context
+
+    async def _take_screenshot_bytes(self) -> bytes:
+        if self.controller is None:
+            raise RuntimeError("Controller is not initialized.")
+        async with self._device_lock:
+            return await self.controller.driver.screenshot()
 
     def _build_startup_response(self) -> str:
         if self.backend == "mobile_adb":
@@ -584,6 +1186,20 @@ class ToolCallSessionRuntime:
         save_session_metadata(self.metadata)
         return str(destination.resolve())
 
+    def _promote_background_artifact_screenshot(
+        self,
+        source_path: str,
+        state: _BackgroundTaskBase,
+    ) -> str | None:
+        if state.latest_source_screenshot == source_path:
+            return state.screenshot_path
+        try:
+            promoted = self._promote_existing_screenshot(source_path)
+        except FileNotFoundError:
+            return state.screenshot_path
+        state.latest_source_screenshot = source_path
+        return promoted
+
     def _promote_result_screenshot(
         self,
         result: EnhancedActionResult,
@@ -655,75 +1271,6 @@ class ToolCallSessionRuntime:
         if "driver" in error_text or "device" in error_text:
             return ExitReason.DEVICE_ERROR
         return ExitReason.ASSERTION_FAILED
-
-    def _build_test_envelope(self, final_state: TestState) -> ToolCallEnvelope:
-        """Translate a completed test-state into the tool-call response contract."""
-
-        case_results = (
-            list(final_state.test_report.test_cases) if final_state.test_report else []
-        )
-        steps_total = sum(case.steps_total for case in case_results)
-        steps_passed = sum(case.steps_completed for case in case_results)
-        steps_failed = sum(case.steps_failed for case in case_results)
-        actions_taken = self._count_test_actions(case_results)
-        screenshot_path = self._promote_test_screenshot(case_results)
-
-        if final_state.status in {TestStatus.PASSED, TestStatus.COMPLETED}:
-            response = (
-                (
-                    f"Test passed in {steps_total} steps. "
-                    f"{steps_passed} steps passed with {actions_taken} device actions."
-                )
-                if steps_total
-                else "Test passed."
-            )
-            return make_envelope(
-                session_id=self.session_id,
-                command="test",
-                status=CommandStatus.SUCCESS,
-                response=self._redact(response),
-                screenshot_path=screenshot_path,
-                exit_reason=ExitReason.COMPLETED,
-                duration_ms=0,
-                actions_taken=actions_taken,
-                steps_total=steps_total,
-                steps_passed=steps_passed,
-                steps_failed=steps_failed,
-            )
-
-        failed_step, failed_case = self._first_failed_step(case_results)
-        failure_reason = self._test_failure_reason(failed_step, failed_case)
-        if failed_step is not None:
-            observed = (
-                failed_step.actual_result
-                or failed_step.error_message
-                or (failed_case.error_message if failed_case else None)
-                or "Step failed."
-            )
-            response = (
-                f"Test failed at step {failed_step.step_number} of {steps_total}. "
-                f"{steps_passed} step(s) passed before failure. "
-                f"Expected: {failed_step.expected_result}. "
-                f"Observed: {observed}"
-            )
-        elif failed_case is not None:
-            response = failed_case.error_message or "Test failed."
-        else:
-            response = "Test failed."
-
-        return make_envelope(
-            session_id=self.session_id,
-            command="test",
-            status=CommandStatus.FAILURE,
-            response=self._redact(response),
-            screenshot_path=screenshot_path,
-            exit_reason=failure_reason,
-            duration_ms=0,
-            actions_taken=actions_taken,
-            steps_total=steps_total,
-            steps_passed=steps_passed,
-            steps_failed=steps_failed,
-        )
 
     @staticmethod
     def _count_test_actions(case_results: list[TestCaseResult]) -> int:
@@ -798,6 +1345,98 @@ class ToolCallSessionRuntime:
         if "exceeded max_steps" in text or "max_steps" in text:
             return ExitReason.MAX_STEPS_REACHED
         return ExitReason.ASSERTION_FAILED
+
+    def _normalize_todo(
+        self,
+        todo: list[ExploreTodoItem],
+        *,
+        terminal: bool,
+    ) -> list[ExploreTodoItem]:
+        if not todo:
+            return todo
+
+        normalized: list[ExploreTodoItem] = []
+        active_index: int | None = None
+        for item in todo:
+            if not item.action.strip():
+                continue
+            status = item.status
+            if terminal and status == TodoStatus.IN_PROGRESS:
+                status = TodoStatus.PENDING
+            if status == TodoStatus.IN_PROGRESS and active_index is None:
+                active_index = len(normalized)
+            elif status == TodoStatus.IN_PROGRESS:
+                status = TodoStatus.PENDING
+            normalized.append(ExploreTodoItem(action=item.action, status=status))
+
+        if not terminal and active_index is None:
+            for index, item in enumerate(normalized):
+                if item.status == TodoStatus.PENDING:
+                    normalized[index] = ExploreTodoItem(
+                        action=item.action,
+                        status=TodoStatus.IN_PROGRESS,
+                    )
+                    break
+        return normalized
+
+    @staticmethod
+    def _todo_status_from_text(value: str) -> TodoStatus:
+        try:
+            return TodoStatus(str(value).strip().lower())
+        except ValueError:
+            return TodoStatus.PENDING
+
+    @staticmethod
+    def _next_explore_action(
+        todo: list[ExploreTodoItem],
+    ) -> ExploreTodoItem | None:
+        for item in todo:
+            if item.status == TodoStatus.IN_PROGRESS:
+                return item
+        for item in todo:
+            if item.status == TodoStatus.PENDING:
+                return item
+        return None
+
+    @staticmethod
+    def _to_awareness_todo(todo: list[ExploreTodoItem]) -> list[AwarenessTodoItem]:
+        return [
+            AwarenessTodoItem(action=item.action, status=item.status.value)
+            for item in todo
+        ]
+
+    def _describe_action_result(
+        self,
+        result: EnhancedActionResult,
+        *,
+        instruction: str,
+    ) -> str:
+        observed = (
+            result.final_model_output
+            or (result.ai_analysis.actual_outcome if result.ai_analysis else None)
+            or result.terminal_failure_reason
+            or "No further detail available."
+        )
+        prefix = "Succeeded" if result.overall_success else "Failed"
+        return f"{prefix} action '{instruction}'. {observed}"
+
+    def _redact_mapping(self, values: dict[str, str]) -> dict[str, str]:
+        return {key: self._redact(value) for key, value in values.items()}
+
+    def _redact_string_list(self, values: list[str]) -> list[str]:
+        return [self._redact(value) for value in values]
+
+    def _redact_todo_items(
+        self,
+        todo: list[ExploreTodoItem],
+    ) -> list[ExploreTodoItem]:
+        return [
+            ExploreTodoItem(
+                action=self._redact(item.action),
+                status=item.status,
+            )
+            for item in todo
+        ]
 
     def _redact(self, text: str | None) -> str:
         return self.variables.redact(text) or ""

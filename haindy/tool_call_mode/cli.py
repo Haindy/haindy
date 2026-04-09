@@ -41,12 +41,22 @@ from .paths import (
     get_socket_path,
     is_process_alive,
     load_session_metadata,
+    prune_dead_sessions,
     read_pid,
     save_session_metadata,
     terminate_session_process,
 )
 
-TOOL_CALL_COMMANDS = {"session", "act", "test", "screenshot", "__tool_call_daemon"}
+TOOL_CALL_COMMANDS = {
+    "session",
+    "act",
+    "test",
+    "test-status",
+    "explore",
+    "explore-status",
+    "screenshot",
+    "__tool_call_daemon",
+}
 
 
 class ToolCallUsageError(ValueError):
@@ -93,7 +103,17 @@ def is_tool_call_command(argv: list[str] | None) -> bool:
 
     if not argv:
         return False
-    return argv[0] in TOOL_CALL_COMMANDS
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in {"--debug", "--json"}:
+            index += 1
+            continue
+        if token == "--session":
+            index += 2
+            continue
+        return token in TOOL_CALL_COMMANDS
+    return False
 
 
 def create_tool_call_parser() -> argparse.ArgumentParser:
@@ -231,6 +251,13 @@ def create_tool_call_parser() -> argparse.ArgumentParser:
     )
     del session_vars
 
+    session_prune = session_subparsers.add_parser(
+        "prune",
+        help="Delete old dead session directories",
+        parents=[common_parser],
+    )
+    session_prune.add_argument("--older-than", type=int, required=True)
+
     screenshot_parser = subparsers.add_parser(
         "screenshot",
         help="Take a screenshot and return its path (no AI model call)",
@@ -254,6 +281,29 @@ def create_tool_call_parser() -> argparse.ArgumentParser:
     test_parser.add_argument("scenario")
     test_parser.add_argument("--max-steps", type=int, default=20)
     test_parser.add_argument("--timeout", type=int, default=300)
+
+    test_status_parser = subparsers.add_parser(
+        "test-status",
+        help="Poll the latest test background task",
+        parents=[common_parser, session_parser_parent],
+    )
+    del test_status_parser
+
+    explore_parser = subparsers.add_parser(
+        "explore",
+        help="Run one open-ended exploration goal",
+        parents=[common_parser, session_parser_parent],
+    )
+    explore_parser.add_argument("goal")
+    explore_parser.add_argument("--max-steps", type=int, default=50)
+    explore_parser.add_argument("--timeout", type=int)
+
+    explore_status_parser = subparsers.add_parser(
+        "explore-status",
+        help="Poll the latest explore background task",
+        parents=[common_parser, session_parser_parent],
+    )
+    del explore_status_parser
 
     return parser
 
@@ -294,6 +344,8 @@ async def run_tool_call_cli(argv: list[str]) -> int:
             envelope, exit_code = _handle_session_list()
         elif args.session_command == "close":
             envelope, exit_code = await _handle_session_close(args)
+        elif args.session_command == "prune":
+            envelope, exit_code = _handle_session_prune(args)
         elif args.session_command == "status":
             envelope, exit_code = await _send_session_request(
                 args,
@@ -347,6 +399,28 @@ async def run_tool_call_cli(argv: list[str]) -> int:
                     "max_steps": args.max_steps,
                 },
             ),
+        )
+    elif args.tool_command == "test-status":
+        envelope, exit_code = await _send_session_request(
+            args,
+            ToolCallRequest(command="test_status"),
+        )
+    elif args.tool_command == "explore":
+        options: dict[str, Any] = {"max_steps": args.max_steps}
+        if args.timeout is not None:
+            options["timeout_seconds"] = args.timeout
+        envelope, exit_code = await _send_session_request(
+            args,
+            ToolCallRequest(
+                command="explore",
+                instruction=args.goal,
+                options=options,
+            ),
+        )
+    elif args.tool_command == "explore-status":
+        envelope, exit_code = await _send_session_request(
+            args,
+            ToolCallRequest(command="explore_status"),
         )
     else:  # pragma: no cover - parser guarantees this branch is unreachable
         envelope, exit_code = _usage_error("Unknown tool-call command.")
@@ -514,6 +588,25 @@ def _handle_session_list() -> tuple[ToolCallEnvelope, int]:
         duration_ms=int((time.perf_counter() - started) * 1000),
         actions_taken=0,
         sessions=sessions,
+    )
+    return envelope, 0
+
+
+def _handle_session_prune(
+    args: argparse.Namespace,
+) -> tuple[ToolCallEnvelope, int]:
+    started = time.perf_counter()
+    older_than = max(int(args.older_than), 0)
+    pruned = prune_dead_sessions(older_than_days=older_than)
+    envelope = make_envelope(
+        session_id=None,
+        command="session",
+        status=CommandStatus.SUCCESS,
+        response=f"Pruned {len(pruned)} session directories older than {older_than} day(s).",
+        screenshot_path=None,
+        exit_reason=ExitReason.COMPLETED,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        actions_taken=0,
     )
     return envelope, 0
 

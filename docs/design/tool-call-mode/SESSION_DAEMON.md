@@ -337,7 +337,7 @@ tests, and hostile wrappers that kill all detached descendants:
 python -m haindy.main __tool_call_daemon --session-id <SESSION_ID> --backend desktop
 ```
 
-This is an operational fallback, not the primary V1 path.
+This is an operational fallback, not the primary launch path.
 
 ---
 

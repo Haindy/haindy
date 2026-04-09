@@ -219,6 +219,32 @@ BUG_CLASSIFICATION_RESPONSE_FORMAT = build_json_schema_response_format(
     ),
 )
 
+AWARENESS_ASSESSMENT_RESPONSE_FORMAT = build_json_schema_response_format(
+    "haindy_awareness_assessment_v1",
+    _object_schema(
+        {
+            "decision": {
+                "type": "string",
+                "enum": ["continue", "goal_reached", "stuck", "aborted"],
+            },
+            "response": _string_schema(),
+            "current_focus": {"type": ["string", "null"]},
+            "todo": _array_schema(
+                _object_schema(
+                    {
+                        "action": _string_schema(),
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "done", "skipped"],
+                        },
+                    }
+                )
+            ),
+            "observations": _STRING_LIST_SCHEMA,
+        }
+    ),
+)
+
 BUG_PLAN_ASSESSMENT_RESPONSE_FORMAT = build_json_schema_response_format(
     "haindy_bug_plan_assessment_v1",
     _object_schema(
