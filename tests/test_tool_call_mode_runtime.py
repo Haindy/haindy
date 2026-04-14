@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,7 @@ from haindy.tool_call_mode.models import (
     ExitReason,
     ExploreTaskStatus,
     TodoStatus,
+    ToolCallEnvelope,
     ToolCallRequest,
     make_envelope,
 )
@@ -192,6 +194,23 @@ def _make_action_result(
         final_model_output="Action completed.",
         overall_success=success,
     )
+
+
+async def _wait_for_test_status(
+    runtime: ToolCallSessionRuntime,
+    *,
+    predicate: Callable[[ToolCallEnvelope], bool],
+    attempts: int = 10,
+) -> ToolCallEnvelope:
+    envelope = await runtime.handle_request(ToolCallRequest(command="test_status"))
+    if predicate(envelope):
+        return envelope
+    for _ in range(attempts - 1):
+        await asyncio.sleep(0)
+        envelope = await runtime.handle_request(ToolCallRequest(command="test_status"))
+        if predicate(envelope):
+            return envelope
+    return envelope
 
 
 class _FakeTestPlanner:
@@ -413,9 +432,13 @@ async def test_runtime_test_dispatch_and_status_lifecycle(
     assert dispatch.command == "test"
     assert dispatch.screenshot_path is not None
 
-    await asyncio.sleep(0)
-
-    in_progress = await runtime.handle_request(ToolCallRequest(command="test_status"))
+    in_progress = await _wait_for_test_status(
+        runtime,
+        predicate=lambda envelope: (
+            envelope.current_step == "Step 1: Open the dashboard"
+            and envelope.phase == "awaiting_step_reflection"
+        ),
+    )
 
     assert in_progress.status == CommandStatus.SUCCESS
     assert in_progress.test_status == ToolTestTaskStatus.IN_PROGRESS

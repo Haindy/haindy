@@ -363,9 +363,7 @@ class TestRunnerStepProcessor:
                             )
                         elif (
                             step_session is not None
-                            and getattr(
-                                step_session, "has_computer_use_action", False
-                            )
+                            and getattr(step_session, "has_computer_use_action", False)
                             and runner._tool_mode_session_id is not None
                         ):
                             runner._set_tool_mode_phase(
