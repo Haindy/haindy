@@ -99,8 +99,8 @@ class TestSettings:
             )
 
     def test_default_computer_action_timeout(self):
-        settings = load_settings({})
-        assert settings.actions_computer_tool_action_timeout_ms == 600000
+        settings = Settings()
+        assert settings.actions_computer_tool_action_timeout_seconds == 600.0
 
     def test_planning_cache_defaults(self):
         settings = load_settings({})

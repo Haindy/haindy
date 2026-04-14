@@ -7,110 +7,176 @@ metadata:
 
 # Using HAINDY Tool-Call Mode
 
-HAINDY controls a real desktop (Linux/X11 or macOS), Android device, or iOS device/simulator. In tool-call mode it runs as a background session daemon and every command returns exactly one JSON object on stdout.
+HAINDY is an autonomous testing agent that controls a real Android device (via ADB), iOS device (via idb), or desktop environment (via computer use). You issue natural language commands through its CLI and receive structured JSON results. HAINDY runs as a background session daemon that keeps the device connection alive between your commands.
 
-## Invocation
-
-`haindy` is pre-installed system-wide at `/usr/local/bin/haindy`. `idb` and `idb_companion` are also pre-installed at `/usr/local/bin/idb` and `/usr/local/bin/idb_companion`. Do NOT create a virtualenv, install packages, or run `pip install` or `brew install`. Just call `haindy` directly — if it is not on your PATH, use `/usr/local/bin/haindy`.
-
-## Start a session
+## Session setup
 
 ```bash
-haindy session new --desktop
 haindy session new --android [--android-serial <SERIAL>] [--android-app <PACKAGE>]
 haindy session new --ios [--ios-udid <UDID>] [--ios-app <BUNDLE_ID>]
+haindy session new --desktop
 ```
 
-`--android-app` tells HAINDY to launch the app at session start via `adb shell monkey`. Omit it if you have already launched the app yourself (e.g. after installing it with `adb install`). Passing `--android-app` when the app is already in the foreground is harmless — HAINDY will detect that and skip the launch — but omitting it is clearer when you know the app is already running.
+Read `session_id` from the JSON response and pass it explicitly on every later command.
 
-`--ios-udid` selects a specific device or simulator UDID. Omit it when only one simulator is booted. `--ios-app` launches the given bundle ID at session start; omit it if the app or home screen is already where you want to begin.
+Rules:
+- Web: make sure the site or dev server is already running before starting a desktop session. If no browser is open yet, instruct HAINDY to open one and navigate like a human would.
+- Native desktop app: make sure the app is already running before starting a desktop session. If needed, instruct HAINDY to bring it to the foreground.
+- Prefer maximized windows. Desktop sessions may downshift resolution for speed and token savings.
+- Android: start against a device or emulator ADB can reach, and pass `--android-serial` / `--android-app` when needed.
+- iOS: start against a device or simulator idb can reach, and pass `--ios-udid` / `--ios-app` when needed.
+- Use `haindy session set --secret` for credentials and tokens. Prefer `--value-file` when the value is sensitive.
 
-Read `session_id` from the JSON response and pass it explicitly on later commands.
-
-Troubleshooting:
-
-- `session new` should normally survive after the original CLI process exits because HAINDY launches the session daemon independently.
-- If `session new` returns success but the very next command still says `No active session found`, treat it as a harness/process-lifetime issue rather than an app failure.
-- Wrappers that kill the entire process container or cgroup can still defeat detached daemons. In that case, rerun from a normal shell or keep the hidden `python -m src.main __tool_call_daemon ...` fallback alive in a long-lived PTY for debugging.
-
-Desktop rules:
-
-- Start the target site or desktop app before opening the session
-- Prefer a maximized target window
-- Desktop `session new --url ...` is not part of V1
-- On macOS, grant **Accessibility** and **Screen Recording** permissions to the terminal app before starting a session (System Settings > Privacy & Security). A restart of the terminal may be required after granting permissions.
-
-iOS rules:
-
-- Requires macOS with `idb-companion` installed (`brew install idb-companion`) and `fb-idb` Python package
-- Boot the target simulator in Xcode or via `xcrun simctl boot <UDID>` before starting the session
-- For real devices: Developer Mode must be enabled (Settings > Privacy & Security > Developer Mode) and the device trusted on this Mac
-- Run `idb list-targets` to confirm the device/simulator is visible before opening a session
-- Modern iPhones have no hardware Home button; use `haindy act "go to home screen"` which maps to `idb ui button HOME`
-
-## Core commands
+Store variables before using them:
 
 ```bash
-haindy screenshot --session <SESSION_ID>
-haindy session status --session <SESSION_ID>
-haindy act "<single action>" --session <SESSION_ID>
-haindy test "<scenario with an expected outcome>" --session <SESSION_ID>
-haindy session set <NAME> <VALUE> --session <SESSION_ID>
-haindy session set <NAME> --value-file <PATH> --secret --session <SESSION_ID>
-haindy session vars --session <SESSION_ID>
-haindy session close --session <SESSION_ID>
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 ```
 
-Command choice:
+Close and clean up when done:
 
-- Use `screenshot` to capture the current screen cheaply — no AI model is invoked, returns immediately with `screenshot_path`
-- Use `session status` when you also want an AI description of what is on screen
-- Use `act` for one direct interaction when you do not need outcome validation
-- Use `test` when you care whether the result actually happened
+```bash
+haindy session close --session <SESSION_ID>
+haindy session prune --older-than 7
+```
 
-Prefer `screenshot` over `session status` whenever you just need to see the screen. Prefer `test` over `act` when the outcome matters.
+## Commands
+
+```bash
+haindy act "<instruction>" --session <SESSION_ID>
+haindy screenshot --session <SESSION_ID>
+haindy session status --session <SESSION_ID>
+haindy session set <NAME> <VALUE> [--secret] --session <SESSION_ID>
+haindy session set <NAME> --value-file <PATH> [--secret] --session <SESSION_ID>
+haindy session unset <NAME> --session <SESSION_ID>
+haindy session vars --session <SESSION_ID>
+
+haindy test "<scenario>" --session <SESSION_ID>
+haindy test-status --session <SESSION_ID>
+haindy explore "<goal>" --session <SESSION_ID>
+haindy explore-status --session <SESSION_ID>
+```
+
+Choose the right command:
+- `act`: exact interaction, no validation.
+- `test`: detailed, unambiguous scenario with explicit steps and expected outcomes.
+- `explore`: open-ended goal when you do not yet know a reliable step-by-step path.
+- `session status`: AI description of the current screen.
+- `screenshot`: raw screenshot without AI processing.
+
+Rules:
+- Use `test` when you can write precise steps. Use `explore` when you cannot.
+- `act` does not validate anything. If the tap succeeds but the expected result does not appear, `act` can still return `success`.
+
+## `test` requires detailed requirements
+
+Do not pass vague one-liners. Provide explicit steps, specific UI elements, concrete values, and clear expected outcomes.
+
+Good:
+
+```bash
+haindy test "Step 1: Tap the email field and type '{{USERNAME}}'. Step 2: Tap the password field and type '{{PASSWORD}}'. Step 3: Tap 'Sign In'. Step 4: Verify the dashboard appears with text 'Welcome, Alice' in the header." --session <SESSION_ID>
+```
+
+Bad:
+
+```bash
+haindy test "test the login flow" --session <SESSION_ID>
+```
+
+If you do not have enough detail for `test`, use `explore` or `session status` first.
+
+## `explore` accepts a goal
+
+Pass a goal achievable by navigating visible UI. It does not need step-by-step instructions.
+
+```bash
+haindy explore "find the notification settings screen and report what options are available" --session <SESSION_ID>
+```
+
+`explore` runs until the goal is reached, the agent gets stuck, external interference aborts the run, or a limit is hit. Pass `--timeout <seconds>` if you want to cap execution time.
+
+## Async pattern
+
+`test` and `explore` dispatch background work and return immediately. They do not wait for the full run to finish.
+
+```bash
+haindy test "..." --session <SESSION_ID>
+haindy test-status --session <SESSION_ID>
+haindy test-status --session <SESSION_ID>
+
+haindy explore "..." --session <SESSION_ID>
+haindy explore-status --session <SESSION_ID>
+haindy explore-status --session <SESSION_ID>
+```
+
+While a background task is active:
+- `act`, `session status`, `test`, and `explore` may return `session_busy`
+- `test-status`, `explore-status`, `screenshot`, `session set`, `session unset`, `session vars`, and `session close` are still allowed
+- `session close` cancels the active background task before the daemon exits
+
+Read these fields on status polls:
+- `run_id`: stable async identifier for a `test` run
+- `test_status`: `in_progress`, `passed`, `failed`, `error`, `timeout`, `max_steps_reached`
+- `current_step`, `phase`, `last_model_agent`, `latest_action_artifact_path`
+- `steps_total`, `steps_completed`, `steps_failed`, `issues_found`, `elapsed_time_seconds`
+- `explore_status`: `in_progress`, `goal_reached`, `stuck`, `aborted`, `timeout`, `max_steps_reached`, `error`
+- `current_focus`, `todo`, `observations`, `elapsed_time_seconds`
+
+`explore` is driven by an Awareness Agent that maintains a living TODO list and can backtrack freely. `aborted` means something outside HAINDY moved the device or changed focus. That is not automatically a bug in the app under test.
 
 ## Session variables
 
 Store a variable once, then reference it by the exact same name you chose:
 
 ```bash
-haindy session set EMAIL user@example.com --session <SESSION_ID>
-haindy session set PASSWORD --value-file /run/secrets/pass --secret --session <SESSION_ID>
+haindy session set USERNAME alice@example.com --session <SESSION_ID>
+haindy session set PASSWORD --value-file /run/secrets/test_password --secret --session <SESSION_ID>
 
 # Reference with {{NAME}} in any instruction string
-haindy act "type {{EMAIL}} into the email field" --session <SESSION_ID>
-haindy test "sign in with {{EMAIL}} and {{PASSWORD}} and verify the dashboard appears" --session <SESSION_ID>
+haindy act "type {{USERNAME}} into the email field" --session <SESSION_ID>
+haindy test "Step 1: Type {{USERNAME}} into the email field. Step 2: Type {{PASSWORD}} into the password field. Step 3: Tap 'Sign In'. Step 4: Verify the dashboard loads." --session <SESSION_ID>
 ```
 
 Rules:
 - Use `{{NAME}}` — double curly braces around the variable name. This syntax is shell-safe and works in both single- and double-quoted strings.
-- Use the exact name you passed to `session set`. If you stored it as `EMAIL`, reference it as `{{EMAIL}}`, not `{{LOGIN_EMAIL}}` or `{{USER}}`.
+- Use the exact name you passed to `session set`. If you stored it as `USERNAME`, reference it as `{{USERNAME}}`, not `{{LOGIN_EMAIL}}`, `{{USER}}`, or anything else.
 - Unknown `{{NAME}}` tokens are left unchanged in the instruction string.
 - Prefer `--value-file` for secrets so sensitive data does not travel in shell history.
 - Secret values are masked in responses and are not persisted to `session.json`.
 
-## Read the JSON response
+## Screenshots
+
+The dispatch response for `test` and `explore` includes a screenshot of the device at accept time. Status poll responses include the latest screenshot from the background task.
+
+Use `haindy screenshot --session <SESSION_ID>` when you need a screenshot at your own chosen moment. HAINDY's screenshot timing may not match yours.
+
+## JSON response
 
 Always inspect:
 
 - `status`: `success`, `failure`, or `error`
 - `response`: natural-language explanation of what happened
 - `meta.exit_reason`: machine-readable reason the command ended
+- `run_id`: stable background identifier for async `test` runs when present
 - `screenshot_path`: absolute path to the latest screenshot when a session is active
 
 Important `exit_reason` values:
 
 - `completed`: command finished normally
+- `dispatched`: async work was accepted; poll the matching `*-status` command
 - `assertion_failed`: the expected result did not occur
 - `element_not_found`: the target was not visible
 - `max_steps_reached` or `max_actions_reached`: the command ran out of budget
 - `command_timeout`: the command hit its wall-clock timeout
-- `session_busy`: another command is already running in that session; wait 5-10 seconds and retry once
+- `goal_reached`, `stuck`, `aborted`, `timeout`: terminal outcomes for `explore`
+- `session_busy`: another command is already running in that session; poll the matching `*-status` command or close the session instead of retrying blindly
 - `agent_error` or `device_error`: HAINDY itself failed
 
-## V1 boundaries
+## On failure
 
-- `explore` is V2 and is not available
-- Tool-call mode does not own desktop app or web-server startup
-- Session variables are memory-only for the life of the daemon
+- For `act`: `element_not_found` means the target is not visible. Use `session status` or `screenshot` to check screen state. Do not retry the same `act` more than twice.
+- For `test`: read `test-status`, not just the dispatch response. Check `assertion_failed`, `max_steps_reached`, `timeout`, `phase`, `current_step`, and `latest_action_artifact_path`.
+- For `explore`: `stuck` means HAINDY tried and could not find a way forward. `aborted` means the device left HAINDY's control. Read `observations`, `todo`, and the latest screenshot before deciding what to do next.
+- For any command: `agent_error` or `device_error` means HAINDY itself failed. Read `response` for diagnostics.

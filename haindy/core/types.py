@@ -99,7 +99,6 @@ class ActionInstruction(BaseModel):
     value: str | None = None
     expected_outcome: str = Field(..., description="Expected result of the action")
     computer_use_prompt: str | None = None
-    timeout: int = 5000
 
 
 class ResolvedAction(BaseModel):

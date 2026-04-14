@@ -216,7 +216,7 @@ class TestErrorAggregator:
             == ErrorCategory.VALIDATION
         )
         assert (
-            aggregator._categorize_error(TimeoutError("", "", 0))
+            aggregator._categorize_error(TimeoutError("", "", 0.0))
             == ErrorCategory.TIMEOUT
         )
         assert (
@@ -260,7 +260,7 @@ class TestErrorAggregator:
             aggregator.add_error(AutomationError("Fail"), recovered=True)
 
         for _i in range(2):
-            aggregator.add_error(TimeoutError("Timeout", "op", 5000), recovered=False)
+            aggregator.add_error(TimeoutError("Timeout", "op", 5.0), recovered=False)
 
         summary = aggregator.get_recovery_summary()
         assert summary["total_recovery_attempts"] == 5
@@ -294,7 +294,7 @@ class TestErrorAggregator:
 
         # Add timeout errors
         for _i in range(4):
-            aggregator.add_error(TimeoutError("Timeout", "op", 1000))
+            aggregator.add_error(TimeoutError("Timeout", "op", 1.0))
 
         recommendations = aggregator.generate_recommendations()
         assert any("Timeout errors" in r for r in recommendations)

@@ -7,6 +7,7 @@ from typing import Any
 
 from haindy.agents import (
     ActionAgent,
+    AwarenessAgent,
     ScopeTriageAgent,
     SituationalAgent,
     TestPlannerAgent,
@@ -33,10 +34,12 @@ class RuntimeAgentBundle:
     test_planner: TestPlannerAgent
     test_runner: TestRunner
     action_agent: ActionAgent
+    awareness_agent: AwarenessAgent
     situational_agent: SituationalAgent
 
     def as_dict(self) -> dict[str, Any]:
-        """Expose the coordinator's canonical agent map."""
+        """Expose the standard coordinator's canonical agent map."""
+
         return {
             "scope_triage": self.scope_triage,
             "test_planner": self.test_planner,
@@ -91,6 +94,10 @@ class AgentFactory:
             test_planner=planning_agents.test_planner,
             test_runner=test_runner,
             action_agent=action_agent,
+            awareness_agent=AwarenessAgent(
+                name="AwarenessAgent",
+                **self._agent_kwargs("situational_agent"),
+            ),
             situational_agent=planning_agents.situational_agent,
         )
 

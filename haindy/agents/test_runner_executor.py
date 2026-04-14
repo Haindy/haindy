@@ -148,12 +148,6 @@ class TestRunnerExecutor:
                 state_context.get("target_type"),
                 default=runtime_spec.target_type,
             )
-            timeout_ms = action.get("timeout")
-            if timeout_ms is None and step.action_instruction is not None:
-                timeout_ms = step.action_instruction.timeout
-            if not isinstance(timeout_ms, int):
-                timeout_ms = 5000
-
             instruction = ActionInstruction(
                 action_type=ActionType(action_type),
                 description=action.get("description", ""),
@@ -161,7 +155,6 @@ class TestRunnerExecutor:
                 value=action.get("value"),
                 expected_outcome=action.get("expected_outcome", step.expected_result),
                 computer_use_prompt=action.get("computer_use_prompt"),
-                timeout=timeout_ms,
             )
             action_step = TestStep(
                 step_id=step.step_id,

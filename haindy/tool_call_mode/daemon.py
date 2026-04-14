@@ -107,7 +107,25 @@ class ToolCallDaemon:
     ) -> None:
         try:
             request = await read_request(reader)
-            if self._command_lock.locked() and request.command != "session_close":
+            if (
+                self.runtime.is_background_task_active()
+                and not self.runtime.background_command_allowed(request.command)
+            ):
+                envelope = make_envelope(
+                    session_id=self.session_id,
+                    command=public_command_name(request.command),
+                    status=CommandStatus.ERROR,
+                    response=(
+                        "Session is busy executing a background task. "
+                        "Use test-status or explore-status to check progress, "
+                        "or session close to cancel."
+                    ),
+                    screenshot_path=self.runtime.metadata.latest_screenshot_path,
+                    exit_reason=ExitReason.SESSION_BUSY,
+                    duration_ms=0,
+                    actions_taken=0,
+                )
+            elif self._command_lock.locked() and request.command != "session_close":
                 envelope = make_envelope(
                     session_id=self.session_id,
                     command=public_command_name(request.command),

@@ -127,7 +127,7 @@ sequenceDiagram
     D->>DEV: Take initial screenshot
     DEV-->>D: entry_screen.png
     D->>BG: spawn background task (with initial screenshot)
-    D-->>CLI: {"status": "success", "screenshot_path": "...", "meta": {"exit_reason": "dispatched"}}
+    D-->>CLI: {"status": "success", "run_id": "...", "screenshot_path": "...", "meta": {"exit_reason": "dispatched"}}
     CLI-->>CA: Test dispatched (with screenshot of entry state)
 
     Note over BG,DEV: Background execution (async)
@@ -153,9 +153,9 @@ sequenceDiagram
     CA->>CLI: haindy test-status --session <id>
     CLI->>D: {command: "test_status"}
     D->>BG: read current state
-    BG-->>D: {test_status, current_step, steps_completed, ...}
+    BG-->>D: {run_id, test_status, phase, current_step, steps_completed, ...}
     D-->>CLI: JSON response
-    CLI-->>CA: {"test_status": "in_progress|passed|failed", ...}
+    CLI-->>CA: {"run_id": "...", "test_status": "in_progress|passed|failed", "phase": "...", ...}
 ```
 
 ---
@@ -317,6 +317,8 @@ For async commands (`test`, `explore`), the `--timeout` flag sets the wall-clock
 
 For `test`, the default timeout is 300s. For `explore`, timeout is optional -- if omitted, explore runs until the goal is reached, the agent gets stuck, or max-steps is hit. The coding agent controls timing at its own level.
 
+For `test`, step-scoped validation and reflection are also bounded by the enclosing test budget. The runtime computes `effective_step_timeout = min(execution.actions_action_timeout_seconds, remaining_test_budget)` before awaiting reflection. If the outer timeout still fires first, the daemon records a terminal timeout reason tied to the active phase (`timed_out_during_planning`, `timed_out_during_execution`, or `timed_out_during_validation`) and preserves the active step in the final `test-status` payload.
+
 ### Clean shutdown
 
 `haindy session close` sends a `session_close` command over the socket. The daemon:
@@ -337,7 +339,7 @@ tests, and hostile wrappers that kill all detached descendants:
 python -m haindy.main __tool_call_daemon --session-id <SESSION_ID> --backend desktop
 ```
 
-This is an operational fallback, not the primary V1 path.
+This is an operational fallback, not the primary launch path.
 
 ---
 
@@ -347,16 +349,21 @@ This is an operational fallback, not the primary V1 path.
 ~/.haindy/sessions/<uuid>/
     daemon.sock    # Created when daemon is ready. Removed on close.
     daemon.pid     # Written immediately on spawn. Used for orphan detection.
-    session.json   # Written on ready. Updated on close with final stats.
+    session.json   # Written on ready. Updated with latest background run/phase pointers.
     screenshots/
         step_001.png   # Numbered sequentially across all commands.
         step_002.png
+        ...
+    action_artifacts/
+        tc001_step_001.json   # Per-step action + verification artifact for background tests.
         ...
     logs/
         daemon.log     # Rotating structured log for this session.
 ```
 
 Session directories are not automatically deleted after close. They serve as an audit trail. Use `haindy session prune --older-than <days>` to clean up old sessions (see CLI_SPEC.md).
+
+For background-test triage, `session.json` exposes the latest `run_id`, phase, and action-artifact path so investigators can jump directly into the session-local forensic trail. The session directory is designed to be self-sufficient when combined with `data/traces/<run_id>.json` and `data/model_logs/model_calls.jsonl`.
 
 ---
 

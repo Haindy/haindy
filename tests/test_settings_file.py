@@ -91,6 +91,18 @@ class TestFlattenSettingsDict:
         result = flatten_settings_dict({"execution": {"actions_max_turns": 20}})
         assert result == {"actions_computer_tool_max_turns": 20}
 
+    def test_legacy_execution_action_timeout_ms_migrates_to_seconds(self) -> None:
+        result = flatten_settings_dict(
+            {"execution": {"actions_action_timeout_ms": 1500}}
+        )
+        assert result == {"actions_computer_tool_action_timeout_seconds": 1.5}
+
+    def test_legacy_execution_action_timeout_ms_requires_numeric_value(self) -> None:
+        with pytest.raises(ValueError, match="actions_action_timeout_ms"):
+            flatten_settings_dict(
+                {"execution": {"actions_action_timeout_ms": "not-a-number"}}
+            )
+
     def test_logging_level(self) -> None:
         result = flatten_settings_dict({"logging": {"level": "DEBUG"}})
         assert result == {"log_level": "DEBUG"}

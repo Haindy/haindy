@@ -377,21 +377,101 @@ class ComputerUseSession(
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Request a final structured verdict from the active step-scoped session."""
-        if self._provider == "google":
-            return await self._reflect_google_step(
-                prompt=prompt,
-                metadata=metadata or {},
-                model=self._google_model,
-            )
-        if self._provider != "openai":
-            raise ComputerUseExecutionError(
-                "Step-scoped reflection is only supported for the OpenAI and Google providers."
-            )
-        return await self._reflect_openai_step(
-            prompt=prompt,
-            metadata=metadata or {},
-            model=self._openai_model,
+        metadata = metadata or {}
+        model_name = (
+            self._google_model
+            if self._provider == "google"
+            else self._openai_model
+            if self._provider == "openai"
+            else None
         )
+        configured_timeout_seconds = self._action_timeout_seconds
+        remaining_budget_seconds: float | None = None
+        remaining_raw = metadata.get("remaining_test_budget_seconds")
+        if remaining_raw is not None:
+            try:
+                remaining_budget_seconds = max(float(remaining_raw), 0.0)
+            except (TypeError, ValueError):
+                remaining_budget_seconds = None
+        effective_timeout_seconds = configured_timeout_seconds
+        if remaining_budget_seconds is not None:
+            effective_timeout_seconds = min(
+                effective_timeout_seconds,
+                remaining_budget_seconds,
+            )
+        effective_timeout_seconds = max(effective_timeout_seconds, 0.0)
+
+        async def _perform_reflection() -> dict[str, Any]:
+            if self._provider == "google":
+                return await self._reflect_google_step(
+                    prompt=prompt,
+                    metadata=metadata,
+                    model=self._google_model,
+                )
+            if self._provider != "openai":
+                raise ComputerUseExecutionError(
+                    "Step-scoped reflection is only supported for the OpenAI and Google providers."
+                )
+            return await self._reflect_openai_step(
+                prompt=prompt,
+                metadata=metadata,
+                model=self._openai_model,
+            )
+
+        logger.info(
+            "Computer Use step reflection request started",
+            extra={
+                "provider": self._provider,
+                "model": model_name,
+                "payload_type": "step_reflection",
+                "step_number": metadata.get("step_number"),
+                "test_case": metadata.get("test_case_name"),
+                "run_id": metadata.get("tool_mode_run_id"),
+                "phase": metadata.get("validation_phase") or metadata.get("phase"),
+                "configured_step_timeout_seconds": configured_timeout_seconds,
+                "remaining_test_budget_seconds": remaining_budget_seconds,
+                "effective_timeout_seconds": effective_timeout_seconds,
+            },
+        )
+        try:
+            result = await asyncio.wait_for(
+                _perform_reflection(),
+                timeout=effective_timeout_seconds,
+            )
+            logger.info(
+                "Computer Use step reflection request completed",
+                extra={
+                    "provider": self._provider,
+                    "model": model_name,
+                    "payload_type": "step_reflection",
+                    "step_number": metadata.get("step_number"),
+                    "test_case": metadata.get("test_case_name"),
+                    "run_id": metadata.get("tool_mode_run_id"),
+                    "phase": metadata.get("validation_phase") or metadata.get("phase"),
+                    "response_ids": result.get("response_ids", []),
+                },
+            )
+            return result
+        except asyncio.TimeoutError as exc:
+            logger.warning(
+                "Computer Use step reflection request timed out",
+                extra={
+                    "provider": self._provider,
+                    "model": model_name,
+                    "payload_type": "step_reflection",
+                    "step_number": metadata.get("step_number"),
+                    "test_case": metadata.get("test_case_name"),
+                    "run_id": metadata.get("tool_mode_run_id"),
+                    "phase": metadata.get("validation_phase") or metadata.get("phase"),
+                    "configured_step_timeout_seconds": configured_timeout_seconds,
+                    "remaining_test_budget_seconds": remaining_budget_seconds,
+                    "effective_timeout_seconds": effective_timeout_seconds,
+                },
+            )
+            raise ComputerUseExecutionError(
+                "Computer Use step reflection timed out after "
+                f"{effective_timeout_seconds:.1f} seconds."
+            ) from exc
 
     async def run(
         self,

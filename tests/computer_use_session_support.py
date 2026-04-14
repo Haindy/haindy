@@ -25,7 +25,7 @@ def session_settings(tmp_path):
     """Provide minimal settings required by the session."""
     return SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,

@@ -94,7 +94,7 @@ _JSON_TO_FIELD: dict[str, str] = {
     "execution.screenshot_quality": "screenshot_quality",
     "execution.actions_max_turns": "actions_computer_tool_max_turns",
     "execution.actions_loop_detection_window": "actions_computer_tool_loop_detection_window",
-    "execution.actions_action_timeout_ms": "actions_computer_tool_action_timeout_ms",
+    "execution.actions_action_timeout_seconds": "actions_computer_tool_action_timeout_seconds",
     "execution.actions_stabilization_wait_ms": "actions_computer_tool_stabilization_wait_ms",
     "execution.actions_fail_fast_on_safety": "actions_computer_tool_fail_fast_on_safety",
     "execution.actions_allowed_domains": "actions_computer_tool_allowed_domains",
@@ -261,6 +261,23 @@ def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
         target_field = _PROVIDER_MODEL_FIELD.get(provider, "computer_use_model")
         if target_field != "computer_use_model" and target_field not in flat:
             flat[target_field] = flat.pop("computer_use_model")
+
+    execution_section = nested.get("execution")
+    if isinstance(execution_section, dict):
+        legacy_timeout_ms = execution_section.get("actions_action_timeout_ms")
+        if (
+            legacy_timeout_ms is not None
+            and "actions_computer_tool_action_timeout_seconds" not in flat
+        ):
+            try:
+                flat["actions_computer_tool_action_timeout_seconds"] = (
+                    float(legacy_timeout_ms) / 1000.0
+                )
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "execution.actions_action_timeout_ms must be numeric when used as a "
+                    "legacy alias for execution.actions_action_timeout_seconds"
+                ) from None
 
     return flat
 

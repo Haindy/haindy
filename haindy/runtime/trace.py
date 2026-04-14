@@ -144,6 +144,27 @@ class RunTraceWriter:
         except Exception:
             logger.debug("RunTraceWriter: failed to record step", exc_info=True)
 
+    def update_last_step(
+        self,
+        *,
+        step_number: int | None = None,
+        step_result: StepResult | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> bool:
+        """Update the most recent recorded step entry in-place."""
+        try:
+            for entry in reversed(self._data["steps"]):
+                if step_number is not None and entry.get("step_number") != step_number:
+                    continue
+                if step_result is not None:
+                    entry["step_result"] = _sanitize_for_json(step_result)
+                if extra:
+                    entry.update(_sanitize_for_json(extra))
+                return True
+        except Exception:
+            logger.debug("RunTraceWriter: failed to update last step", exc_info=True)
+        return False
+
     def record_cache_event(self, event: dict[str, Any]) -> None:
         try:
             event_with_timestamp = dict(event)

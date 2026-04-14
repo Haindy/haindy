@@ -175,11 +175,11 @@ class TestTimeoutError:
     def test_timeout_error(self):
         """Test timeout error creation."""
         error = TimeoutError(
-            "Operation timed out", operation="page_load", timeout_ms=5000
+            "Operation timed out", operation="page_load", timeout_seconds=5.0
         )
 
         assert error.operation == "page_load"
-        assert error.timeout_ms == 5000
+        assert error.timeout_seconds == 5.0
         assert isinstance(error, RetryableError)
 
 

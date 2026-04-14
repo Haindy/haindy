@@ -255,6 +255,10 @@ def test_installed_haindy_help_smoke() -> None:
 
     assert result.returncode == 0, result.stderr
     assert f"{public_cli_program_name()} run --plan requirements.md" in result.stdout
+    assert f"{public_cli_program_name()} session new --android" in result.stdout
+    assert "session" in result.stdout
+    assert "act" in result.stdout
+    assert "explore-status" in result.stdout
     assert "python -m haindy.main run --plan requirements.md" in result.stdout
     assert result.stdout.index(
         f"{public_cli_program_name()} run --plan"

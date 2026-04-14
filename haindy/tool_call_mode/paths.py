@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from haindy.config.settings import get_settings
@@ -65,6 +66,12 @@ def get_logs_dir(session_id: str) -> Path:
     return get_session_dir(session_id) / "logs"
 
 
+def get_action_artifacts_dir(session_id: str) -> Path:
+    """Return the session-local action artifact directory."""
+
+    return get_session_dir(session_id) / "action_artifacts"
+
+
 def get_daemon_log_path(session_id: str) -> Path:
     """Return the daemon log path for one session."""
 
@@ -78,6 +85,7 @@ def ensure_session_layout(session_id: str) -> Path:
     get_sessions_root().mkdir(parents=True, exist_ok=True)
     get_screenshots_dir(session_id).mkdir(parents=True, exist_ok=True)
     get_logs_dir(session_id).mkdir(parents=True, exist_ok=True)
+    get_action_artifacts_dir(session_id).mkdir(parents=True, exist_ok=True)
     return session_dir
 
 
@@ -164,6 +172,38 @@ def cleanup_stale_sessions() -> None:
         if is_process_alive(pid):
             continue
         cleanup_session_artifacts(session_id)
+
+
+def prune_dead_sessions(*, older_than_days: int) -> list[str]:
+    """Delete dead session directories older than the requested age."""
+
+    threshold = datetime.now(timezone.utc) - timedelta(
+        days=max(int(older_than_days), 0)
+    )
+    pruned: list[str] = []
+    sessions_root = get_sessions_root()
+    if not sessions_root.exists():
+        return pruned
+
+    for session_dir in sorted(sessions_root.iterdir()):
+        if not session_dir.is_dir():
+            continue
+        session_id = session_dir.name
+        metadata = load_session_metadata(session_id)
+        pid = read_pid(session_id)
+        if is_process_alive(pid):
+            continue
+        if metadata is None:
+            continue
+        try:
+            created_at = datetime.fromisoformat(metadata.created_at)
+        except ValueError:
+            continue
+        if created_at > threshold:
+            continue
+        cleanup_session_artifacts(session_id, remove_dir=True)
+        pruned.append(session_id)
+    return pruned
 
 
 def terminate_session_process(session_id: str, *, force: bool = False) -> bool:

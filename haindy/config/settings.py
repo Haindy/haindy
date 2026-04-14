@@ -130,7 +130,7 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "cu_patch_margin_ratio": "HAINDY_CU_PATCH_MARGIN_RATIO",
     "actions_computer_tool_max_turns": "HAINDY_ACTIONS_COMPUTER_TOOL_MAX_TURNS",
     "actions_computer_tool_loop_detection_window": "HAINDY_ACTIONS_COMPUTER_TOOL_LOOP_WINDOW",
-    "actions_computer_tool_action_timeout_ms": "HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_MS",
+    "actions_computer_tool_action_timeout_seconds": "HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_SECONDS",
     "actions_computer_tool_stabilization_wait_ms": "HAINDY_ACTIONS_COMPUTER_TOOL_STABILIZATION_WAIT_MS",
     "actions_computer_tool_fail_fast_on_safety": "HAINDY_ACTIONS_COMPUTER_TOOL_FAIL_FAST",
     "actions_computer_tool_allowed_domains": "HAINDY_ACTIONS_COMPUTER_TOOL_ALLOWED_DOMAINS",
@@ -701,10 +701,10 @@ class Settings(BaseModel):
         ge=2,
         description="Repeated identical turns (with identical screenshots) before flagging a loop",
     )
-    actions_computer_tool_action_timeout_ms: int = Field(
-        default=600000,
-        ge=500,
-        description="Timeout in milliseconds for executing a single computer action",
+    actions_computer_tool_action_timeout_seconds: float = Field(
+        default=600.0,
+        ge=0.5,
+        description="Timeout in seconds for executing a single computer action",
     )
     actions_computer_tool_stabilization_wait_ms: int = Field(
         default=2000,

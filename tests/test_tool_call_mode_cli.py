@@ -9,7 +9,9 @@ import pytest
 from haindy.tool_call_mode.cli import (
     _handle_session_list,
     _handle_session_new,
+    _handle_session_prune,
     create_tool_call_parser,
+    is_tool_call_command,
     run_tool_call_cli,
 )
 from haindy.tool_call_mode.launcher import ToolCallDaemonLaunch
@@ -81,6 +83,57 @@ def test_tool_call_parser_accepts_session_set_value_file_after_subcommand(
     assert parsed.secret is True
 
 
+def test_tool_call_parser_accepts_test_status_and_explore_commands() -> None:
+    parser = create_tool_call_parser()
+
+    test_status = parser.parse_args(["test-status", "--session", "abc123"])
+    explore = parser.parse_args(
+        [
+            "explore",
+            "map the settings screen",
+            "--max-steps",
+            "8",
+            "--timeout",
+            "120",
+            "--session",
+            "abc123",
+        ]
+    )
+    explore_status = parser.parse_args(["explore-status", "--session", "abc123"])
+
+    assert test_status.tool_command == "test-status"
+    assert test_status.session == "abc123"
+    assert explore.tool_command == "explore"
+    assert explore.goal == "map the settings screen"
+    assert explore.max_steps == 8
+    assert explore.timeout == 120
+    assert explore.session == "abc123"
+    assert explore_status.tool_command == "explore-status"
+    assert explore_status.session == "abc123"
+
+
+def test_tool_call_parser_accepts_session_prune() -> None:
+    parser = create_tool_call_parser()
+
+    parsed = parser.parse_args(["session", "prune", "--older-than", "7"])
+
+    assert parsed.tool_command == "session"
+    assert parsed.session_command == "prune"
+    assert parsed.older_than == 7
+
+
+def test_is_tool_call_command_skips_global_flags() -> None:
+    assert (
+        is_tool_call_command(
+            ["--debug", "--json", "--session", "abc123", "explore-status"]
+        )
+        is True
+    )
+    assert is_tool_call_command(["--session", "abc123", "run", "--plan", "req.md"]) is (
+        False
+    )
+
+
 def test_handle_session_list_filters_dead_sessions(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HAINDY_HOME", str(tmp_path / "haindy-home"))
 
@@ -117,6 +170,22 @@ def test_handle_session_list_filters_dead_sessions(monkeypatch, tmp_path: Path) 
     assert envelope.status.value == "success"
     assert envelope.sessions is not None
     assert [entry.session_id for entry in envelope.sessions] == [live_session]
+
+
+def test_handle_session_prune_reports_pruned_count(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "haindy.tool_call_mode.cli.prune_dead_sessions",
+        lambda *, older_than_days: ["old-a", "old-b"],
+    )
+    args = create_tool_call_parser().parse_args(
+        ["session", "prune", "--older-than", "14"]
+    )
+
+    envelope, exit_code = _handle_session_prune(args)
+
+    assert exit_code == 0
+    assert envelope.status.value == "success"
+    assert envelope.response == "Pruned 2 session directories older than 14 day(s)."
 
 
 @pytest.mark.asyncio

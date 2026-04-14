@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from asyncio import Lock
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -86,8 +87,14 @@ class ActionAgent:
         self._coordinate_cache = CoordinateCache(settings.desktop_coordinate_cache_path)
         self._computer_use_model = getattr(settings, "computer_use_model", None)
         self._openai_client: AsyncOpenAI | None = None
+        self._execution_lock: Lock | None = None
 
         self.conversation_history: list[dict[str, Any]] = []
+
+    def set_execution_lock(self, lock: Lock | None) -> None:
+        """Install a shared lock for device-interacting workflows."""
+
+        self._execution_lock = lock
 
     def reset_conversation(self) -> None:
         """Reset conversation history for a new action."""
@@ -149,6 +156,14 @@ class ActionAgent:
                 "environment": environment,
                 "allow_safety_auto_approve": True,
                 "safety_identifier": safety_identifier,
+                "tool_mode_run_id": context_lookup.get("tool_mode_run_id"),
+                "tool_mode_session_id": context_lookup.get("tool_mode_session_id"),
+                "tool_mode_test_deadline_monotonic": context_lookup.get(
+                    "tool_mode_test_deadline_monotonic"
+                ),
+                "tool_mode_test_timeout_seconds": context_lookup.get(
+                    "tool_mode_test_timeout_seconds"
+                ),
             },
         )
 
@@ -411,12 +426,51 @@ Respond with JSON only:
                 response_ids=[],
             )
 
+        configured_timeout_seconds = max(
+            float(step_session.session._action_timeout_seconds),
+            0.0,
+        )
+        remaining_budget_seconds: float | None = None
+        deadline_raw = step_session.base_metadata.get(
+            "tool_mode_test_deadline_monotonic"
+        )
+        if deadline_raw is not None:
+            try:
+                remaining_budget_seconds = max(
+                    float(deadline_raw) - time.monotonic(),
+                    0.0,
+                )
+            except (TypeError, ValueError):
+                remaining_budget_seconds = None
+        effective_timeout_seconds = configured_timeout_seconds
+        if remaining_budget_seconds is not None:
+            effective_timeout_seconds = min(
+                effective_timeout_seconds,
+                remaining_budget_seconds,
+            )
+
+        logger.info(
+            "Starting step validation with reusable Computer Use session",
+            extra={
+                "provider": step_session.provider,
+                "step_number": step.step_number,
+                "test_case": test_case.name,
+                "run_id": step_session.base_metadata.get("tool_mode_run_id"),
+                "phase": "awaiting_step_reflection",
+                "configured_step_timeout_seconds": configured_timeout_seconds,
+                "remaining_test_budget_seconds": remaining_budget_seconds,
+                "effective_timeout_seconds": effective_timeout_seconds,
+            },
+        )
         try:
             reflection = await step_session.session.reflect_step(
                 prompt=prompt,
                 metadata={
                     **step_session.base_metadata,
                     "validation_phase": "step_reflection",
+                    "configured_step_timeout_seconds": configured_timeout_seconds,
+                    "remaining_test_budget_seconds": remaining_budget_seconds,
+                    "effective_timeout_seconds": effective_timeout_seconds,
                 },
             )
             raw_response = str(reflection.get("raw_text") or "")
@@ -431,6 +485,17 @@ Respond with JSON only:
                 if isinstance(response_id, str) and response_id
             ]
             step_session.response_ids.extend(response_ids)
+            logger.info(
+                "Completed step validation with reusable Computer Use session",
+                extra={
+                    "provider": step_session.provider,
+                    "step_number": step.step_number,
+                    "test_case": test_case.name,
+                    "run_id": step_session.base_metadata.get("tool_mode_run_id"),
+                    "phase": "awaiting_step_reflection",
+                    "response_ids": response_ids,
+                },
+            )
             return StepSessionValidationResult(
                 verification=verification,
                 prompt=prompt,
@@ -439,6 +504,17 @@ Respond with JSON only:
             )
         except Exception as exc:
             self._mark_step_session_unusable(step_session, str(exc))
+            logger.warning(
+                "Step validation with reusable Computer Use session failed",
+                extra={
+                    "provider": step_session.provider,
+                    "step_number": step.step_number,
+                    "test_case": test_case.name,
+                    "run_id": step_session.base_metadata.get("tool_mode_run_id"),
+                    "phase": "awaiting_step_reflection",
+                    "error": str(exc),
+                },
+            )
             verification = self._normalize_step_validation_result(
                 None,
                 failure_reason=f"Step validation failed in the ActionAgent session: {exc}",
@@ -1256,25 +1332,32 @@ Respond with JSON only:
         if is_skip_navigation:
             return await self._execute_skip_navigation_workflow(test_step, test_context)
 
-        try:
-            return await self._execute_computer_tool_workflow(
-                test_step=test_step,
-                test_context=test_context,
-                screenshot=screenshot,
-                record_driver_actions=record_driver_actions,
-                step_session=step_session,
-                stop_after_actions=stop_after_actions,
-            )
-        except ComputerUseExecutionError:
-            logger.error(
-                "Computer Use workflow failed; aborting action",
-                extra={
-                    "step_number": test_step.step_number,
-                    "action_type": action_type.value if action_type else "unknown",
-                },
-                exc_info=True,
-            )
-            raise
+        async def _run_workflow() -> EnhancedActionResult:
+            try:
+                return await self._execute_computer_tool_workflow(
+                    test_step=test_step,
+                    test_context=test_context,
+                    screenshot=screenshot,
+                    record_driver_actions=record_driver_actions,
+                    step_session=step_session,
+                    stop_after_actions=stop_after_actions,
+                )
+            except ComputerUseExecutionError:
+                logger.error(
+                    "Computer Use workflow failed; aborting action",
+                    extra={
+                        "step_number": test_step.step_number,
+                        "action_type": action_type.value if action_type else "unknown",
+                    },
+                    exc_info=True,
+                )
+                raise
+
+        if self._execution_lock is None:
+            return await _run_workflow()
+
+        async with self._execution_lock:
+            return await _run_workflow()
 
     @staticmethod
     def _infer_tool_mode_action_type(instruction: str) -> ActionType:

@@ -19,9 +19,13 @@ Your coding agent calls HAINDY to interact with a live UI. Every command returns
 ```bash
 haindy session new --desktop                                       # start a session
 haindy act "click the Login button" --session <ID>                 # execute an action
-haindy test "sign in and verify the dashboard loads" --session <ID> # run a multi-step test
+haindy test "sign in and verify the dashboard loads" --session <ID> # dispatch a multi-step test
+haindy test-status --session <ID>                                  # poll test progress / result
+haindy explore "find the notification settings screen" --session <ID> # dispatch exploration
+haindy explore-status --session <ID>                               # poll explore progress / result
 haindy screenshot --session <ID>                                   # capture current state
 haindy session close --session <ID>                                # clean up
+haindy session prune --older-than 7                                # remove old dead sessions
 ```
 
 Under the hood, each action goes through a computer-use AI provider (OpenAI, Google Gemini, or Anthropic Claude) that takes a screenshot, reasons about the UI, and performs real OS-level input -- mouse, keyboard, scroll -- against the actual application. No DOM hooks, no selectors, no browser automation.
@@ -47,12 +51,13 @@ HAINDY ships with bundled skills that `haindy setup` installs automatically for 
 
 Supported CLIs: Claude Code, Codex CLI, OpenCode.
 
-### act vs test
+### act vs test vs explore
 
 - **`act`** -- execute a single action ("click the submit button", "type hello into the search field")
-- **`test`** -- plan and execute a multi-step scenario with outcome validation ("sign in, navigate to settings, verify the dark mode toggle works")
+- **`test`** -- dispatch a multi-step scenario with outcome validation, then poll `test-status`
+- **`explore`** -- dispatch an open-ended goal, then poll `explore-status`
 
-Use `test` whenever you care about verifying a result, not just performing an action.
+Use `test` whenever you care about verifying a result and can describe the scenario precisely. Use `explore` when the goal is clear but the path is not.
 
 ### Session variables
 
@@ -60,7 +65,7 @@ Store values your agent can reference across commands:
 
 ```bash
 haindy session set USERNAME alice@example.com --session <ID>
-haindy session set --value-file credentials.txt --secret --session <ID>
+haindy session set PASSWORD --value-file credentials.txt --secret --session <ID>
 haindy session vars --session <ID>
 ```
 
@@ -111,12 +116,15 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
   "openai": { "model": "gpt-5.4", "computer_use_model": "gpt-5.4" },
   "google": { "model": "gemini-3-flash-preview", "computer_use_model": "gemini-3-flash-preview" },
   "anthropic": { "model": "claude-sonnet-4-6", "computer_use_model": "claude-sonnet-4-6" },
-  "execution": { "automation_backend": "desktop" },
+  "execution": {
+    "automation_backend": "desktop",
+    "actions_action_timeout_seconds": 600
+  },
   "logging": { "level": "INFO" }
 }
 ```
 
-Environment variables override all other sources. See [`.env.example`](.env.example) for the full list.
+Environment variables override all other sources. Timeout settings use seconds. In `settings.json`, use `execution.actions_action_timeout_seconds`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias. See [`.env.example`](.env.example) for the full list.
 
 ## Platform prerequisites
 

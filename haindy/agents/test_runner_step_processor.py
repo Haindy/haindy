@@ -74,8 +74,16 @@ class TestRunnerStepProcessor:
             "step_number": step.step_number,
             "step_id": str(step.step_id),
             "step_description": step.action,
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "actions": runner._current_step_actions,
             "step_intent": step.intent.value,
+            "status_transitions": [
+                {
+                    "status": TestStatus.IN_PROGRESS.value,
+                    "reason": "step_started",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            ],
         }
         current_case_actions = runner._current_test_case_actions
         assert current_case_actions is not None
@@ -101,6 +109,14 @@ class TestRunnerStepProcessor:
             if not runner._check_dependencies(step, case_result):
                 step_result.status = TestStatus.SKIPPED
                 step_result.actual_result = "Skipped due to unmet dependencies"
+                runner._current_step_data["step_status"] = step_result.status.value
+                runner._current_step_data["step_actual_result"] = (
+                    step_result.actual_result
+                )
+                runner._append_step_status_transition(
+                    step_result.status.value,
+                    "dependencies_unmet",
+                )
                 return step_result
 
             before_capture = await runner._artifacts.capture_test_step_screenshot(
@@ -113,6 +129,9 @@ class TestRunnerStepProcessor:
             if before_capture:
                 screenshot_before = before_capture.screenshot_bytes
                 step_result.screenshot_before = before_capture.screenshot_path
+                runner._current_step_data["screenshot_before"] = (
+                    before_capture.screenshot_path
+                )
 
             execution_history = [
                 {
@@ -327,6 +346,10 @@ class TestRunnerStepProcessor:
 
                     try:
                         if forced_blocker_reason:
+                            runner._set_tool_mode_phase(
+                                "verifying",
+                                agent="test_runner.verifier.short_circuit",
+                            )
                             verification = {
                                 "verdict": "FAIL",
                                 "reasoning": forced_blocker_reason,
@@ -338,9 +361,15 @@ class TestRunnerStepProcessor:
                             runner._current_step_data["verification_mode"] = (
                                 "runner_short_circuit"
                             )
-                        elif step_session is not None and getattr(
-                            step_session, "has_computer_use_action", False
+                        elif (
+                            step_session is not None
+                            and getattr(step_session, "has_computer_use_action", False)
+                            and runner._tool_mode_session_id is not None
                         ):
+                            runner._set_tool_mode_phase(
+                                "awaiting_step_reflection",
+                                agent=f"computer_use.{step_session.provider}.step_reflection",
+                            )
                             validation_result = (
                                 await runner.action_agent.validate_step_with_session(
                                     step_session=step_session,
@@ -366,6 +395,10 @@ class TestRunnerStepProcessor:
                                 ),
                             }
                         else:
+                            runner._set_tool_mode_phase(
+                                "verifying",
+                                agent="test_runner.verify_step",
+                            )
                             verification = await runner._verify_expected_outcome(
                                 test_case=test_case,
                                 step=step,
@@ -499,6 +532,16 @@ class TestRunnerStepProcessor:
             else:
                 await runner._invalidate_coordinate_cache(latest_action_results)
 
+        except asyncio.CancelledError:
+            logger.warning(
+                "Step execution cancelled",
+                extra={"step_number": step.step_number, "test_case": test_case.name},
+            )
+            step_result.status = TestStatus.FAILED
+            step_result.actual_result = "Step execution cancelled before completion."
+            step_result.error_message = "Step execution cancelled."
+            step_result.confidence = 0.0
+            raise
         except Exception as exc:
             logger.error(
                 "Step execution failed",
@@ -510,6 +553,23 @@ class TestRunnerStepProcessor:
 
         finally:
             step_result.completed_at = datetime.now(timezone.utc)
+            if step_result.screenshot_before:
+                runner._current_step_data["screenshot_before"] = (
+                    step_result.screenshot_before
+                )
+            if step_result.screenshot_after:
+                runner._current_step_data["screenshot_after"] = (
+                    step_result.screenshot_after
+                )
+            runner._current_step_data["step_status"] = step_result.status.value
+            runner._current_step_data["step_actual_result"] = step_result.actual_result
+            runner._current_step_data["step_error_message"] = step_result.error_message
+            runner._append_step_status_transition(
+                step_result.status.value,
+                step_result.error_message
+                or step_result.actual_result
+                or "step_finished",
+            )
             if (
                 step_result.screenshot_after is None
                 and screenshot_after is None
@@ -520,6 +580,12 @@ class TestRunnerStepProcessor:
                     screenshot_before,
                     step_result.screenshot_before,
                     f"step_{step.step_number}_before",
+                )
+            elif step_result.screenshot_after is not None:
+                runner._artifacts.update_latest_snapshot(
+                    screenshot_after,
+                    step_result.screenshot_after,
+                    f"step_{step.step_number}_after",
                 )
 
             runner._execution_history.append(
@@ -544,6 +610,12 @@ class TestRunnerStepProcessor:
                     attempt=attempt,
                     plan_cache_hit=plan_cache_hit,
                 )
+
+            runner._persist_tool_mode_step_artifact(
+                test_case=test_case,
+                step=step,
+                step_result=step_result,
+            )
 
         return step_result
 

@@ -6,6 +6,7 @@ Provides enhanced logging for AI interactions and screenshot management.
 
 import json
 import logging
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -247,17 +248,22 @@ class DebugLogger:
 
 # Global instance for easy access
 _debug_logger: DebugLogger | None = None
+_debug_logger_ctx: ContextVar[DebugLogger | None] = ContextVar(
+    "haindy_debug_logger",
+    default=None,
+)
 
 
 def get_debug_logger() -> DebugLogger | None:
     """Get the global debug logger instance."""
-    return _debug_logger
+    return _debug_logger_ctx.get() or _debug_logger
 
 
 def set_debug_logger(debug_logger: DebugLogger) -> None:
     """Set the global debug logger instance."""
     global _debug_logger
     _debug_logger = debug_logger
+    _debug_logger_ctx.set(debug_logger)
 
 
 def initialize_debug_logger(
