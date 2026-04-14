@@ -156,6 +156,14 @@ class ActionAgent:
                 "environment": environment,
                 "allow_safety_auto_approve": True,
                 "safety_identifier": safety_identifier,
+                "tool_mode_run_id": context_lookup.get("tool_mode_run_id"),
+                "tool_mode_session_id": context_lookup.get("tool_mode_session_id"),
+                "tool_mode_test_deadline_monotonic": context_lookup.get(
+                    "tool_mode_test_deadline_monotonic"
+                ),
+                "tool_mode_test_timeout_seconds": context_lookup.get(
+                    "tool_mode_test_timeout_seconds"
+                ),
             },
         )
 
@@ -418,12 +426,51 @@ Respond with JSON only:
                 response_ids=[],
             )
 
+        configured_timeout_seconds = max(
+            float(step_session.session._action_timeout_seconds),
+            0.0,
+        )
+        remaining_budget_seconds: float | None = None
+        deadline_raw = step_session.base_metadata.get(
+            "tool_mode_test_deadline_monotonic"
+        )
+        if deadline_raw is not None:
+            try:
+                remaining_budget_seconds = max(
+                    float(deadline_raw) - time.monotonic(),
+                    0.0,
+                )
+            except (TypeError, ValueError):
+                remaining_budget_seconds = None
+        effective_timeout_seconds = configured_timeout_seconds
+        if remaining_budget_seconds is not None:
+            effective_timeout_seconds = min(
+                effective_timeout_seconds,
+                remaining_budget_seconds,
+            )
+
+        logger.info(
+            "Starting step validation with reusable Computer Use session",
+            extra={
+                "provider": step_session.provider,
+                "step_number": step.step_number,
+                "test_case": test_case.name,
+                "run_id": step_session.base_metadata.get("tool_mode_run_id"),
+                "phase": "awaiting_step_reflection",
+                "configured_step_timeout_seconds": configured_timeout_seconds,
+                "remaining_test_budget_seconds": remaining_budget_seconds,
+                "effective_timeout_seconds": effective_timeout_seconds,
+            },
+        )
         try:
             reflection = await step_session.session.reflect_step(
                 prompt=prompt,
                 metadata={
                     **step_session.base_metadata,
                     "validation_phase": "step_reflection",
+                    "configured_step_timeout_seconds": configured_timeout_seconds,
+                    "remaining_test_budget_seconds": remaining_budget_seconds,
+                    "effective_timeout_seconds": effective_timeout_seconds,
                 },
             )
             raw_response = str(reflection.get("raw_text") or "")
@@ -438,6 +485,17 @@ Respond with JSON only:
                 if isinstance(response_id, str) and response_id
             ]
             step_session.response_ids.extend(response_ids)
+            logger.info(
+                "Completed step validation with reusable Computer Use session",
+                extra={
+                    "provider": step_session.provider,
+                    "step_number": step.step_number,
+                    "test_case": test_case.name,
+                    "run_id": step_session.base_metadata.get("tool_mode_run_id"),
+                    "phase": "awaiting_step_reflection",
+                    "response_ids": response_ids,
+                },
+            )
             return StepSessionValidationResult(
                 verification=verification,
                 prompt=prompt,
@@ -446,6 +504,17 @@ Respond with JSON only:
             )
         except Exception as exc:
             self._mark_step_session_unusable(step_session, str(exc))
+            logger.warning(
+                "Step validation with reusable Computer Use session failed",
+                extra={
+                    "provider": step_session.provider,
+                    "step_number": step.step_number,
+                    "test_case": test_case.name,
+                    "run_id": step_session.base_metadata.get("tool_mode_run_id"),
+                    "phase": "awaiting_step_reflection",
+                    "error": str(exc),
+                },
+            )
             verification = self._normalize_step_validation_result(
                 None,
                 failure_reason=f"Step validation failed in the ActionAgent session: {exc}",

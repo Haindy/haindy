@@ -101,6 +101,7 @@ Every command returns JSON. Read `status`, `response`, and `meta.exit_reason`:
 ```json
 {
   "session_id": "...",
+  "run_id": "stable async test identifier or null",
   "command": "act|test|test-status|explore|explore-status|screenshot|session",
   "status": "success|failure|error",
   "response": "Natural language description of what happened.",
@@ -159,8 +160,14 @@ haindy explore-status --session <SESSION_ID>
 ```
 
 **`test-status` response fields:**
+- `run_id`: stable async identifier for the dispatched background test. Reuse it to correlate traces, model logs, screenshots, and session-local artifacts.
 - `test_status`: `in_progress`, `passed`, `failed`, `error`, `timeout`, `max_steps_reached`
 - `current_step`: what Haindy is currently executing (null when done)
+- `phase`: machine-readable state such as `planning`, `executing_step`, `awaiting_step_reflection`, `verifying`, `cleanup`, `completed`
+- `phase_started_at`: when the current phase began
+- `last_model_agent`: latest agent/model handoff that reported progress
+- `last_progress_at`: latest progress heartbeat timestamp
+- `latest_action_artifact_path`: latest per-step action artifact under the session directory, when available
 - `steps_total`, `steps_completed`, `steps_failed`: progress counters
 - `issues_found`: map of step identifiers to failure descriptions
 - `elapsed_time_seconds`: wall-clock time since dispatch
@@ -174,9 +181,11 @@ haindy explore-status --session <SESSION_ID>
 
 Note: `explore` is driven by an Awareness Agent that maintains the TODO list and calls the Action Agent directly in a tight loop. It does not build a fixed plan up front, so it can freely backtrack when assumptions about the app turn out to be wrong. `aborted` specifically means the Awareness Agent detected that the device is no longer in a state Haindy produced (e.g. the target app lost focus, the emulator restarted, a user touched the device). It is distinct from `stuck`, which means Haindy tried and could not find a way forward on its own.
 
-**Timeout:** `test` defaults to 300s. `explore` has no default timeout -- it runs until the goal is reached, the agent gets stuck, or max-steps is hit. You can pass `--timeout <seconds>` to either command if you want to cap execution time.
+**Timeout:** `test` defaults to 300s. `explore` has no default timeout -- it runs until the goal is reached, the agent gets stuck, or max-steps is hit. You can pass `--timeout <seconds>` to either command if you want to cap execution time. For `test`, step reflection also honors the remaining outer test budget: `effective_step_timeout = min(execution.actions_action_timeout_seconds, remaining_test_budget)`.
 
 **Screenshots:** The dispatch response for `test` and `explore` includes a `screenshot_path` capturing the device state at the moment the command was accepted. Status poll responses include the latest screenshot from the background task. Haindy's screenshot timing may not match the exact moment you need. Use `haindy screenshot --session <SESSION_ID>` to take your own screenshot at a time you choose.
+
+**Forensics:** When a background `test` stalls or times out, inspect `test-status.phase`, `test-status.last_model_agent`, and `test-status.latest_action_artifact_path` first. Then jump to `~/.haindy/sessions/<SESSION_ID>/session.json`, `~/.haindy/sessions/<SESSION_ID>/action_artifacts/*.json`, `data/traces/<RUN_ID>.json`, and `data/model_logs/model_calls.jsonl`.
 
 ### 7. Session Variables
 
@@ -205,7 +214,7 @@ Important: use the exact name you passed to `session set`. If you stored it as `
 **For `test`:** Check `test-status` response fields.
 - `assertion_failed` - action worked but expected outcome did not appear. Adjust the scenario or investigate with `session status`.
 - `max_steps_reached` - increase `--max-steps` or split into smaller test calls.
-- `timeout` - increase `--timeout` or split into smaller test calls.
+- `timeout` - check `phase`, `current_step`, and `latest_action_artifact_path` first. The timeout may have occurred during planning, step execution, or reflection/verification. Increase `--timeout` or split into smaller test calls only after confirming where it stalled.
 
 **For `explore`:** Check `explore-status` response fields.
 - `stuck` - the agent tried and could not find a way forward. Read `observations` and the final `todo` for what was discovered and attempted. Try a different goal or provide more context.

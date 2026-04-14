@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import MagicMock
 
 import pytest
 
 import haindy.agents.computer_use.session as cu_session_module
+from haindy.agents.computer_use import ComputerUseExecutionError
 from haindy.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     make_session,
@@ -573,6 +575,71 @@ async def test_openai_step_reflection_uses_json_output_without_tools(
     )
     assert reflection["response_ids"] == ["resp_3"]
     assert '"verdict":"PASS"' in reflection["raw_text"]
+
+
+@pytest.mark.asyncio
+async def test_openai_step_reflection_uses_action_timeout_budget(
+    mock_client,
+    mock_browser,
+    session_settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_settings.actions_computer_tool_action_timeout_seconds = 0.5
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+
+    async def _hang(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        await asyncio.sleep(1)
+        return {}
+
+    monkeypatch.setattr(session, "_reflect_openai_step", _hang)
+
+    with pytest.raises(
+        ComputerUseExecutionError,
+        match="Computer Use step reflection timed out after",
+    ):
+        await session.reflect_step(
+            prompt="Respond with valid JSON for the step verdict.",
+            metadata={"step_number": 2},
+        )
+
+
+@pytest.mark.asyncio
+async def test_openai_step_reflection_honors_remaining_test_budget(
+    mock_client,
+    mock_browser,
+    session_settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_settings.actions_computer_tool_action_timeout_seconds = 5.0
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+    )
+
+    async def _hang(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        await asyncio.sleep(1)
+        return {}
+
+    monkeypatch.setattr(session, "_reflect_openai_step", _hang)
+
+    with pytest.raises(
+        ComputerUseExecutionError,
+        match="Computer Use step reflection timed out after 0.1 seconds.",
+    ):
+        await session.reflect_step(
+            prompt="Respond with valid JSON for the step verdict.",
+            metadata={
+                "step_number": 2,
+                "remaining_test_budget_seconds": 0.1,
+            },
+        )
 
 
 @pytest.mark.asyncio

@@ -167,6 +167,9 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
   "anthropic": {
     "model": "claude-sonnet-4-6",
     "computer_use_model": "claude-sonnet-4-6"
+  },
+  "execution": {
+    "actions_action_timeout_seconds": 600
   }
 }
 ```
@@ -187,7 +190,10 @@ Important env vars (still supported, override all other sources):
 - `HAINDY_AUTOMATION_BACKEND=desktop|mobile_adb|mobile_ios`
 - `HAINDY_HOME` for tool-call session state root
 - `HAINDY_CU_PROVIDER=openai|google|anthropic`
+- `HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_SECONDS` for the per-action computer-use timeout budget
 - `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
+
+Timeout settings use seconds across the runtime and configuration surface. Use `execution.actions_action_timeout_seconds` in `settings.json`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias for older configs.
 
 Tool-call mode does not introduce a separate backend env var. Use `HAINDY_AUTOMATION_BACKEND` or explicit `--desktop` / `--android`.
 
@@ -233,6 +239,13 @@ haindy explore-status --session <SESSION_ID>
 haindy session close --session <SESSION_ID>
 haindy session prune --older-than 7
 ```
+
+When a background `test` stalls or times out, inspect the session-local forensic trail first:
+
+- `~/.haindy/sessions/<SESSION_ID>/session.json` for `latest_background_run_id`, `latest_test_phase`, and `latest_test_action_artifact_path`
+- `~/.haindy/sessions/<SESSION_ID>/action_artifacts/*.json` for per-step action, verification, and status-transition details
+- `data/traces/<RUN_ID>.json` for the run trace tied to the stable background `run_id`
+- `data/model_logs/model_calls.jsonl` for model-call history correlated by that same `run_id`
 
 ## Model-call artifacts
 

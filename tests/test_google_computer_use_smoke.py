@@ -54,7 +54,7 @@ def _stub_initial_interaction_request(*args, **kwargs):
 async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,
@@ -113,7 +113,7 @@ async def test_google_observe_only_policy_violation_fails_immediately(
 ) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,
@@ -179,7 +179,7 @@ async def test_google_observe_only_policy_violation_fails_immediately(
 async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=1,
         actions_computer_tool_loop_detection_window=3,
@@ -244,7 +244,7 @@ async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> N
 async def test_google_executes_duplicate_name_batch_with_ids(tmp_path: Path) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,
@@ -337,7 +337,7 @@ async def test_google_duplicate_name_batch_without_ids_reasks_then_executes_sing
 ) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,
@@ -438,7 +438,7 @@ async def test_google_duplicate_name_batch_without_ids_fails_after_single_retry(
 ) -> None:
     settings = SimpleNamespace(
         openai_request_timeout_seconds=900,
-        actions_computer_tool_action_timeout_ms=5000,
+        actions_computer_tool_action_timeout_seconds=5.0,
         actions_computer_tool_stabilization_wait_ms=0,
         actions_computer_tool_max_turns=5,
         actions_computer_tool_loop_detection_window=3,

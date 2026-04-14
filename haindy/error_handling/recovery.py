@@ -173,7 +173,7 @@ class RecoveryManager:
         *args: Any,
         retry_strategy: RetryStrategy | None = None,
         fallback: Callable[..., Awaitable[T]] | None = None,
-        timeout_ms: int | None = None,
+        timeout_seconds: float | None = None,
         **kwargs: Any,
     ) -> T:
         """
@@ -184,7 +184,7 @@ class RecoveryManager:
             operation_name: Name for logging/tracking
             retry_strategy: Custom retry strategy (uses default if None)
             fallback: Fallback function if all retries fail
-            timeout_ms: Overall timeout for all attempts
+            timeout_seconds: Overall timeout for all attempts
             *args, **kwargs: Arguments for the operation
 
         Returns:
@@ -203,19 +203,19 @@ class RecoveryManager:
         while True:
             try:
                 # Apply timeout if specified
-                if timeout_ms:
-                    remaining_ms = timeout_ms - int(
-                        (asyncio.get_event_loop().time() - start_time) * 1000
+                if timeout_seconds:
+                    remaining_seconds = timeout_seconds - (
+                        asyncio.get_event_loop().time() - start_time
                     )
-                    if remaining_ms <= 0:
+                    if remaining_seconds <= 0:
                         raise TimeoutError(
                             f"Operation {operation_name} timed out",
                             operation=operation_name,
-                            timeout_ms=timeout_ms,
+                            timeout_seconds=timeout_seconds,
                         )
 
                     result = await asyncio.wait_for(
-                        operation(*args, **kwargs), timeout=remaining_ms / 1000
+                        operation(*args, **kwargs), timeout=remaining_seconds
                     )
                 else:
                     result = await operation(*args, **kwargs)

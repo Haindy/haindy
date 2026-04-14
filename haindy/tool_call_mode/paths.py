@@ -66,6 +66,12 @@ def get_logs_dir(session_id: str) -> Path:
     return get_session_dir(session_id) / "logs"
 
 
+def get_action_artifacts_dir(session_id: str) -> Path:
+    """Return the session-local action artifact directory."""
+
+    return get_session_dir(session_id) / "action_artifacts"
+
+
 def get_daemon_log_path(session_id: str) -> Path:
     """Return the daemon log path for one session."""
 
@@ -79,6 +85,7 @@ def ensure_session_layout(session_id: str) -> Path:
     get_sessions_root().mkdir(parents=True, exist_ok=True)
     get_screenshots_dir(session_id).mkdir(parents=True, exist_ok=True)
     get_logs_dir(session_id).mkdir(parents=True, exist_ok=True)
+    get_action_artifacts_dir(session_id).mkdir(parents=True, exist_ok=True)
     return session_dir
 
 

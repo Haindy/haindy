@@ -84,10 +84,12 @@ class _StubActionAgent:
         if not self._supports_step_sessions:
             return None
         return SimpleNamespace(
+            provider="openai",
             has_computer_use_action=True,
             usable=True,
             unusable_reason=None,
             response_ids=[],
+            base_metadata={},
         )
 
     async def end_step_session(self, step_session: object | None) -> None:
@@ -124,6 +126,16 @@ class _StubTraceWriter:
     def record_step(self, **kwargs: object) -> None:
         del kwargs
 
+    def update_last_step(
+        self,
+        *,
+        step_number: int | None = None,
+        step_result: object | None = None,
+        extra: dict[str, object] | None = None,
+    ) -> bool:
+        del step_number, step_result, extra
+        return True
+
 
 def _patch_runner_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     settings = SimpleNamespace(
@@ -132,7 +144,7 @@ def _patch_runner_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         enable_execution_replay_cache=True,
         model_log_path=tmp_path / "model_calls.jsonl",
         actions_computer_tool_stabilization_wait_ms=500,
-        actions_computer_tool_action_timeout_ms=7000,
+        actions_computer_tool_action_timeout_seconds=7.0,
         desktop_coordinate_cache_path=tmp_path / "desktop_coordinates.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coordinates.json",
         desktop_keyboard_layout="us",

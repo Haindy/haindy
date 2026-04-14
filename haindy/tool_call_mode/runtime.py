@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from haindy.agents.action_agent import ActionAgent
 from haindy.agents.awareness_agent import (
@@ -43,7 +44,12 @@ from .models import (
     ToolCallRequest,
     make_envelope,
 )
-from .paths import get_logs_dir, get_screenshots_dir, save_session_metadata
+from .paths import (
+    get_action_artifacts_dir,
+    get_logs_dir,
+    get_screenshots_dir,
+    save_session_metadata,
+)
 from .variables import SessionVariableStore
 
 logger = get_logger(__name__)
@@ -56,15 +62,37 @@ def _utc_now() -> datetime:
 @dataclass
 class _BackgroundTaskBase:
     started_monotonic: float = field(default_factory=time.monotonic)
+    run_id: str | None = None
     response: str = ""
     screenshot_path: str | None = None
     actions_taken: int = 0
     exit_reason: ExitReason = ExitReason.COMPLETED
     accounted_actions: int = 0
     latest_source_screenshot: str | None = None
+    phase: str | None = None
+    phase_started_at: str | None = None
+    last_model_agent: str | None = None
+    last_progress_at: str | None = None
+    latest_action_artifact_path: str | None = None
 
     def elapsed_seconds(self) -> int:
         return max(int(time.monotonic() - self.started_monotonic), 0)
+
+    def set_phase(self, phase: str, *, agent: str | None = None) -> None:
+        now = _utc_now().isoformat()
+        if self.phase != phase:
+            self.phase = phase
+            self.phase_started_at = now
+        elif self.phase_started_at is None:
+            self.phase_started_at = now
+        self.last_progress_at = now
+        if agent:
+            self.last_model_agent = agent
+
+    def mark_progress(self, *, agent: str | None = None) -> None:
+        self.last_progress_at = _utc_now().isoformat()
+        if agent:
+            self.last_model_agent = agent
 
 
 @dataclass
@@ -418,15 +446,20 @@ class ToolCallSessionRuntime:
         timeout_seconds = max(int(request.options.get("timeout_seconds", 300)), 1)
         screenshot_bytes = await self._take_screenshot_bytes()
         screenshot_path = self._store_screenshot_bytes(screenshot_bytes)
+        run_id = self._background_run_id("test")
+        self._activate_background_context(run_id)
 
         state = _TestTaskState(
+            run_id=run_id,
             scenario=scenario,
             response="Test dispatched. Poll test-status for progress.",
             screenshot_path=screenshot_path,
             actions_taken=1,
             accounted_actions=1,
         )
+        state.set_phase("planning", agent="test_planner")
         self._test_task_state = state
+        self._sync_test_task_metadata(state)
         self._background_task_kind = "test"
         self._background_task = asyncio.create_task(
             self._run_test_task(
@@ -439,6 +472,7 @@ class ToolCallSessionRuntime:
 
         return make_envelope(
             session_id=self.session_id,
+            run_id=state.run_id,
             command="test",
             status=CommandStatus.SUCCESS,
             response=state.response,
@@ -467,6 +501,7 @@ class ToolCallSessionRuntime:
             self._refresh_test_progress(state)
         return make_envelope(
             session_id=self.session_id,
+            run_id=getattr(state, "run_id", None),
             command="test-status",
             status=CommandStatus.SUCCESS,
             response=self._redact(self._test_status_response(state)),
@@ -476,6 +511,15 @@ class ToolCallSessionRuntime:
             actions_taken=state.actions_taken,
             test_status=state.status,
             current_step=self._redact(state.current_step),
+            phase=getattr(state, "phase", None),
+            phase_started_at=getattr(state, "phase_started_at", None),
+            last_model_agent=getattr(state, "last_model_agent", None),
+            last_progress_at=getattr(state, "last_progress_at", None),
+            latest_action_artifact_path=getattr(
+                state,
+                "latest_action_artifact_path",
+                None,
+            ),
             steps_total=state.steps_total,
             steps_completed=state.steps_completed,
             steps_failed=state.steps_failed,
@@ -644,27 +688,43 @@ class ToolCallSessionRuntime:
         max_steps: int,
         timeout_seconds: int,
     ) -> None:
+        if state.run_id:
+            self._activate_background_context(state.run_id)
         try:
             await asyncio.wait_for(
                 self._execute_test_task(
                     state=state,
                     scenario=scenario,
                     max_steps=max_steps,
+                    timeout_seconds=timeout_seconds,
                 ),
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError:
             self._refresh_test_progress(state)
-            state.status = TestTaskStatus.TIMEOUT
-            state.current_step = None
-            state.exit_reason = ExitReason.TIMEOUT
-            state.response = (
-                f"Test timed out after {timeout_seconds} seconds "
-                f"with {state.steps_completed} completed step(s)."
+            timeout_reason = self._test_timeout_reason(state.phase)
+            timeout_response = self._test_timeout_response(
+                state=state,
+                timeout_seconds=timeout_seconds,
+                timeout_reason=timeout_reason,
             )
+            if self.test_runner is not None:
+                self.test_runner.mark_tool_mode_timeout(
+                    reason=timeout_reason,
+                    message=timeout_response,
+                    phase=state.phase,
+                    timeout_seconds=timeout_seconds,
+                )
+                self._refresh_test_progress(state)
+            state.status = TestTaskStatus.TIMEOUT
+            state.exit_reason = ExitReason.TIMEOUT
+            state.response = timeout_response
+            if not state.issues_found:
+                state.issues_found = {
+                    "active_step": timeout_response,
+                }
         except asyncio.CancelledError:
             self._refresh_test_progress(state)
-            state.current_step = None
             if state.status == TestTaskStatus.IN_PROGRESS:
                 state.status = TestTaskStatus.ERROR
                 state.exit_reason = ExitReason.AGENT_ERROR
@@ -692,6 +752,7 @@ class ToolCallSessionRuntime:
         state: _TestTaskState,
         scenario: str,
         max_steps: int,
+        timeout_seconds: int,
     ) -> None:
         assert self.test_planner is not None
         assert self.test_runner is not None
@@ -719,9 +780,21 @@ class ToolCallSessionRuntime:
         final_state = await self.test_runner.execute_test_plan(
             TestState(
                 test_plan=test_plan,
-                context=self._tool_context("test"),
+                context={
+                    **self._tool_context("test"),
+                    "tool_mode_run_id": state.run_id,
+                    "tool_mode_session_id": self.session_id,
+                    "tool_mode_test_timeout_seconds": timeout_seconds,
+                    "tool_mode_test_deadline_monotonic": (
+                        state.started_monotonic + timeout_seconds
+                    ),
+                    "tool_mode_action_artifacts_dir": str(
+                        get_action_artifacts_dir(self.session_id)
+                    ),
+                },
             )
         )
+        self._refresh_test_progress(state)
         summary = self._summarize_test_result(final_state)
         state.status = summary["status"]
         state.response = summary["response"]
@@ -733,6 +806,7 @@ class ToolCallSessionRuntime:
         state.exit_reason = summary["exit_reason"]
         state.actions_taken = max(state.actions_taken, summary["actions_taken"])
         state.screenshot_path = summary["screenshot_path"] or state.screenshot_path
+        state.set_phase("completed", agent="test_runner")
 
     async def _run_explore_task(
         self,
@@ -865,11 +939,24 @@ class ToolCallSessionRuntime:
         state.steps_failed = progress.steps_failed
         state.issues_found = dict(progress.issues_found)
         state.actions_taken = max(state.actions_taken, progress.actions_taken)
+        if progress.phase:
+            state.set_phase(progress.phase, agent=progress.last_model_agent)
+        else:
+            state.mark_progress(agent=progress.last_model_agent)
+        if progress.phase_started_at:
+            state.phase_started_at = progress.phase_started_at
+        if progress.last_progress_at:
+            state.last_progress_at = progress.last_progress_at
+        if progress.last_model_agent:
+            state.last_model_agent = progress.last_model_agent
+        if progress.latest_action_artifact_path:
+            state.latest_action_artifact_path = progress.latest_action_artifact_path
         if progress.latest_screenshot_path:
             state.screenshot_path = self._promote_background_artifact_screenshot(
                 progress.latest_screenshot_path,
                 state,
             )
+        self._sync_test_task_metadata(state)
 
     def _apply_awareness_assessment(
         self,
@@ -1009,14 +1096,54 @@ class ToolCallSessionRuntime:
 
     def _test_status_response(self, state: _TestTaskState) -> str:
         if state.status == TestTaskStatus.IN_PROGRESS:
-            if state.current_step and state.steps_total:
-                return (
+            progress_prefix = "Test in progress."
+            if state.steps_total:
+                progress_prefix = (
                     "Test in progress. "
-                    f"Completed {state.steps_completed} of {state.steps_total} step(s). "
-                    f"Currently executing {state.current_step}."
+                    f"Completed {state.steps_completed} of {state.steps_total} step(s)."
                 )
-            return "Test in progress."
+            if state.phase == "planning":
+                return f"{progress_prefix} Planning the scenario steps."
+            if state.phase == "awaiting_step_reflection" and state.current_step:
+                return (
+                    f"{progress_prefix} Waiting for step reflection to finish for "
+                    f"{state.current_step}."
+                )
+            if state.phase == "verifying" and state.current_step:
+                return (
+                    f"{progress_prefix} Verifying the outcome of {state.current_step}."
+                )
+            if state.phase == "cleanup" and state.current_step:
+                return f"{progress_prefix} Cleaning up after {state.current_step}."
+            if state.current_step:
+                return f"{progress_prefix} Currently executing {state.current_step}."
+            return progress_prefix
         return state.response
+
+    @staticmethod
+    def _test_timeout_reason(phase: str | None) -> str:
+        if phase == "planning":
+            return "timed_out_during_planning"
+        if phase in {"awaiting_step_reflection", "verifying"}:
+            return "timed_out_during_validation"
+        return "timed_out_during_execution"
+
+    @staticmethod
+    def _test_timeout_response(
+        *,
+        state: _TestTaskState,
+        timeout_seconds: int,
+        timeout_reason: str,
+    ) -> str:
+        phase = state.phase or "executing_step"
+        if timeout_reason == "timed_out_during_planning":
+            return f"Test timed out after {timeout_seconds} seconds while planning the scenario."
+        if state.current_step:
+            return (
+                f"Test timed out after {timeout_seconds} seconds during phase '{phase}' "
+                f"while working on {state.current_step}."
+            )
+        return f"Test timed out after {timeout_seconds} seconds during phase '{phase}'."
 
     def _record_command(self, envelope: ToolCallEnvelope) -> None:
         """Persist command-level counters after one handled request."""
@@ -1035,6 +1162,7 @@ class ToolCallSessionRuntime:
             self.metadata.actions_executed += delta
             state.accounted_actions += delta
             save_session_metadata(self.metadata)
+        self._sync_test_task_metadata(state)
 
     def _activate_command_context(self, command_name: str) -> None:
         """Set per-command logging/debug context within the live session."""
@@ -1048,6 +1176,33 @@ class ToolCallSessionRuntime:
             reports_dir=get_logs_dir(self.session_id),
             ai_log_path=get_logs_dir(self.session_id) / "ai_interactions.jsonl",
         )
+
+    def _background_run_id(self, task_kind: str) -> str:
+        timestamp = _utc_now().strftime("%Y%m%dT%H%M%SZ")
+        return f"{self.session_id}-{task_kind}-{timestamp}-{uuid4().hex[:8]}"
+
+    def _activate_background_context(self, run_id: str) -> None:
+        """Bind the stable run context used by one background task."""
+        set_run_id(run_id)
+        initialize_debug_logger(
+            run_id,
+            debug_dir=get_screenshots_dir(self.session_id),
+            reports_dir=get_logs_dir(self.session_id),
+            ai_log_path=get_logs_dir(self.session_id) / "ai_interactions.jsonl",
+        )
+
+    def _sync_test_task_metadata(self, state: _BackgroundTaskBase) -> None:
+        """Expose the latest background-test pointers in session.json."""
+        if not isinstance(state, _TestTaskState):
+            return
+        self.metadata.latest_background_run_id = state.run_id
+        self.metadata.latest_test_phase = state.phase
+        self.metadata.latest_test_phase_started_at = state.phase_started_at
+        self.metadata.latest_test_progress_at = state.last_progress_at
+        self.metadata.latest_test_action_artifact_path = (
+            state.latest_action_artifact_path
+        )
+        save_session_metadata(self.metadata)
 
     def _create_controller(
         self,

@@ -291,12 +291,16 @@ class TestRecoveryManager:
             return "done"
 
         # Should succeed with sufficient timeout
-        result = await manager.execute_with_recovery(slow_op, "slow_op", timeout_ms=300)
+        result = await manager.execute_with_recovery(
+            slow_op, "slow_op", timeout_seconds=0.3
+        )
         assert result == "done"
 
         # Should fail with insufficient timeout
         with pytest.raises(RecoveryError) as exc_info:
-            await manager.execute_with_recovery(slow_op, "slow_op", timeout_ms=50)
+            await manager.execute_with_recovery(
+                slow_op, "slow_op", timeout_seconds=0.05
+            )
 
         # Check for timeout error in chain
         assert isinstance(exc_info.value.cause, asyncio.TimeoutError)

@@ -159,7 +159,7 @@ class ScriptRecorder:
             command_type="click",
             command=command,
             selectors=selectors,
-            parameters={"timeout": 30000, "force": False},
+            parameters={"timeout_seconds": 30.0, "force": False},
         )
 
     def _record_type(
@@ -184,7 +184,7 @@ class ScriptRecorder:
             command_type="type",
             command=command,
             selectors=selectors,
-            parameters={"text": action_result.input_text, "timeout": 30000},
+            parameters={"text": action_result.input_text, "timeout_seconds": 30.0},
         )
 
     def _record_navigate(
@@ -204,7 +204,11 @@ class ScriptRecorder:
             command_type="navigate",
             command=command,
             selectors=[],
-            parameters={"url": url, "wait_until": "networkidle", "timeout": 60000},
+            parameters={
+                "url": url,
+                "wait_until": "networkidle",
+                "timeout_seconds": 60.0,
+            },
         )
 
     def _record_scroll(

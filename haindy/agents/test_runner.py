@@ -5,6 +5,9 @@ This agent orchestrates test execution with intelligent step interpretation,
 living document reporting, and comprehensive failure handling.
 """
 
+import json
+import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +68,11 @@ class ToolModeTestProgress:
     issues_found: dict[str, str]
     latest_screenshot_path: str | None
     actions_taken: int
+    phase: str | None = None
+    phase_started_at: str | None = None
+    last_model_agent: str | None = None
+    last_progress_at: str | None = None
+    latest_action_artifact_path: str | None = None
 
 
 class TestRunner(BaseAgent):
@@ -158,6 +166,15 @@ class TestRunner(BaseAgent):
         self._current_test_case_actions: dict[str, Any] | None = None
         self._current_step_actions: list[dict[str, Any]] | None = None
         self._current_step_data: dict[str, Any] = {}
+        self._tool_mode_phase: str | None = None
+        self._tool_mode_phase_started_at: str | None = None
+        self._tool_mode_last_progress_at: str | None = None
+        self._tool_mode_last_model_agent: str | None = None
+        self._tool_mode_latest_action_artifact_path: str | None = None
+        self._tool_mode_action_artifacts_dir: Path | None = None
+        self._tool_mode_run_deadline_monotonic: float | None = None
+        self._tool_mode_run_id: str | None = None
+        self._tool_mode_session_id: str | None = None
 
     def _coordinate_cache_path_for_environment(self, environment: str) -> Path:
         return Path(coordinate_cache_path_for_environment(self._settings, environment))
@@ -238,6 +255,11 @@ class TestRunner(BaseAgent):
             issues_found=issues_found,
             latest_screenshot_path=latest_screenshot_path,
             actions_taken=actions_taken,
+            phase=self._tool_mode_phase,
+            phase_started_at=self._tool_mode_phase_started_at,
+            last_model_agent=self._tool_mode_last_model_agent,
+            last_progress_at=self._tool_mode_last_progress_at,
+            latest_action_artifact_path=self._tool_mode_latest_action_artifact_path,
         )
 
     def _reset_execution_state(self) -> None:
@@ -255,12 +277,125 @@ class TestRunner(BaseAgent):
         self._current_test_case_actions = None
         self._current_step_actions = None
         self._current_step_data = {}
+        self._tool_mode_phase = None
+        self._tool_mode_phase_started_at = None
+        self._tool_mode_last_progress_at = None
+        self._tool_mode_last_model_agent = None
+        self._tool_mode_latest_action_artifact_path = None
+        self._tool_mode_action_artifacts_dir = None
+        self._tool_mode_run_deadline_monotonic = None
+        self._tool_mode_run_id = None
+        self._tool_mode_session_id = None
         self._action_storage = {
             "test_plan_id": None,
             "test_run_timestamp": None,
             "test_cases": [],
         }
         self._trace = self._create_run_trace()
+
+    @staticmethod
+    def _tool_mode_now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _set_tool_mode_phase(self, phase: str, *, agent: str | None = None) -> None:
+        """Update the machine-readable phase surfaced through tool-call polling."""
+        now = self._tool_mode_now_iso()
+        if self._tool_mode_phase != phase:
+            self._tool_mode_phase = phase
+            self._tool_mode_phase_started_at = now
+        elif self._tool_mode_phase_started_at is None:
+            self._tool_mode_phase_started_at = now
+        self._tool_mode_last_progress_at = now
+        if agent:
+            self._tool_mode_last_model_agent = agent
+
+    def _mark_tool_mode_progress(self, *, agent: str | None = None) -> None:
+        """Refresh the latest progress timestamp without changing the phase."""
+        self._tool_mode_last_progress_at = self._tool_mode_now_iso()
+        if agent:
+            self._tool_mode_last_model_agent = agent
+
+    @staticmethod
+    def _artifact_slug(value: str) -> str:
+        normalized = "".join(
+            character.lower() if character.isalnum() else "_"
+            for character in str(value or "").strip()
+        ).strip("_")
+        return normalized or "artifact"
+
+    def remaining_tool_mode_budget_seconds(self) -> float | None:
+        """Return the remaining outer tool-mode budget when one is configured."""
+        if self._tool_mode_run_deadline_monotonic is None:
+            return None
+        return max(self._tool_mode_run_deadline_monotonic - time.monotonic(), 0.0)
+
+    def _tool_mode_artifact_path(
+        self,
+        *,
+        test_case: TestCase,
+        step: TestStep,
+    ) -> Path | None:
+        if self._tool_mode_action_artifacts_dir is None:
+            return None
+        case_slug = self._artifact_slug(test_case.test_id or test_case.name)
+        filename = f"{case_slug}_step_{step.step_number:03d}.json"
+        return self._tool_mode_action_artifacts_dir / filename
+
+    def _append_step_status_transition(self, status: str, reason: str) -> None:
+        transitions = self._current_step_data.setdefault("status_transitions", [])
+        if not isinstance(transitions, list):
+            transitions = []
+            self._current_step_data["status_transitions"] = transitions
+        transitions.append(
+            {
+                "status": status,
+                "reason": reason,
+                "timestamp": self._tool_mode_now_iso(),
+            }
+        )
+
+    def _persist_tool_mode_step_artifact(
+        self,
+        *,
+        test_case: TestCase,
+        step: TestStep,
+        step_result: StepResult,
+    ) -> str | None:
+        """Write a self-contained per-step action artifact for session-local triage."""
+        destination = self._tool_mode_artifact_path(test_case=test_case, step=step)
+        if destination is None:
+            return None
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "run_id": self._tool_mode_run_id,
+            "session_id": self._tool_mode_session_id,
+            "test_plan_id": (
+                str(self._current_test_plan.plan_id)
+                if self._current_test_plan
+                else None
+            ),
+            "test_plan_name": (
+                self._current_test_plan.name if self._current_test_plan else None
+            ),
+            "test_case_id": str(test_case.case_id),
+            "test_case_name": test_case.name,
+            "phase": self._tool_mode_phase,
+            "phase_started_at": self._tool_mode_phase_started_at,
+            "last_model_agent": self._tool_mode_last_model_agent,
+            "last_progress_at": self._tool_mode_last_progress_at,
+            "step_data": self._current_step_data,
+            "step_result": step_result.model_dump(mode="json"),
+        }
+        destination.write_text(
+            json.dumps(payload, indent=2, default=str),
+            encoding="utf-8",
+        )
+        artifact_path = str(destination.resolve())
+        self._tool_mode_latest_action_artifact_path = artifact_path
+        self._current_step_data["tool_mode_action_artifact_path"] = artifact_path
+        self._mark_tool_mode_progress()
+        return artifact_path
 
     async def _ensure_initial_screenshot(self) -> None:
         """Capture and cache the initial environment screenshot."""
@@ -314,6 +449,34 @@ class TestRunner(BaseAgent):
         self._current_test_plan = test_plan
         self._initial_url = initial_url
         self._test_state = test_state
+        context_lookup = (
+            test_state.context if isinstance(test_state.context, dict) else {}
+        )
+        run_id = context_lookup.get("tool_mode_run_id")
+        if isinstance(run_id, str) and run_id.strip():
+            self._tool_mode_run_id = run_id
+        else:
+            fallback_run_id = get_run_id()
+            self._tool_mode_run_id = (
+                None if fallback_run_id == "unknown" else fallback_run_id
+            )
+        session_id = context_lookup.get("tool_mode_session_id")
+        if isinstance(session_id, str) and session_id.strip():
+            self._tool_mode_session_id = session_id
+        action_artifacts_dir = context_lookup.get("tool_mode_action_artifacts_dir")
+        if (
+            isinstance(action_artifacts_dir, (str, Path))
+            and str(action_artifacts_dir).strip()
+        ):
+            self._tool_mode_action_artifacts_dir = Path(action_artifacts_dir)
+            self._tool_mode_action_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        deadline_raw = context_lookup.get("tool_mode_test_deadline_monotonic")
+        if deadline_raw is not None:
+            try:
+                self._tool_mode_run_deadline_monotonic = float(deadline_raw)
+            except (TypeError, ValueError):
+                self._tool_mode_run_deadline_monotonic = None
+        self._set_tool_mode_phase("planning", agent="test_planner")
         runtime_environment = resolve_runtime_environment(
             automation_backend=test_state.context.get("automation_backend"),
             target_type=test_state.context.get("target_type"),
@@ -472,6 +635,7 @@ class TestRunner(BaseAgent):
             self._test_report.completed_at = datetime.now(timezone.utc)
             self._test_report.status = self._determine_overall_status()
             self._test_report.summary = self._calculate_summary()
+            self._set_tool_mode_phase("completed", agent="test_runner")
 
             # Update test state
             self._test_state.end_time = self._test_report.completed_at
@@ -563,6 +727,7 @@ class TestRunner(BaseAgent):
         if not test_case.cleanup_steps:
             return
 
+        self._set_tool_mode_phase("cleanup", agent="test_runner.cleanup")
         logger.info(
             "Executing cleanup steps",
             extra={
@@ -746,6 +911,7 @@ class TestRunner(BaseAgent):
     async def _execute_test_step(
         self, step: TestStep, test_case: TestCase, case_result: TestCaseResult
     ) -> StepResult:
+        self._set_tool_mode_phase("executing_step", agent="action_agent")
         if self._test_state is not None:
             self._test_state.current_step = step
         try:
@@ -907,6 +1073,162 @@ class TestRunner(BaseAgent):
         self, action_results: list[dict[str, Any]]
     ) -> None:
         await self._step_processor.invalidate_coordinate_cache(action_results)
+
+    def _locate_case_result(self, test_case: TestCase) -> TestCaseResult | None:
+        if self._test_report is None:
+            return None
+        for case_result in self._test_report.test_cases:
+            if case_result.case_id == test_case.case_id:
+                return case_result
+        return None
+
+    @staticmethod
+    def _step_result_container(
+        *,
+        test_case: TestCase,
+        case_result: TestCaseResult,
+        step: TestStep,
+    ) -> list[StepResult]:
+        if any(
+            candidate.step_id == step.step_id for candidate in test_case.setup_steps
+        ):
+            return case_result.setup_step_results
+        if any(
+            candidate.step_id == step.step_id for candidate in test_case.cleanup_steps
+        ):
+            return case_result.cleanup_step_results
+        return case_result.step_results
+
+    @staticmethod
+    def _refresh_case_result_counts(case_result: TestCaseResult) -> None:
+        case_result.steps_completed = sum(
+            1
+            for step_result in case_result.step_results
+            if step_result.status == TestStatus.PASSED
+        )
+        case_result.steps_failed = sum(
+            1
+            for step_result in case_result.step_results
+            if step_result.status == TestStatus.FAILED
+        )
+
+    def mark_tool_mode_timeout(
+        self,
+        *,
+        reason: str,
+        message: str,
+        phase: str | None,
+        timeout_seconds: float,
+    ) -> str | None:
+        """Persist a terminal failed step state when the outer test budget expires."""
+        step = self._current_test_step or (
+            self._test_state.current_step if self._test_state else None
+        )
+        test_case = self._current_test_case
+        if step is None or test_case is None:
+            self._mark_tool_mode_progress()
+            return None
+
+        now = datetime.now(timezone.utc)
+        started_at_raw = self._current_step_data.get("started_at")
+        started_at = now
+        if isinstance(started_at_raw, str) and started_at_raw:
+            with suppress(ValueError):
+                started_at = datetime.fromisoformat(started_at_raw)
+
+        step_result = StepResult(
+            step_id=step.step_id,
+            step_number=step.step_number,
+            status=TestStatus.FAILED,
+            started_at=started_at,
+            completed_at=now,
+            action=step.action,
+            expected_result=step.expected_result,
+            actual_result=message,
+            screenshot_before=self._current_step_data.get("screenshot_before"),
+            screenshot_after=self._current_step_data.get("screenshot_after"),
+            error_message=message,
+            confidence=0.0,
+            actions_performed=list(self._current_step_actions or []),
+        )
+        self._current_step_data["timeout_reason"] = reason
+        self._current_step_data["timeout_phase"] = phase
+        self._current_step_data["timeout_seconds"] = timeout_seconds
+        self._current_step_data["step_status"] = step_result.status.value
+        self._current_step_data["step_actual_result"] = step_result.actual_result
+        self._current_step_data["step_error_message"] = step_result.error_message
+        self._append_step_status_transition(step_result.status.value, reason)
+        if phase:
+            self._set_tool_mode_phase(phase, agent=self._tool_mode_last_model_agent)
+        else:
+            self._mark_tool_mode_progress()
+
+        case_result = self._locate_case_result(test_case)
+        if case_result is None:
+            case_result = TestCaseResult(
+                case_id=test_case.case_id,
+                test_id=test_case.test_id,
+                name=test_case.name,
+                status=TestStatus.FAILED,
+                started_at=now,
+                completed_at=now,
+                steps_total=len(test_case.steps),
+                steps_completed=0,
+                steps_failed=0,
+            )
+            assert self._test_report is not None
+            self._test_report.test_cases.append(case_result)
+
+        container = self._step_result_container(
+            test_case=test_case,
+            case_result=case_result,
+            step=step,
+        )
+        for index, existing in enumerate(container):
+            if existing.step_id == step.step_id:
+                container[index] = step_result
+                break
+        else:
+            container.append(step_result)
+        self._refresh_case_result_counts(case_result)
+        case_result.status = TestStatus.FAILED
+        case_result.error_message = message
+        case_result.completed_at = now
+
+        if self._test_report is not None:
+            self._test_report.status = TestStatus.FAILED
+            self._test_report.completed_at = now
+            self._test_report.summary = self._calculate_summary()
+        if self._test_state is not None:
+            self._test_state.status = TestStatus.FAILED
+            self._test_state.end_time = now
+
+        artifact_path = self._persist_tool_mode_step_artifact(
+            test_case=test_case,
+            step=step,
+            step_result=step_result,
+        )
+        if self._trace is not None:
+            updated = self._trace.update_last_step(
+                step_number=step.step_number,
+                step_result=step_result,
+                extra={
+                    "timeout_reason": reason,
+                    "phase": phase,
+                    "latest_action_artifact_path": artifact_path,
+                },
+            )
+            if not updated:
+                self._trace.record_step(
+                    scenario_name=(
+                        self._current_test_plan.name if self._current_test_plan else ""
+                    ),
+                    step=step,
+                    step_result=step_result,
+                    attempt=None,
+                    plan_cache_hit=None,
+                )
+        return artifact_path
 
     def _print_summary(self) -> None:
         self._summary_helper.print_summary()

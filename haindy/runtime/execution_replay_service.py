@@ -248,7 +248,7 @@ class ExecutionReplayService:
                 entry.actions,
                 stabilization_wait_ms=self.replay_stabilization_wait_ms(),
                 action_timeout_seconds=max(
-                    self.settings.actions_computer_tool_action_timeout_ms / 1000.0,
+                    self.settings.actions_computer_tool_action_timeout_seconds,
                     0.5,
                 ),
             )

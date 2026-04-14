@@ -346,6 +346,7 @@ Shared behavior:
 - Return immediately with `meta.exit_reason: dispatched` and exit 0.
 - The daemon runs one background task at a time per session. If a background task is already running, the dispatch returns `status: error` with `meta.exit_reason: session_busy`.
 - The `--timeout` flag sets the wall-clock budget for the background task, not for the dispatch itself.
+- `test` dispatch returns a stable `run_id` that is reused by every later `test-status` poll for the same background run.
 
 ---
 
@@ -370,6 +371,8 @@ haindy test "<scenario>" --session <id> [--max-steps <n>] [--timeout <seconds>]
 | `--max-steps <n>` | 20 | Maximum number of steps the Test Runner may execute before returning `max_steps_reached`. |
 | `--timeout <seconds>` | 300 | Maximum wall-clock time for the background task. When reached, the test stops with `timeout`. |
 
+Step-scoped validation and reflection still obey the remaining background-test budget. The effective timeout is `min(execution.actions_action_timeout_seconds, remaining_test_budget)`.
+
 **Examples:**
 
 ```bash
@@ -388,6 +391,7 @@ haindy test "Starting from the Settings screen, tap 'Change Password', enter 'ol
 ```json
 {
   "session_id": "a3f9c2d1-...",
+  "run_id": "a3f9c2d1-...-test-20260410T120000Z-ab12cd34",
   "command": "test",
   "status": "success",
   "response": "Test dispatched. Poll test-status for progress.",
@@ -397,6 +401,7 @@ haindy test "Starting from the Settings screen, tap 'Change Password', enter 'ol
 ```
 
 The dispatch takes an initial screenshot before starting the background task. This captures the device state at the moment the test was accepted and provides visual context in the dispatch response.
+The `run_id` is the stable identifier for that background test and is reused across `test-status`, traces, model-call logs, screenshots, and session-local action artifacts.
 
 **When to use:** When the coding agent has a well-defined scenario with explicit steps and expected outcomes. The scenario should be detailed enough that a human tester could follow it without asking questions. For open-ended goals or unknown screen states, use `explore` instead.
 
@@ -417,12 +422,18 @@ If no test has been dispatched in this session, returns `status: error` with `me
 ```json
 {
   "session_id": "a3f9c2d1-...",
+  "run_id": "a3f9c2d1-...-test-20260410T120000Z-ab12cd34",
   "command": "test-status",
   "status": "success",
-  "response": "Test in progress. Completed step 3 of 6: typed 'alice@example.com' into the email field. Currently executing step 4: tap the 'Sign In' button.",
+  "response": "Test in progress. Completed 3 of 6 step(s). Waiting for step reflection to finish for Step 4: Tap the 'Sign In' button and wait for the dashboard to load.",
   "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_008.png",
   "test_status": "in_progress",
   "current_step": "Step 4: Tap the 'Sign In' button and wait for the dashboard to load.",
+  "phase": "awaiting_step_reflection",
+  "phase_started_at": "2026-04-10T12:00:22+00:00",
+  "last_model_agent": "computer_use.openai.step_reflection",
+  "last_progress_at": "2026-04-10T12:00:24+00:00",
+  "latest_action_artifact_path": "/home/user/.haindy/sessions/a3f9c2d1-.../action_artifacts/tc_login_step_004.json",
   "steps_total": 6,
   "steps_completed": 3,
   "steps_failed": 0,
@@ -437,12 +448,14 @@ If no test has been dispatched in this session, returns `status: error` with `me
 ```json
 {
   "session_id": "a3f9c2d1-...",
+  "run_id": "a3f9c2d1-...-test-20260410T120000Z-ab12cd34",
   "command": "test-status",
   "status": "success",
   "response": "Test passed. All 6 steps completed successfully. The dashboard shows 'Welcome, Alice' as expected.",
   "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_012.png",
   "test_status": "passed",
   "current_step": null,
+  "phase": "completed",
   "steps_total": 6,
   "steps_completed": 6,
   "steps_failed": 0,
@@ -457,12 +470,14 @@ If no test has been dispatched in this session, returns `status: error` with `me
 ```json
 {
   "session_id": "a3f9c2d1-...",
+  "run_id": "a3f9c2d1-...-test-20260410T120000Z-ab12cd34",
   "command": "test-status",
   "status": "success",
   "response": "Test failed at step 4 of 6. Steps 1-3 passed. Step 4 failed: after tapping 'Sign In', the screen showed 'Invalid credentials' instead of the dashboard.",
   "screenshot_path": "/home/user/.haindy/sessions/a3f9c2d1-.../screenshots/step_009.png",
   "test_status": "failed",
   "current_step": null,
+  "phase": "completed",
   "steps_total": 6,
   "steps_completed": 3,
   "steps_failed": 1,
@@ -478,8 +493,14 @@ If no test has been dispatched in this session, returns `status: error` with `me
 
 | Field | Type | Description |
 |---|---|---|
+| `run_id` | string or null | Stable background-task identifier returned by `test` dispatch and every later `test-status` poll for the same run. |
 | `test_status` | string | `in_progress`, `passed`, `failed`, `error`, `timeout`, `max_steps_reached`. |
 | `current_step` | string or null | Description of the step currently being executed. `null` when test is finished. |
+| `phase` | string or null | Machine-readable phase such as `planning`, `executing_step`, `awaiting_step_reflection`, `verifying`, `cleanup`, `completed`. |
+| `phase_started_at` | string or null | ISO 8601 timestamp for when the current phase began. |
+| `last_model_agent` | string or null | Most recent agent/model entry point that reported progress. |
+| `last_progress_at` | string or null | ISO 8601 timestamp for the latest progress heartbeat. |
+| `latest_action_artifact_path` | string or null | Absolute path to the latest session-local per-step action artifact, when available. |
 | `steps_total` | integer | Total steps in the planned test. |
 | `steps_completed` | integer | Steps that have passed so far. |
 | `steps_failed` | integer | Steps that have failed. |
@@ -747,6 +768,7 @@ haindy session prune --older-than <days>
 ```json
 {
   "session_id": "string (UUID) | null",
+  "run_id": "string | null",
   "command": "act | screenshot | test | test-status | explore | explore-status | session",
   "status": "success | failure | error",
   "response": "string (natural language, always present)",
@@ -758,6 +780,8 @@ haindy session prune --older-than <days>
   }
 }
 ```
+
+`run_id` is normally `null` for synchronous commands. For background `test` flows, it identifies the stable async run across dispatch, polling, traces, model logs, screenshots, and session-local action artifacts.
 
 `actions_taken` counts device operations performed. For sync commands, this is the count from the command itself. For async dispatch, this is 1 (the initial screenshot). For status polls, this is the background task's running total. A fresh screenshot taken for `session status` counts as 1. Session startup and shutdown bookkeeping does not.
 
@@ -774,8 +798,14 @@ haindy session prune --older-than <days>
 
 ```json
 {
+  "run_id": "string | null",
   "test_status": "in_progress | passed | failed | error | timeout | max_steps_reached",
   "current_step": "string | null",
+  "phase": "planning | executing_step | awaiting_step_reflection | verifying | cleanup | completed | null",
+  "phase_started_at": "ISO 8601 datetime | null",
+  "last_model_agent": "string | null",
+  "last_progress_at": "ISO 8601 datetime | null",
+  "latest_action_artifact_path": "string | null",
   "steps_total": "integer",
   "steps_completed": "integer",
   "steps_failed": "integer",

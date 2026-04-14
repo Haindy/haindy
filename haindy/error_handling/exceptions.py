@@ -178,13 +178,15 @@ class TimeoutError(RetryableError):
         self,
         message: str,
         operation: str,
-        timeout_ms: int,
+        timeout_seconds: float,
         **kwargs: Any,
     ) -> None:
         super().__init__(message, **kwargs)
         self.operation = operation
-        self.timeout_ms = timeout_ms
-        self.details.update({"operation": operation, "timeout_ms": timeout_ms})
+        self.timeout_seconds = timeout_seconds
+        self.details.update(
+            {"operation": operation, "timeout_seconds": timeout_seconds}
+        )
 
 
 class CoordinationError(HAINDYError):

@@ -1462,6 +1462,6 @@ class ComputerUseSupportMixin:
     @property
     def _action_timeout_seconds(self: _ComputerUseSession) -> float:
         return max(
-            float(self._settings.actions_computer_tool_action_timeout_ms) / 1000.0,
+            float(self._settings.actions_computer_tool_action_timeout_seconds),
             0.5,
         )

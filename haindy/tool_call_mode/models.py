@@ -97,6 +97,7 @@ class ToolCallEnvelope(BaseModel):
     """JSON envelope printed by tool-call CLI commands."""
 
     session_id: str | None
+    run_id: str | None = None
     command: str
     status: CommandStatus
     response: str
@@ -107,6 +108,11 @@ class ToolCallEnvelope(BaseModel):
     steps_failed: int | None = None
     test_status: TestTaskStatus | None = None
     current_step: str | None = None
+    phase: str | None = None
+    phase_started_at: str | None = None
+    last_model_agent: str | None = None
+    last_progress_at: str | None = None
+    latest_action_artifact_path: str | None = None
     issues_found: dict[str, str] | None = None
     elapsed_time_seconds: int | None = None
     explore_status: ExploreTaskStatus | None = None
@@ -149,6 +155,11 @@ class SessionMetadata(BaseModel):
     ios_udid: str | None = None
     ios_app: str | None = None
     notes: str | None = None
+    latest_background_run_id: str | None = None
+    latest_test_phase: str | None = None
+    latest_test_phase_started_at: str | None = None
+    latest_test_progress_at: str | None = None
+    latest_test_action_artifact_path: str | None = None
 
     @classmethod
     def new(
@@ -179,6 +190,7 @@ class SessionMetadata(BaseModel):
 def make_envelope(
     *,
     session_id: str | None,
+    run_id: str | None = None,
     command: str,
     status: CommandStatus,
     response: str,
@@ -191,6 +203,11 @@ def make_envelope(
     steps_failed: int | None = None,
     test_status: TestTaskStatus | None = None,
     current_step: str | None = None,
+    phase: str | None = None,
+    phase_started_at: str | None = None,
+    last_model_agent: str | None = None,
+    last_progress_at: str | None = None,
+    latest_action_artifact_path: str | None = None,
     issues_found: dict[str, str] | None = None,
     elapsed_time_seconds: int | None = None,
     explore_status: ExploreTaskStatus | None = None,
@@ -204,6 +221,7 @@ def make_envelope(
 
     return ToolCallEnvelope(
         session_id=session_id,
+        run_id=run_id,
         command=command,
         status=status,
         response=response,
@@ -218,6 +236,11 @@ def make_envelope(
         steps_failed=steps_failed,
         test_status=test_status,
         current_step=current_step,
+        phase=phase,
+        phase_started_at=phase_started_at,
+        last_model_agent=last_model_agent,
+        last_progress_at=last_progress_at,
+        latest_action_artifact_path=latest_action_artifact_path,
         issues_found=issues_found,
         elapsed_time_seconds=elapsed_time_seconds,
         explore_status=explore_status,

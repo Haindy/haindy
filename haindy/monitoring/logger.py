@@ -8,6 +8,7 @@ import re
 import sys
 import uuid
 from collections.abc import Iterable, MutableMapping
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
@@ -41,6 +42,10 @@ STANDARD_LOG_RECORD_ATTRS = {
 }
 
 _CURRENT_RUN_ID: str | None = None
+_CURRENT_RUN_ID_CTX: ContextVar[str | None] = ContextVar(
+    "haindy_current_run_id",
+    default=None,
+)
 
 HUMAN_LOG_EXTRA_FIELD_ORDER = [
     "taskName",
@@ -318,11 +323,12 @@ def set_run_id(run_id: str) -> None:
     """Set the active run identifier for logging and tracing."""
     global _CURRENT_RUN_ID
     _CURRENT_RUN_ID = run_id
+    _CURRENT_RUN_ID_CTX.set(run_id)
 
 
 def get_run_id() -> str:
     """Return the active run identifier."""
-    return _CURRENT_RUN_ID or "unknown"
+    return _CURRENT_RUN_ID_CTX.get() or _CURRENT_RUN_ID or "unknown"
 
 
 def setup_logging(

@@ -1090,6 +1090,25 @@ class GoogleComputerUseMixin:
             "response_format": {"type": "object"},
         }
 
+        logger.info(
+            "Google step reflection provider handoff started",
+            extra={
+                "provider": "google",
+                "model": model,
+                "payload_type": "step_reflection",
+                "step_number": metadata.get("step_number"),
+                "test_case": metadata.get("test_case_name"),
+                "run_id": metadata.get("tool_mode_run_id"),
+                "phase": metadata.get("validation_phase") or metadata.get("phase"),
+                "configured_step_timeout_seconds": metadata.get(
+                    "configured_step_timeout_seconds"
+                ),
+                "remaining_test_budget_seconds": metadata.get(
+                    "remaining_test_budget_seconds"
+                ),
+                "effective_timeout_seconds": metadata.get("effective_timeout_seconds"),
+            },
+        )
         response = await self._create_google_response(
             payload,
             agent="computer_use.google.step_reflection",

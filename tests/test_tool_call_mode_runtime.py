@@ -222,6 +222,7 @@ class _FakeTestRunner:
         self._gate = gate
         self._artifact_path = artifact_path
         self._progress: ToolModeTestProgress | None = None
+        self.timeout_calls: list[dict[str, object]] = []
 
     def get_tool_mode_progress(self) -> ToolModeTestProgress | None:
         return self._progress
@@ -237,6 +238,11 @@ class _FakeTestRunner:
             issues_found={},
             latest_screenshot_path=None,
             actions_taken=0,
+            phase="awaiting_step_reflection",
+            phase_started_at="2026-04-10T00:00:00+00:00",
+            last_model_agent="computer_use.openai.step_reflection",
+            last_progress_at="2026-04-10T00:00:01+00:00",
+            latest_action_artifact_path=str(self._artifact_path.with_suffix(".json")),
         )
         await self._gate.wait()
         state.current_step = None
@@ -248,8 +254,46 @@ class _FakeTestRunner:
             issues_found={},
             latest_screenshot_path=str(self._artifact_path),
             actions_taken=1,
+            phase="completed",
+            phase_started_at="2026-04-10T00:00:02+00:00",
+            last_model_agent="test_runner",
+            last_progress_at="2026-04-10T00:00:03+00:00",
+            latest_action_artifact_path=str(self._artifact_path.with_suffix(".json")),
         )
         return self._final_state
+
+    def mark_tool_mode_timeout(
+        self,
+        *,
+        reason: str,
+        message: str,
+        phase: str | None,
+        timeout_seconds: float,
+    ) -> str:
+        self.timeout_calls.append(
+            {
+                "reason": reason,
+                "message": message,
+                "phase": phase,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        assert self._progress is not None
+        self._progress = ToolModeTestProgress(
+            current_step=self._progress.current_step,
+            steps_total=self._progress.steps_total,
+            steps_completed=self._progress.steps_completed,
+            steps_failed=1,
+            issues_found={"active_step": message},
+            latest_screenshot_path=self._progress.latest_screenshot_path,
+            actions_taken=self._progress.actions_taken,
+            phase=phase,
+            phase_started_at=self._progress.phase_started_at,
+            last_model_agent=self._progress.last_model_agent,
+            last_progress_at="2026-04-10T00:00:04+00:00",
+            latest_action_artifact_path=self._progress.latest_action_artifact_path,
+        )
+        return str(self._artifact_path.with_suffix(".json"))
 
 
 class _FakeAwarenessAgent:
@@ -375,7 +419,11 @@ async def test_runtime_test_dispatch_and_status_lifecycle(
 
     assert in_progress.status == CommandStatus.SUCCESS
     assert in_progress.test_status == ToolTestTaskStatus.IN_PROGRESS
+    assert in_progress.run_id is not None
     assert in_progress.current_step == "Step 1: Open the dashboard"
+    assert in_progress.phase == "awaiting_step_reflection"
+    assert in_progress.last_model_agent == "computer_use.openai.step_reflection"
+    assert in_progress.latest_action_artifact_path is not None
     assert in_progress.steps_total == 1
     assert in_progress.steps_completed == 0
 
@@ -387,11 +435,63 @@ async def test_runtime_test_dispatch_and_status_lifecycle(
     completed = await runtime.handle_request(ToolCallRequest(command="test_status"))
 
     assert completed.test_status == ToolTestTaskStatus.PASSED
+    assert completed.run_id == in_progress.run_id
     assert completed.meta.exit_reason == ExitReason.COMPLETED
+    assert completed.phase == "completed"
     assert completed.steps_completed == 1
     assert completed.steps_failed == 0
     assert completed.issues_found == {}
     assert completed.screenshot_path is not None
+
+
+@pytest.mark.asyncio
+async def test_runtime_test_timeout_surfaces_phase_and_terminal_step_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime = _make_runtime(monkeypatch, tmp_path)
+    plan, step = _make_plan()
+    artifact_path = tmp_path / "runner-timeout-artifact.png"
+    artifact_path.write_bytes(b"runner-artifact")
+    final_state = _make_test_state(
+        plan,
+        _make_case_result(
+            step,
+            status=CoreTestStatus.PASSED,
+            screenshot_path=str(artifact_path),
+            actual_result="The dashboard is visible.",
+        ),
+        status=CoreTestStatus.PASSED,
+    )
+    gate = asyncio.Event()
+
+    runtime.test_planner = _FakeTestPlanner(plan)
+    fake_runner = _FakeTestRunner(
+        final_state,
+        gate=gate,
+        artifact_path=artifact_path,
+    )
+    runtime.test_runner = fake_runner
+
+    await runtime.handle_request(
+        ToolCallRequest(
+            command="test",
+            instruction="verify the dashboard appears",
+            options={"max_steps": 5, "timeout_seconds": 1},
+        )
+    )
+    await asyncio.sleep(1.1)
+
+    completed = await runtime.handle_request(ToolCallRequest(command="test_status"))
+
+    assert completed.test_status == ToolTestTaskStatus.TIMEOUT
+    assert completed.phase == "awaiting_step_reflection"
+    assert completed.current_step == "Step 1: Open the dashboard"
+    assert completed.issues_found is not None
+    assert "active_step" in completed.issues_found
+    assert "phase 'awaiting_step_reflection'" in completed.response
+    assert fake_runner.timeout_calls
+    assert fake_runner.timeout_calls[0]["reason"] == "timed_out_during_validation"
 
 
 @pytest.mark.asyncio

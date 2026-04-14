@@ -282,6 +282,10 @@ async def test_execute_setup_step_uses_ai_verification_in_normal_path(
     runner._current_test_case = case
     runner._current_test_case_actions = {"steps": []}
     runner._execution_history = []
+    runner._tool_mode_action_artifacts_dir = tmp_path / "action_artifacts"
+    runner._tool_mode_action_artifacts_dir.mkdir(parents=True, exist_ok=True)
+    runner._tool_mode_run_id = "tool-run-123"
+    runner._tool_mode_session_id = "session-123"
 
     monkeypatch.setattr(
         runner._artifacts,
@@ -367,6 +371,10 @@ async def test_execute_setup_step_failed_ai_verification_does_not_store_replay(
     runner._current_test_case = case
     runner._current_test_case_actions = {"steps": []}
     runner._execution_history = []
+    runner._tool_mode_action_artifacts_dir = tmp_path / "action_artifacts"
+    runner._tool_mode_action_artifacts_dir.mkdir(parents=True, exist_ok=True)
+    runner._tool_mode_run_id = "tool-run-123"
+    runner._tool_mode_session_id = "session-123"
 
     monkeypatch.setattr(
         runner._artifacts,
@@ -596,6 +604,10 @@ async def test_execute_step_uses_action_agent_session_validation_for_openai(
     runner._current_test_case = case
     runner._current_test_case_actions = {"steps": []}
     runner._execution_history = []
+    runner._tool_mode_action_artifacts_dir = tmp_path / "action_artifacts"
+    runner._tool_mode_action_artifacts_dir.mkdir(parents=True, exist_ok=True)
+    runner._tool_mode_run_id = "tool-run-123"
+    runner._tool_mode_session_id = "session-123"
 
     monkeypatch.setattr(
         runner._artifacts,
@@ -672,6 +684,14 @@ async def test_execute_step_uses_action_agent_session_validation_for_openai(
     assert runner._current_step_data["action_agent_step_validation"][
         "response_ids"
     ] == ["resp_step_validation"]
+    assert runner._current_step_data["tool_mode_action_artifact_path"].endswith(
+        "tc001_step_001.json"
+    )
+    artifact_path = Path(runner._current_step_data["tool_mode_action_artifact_path"])
+    assert artifact_path.exists()
+    artifact_text = artifact_path.read_text(encoding="utf-8")
+    assert '"verification_mode": "action_agent_session"' in artifact_text
+    assert '"status_transitions"' in artifact_text
     store_mock.assert_awaited_once()
     persist_mock.assert_awaited_once()
     invalidate_coord_mock.assert_not_awaited()

@@ -164,7 +164,7 @@ class ScriptedCommand(BaseModel):
         default_factory=list, description="Ordered list of selectors to try"
     )
     parameters: dict[str, Any] = Field(default_factory=dict)
-    timeout_ms: int = 30000
+    timeout_seconds: float = 30.0
     retry_count: int = 3
 
     # Fallback to visual mode criteria

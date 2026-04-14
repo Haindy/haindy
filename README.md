@@ -116,12 +116,15 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
   "openai": { "model": "gpt-5.4", "computer_use_model": "gpt-5.4" },
   "google": { "model": "gemini-3-flash-preview", "computer_use_model": "gemini-3-flash-preview" },
   "anthropic": { "model": "claude-sonnet-4-6", "computer_use_model": "claude-sonnet-4-6" },
-  "execution": { "automation_backend": "desktop" },
+  "execution": {
+    "automation_backend": "desktop",
+    "actions_action_timeout_seconds": 600
+  },
   "logging": { "level": "INFO" }
 }
 ```
 
-Environment variables override all other sources. See [`.env.example`](.env.example) for the full list.
+Environment variables override all other sources. Timeout settings use seconds. In `settings.json`, use `execution.actions_action_timeout_seconds`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias. See [`.env.example`](.env.example) for the full list.
 
 ## Platform prerequisites
 
