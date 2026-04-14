@@ -29,6 +29,13 @@ class TestCLIParser:
         assert "version" in subcommands
         assert "test-api" in subcommands
         assert "provider" in subcommands
+        assert "session" in subcommands
+        assert "act" in subcommands
+        assert "screenshot" in subcommands
+        assert "test" in subcommands
+        assert "test-status" in subcommands
+        assert "explore" in subcommands
+        assert "explore-status" in subcommands
 
     def test_provider_list_subcommand(self) -> None:
         parser = create_parser()
@@ -279,15 +286,28 @@ class TestMainFlow:
         mock_auth_status.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_tool_call_cli_commands_dispatch_before_legacy_parser(self) -> None:
+    async def test_tool_call_cli_commands_dispatch_through_unified_parser(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         with patch(
-            "haindy.main.run_tool_call_cli",
-            new=AsyncMock(return_value=0),
-        ) as mock_tool_call:
+            "haindy.main.dispatch_tool_call_args",
+            new=AsyncMock(
+                return_value=(
+                    SimpleNamespace(model_dump_json=lambda: '{"status":"success"}'),
+                    0,
+                )
+            ),
+        ) as mock_dispatch:
             result = await async_main(["session", "list"])
 
+        captured = capsys.readouterr()
         assert result == 0
-        mock_tool_call.assert_awaited_once_with(["session", "list"])
+        assert captured.out.strip() == '{"status":"success"}'
+        mock_dispatch.assert_awaited_once()
+        parsed_args = mock_dispatch.await_args.args[0]
+        assert parsed_args.command == "session"
+        assert parsed_args.tool_command == "session"
 
     @pytest.mark.asyncio
     async def test_tool_call_daemon_commands_dispatch_before_legacy_parser(

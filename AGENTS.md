@@ -43,6 +43,6 @@ This file is intentionally minimal.
 - Before finishing a change, run:
   - `.venv/bin/ruff check .`
   - `.venv/bin/ruff format .`
-  - `.venv/bin/mypy src`
+  - `.venv/bin/mypy haindy`
   - `.venv/bin/pytest`
 - Prefer small, targeted changes. Avoid compatibility fallbacks unless explicitly requested.

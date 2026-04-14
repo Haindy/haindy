@@ -48,213 +48,21 @@ from haindy.runtime.execution_context_builder import build_execution_context_bun
 from haindy.security.rate_limiter import RateLimiter
 from haindy.security.sanitizer import DataSanitizer
 from haindy.tool_call_mode.cli import (
+    ToolCallUsageError,
+    create_tool_call_parser,
+    dispatch_tool_call_args,
     is_tool_call_command,
     run_tool_call_cli,
     run_tool_call_daemon_cli,
 )
-from haindy.tool_call_mode.launcher import public_cli_program_name
 
 console = Console()
 logger = get_logger("main")
 
 
 def create_parser() -> argparse.ArgumentParser:
-    """Create command line argument parser."""
-    cli_name = public_cli_program_name()
-    parser = argparse.ArgumentParser(
-        description="HAINDY - Autonomous AI Testing Agent",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-Examples:
-  {cli_name} run --plan requirements.md --context execution_context.txt
-  {cli_name} run --berserk --plan requirements.md --context execution_context.txt
-  {cli_name} test-api
-  {cli_name} auth login openai
-  {cli_name} auth login openai-codex
-  {cli_name} auth status
-  {cli_name} auth clear openai
-  {cli_name} config show
-  {cli_name} config migrate /path/to/.env
-  {cli_name} provider set openai
-  {cli_name} provider set-model google gemini-3-flash-preview
-  {cli_name} provider set-model google gemini-3-flash-preview --computer-use
-  {cli_name} doctor
-  {cli_name} setup
-
-Fallback:
-  python -m haindy.main run --plan requirements.md --context execution_context.txt
-        """,
-    )
-
-    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
-
-    subparsers.add_parser("version", help="Show version information")
-
-    subparsers.add_parser("doctor", help="Check system dependencies and configuration")
-
-    setup_parser = subparsers.add_parser(
-        "setup", help="Run the first-time setup wizard"
-    )
-    setup_parser.add_argument(
-        "--non-interactive",
-        action="store_true",
-        help="Run without interactive prompts",
-    )
-
-    subparsers.add_parser("test-api", help="Test the active OpenAI API configuration")
-
-    auth_parser = subparsers.add_parser("auth", help="Manage API credentials")
-    auth_sub = auth_parser.add_subparsers(dest="auth_command", metavar="COMMAND")
-    auth_login_parser = auth_sub.add_parser(
-        "login", help="Store credentials for a provider"
-    )
-    auth_login_parser.add_argument(
-        "provider",
-        choices=["openai", "google", "anthropic", "openai-codex"],
-        help="Provider to configure",
-    )
-    auth_sub.add_parser(
-        "status", help="Show which providers have credentials configured"
-    )
-    auth_clear_parser = auth_sub.add_parser(
-        "clear", help="Remove stored credentials for a provider"
-    )
-    auth_clear_parser.add_argument(
-        "provider",
-        choices=["openai", "google", "anthropic", "openai-codex"],
-        help="Provider to clear",
-    )
-
-    config_parser = subparsers.add_parser("config", help="Manage configuration")
-    config_sub = config_parser.add_subparsers(dest="config_command", metavar="COMMAND")
-    config_sub.add_parser(
-        "show", help="Show effective configuration (secrets redacted)"
-    )
-    config_migrate_parser = config_sub.add_parser(
-        "migrate", help="Migrate a .env file to settings.json and keychain"
-    )
-    config_migrate_parser.add_argument(
-        "dotenv_path",
-        nargs="?",
-        default=".env",
-        metavar="DOTENV_PATH",
-        help="Path to .env file (default: .env)",
-    )
-
-    provider_parser = subparsers.add_parser(
-        "provider", help="Manage AI provider selection"
-    )
-    provider_sub = provider_parser.add_subparsers(
-        dest="provider_command", metavar="COMMAND"
-    )
-    provider_sub.add_parser("list", help="List available providers and their status")
-    provider_set_parser = provider_sub.add_parser(
-        "set", help="Set the active provider for all calls"
-    )
-    provider_set_parser.add_argument(
-        "provider",
-        choices=["openai", "openai-codex", "google", "anthropic"],
-        help="Provider to activate",
-    )
-    provider_set_cu_parser = provider_sub.add_parser(
-        "set-computer-use", help="Set the active provider for computer-use calls only"
-    )
-    provider_set_cu_parser.add_argument(
-        "provider",
-        choices=["openai", "google", "anthropic"],
-        help="Provider to use for computer-use",
-    )
-    provider_set_model_parser = provider_sub.add_parser(
-        "set-model",
-        help="Set the configured model for one provider",
-    )
-    provider_set_model_parser.add_argument(
-        "provider",
-        choices=["openai", "openai-codex", "google", "anthropic"],
-        help="Provider whose model should be updated",
-    )
-    provider_set_model_parser.add_argument(
-        "model",
-        help="Model name to persist for the provider",
-    )
-    provider_set_model_parser.add_argument(
-        "--computer-use",
-        action="store_true",
-        help="Update the provider's computer-use model instead of its non-CU model",
-    )
-
-    run_parser = subparsers.add_parser("run", help="Run a test")
-    run_parser.add_argument(
-        "-p",
-        "--plan",
-        type=Path,
-        help="Path to plain-text test requirements/plan file",
-    )
-    run_parser.add_argument(
-        "--context",
-        type=Path,
-        help="Path to plain-text execution context file (required)",
-    )
-    run_parser.add_argument(
-        "--mobile",
-        action="store_true",
-        help="Use mobile ADB backend for Android",
-    )
-    run_parser.add_argument(
-        "--ios",
-        action="store_true",
-        help="Use iOS idb backend",
-    )
-    run_parser.add_argument(
-        "--berserk",
-        action="store_true",
-        help="Berserk mode - aggressive autonomous operation without confirmations",
-    )
-    run_parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug mode with verbose logging",
-    )
-    record_group = run_parser.add_mutually_exclusive_group()
-    record_group.add_argument(
-        "--record",
-        action="store_true",
-        dest="record",
-        help="Force-enable desktop screen recording for this run",
-    )
-    record_group.add_argument(
-        "--no-record",
-        action="store_false",
-        dest="record",
-        help="Force-disable desktop screen recording for this run",
-    )
-    run_parser.set_defaults(record=None)
-    run_parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="Output directory for test results (default: reports/)",
-    )
-    run_parser.add_argument(
-        "--format",
-        choices=["json", "html", "markdown"],
-        default="html",
-        help="Report format (default: html)",
-    )
-    run_parser.add_argument(
-        "--timeout",
-        type=int,
-        default=7200,
-        help="Test execution timeout in seconds (default: 7200)",
-    )
-    run_parser.add_argument(
-        "--max-steps",
-        type=int,
-        default=50,
-        help="Maximum number of test steps (default: 50)",
-    )
-
-    return parser
+    """Create the shared public command line parser."""
+    return create_tool_call_parser()
 
 
 def _create_planning_agents(
@@ -818,19 +626,13 @@ def _is_setup_complete() -> bool:
 async def async_main(args: list[str] | None = None) -> int:
     """Async main entrypoint."""
     argv = list(args) if args is not None else sys.argv[1:]
-    if is_tool_call_command(argv):
-        if argv and argv[0] == "__tool_call_daemon":
-            return await run_tool_call_daemon_cli(argv)
-        return await run_tool_call_cli(argv)
+    if argv and argv[0] == "__tool_call_daemon":
+        return await run_tool_call_daemon_cli(argv)
 
     ensure_settings_skeleton(Path("~/.haindy/settings.json").expanduser())
 
     parser = create_parser()
-    parsed_args = parser.parse_args(argv)
-
-    command = parsed_args.command
-
-    if command is None:
+    if not argv:
         if not _any_auth_configured():
             console.print(
                 "[yellow]No credentials configured. "
@@ -839,6 +641,23 @@ async def async_main(args: list[str] | None = None) -> int:
             console.print("")
         parser.print_help()
         return 1
+
+    try:
+        parsed_args = parser.parse_args(argv)
+    except ToolCallUsageError as exc:
+        if is_tool_call_command(argv):
+            return await run_tool_call_cli(argv)
+        console.print(f"[red]Error: {exc}[/red]")
+        console.print("")
+        parser.print_help()
+        return 2
+
+    if getattr(parsed_args, "tool_command", None):
+        envelope, exit_code = await dispatch_tool_call_args(parsed_args)
+        print(envelope.model_dump_json())
+        return exit_code
+
+    command = parsed_args.command
 
     if command == "version":
         return show_version()
