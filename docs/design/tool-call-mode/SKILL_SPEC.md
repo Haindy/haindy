@@ -120,12 +120,35 @@ Every command returns JSON. Read `status`, `response`, and `meta.exit_reason`:
 | Situation | Use |
 |---|---|
 | You know the exact UI element and action, no validation needed | `act` |
-| You have a detailed, unambiguous scenario with explicit steps and expected outcomes | `test` |
-| You have an open-ended goal and need Haindy to figure out the navigation | `explore` |
+| You have explicit supporting documentation and want structured execution and validation for a substantial scenario | `test` |
+| You have an open-ended or undocumented goal and need Haindy to figure out the navigation | `explore` |
 | You want to see what is on screen (AI description) | `session status` |
 | You want a screenshot without AI processing | `screenshot` |
 
-Rule: **Use `test` when you can write precise steps. Use `explore` when you cannot.** `test` requires detailed, unambiguous requirements. If you cannot describe the exact steps and expected outcomes, use `explore` with a goal instead.
+Rule: Command choice must be based on two things:
+1. what knowledge resources support the task.
+2. how much step-by-step control and validation the operator wants during execution.
+
+Rule: Use `test` when the scenario is backed by written requirements, a test plan/case, wireframes, or other explicit documentation, and the ask is substantial enough to benefit from structured execution and validation.
+
+Rule: When using `test`, ground the command in that source material. Point to the documentation or restate the relevant requirements directly in the command.
+
+Rule: Do not choose the `test` command if you intend to create the scenario from memory, familiarity with the app, or guesses based on the current UI. The presence of explicit supporting documentation is what makes `test` appropriate.
+
+Rule: Use `explore` when the task is complex but you do not have documentation to anchor it, even if you personally have a strong idea of the intended flow.
+
+Rule: Use `explore` when you have partial knowledge, are learning the flow from the live app, or want Haindy to discover the reliable path through the UI.
+
+Rule: `explore` may still be given detailed instructions or a step-by-step objective. The difference is that those instructions are treated as guidance for discovery, not as a documented test case with authoritative expected outcomes.
+
+Rule: Use `act` when the task is atomic, when you want to drive the app one step at a time, or when you need to pause after each action to inspect screenshots and decide the next move.
+
+Rule: If the task is small, sensitive, or requires close human oversight, prefer `act` with screenshot validation after every execution.
+
+Practical rule:
+- Documentation-backed and complex: use `test`.
+- Complex without documentation: use `explore`.
+- Small or stepwise with frequent checks: use `act`.
 
 Rule: **`act` does not validate anything.** If the tap succeeds but the expected outcome does not appear, `act` still returns `success`. Use `test` to validate both the action and the result.
 
@@ -133,7 +156,7 @@ Rule: **`act` does not validate anything.** If the tap succeeds but the expected
 
 Both `test` and `explore` are asynchronous. They return immediately after dispatch. You poll for progress.
 
-**`test` requires detailed, unambiguous requirements.** Do not pass vague descriptions like "test the login flow". Instead, provide explicit steps, specific UI elements, concrete values, and clear expected outcomes. If you do not have enough detail, use `explore` or `session status` first.
+**`test` requires documented, detailed, unambiguous requirements.** Do not pass vague descriptions like "test the login flow". Provide explicit steps, specific UI elements, concrete values, and clear expected outcomes, and make sure they come from written requirements, a test plan/case, wireframes, or other explicit supporting documentation. If you do not have documentation-backed detail, use `explore` or `session status` first.
 
 **`explore` accepts a goal.** The goal should be achievable by navigating visible UI. It does not need step-by-step instructions, but any context you provide (current app state, expected layout, relevant features) improves quality.
 
@@ -302,9 +325,9 @@ The skill must teach that `screenshot_path` in status responses is Haindy's scre
 
 The async dispatch-and-poll pattern for `test` and `explore` is the most important interaction pattern to get right. The skill must show the polling loop and explain the status fields. If the coding agent treats `test` as synchronous, it will block its own tool-use loop or hit tool call timeouts.
 
-### Teach requirement quality for `test`
+### Teach provenance and requirement quality for `test`
 
-The `test` command requires detailed, unambiguous scenario descriptions. Vague inputs produce unreliable plans. The skill must show good examples (with explicit steps and assertions) and bad examples (vague one-liners) so the coding agent understands the quality bar.
+The `test` command requires documented, detailed, unambiguous scenario descriptions. Vague inputs produce unreliable plans, and memory-derived scenarios are the wrong source of truth even when they sound specific. The skill must teach that `test` is appropriate only when the scenario is backed by written requirements, a test plan/case, wireframes, or other explicit supporting documentation. When that documentation does not exist, the coding agent should choose `explore` instead, even if it has strong prior familiarity with the app.
 
 ---
 
