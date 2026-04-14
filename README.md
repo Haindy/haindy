@@ -3,13 +3,24 @@
 [![CI](https://github.com/Haindy/haindy/actions/workflows/ci.yml/badge.svg)](https://github.com/Haindy/haindy/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/haindy.svg)](https://pypi.org/project/haindy/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
 Computer-use for coding agents. HAINDY gives AI coding tools (Claude Code, Codex CLI, OpenCode, and others) the ability to see the screen, click, type, and test real applications across desktop, Android, and iOS.
 
 ```bash
 pip install haindy
 haindy setup
+```
+
+## Quickstart
+
+Start a session, read the returned `session_id`, and pass it explicitly to the next commands:
+
+```bash
+haindy session new --desktop
+haindy screenshot --session <SESSION_ID>
+haindy act "click the Login button" --session <SESSION_ID>
+haindy session close --session <SESSION_ID>
 ```
 
 ## What it does
@@ -26,6 +37,24 @@ haindy explore-status --session <ID>                               # poll explor
 haindy screenshot --session <ID>                                   # capture current state
 haindy session close --session <ID>                                # clean up
 haindy session prune --older-than 7                                # remove old dead sessions
+```
+
+A typical response looks like this:
+
+```json
+{
+  "session_id": "8f4d2c1e-7c2d-4d92-a0bc-3d0a9c6c1b5e",
+  "run_id": null,
+  "command": "screenshot",
+  "status": "success",
+  "response": "Screenshot captured.",
+  "screenshot_path": "/absolute/path/to/screenshot.png",
+  "meta": {
+    "exit_reason": "completed",
+    "duration_ms": 0,
+    "actions_taken": 0
+  }
+}
 ```
 
 Under the hood, each action goes through a computer-use AI provider (OpenAI, Google Gemini, or Anthropic Claude) that takes a screenshot, reasons about the UI, and performs real OS-level input -- mouse, keyboard, scroll -- against the actual application. No DOM hooks, no selectors, no browser automation.
@@ -57,7 +86,7 @@ Supported CLIs: Claude Code, Codex CLI, OpenCode.
 - **`test`** -- dispatch a multi-step scenario with outcome validation, then poll `test-status`
 - **`explore`** -- dispatch an open-ended goal, then poll `explore-status`
 
-Use `test` whenever you care about verifying a result and can describe the scenario precisely. Use `explore` when the goal is clear but the path is not.
+Use `test` when the scenario is backed by written requirements, a test plan, wireframes, or other explicit documentation and you want structured execution plus validation. Use `explore` when the goal is clear but the path is not, or when you are working from product knowledge rather than supporting docs. Use `act` when you want tight step-by-step control and to inspect the screen after each command.
 
 ### Session variables
 
