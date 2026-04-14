@@ -38,6 +38,27 @@ from .types import (
 
 logger = logging.getLogger("haindy.agents.computer_use.session")
 
+
+STEP_REFLECTION_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["PASS", "FAIL"]},
+        "reasoning": {"type": "string"},
+        "actual_result": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "is_blocker": {"type": "boolean"},
+        "blocker_reasoning": {"type": "string"},
+    },
+    "required": [
+        "verdict",
+        "reasoning",
+        "actual_result",
+        "confidence",
+        "is_blocker",
+        "blocker_reasoning",
+    ],
+}
+
 if TYPE_CHECKING:
     from .session import ComputerUseSession as _ComputerUseSession
 
@@ -1087,7 +1108,7 @@ class GoogleComputerUseMixin:
             "previous_interaction_id": self._google_previous_interaction_id,
             "input": [{"type": "text", "text": prompt}],
             "response_mime_type": "application/json",
-            "response_format": {"type": "object"},
+            "response_format": STEP_REFLECTION_RESPONSE_SCHEMA,
         }
 
         logger.info(

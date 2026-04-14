@@ -138,7 +138,17 @@ async def test_google_step_reflection_uses_json_output_without_tools(
     assert payload["previous_interaction_id"] == "int_2"
     assert "tools" not in payload
     assert payload["response_mime_type"] == "application/json"
-    assert payload["response_format"] == {"type": "object"}
+    schema = payload["response_format"]
+    assert schema["type"] == "object"
+    assert set(schema["required"]) == {
+        "verdict",
+        "reasoning",
+        "actual_result",
+        "confidence",
+        "is_blocker",
+        "blocker_reasoning",
+    }
+    assert schema["properties"]["verdict"]["enum"] == ["PASS", "FAIL"]
     assert payload["input"][0]["text"].startswith("Respond with valid JSON")
     assert reflection["response_ids"] == ["int_3"]
     assert '"verdict":"PASS"' in reflection["raw_text"]
