@@ -535,7 +535,7 @@ async def test_api_connection() -> int:
 def show_version() -> int:
     """Show version information."""
     console.print("\n[bold cyan]HAINDY - Autonomous AI Testing Agent[/bold cyan]")
-    console.print("Version: [green]0.1.1[/green]")
+    console.print("Version: [green]0.2.0[/green]")
     console.print("Python: [dim]3.11+[/dim]")
     return 0
 
