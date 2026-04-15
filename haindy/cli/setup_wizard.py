@@ -178,14 +178,16 @@ def _wizard(non_interactive: bool) -> int:
                 _console.print("Which provider should handle planning and analysis?")
                 for i, p in enumerate(available, 1):
                     _console.print(f"  [{i}] {p}")
-                _console.print("  [s] Skip -- keep current setting")
-                choice_ncu = input(f"Choice (1-{len(available)}/s): ").strip()
+                choice_ncu = input(
+                    f"Choice (1-{len(available)}, or press Enter to keep current): "
+                ).strip()
 
                 _console.print("Which provider should handle computer use?")
                 for i, p in enumerate(available, 1):
                     _console.print(f"  [{i}] {p}")
-                _console.print("  [s] Skip -- keep current setting")
-                choice_cu = input(f"Choice (1-{len(available)}/s): ").strip()
+                choice_cu = input(
+                    f"Choice (1-{len(available)}, or press Enter to keep current): "
+                ).strip()
 
                 ncu_prov = (
                     available[int(choice_ncu) - 1]
