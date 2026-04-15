@@ -76,7 +76,7 @@ def _wizard(non_interactive: bool) -> int:
         "  - (optional) Mobile testing tools (Android ADB or iOS idb)\n"
     )
 
-    _console.rule("Step 2: Environment Detection")
+    _console.rule("Step 1: Environment Detection")
     platform_label = {
         "darwin": "macOS",
         "linux": "Linux",
@@ -90,7 +90,7 @@ def _wizard(non_interactive: bool) -> int:
     else:
         _console.print(f"Settings file: [dim]not found[/dim] ({settings_path})")
 
-    _console.rule("Step 3: AI CLI Skill Installation")
+    _console.rule("Step 2: AI CLI Skill Installation")
     for cli_binary, (setup_target, main_target) in AI_CLIS.items():
         if shutil.which(cli_binary) is None:
             continue
@@ -104,7 +104,7 @@ def _wizard(non_interactive: bool) -> int:
         if should_install:
             _install_skills(cli_binary, setup_target, main_target)
 
-    _console.rule("Step 4: Dependency Check")
+    _console.rule("Step 3: Dependency Check")
     doctor_code = run_doctor()
     if not non_interactive and doctor_code != 0:
         _console.print(
@@ -112,7 +112,7 @@ def _wizard(non_interactive: bool) -> int:
             "Review the table above for installation instructions.[/yellow]"
         )
 
-    _console.rule("Step 5: Credential Setup")
+    _console.rule("Step 4: Credential Setup")
     try:
         from haindy.auth.credentials import get_api_key
         from haindy.cli.auth_commands import handle_auth_login
@@ -140,7 +140,7 @@ def _wizard(non_interactive: bool) -> int:
             if Confirm.ask(f"Set up {provider} credentials now?", default=True):
                 asyncio.run(handle_auth_login(provider))
 
-    _console.rule("Step 6: Provider Selection")
+    _console.rule("Step 5: Provider Selection")
     try:
         from haindy.auth import OpenAIAuthManager
         from haindy.auth.credentials import list_configured_providers
@@ -220,7 +220,7 @@ def _wizard(non_interactive: bool) -> int:
     except Exception as exc:
         _console.print(f"[yellow]Provider selection skipped ({exc}).[/yellow]")
 
-    _console.rule("Step 7: Final Check")
+    _console.rule("Step 6: Final Check")
     final_code = run_doctor()
 
     if final_code == 0:

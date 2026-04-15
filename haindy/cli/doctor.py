@@ -28,6 +28,10 @@ def _na(notes: str = "") -> tuple[Text, str]:
     return Text("N/A", style="dim"), notes
 
 
+def _not_set(notes: str = "") -> tuple[Text, str]:
+    return Text("NOT SET", style="yellow dim"), notes
+
+
 def _check_python_version() -> tuple[Text, str]:
     vi = sys.version_info
     version_str = f"{vi.major}.{vi.minor}.{vi.micro}"
@@ -50,9 +54,9 @@ def _check_api_key(provider: str) -> tuple[Text, str]:
 
         if get_api_key(provider):
             return _ok("")
-        return _missing(f"run: haindy auth login {provider}")
+        return _not_set(f"run: haindy auth login {provider}")
     except Exception:
-        return _missing(f"run: haindy auth login {provider}")
+        return _not_set(f"run: haindy auth login {provider}")
 
 
 def _check_codex_oauth() -> tuple[Text, str]:
@@ -67,9 +71,9 @@ def _check_codex_oauth() -> tuple[Text, str]:
                     f"token expired ({label}) — run: haindy auth login openai-codex"
                 )
             return _ok(label)
-        return _missing("run: haindy auth login openai-codex")
+        return _not_set("run: haindy auth login openai-codex")
     except Exception:
-        return _missing("run: haindy auth login openai-codex")
+        return _not_set("run: haindy auth login openai-codex")
 
 
 def _check_macos_pynput() -> tuple[Text, str]:
@@ -189,16 +193,28 @@ def run_doctor() -> int:
     _add("haindy package", status, notes)
 
     status, notes = _check_api_key("openai")
-    _add("OpenAI credentials", status, notes)
+    openai_ok = status.plain == "OK"
+    _add("OpenAI credentials", status, notes, required=False)
 
     status, notes = _check_api_key("anthropic")
-    _add("Anthropic credentials", status, notes)
+    anthropic_ok = status.plain == "OK"
+    _add("Anthropic credentials", status, notes, required=False)
 
     status, notes = _check_api_key("vertex")
-    _add("Google credentials", status, notes)
+    google_ok = status.plain == "OK"
+    _add("Google credentials", status, notes, required=False)
 
     status, notes = _check_codex_oauth()
-    _add("OpenAI Codex (OAuth)", status, notes)
+    codex_ok = status.plain == "OK"
+    _add("OpenAI Codex (OAuth)", status, notes, required=False)
+
+    if openai_ok or anthropic_ok or google_ok or codex_ok:
+        _add("AI provider (at least one)", *_ok())
+    else:
+        _add(
+            "AI provider (at least one)",
+            *_missing("run: haindy auth login openai / anthropic / google"),
+        )
 
     # macOS desktop deps — backend-specific, not individually required
     if sys.platform == "darwin":
