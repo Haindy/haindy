@@ -175,16 +175,24 @@ def _wizard(non_interactive: bool) -> int:
                     },
                 )
             elif not non_interactive:
+                from haindy.config.settings_file import load_settings_file
+
+                _sd = load_settings_file(_sp)
+                current_ncu = _sd.get("agent", {}).get("provider", "")
+                current_cu = _sd.get("computer_use", {}).get("provider", "")
+
                 _console.print("Which provider should handle planning and analysis?")
                 for i, p in enumerate(available, 1):
-                    _console.print(f"  [{i}] {p}")
+                    marker = " [dim](current)[/dim]" if p == current_ncu else ""
+                    _console.print(f"  [{i}] {p}{marker}")
                 choice_ncu = input(
                     f"Choice (1-{len(available)}, or press Enter to keep current): "
                 ).strip()
 
                 _console.print("Which provider should handle computer use?")
                 for i, p in enumerate(available, 1):
-                    _console.print(f"  [{i}] {p}")
+                    marker = " [dim](current)[/dim]" if p == current_cu else ""
+                    _console.print(f"  [{i}] {p}{marker}")
                 choice_cu = input(
                     f"Choice (1-{len(available)}, or press Enter to keep current): "
                 ).strip()
