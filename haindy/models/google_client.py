@@ -419,7 +419,7 @@ class GoogleClient:
         if format_type == "json_schema":
             schema_def = extract_json_schema_definition(response_format)
             if schema_def and schema_def.get("schema"):
-                config_kwargs["response_schema"] = schema_def["schema"]
+                config_kwargs["response_json_schema"] = schema_def["schema"]
 
         if genai_types is None:
             raise RuntimeError(

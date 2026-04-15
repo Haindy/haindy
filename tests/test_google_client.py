@@ -265,7 +265,7 @@ class TestGoogleClientCall:
         assert captured_config
         config_kwargs = captured_config[0]
         assert config_kwargs.get("response_mime_type") == "application/json"
-        assert config_kwargs.get("response_schema") == schema
+        assert config_kwargs.get("response_json_schema") == schema
 
     @pytest.mark.asyncio
     async def test_json_object_mode_does_not_forward_response_schema(
@@ -307,7 +307,7 @@ class TestGoogleClientCall:
         assert captured_config
         config_kwargs = captured_config[0]
         assert config_kwargs.get("response_mime_type") == "application/json"
-        assert "response_schema" not in config_kwargs
+        assert "response_json_schema" not in config_kwargs
 
     @pytest.mark.asyncio
     async def test_system_prompt_included_in_config(
