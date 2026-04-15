@@ -76,7 +76,7 @@ def _wizard(non_interactive: bool) -> int:
         "  - (optional) Mobile testing tools (Android ADB or iOS idb)\n"
     )
 
-    _console.rule("Step 2: Environment Detection")
+    _console.rule("Step 1: Environment Detection")
     platform_label = {
         "darwin": "macOS",
         "linux": "Linux",
@@ -90,7 +90,8 @@ def _wizard(non_interactive: bool) -> int:
     else:
         _console.print(f"Settings file: [dim]not found[/dim] ({settings_path})")
 
-    _console.rule("Step 3: AI CLI Skill Installation")
+    _console.rule("Step 2: AI CLI Skill Installation")
+    installed_clis: list[str] = []
     for cli_binary, (setup_target, main_target) in AI_CLIS.items():
         if shutil.which(cli_binary) is None:
             continue
@@ -103,8 +104,9 @@ def _wizard(non_interactive: bool) -> int:
             )
         if should_install:
             _install_skills(cli_binary, setup_target, main_target)
+            installed_clis.append(cli_binary)
 
-    _console.rule("Step 4: Dependency Check")
+    _console.rule("Step 3: Dependency Check")
     doctor_code = run_doctor()
     if not non_interactive and doctor_code != 0:
         _console.print(
@@ -112,7 +114,7 @@ def _wizard(non_interactive: bool) -> int:
             "Review the table above for installation instructions.[/yellow]"
         )
 
-    _console.rule("Step 5: Credential Setup")
+    _console.rule("Step 4: Credential Setup")
     try:
         from haindy.auth.credentials import get_api_key
         from haindy.cli.auth_commands import handle_auth_login
@@ -140,7 +142,7 @@ def _wizard(non_interactive: bool) -> int:
             if Confirm.ask(f"Set up {provider} credentials now?", default=True):
                 asyncio.run(handle_auth_login(provider))
 
-    _console.rule("Step 6: Provider Selection")
+    _console.rule("Step 5: Provider Selection")
     try:
         from haindy.auth import OpenAIAuthManager
         from haindy.auth.credentials import list_configured_providers
@@ -173,17 +175,27 @@ def _wizard(non_interactive: bool) -> int:
                     },
                 )
             elif not non_interactive:
+                from haindy.config.settings_file import load_settings_file
+
+                _sd = load_settings_file(_sp)
+                current_ncu = _sd.get("agent", {}).get("provider", "")
+                current_cu = _sd.get("computer_use", {}).get("provider", "")
+
                 _console.print("Which provider should handle planning and analysis?")
                 for i, p in enumerate(available, 1):
-                    _console.print(f"  [{i}] {p}")
-                _console.print("  [s] Skip -- keep current setting")
-                choice_ncu = input(f"Choice (1-{len(available)}/s): ").strip()
+                    marker = " [dim](current)[/dim]" if p == current_ncu else ""
+                    _console.print(f"  [{i}] {p}{marker}")
+                choice_ncu = input(
+                    f"Choice (1-{len(available)}, or press Enter to keep current): "
+                ).strip()
 
                 _console.print("Which provider should handle computer use?")
                 for i, p in enumerate(available, 1):
-                    _console.print(f"  [{i}] {p}")
-                _console.print("  [s] Skip -- keep current setting")
-                choice_cu = input(f"Choice (1-{len(available)}/s): ").strip()
+                    marker = " [dim](current)[/dim]" if p == current_cu else ""
+                    _console.print(f"  [{i}] {p}{marker}")
+                choice_cu = input(
+                    f"Choice (1-{len(available)}, or press Enter to keep current): "
+                ).strip()
 
                 ncu_prov = (
                     available[int(choice_ncu) - 1]
@@ -220,16 +232,41 @@ def _wizard(non_interactive: bool) -> int:
     except Exception as exc:
         _console.print(f"[yellow]Provider selection skipped ({exc}).[/yellow]")
 
-    _console.rule("Step 7: Final Check")
+    _console.rule("Step 6: Final Check")
     final_code = run_doctor()
 
     if final_code == 0:
         _SETUP_MARKER.parent.mkdir(parents=True, exist_ok=True)
         _SETUP_MARKER.touch()
-        _console.print(
-            "\n[green]Setup complete![/green] Run:\n\n"
-            "  haindy run --plan <requirements_file> --context <context_file>\n"
-        )
+
+        if installed_clis:
+            agents = " or ".join(installed_clis)
+            _console.print(
+                f"\n[green]Setup complete.[/green] Open {agents} and use the "
+                f"[bold]haindy[/bold] skill to run your first task. For example:\n\n"
+                f"  Use the haindy skill to open a desktop session, get a screenshot "
+                f"and tell me what you see.\n\n"
+                f"[dim]Note: you may need to restart any open agent sessions for the "
+                f"skill to load.[/dim]\n"
+            )
+        else:
+            try:
+                skill_path = str(
+                    importlib.resources.files("haindy.skills") / "haindy" / "SKILL.md"
+                )
+            except Exception:
+                skill_path = "haindy/skills/haindy/SKILL.md"
+            _console.print(
+                "\n[green]Setup complete.[/green] Open your favourite coding agent "
+                "and give it this prompt:\n\n"
+                "  Run `haindy session new --desktop` to start a desktop session, "
+                "then run `haindy screenshot --session <SESSION_ID>` and tell me "
+                "what you see on screen.\n\n"
+                f"[dim]Tip: if you have claude, codex, or opencode installed, "
+                f"re-run [bold]haindy setup[/bold] to install the haindy skill and "
+                f"skip the manual prompting. For other coding agents, install the "
+                f"skill manually from {skill_path}[/dim]\n"
+            )
         return 0
 
     _console.print(
