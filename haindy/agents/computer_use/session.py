@@ -382,7 +382,9 @@ class ComputerUseSession(
         model_name = (
             self._google_model
             if self._provider == "google"
-            else self._openai_model if self._provider == "openai" else None
+            else self._openai_model
+            if self._provider == "openai"
+            else None
         )
         configured_timeout_seconds = self._action_timeout_seconds
         remaining_budget_seconds: float | None = None
