@@ -206,6 +206,7 @@ class ComputerUseSession(
             "navigate",
             "click_at",
             "type_text_at",
+            "append_text_at",
             "key_combination",
             "hover_at",
             "drag_and_drop",
@@ -381,9 +382,7 @@ class ComputerUseSession(
         model_name = (
             self._google_model
             if self._provider == "google"
-            else self._openai_model
-            if self._provider == "openai"
-            else None
+            else self._openai_model if self._provider == "openai" else None
         )
         configured_timeout_seconds = self._action_timeout_seconds
         remaining_budget_seconds: float | None = None
