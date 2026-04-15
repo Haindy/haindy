@@ -91,6 +91,7 @@ def _wizard(non_interactive: bool) -> int:
         _console.print(f"Settings file: [dim]not found[/dim] ({settings_path})")
 
     _console.rule("Step 2: AI CLI Skill Installation")
+    installed_clis: list[str] = []
     for cli_binary, (setup_target, main_target) in AI_CLIS.items():
         if shutil.which(cli_binary) is None:
             continue
@@ -103,6 +104,7 @@ def _wizard(non_interactive: bool) -> int:
             )
         if should_install:
             _install_skills(cli_binary, setup_target, main_target)
+            installed_clis.append(cli_binary)
 
     _console.rule("Step 3: Dependency Check")
     doctor_code = run_doctor()
@@ -226,10 +228,26 @@ def _wizard(non_interactive: bool) -> int:
     if final_code == 0:
         _SETUP_MARKER.parent.mkdir(parents=True, exist_ok=True)
         _SETUP_MARKER.touch()
-        _console.print(
-            "\n[green]Setup complete![/green] Run:\n\n"
-            "  haindy run --plan <requirements_file> --context <context_file>\n"
-        )
+
+        if installed_clis:
+            agents = " or ".join(installed_clis)
+            _console.print(
+                f"\n[green]Setup complete.[/green] Open {agents} and use the "
+                f"[bold]haindy[/bold] skill to run your first task. For example:\n\n"
+                f"  Use the haindy skill to open a desktop session, get a screenshot "
+                f"and tell me what you see.\n\n"
+                f"[dim]Note: you may need to restart any open agent sessions for the "
+                f"skill to load.[/dim]\n"
+            )
+        else:
+            _console.print(
+                "\n[green]Setup complete.[/green] Open your AI coding agent and use "
+                "the [bold]haindy[/bold] skill to run your first task. For example:\n\n"
+                "  Use the haindy skill to open a desktop session, get a screenshot "
+                "and tell me what you see.\n\n"
+                "[dim]Note: you may need to restart any open agent sessions for the "
+                "skill to load.[/dim]\n"
+            )
         return 0
 
     _console.print(
