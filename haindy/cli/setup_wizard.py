@@ -240,15 +240,22 @@ def _wizard(non_interactive: bool) -> int:
                 f"skill to load.[/dim]\n"
             )
         else:
+            try:
+                skill_path = str(
+                    importlib.resources.files("haindy.skills") / "haindy" / "SKILL.md"
+                )
+            except Exception:
+                skill_path = "haindy/skills/haindy/SKILL.md"
             _console.print(
                 "\n[green]Setup complete.[/green] Open your favourite coding agent "
                 "and give it this prompt:\n\n"
                 "  Run `haindy session new --desktop` to start a desktop session, "
                 "then run `haindy screenshot --session <SESSION_ID>` and tell me "
                 "what you see on screen.\n\n"
-                "[dim]Tip: install claude, codex, or opencode and re-run "
-                "[bold]haindy setup[/bold] to get the haindy skill, which makes "
-                "this much simpler.[/dim]\n"
+                f"[dim]Tip: if you have claude, codex, or opencode installed, "
+                f"re-run [bold]haindy setup[/bold] to install the haindy skill and "
+                f"skip the manual prompting. For other coding agents, install the "
+                f"skill manually from {skill_path}[/dim]\n"
             )
         return 0
 
