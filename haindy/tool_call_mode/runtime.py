@@ -883,6 +883,7 @@ class ToolCallSessionRuntime:
             return
 
         steps_taken = 0
+        _attempt_counts: dict[str, int] = {}
         while steps_taken < max_steps:
             next_action = self._next_explore_action(state.todo)
             if next_action is None:
@@ -891,6 +892,10 @@ class ToolCallSessionRuntime:
                 state.exit_reason = ExitReason.STUCK
                 state.response = "Exploration ended. No actionable TODO items remained."
                 return
+
+            action_key = next_action.action.strip()
+            _attempt_counts[action_key] = _attempt_counts.get(action_key, 0) + 1
+            consecutive_attempts = _attempt_counts[action_key]
 
             result = await self.action_agent.execute_tool_instruction(
                 next_action.action,
@@ -907,13 +912,17 @@ class ToolCallSessionRuntime:
                 result,
                 instruction=next_action.action,
             )
+            assess_context = {
+                **self._tool_context("explore"),
+                "consecutive_attempts_on_current_action": consecutive_attempts,
+            }
             assessment = await self.awareness_agent.assess(
                 goal=goal,
                 screenshot=screenshot_bytes,
                 todo=self._to_awareness_todo(state.todo),
                 observations=list(state.observations),
                 last_action_summary=last_action_summary,
-                context=self._tool_context("explore"),
+                context=assess_context,
             )
             self._apply_awareness_assessment(state, assessment)
             steps_taken += 1

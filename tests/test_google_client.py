@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+from collections.abc import AsyncGenerator, Generator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,7 +29,7 @@ def _make_settings(
 
 
 @pytest.fixture()
-def patched_settings():
+def patched_settings() -> Generator[Any, None, None]:
     settings = _make_settings()
     with patch("haindy.models.google_client.get_settings", return_value=settings):
         yield settings
@@ -212,6 +214,102 @@ class TestGoogleClientCall:
         assert result["content"] == {"key": "value"}
 
     @pytest.mark.asyncio
+    async def test_json_schema_mode_forwards_response_schema(
+        self, patched_settings: Any
+    ) -> None:
+        from haindy.models.google_client import GoogleClient
+
+        response = _make_genai_response('{"decision": "continue"}')
+        captured_config: list[Any] = []
+
+        def _capture_config(**kwargs: Any) -> Any:
+            captured_config.append(kwargs)
+            return MagicMock()
+
+        schema = {
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+            "required": ["decision"],
+            "additionalProperties": False,
+        }
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "test_schema", "schema": schema, "strict": True},
+        }
+
+        with (
+            patch("haindy.models.google_client.genai") as mock_genai,
+            patch("haindy.models.google_client.genai_types") as mock_types,
+        ):
+            mock_types.GenerateContentConfig = MagicMock(side_effect=_capture_config)
+            mock_types.Content = MagicMock(
+                side_effect=lambda role, parts: SimpleNamespace(role=role, parts=parts)
+            )
+            mock_types.Part = MagicMock()
+            mock_types.Part.from_text = MagicMock(
+                return_value=SimpleNamespace(text="x")
+            )
+            mock_client = MagicMock()
+            mock_client.aio = MagicMock()
+            mock_client.aio.models = MagicMock()
+            mock_client.aio.models.generate_content = AsyncMock(return_value=response)
+            mock_genai.Client = MagicMock(return_value=mock_client)
+
+            client = GoogleClient()
+            result = await client.call(
+                messages=[{"role": "user", "content": "go"}],
+                response_format=response_format,
+            )
+
+        assert result["content"] == {"decision": "continue"}
+        assert captured_config
+        config_kwargs = captured_config[0]
+        assert config_kwargs.get("response_mime_type") == "application/json"
+        assert config_kwargs.get("response_json_schema") == schema
+
+    @pytest.mark.asyncio
+    async def test_json_object_mode_does_not_forward_response_schema(
+        self, patched_settings: Any
+    ) -> None:
+        from haindy.models.google_client import GoogleClient
+
+        response = _make_genai_response('{"key": "value"}')
+        captured_config: list[Any] = []
+
+        def _capture_config(**kwargs: Any) -> Any:
+            captured_config.append(kwargs)
+            return MagicMock()
+
+        with (
+            patch("haindy.models.google_client.genai") as mock_genai,
+            patch("haindy.models.google_client.genai_types") as mock_types,
+        ):
+            mock_types.GenerateContentConfig = MagicMock(side_effect=_capture_config)
+            mock_types.Content = MagicMock(
+                side_effect=lambda role, parts: SimpleNamespace(role=role, parts=parts)
+            )
+            mock_types.Part = MagicMock()
+            mock_types.Part.from_text = MagicMock(
+                return_value=SimpleNamespace(text="x")
+            )
+            mock_client = MagicMock()
+            mock_client.aio = MagicMock()
+            mock_client.aio.models = MagicMock()
+            mock_client.aio.models.generate_content = AsyncMock(return_value=response)
+            mock_genai.Client = MagicMock(return_value=mock_client)
+
+            client = GoogleClient()
+            await client.call(
+                messages=[{"role": "user", "content": "go"}],
+                response_format={"type": "json_object"},
+            )
+
+        assert captured_config
+        config_kwargs = captured_config[0]
+        assert config_kwargs.get("response_mime_type") == "application/json"
+        assert "response_json_schema" not in config_kwargs
+
+    @pytest.mark.asyncio
     async def test_system_prompt_included_in_config(
         self, patched_settings: Any
     ) -> None:
@@ -321,7 +419,7 @@ class TestGoogleClientCall:
             def on_error(self, error: Any) -> None:
                 pass
 
-        async def _fake_stream(**kwargs: Any):
+        async def _fake_stream(**kwargs: Any) -> AsyncGenerator[Any, None]:
             yield chunk1
             yield chunk2
 
@@ -364,10 +462,10 @@ class TestGoogleClientCall:
 
         chunk = _make_genai_response("Hello")
 
-        async def _stream():
+        async def _stream() -> AsyncGenerator[Any, None]:
             yield chunk
 
-        async def _fake_stream(**kwargs: Any):
+        async def _fake_stream(**kwargs: Any) -> AsyncGenerator[Any, None]:
             return _stream()
 
         with (
@@ -501,3 +599,92 @@ class TestGoogleClientBuildContents:
 
         assert "model" in roles_created
         assert "user" in roles_created
+
+    def test_multimodal_content_uses_distinct_text_and_image_parts(
+        self, patched_settings: Any
+    ) -> None:
+        from haindy.models.google_client import GoogleClient
+
+        image_bytes = b"fake-png-bytes"
+        data_url = (
+            f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        )
+
+        with patch("haindy.models.google_client.genai_types") as mock_types:
+            contents_created: list[Any] = []
+
+            def _make_content(role: str, parts: Any) -> Any:
+                obj = SimpleNamespace(role=role, parts=parts)
+                contents_created.append(obj)
+                return obj
+
+            mock_types.Content = MagicMock(side_effect=_make_content)
+            mock_types.Part = MagicMock()
+            mock_types.Part.from_text = MagicMock(
+                side_effect=lambda *, text: SimpleNamespace(kind="text", text=text)
+            )
+            mock_types.Part.from_bytes = MagicMock(
+                side_effect=lambda *, data, mime_type: SimpleNamespace(
+                    kind="image", data=data, mime_type=mime_type
+                )
+            )
+
+            client = GoogleClient()
+            client._build_contents(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Describe the image."},
+                            {"type": "input_image", "image_url": data_url},
+                        ],
+                    }
+                ],
+                system_prompt=None,
+            )
+
+        assert len(contents_created) == 1
+        assert contents_created[0].role == "user"
+        assert [part.kind for part in contents_created[0].parts] == ["text", "image"]
+        assert contents_created[0].parts[0].text == "Describe the image."
+        assert contents_created[0].parts[1].data == image_bytes
+        assert contents_created[0].parts[1].mime_type == "image/png"
+        mock_types.Part.from_text.assert_called_once_with(text="Describe the image.")
+        mock_types.Part.from_bytes.assert_called_once_with(
+            data=image_bytes,
+            mime_type="image/png",
+        )
+
+    def test_invalid_data_url_raises_request_validation_error(
+        self, patched_settings: Any
+    ) -> None:
+        from haindy.models.errors import ModelCallError
+        from haindy.models.google_client import GoogleClient
+
+        with patch("haindy.models.google_client.genai_types") as mock_types:
+            mock_types.Content = MagicMock(
+                side_effect=lambda role, parts: SimpleNamespace(role=role, parts=parts)
+            )
+            mock_types.Part = MagicMock()
+            mock_types.Part.from_text = MagicMock(
+                return_value=SimpleNamespace(kind="text", text="x")
+            )
+            mock_types.Part.from_bytes = MagicMock()
+
+            client = GoogleClient()
+            with pytest.raises(ModelCallError, match="valid base64 data"):
+                client._build_contents(
+                    [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "Describe the image."},
+                                {
+                                    "type": "input_image",
+                                    "image_url": "data:image/png;base64,a",
+                                },
+                            ],
+                        }
+                    ],
+                    system_prompt=None,
+                )

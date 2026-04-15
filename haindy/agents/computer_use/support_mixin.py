@@ -1026,7 +1026,8 @@ class ComputerUseSupportMixin:
                 "Stay inside the browser tab that is already open. Do NOT use alt+tab or open other desktop apps. "
                 "Use only these actions to interact with the page:\n"
                 "- click_at for buttons, inputs, and toggles (set button='right' for context clicks or click_count=2 for double clicks)\n"
-                "- type_text_at after clicking into inputs (set press_enter=true only when instructed)\n"
+                "- type_text_at after clicking into inputs — clears the field first, then types (set press_enter=true only when instructed)\n"
+                "- append_text_at to add text to an already-populated field without clearing it first\n"
                 "- scroll_at / scroll_document to move within the page\n"
                 "- key_combination for shortcuts like ctrl+l, ctrl+c, etc.\n"
                 "- read_clipboard to read copied text/URLs after using Copy actions\n"
@@ -1049,7 +1050,7 @@ class ComputerUseSupportMixin:
                 "IMPORTANT: You are controlling an Android phone through ADB-backed screenshots.\n"
                 + device_line
                 + "- Treat coordinates as positions on the provided mobile screenshot.\n"
-                "- Use mobile interactions only: click_at, type_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at, go_home, and open_app when needed.\n"
+                "- Use mobile interactions only: click_at, type_text_at, append_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at, go_home, and open_app when needed.\n"
                 "- Browser-style actions such as open_web_browser, search, navigate, hover_at, go_forward, scroll_document, drag_and_drop, and key_combination are unavailable in this mobile flow.\n"
                 "\n"
                 "GESTURE NAVIGATION:\n"
@@ -1063,7 +1064,7 @@ class ComputerUseSupportMixin:
                 "\n"
                 "GENERAL RULES:\n"
                 "- Do not use desktop assumptions, browser navigation actions, or desktop shortcuts like ctrl+a.\n"
-                "- For text entry, use type_text_at directly. Set press_enter=true only when the task explicitly says to submit or press Enter.\n"
+                "- For text entry, use type_text_at to clear the field and type fresh content. Use append_text_at to add to existing content without clearing. Set press_enter=true only when the task explicitly says to submit or press Enter.\n"
                 "- If masked password dots are visible after typing, treat the field as filled and stop retrying.\n\n"
                 + completion_instruction
                 + "YOUR TASK: "
@@ -1075,11 +1076,11 @@ class ComputerUseSupportMixin:
             ios_context = (
                 "IMPORTANT: You are controlling an iOS device (iPhone or iPad) through idb-backed screenshots.\n"
                 "- Treat coordinates as positions on the provided iOS screenshot.\n"
-                "- Use mobile interactions only: click_at, type_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at and go_home when needed.\n"
+                "- Use mobile interactions only: click_at, type_text_at, append_text_at, scroll_at, wait_5_seconds, and the custom helpers long_press_at and go_home when needed.\n"
                 "- Browser-style actions such as open_web_browser, search, navigate, hover_at, go_forward, scroll_document, drag_and_drop, and key_combination are unavailable in this mobile flow.\n"
                 "- For system navigation, use the go_home helper to return to the iOS home screen.\n"
                 "- Do not use desktop assumptions, browser navigation actions, or desktop shortcuts.\n"
-                "- For text entry, use type_text_at directly. Set press_enter=true only when the task explicitly says to submit or press Enter.\n\n"
+                "- For text entry, use type_text_at to clear the field and type fresh content. Use append_text_at to add to existing content without clearing. Set press_enter=true only when the task explicitly says to submit or press Enter.\n\n"
                 + completion_instruction
                 + "YOUR TASK: "
             )
@@ -1095,7 +1096,8 @@ class ComputerUseSupportMixin:
             "Look for Slack (purple icon) or Firefox (orange/red icon) in the sidebar.\n\n"
             "AVAILABLE ACTIONS:\n"
             "- click_at: Click at screen coordinates (button='right' for context clicks, click_count=2 for double clicks)\n"
-            "- type_text_at: Click and type text (press Enter only if instructed)\n"
+            "- type_text_at: Clear the field and type fresh text (press Enter only if instructed)\n"
+            "- append_text_at: Add text to an already-populated field without clearing it\n"
             "- key_combination: Keyboard shortcuts like ctrl+c, enter\n"
             "- read_clipboard: Read copied text/URLs after using Copy actions\n"
             "- scroll_at / scroll_document: Scroll content\n"

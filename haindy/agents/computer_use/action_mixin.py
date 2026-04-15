@@ -422,15 +422,15 @@ class ComputerUseActionMixin:
                         )
                     await self._automation_driver.type_text(text_payload)
                     turn.status = "executed"
-                elif action_type == "type_text_at":
+                elif action_type in {"type_text_at", "append_text_at"}:
+                    clear_before = action_type == "type_text_at"
                     text_payload = action.get("text")
                     if text_payload is None:
                         raise ComputerUseExecutionError(
-                            "type_text_at action missing text."
+                            f"{action_type} action missing text."
                         )
                     press_enter_default = not normalized_coords
                     press_enter = bool(action.get("press_enter", press_enter_default))
-                    clear_before = bool(action.get("clear_before_typing", True))
                     if cached:
                         x, y = int(cached.x), int(cached.y)
                     else:

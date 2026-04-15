@@ -206,6 +206,7 @@ class ComputerUseSession(
             "navigate",
             "click_at",
             "type_text_at",
+            "append_text_at",
             "key_combination",
             "hover_at",
             "drag_and_drop",

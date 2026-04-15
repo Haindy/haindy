@@ -121,7 +121,7 @@ Every command returns JSON. Read `status`, `response`, and `meta.exit_reason`:
 |---|---|
 | You know the exact UI element and action, no validation needed | `act` |
 | You have explicit supporting documentation and want structured execution and validation for a substantial scenario | `test` |
-| You have an open-ended or undocumented goal and need Haindy to figure out the navigation | `explore` |
+| The goal is multi-step and you do not have written documentation (requirements, test plan, wireframes) to anchor a `test` command — even if you know the intended flow | `explore` |
 | You want to see what is on screen (AI description) | `session status` |
 | You want a screenshot without AI processing | `screenshot` |
 
@@ -139,9 +139,13 @@ Rule: Use `explore` when the task is complex but you do not have documentation t
 
 Rule: Use `explore` when you have partial knowledge, are learning the flow from the live app, or want Haindy to discover the reliable path through the UI.
 
+Rule: The absence of written documentation is what makes `explore` correct, not uncertainty about the UI. If you personally know the intended flow but have no documentation to anchor a `test` command, use `explore`.
+
 Rule: `explore` may still be given detailed instructions or a step-by-step objective. The difference is that those instructions are treated as guidance for discovery, not as a documented test case with authoritative expected outcomes.
 
 Rule: Use `act` when the task is atomic, when you want to drive the app one step at a time, or when you need to pause after each action to inspect screenshots and decide the next move.
+
+Rule: Each `act` call must contain exactly one atomic device interaction — one tap, one swipe, one text entry, one key press. Do not describe multiple interactions in a single call. If the task requires tap, then type, then submit, issue three separate `act` calls.
 
 Rule: If the task is small, sensitive, or requires close human oversight, prefer `act` with screenshot validation after every execution.
 

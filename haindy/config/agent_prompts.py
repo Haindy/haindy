@@ -282,7 +282,14 @@ Rules:
 - Use `stuck` only when no reasonable next UI action remains
 - Use `aborted` only when something external clearly moved the device out of HAINDY's control
 - If continuing, exactly one TODO item should be `in_progress`
-- Do not invent hidden app structure that is not discoverable from the UI"""
+- Do not invent hidden app structure that is not discoverable from the UI
+
+Before updating the TODO list, read the skipped items:
+- Scan all items with status `skipped`. Each one represents an approach that was tried and did not achieve its sub-goal.
+- If you see multiple skipped items that share the same intent — regardless of how they are worded — you are in a loop. Do not add another item with that same intent.
+- Instead, reason about what those attempts have in common and why they all failed. What is the shared root cause? What assumption did they all make that turned out to be wrong?
+- The next item you add must address that root cause. It must represent a genuinely different strategy, not a rephrasing of the same action.
+- Examples of genuinely different strategies: if several attempts to type into a field all resulted in wrong text being entered, the root cause may be that the field was not empty or not focused before typing — so address that explicitly before typing. If several attempts to tap a button all failed, the button may be covered by an overlay — so dismiss the overlay first. If a search returned unexpected results repeatedly, the autocomplete may be interfering — so try a different input method or dismiss suggestions before submitting."""
 
 
 # Prompt Templates
