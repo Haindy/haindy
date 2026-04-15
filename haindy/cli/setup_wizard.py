@@ -241,14 +241,14 @@ def _wizard(non_interactive: bool) -> int:
             )
         else:
             _console.print(
-                "\n[green]Setup complete.[/green] You can run Haindy directly from "
-                "the CLI:\n\n"
-                "  haindy run --plan <your_plan.txt> --context <your_context.txt>\n\n"
-                "See [bold]docs/RUNBOOK.md[/bold] for how to write plan and context "
-                "files.\n\n"
+                "\n[green]Setup complete.[/green] Open your favourite coding agent "
+                "and give it this prompt:\n\n"
+                "  Run `haindy session new --desktop` to start a desktop session, "
+                "then run `haindy screenshot --session <SESSION_ID>` and tell me "
+                "what you see on screen.\n\n"
                 "[dim]Tip: install claude, codex, or opencode and re-run "
-                "[bold]haindy setup[/bold] to get the agent skill, which lets you "
-                "drive Haindy conversationally.[/dim]\n"
+                "[bold]haindy setup[/bold] to get the haindy skill, which makes "
+                "this much simpler.[/dim]\n"
             )
         return 0
 
