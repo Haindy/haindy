@@ -34,6 +34,7 @@ from haindy.core.types import ScopeTriageResult, TestPlan, TestState
 from haindy.desktop.controller import DesktopController
 from haindy.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
 from haindy.error_handling import ScopeTriageBlockedError
+from haindy.feedback import build_issue_url, console_feedback_hint
 from haindy.mobile.controller import MobileController
 from haindy.mobile.ios_controller import IOSController
 from haindy.monitoring.debug_logger import initialize_debug_logger
@@ -317,15 +318,34 @@ async def run_test(
         if actions_path:
             console.print(f"[green]Actions saved to:[/green] {actions_path}")
 
+        _print_feedback_hint(
+            command="run",
+            run_id=test_run_id,
+            exit_reason=str(status_value),
+            error=None if status_value in success_statuses else f"Status: {status_value}",
+        )
+
         return 0 if status_value in success_statuses else 1
 
     except ScopeTriageBlockedError as scope_error:
         logger.warning("Context/scope gate blocked planning", exc_info=True)
         _print_scope_blockers(scope_error)
+        _print_feedback_hint(
+            command="run",
+            run_id=get_run_id(),
+            exit_reason="scope_blocked",
+            error=str(scope_error) or "Scope triage blocked planning.",
+        )
         return 1
     except asyncio.TimeoutError:
         console.print(
             f"\n[red]Error: Test execution timed out after {timeout} seconds[/red]"
+        )
+        _print_feedback_hint(
+            command="run",
+            run_id=get_run_id(),
+            exit_reason="timeout",
+            error=f"Test execution timed out after {timeout} seconds.",
         )
         return 2
     except KeyboardInterrupt:
@@ -334,6 +354,12 @@ async def run_test(
     except Exception as exc:
         console.print(f"\n[red]Error during test execution: {exc}[/red]")
         logger.exception("Test execution failed")
+        _print_feedback_hint(
+            command="run",
+            run_id=get_run_id(),
+            exit_reason=type(exc).__name__,
+            error=str(exc),
+        )
         return 1
     finally:
         if screen_recorder:
@@ -464,6 +490,25 @@ def _print_scope_blockers(error: ScopeTriageBlockedError) -> None:
         console.print("\n[bold yellow]Additional notes[/bold yellow]")
         for item in additional:
             console.print(f"- {item}")
+
+
+def _print_feedback_hint(
+    *,
+    command: str,
+    run_id: str | None,
+    exit_reason: str | None,
+    error: str | None,
+) -> None:
+    """Print a pre-filled GitHub issue URL unless the user has opted out."""
+
+    url = build_issue_url(
+        command=command,
+        run_id=run_id,
+        exit_reason=exit_reason,
+        error=error,
+    )
+    if url:
+        console.print(console_feedback_hint(url))
 
 
 def _render_plan_table(test_plan: TestPlan) -> None:

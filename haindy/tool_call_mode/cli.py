@@ -13,6 +13,7 @@ from typing import Any, NoReturn
 from uuid import uuid4
 
 from haindy.config.settings import get_settings
+from haindy.feedback import build_issue_url
 from haindy.runtime.environment import normalize_automation_backend
 
 from .daemon import run_daemon_from_args
@@ -618,7 +619,21 @@ async def dispatch_tool_call_args(
     else:  # pragma: no cover - parser guarantees this branch is unreachable
         envelope, exit_code = _usage_error("Unknown tool-call command.")
 
+    _attach_feedback_url(envelope)
     return envelope, exit_code
+
+
+def _attach_feedback_url(envelope: ToolCallEnvelope) -> None:
+    """Populate ``feedback_url`` on failed envelopes. Happy paths stay lean."""
+
+    if envelope.status == CommandStatus.SUCCESS:
+        return
+    envelope.feedback_url = build_issue_url(
+        command=envelope.command,
+        run_id=envelope.run_id,
+        exit_reason=envelope.meta.exit_reason.value,
+        error=envelope.response,
+    )
 
 
 async def run_tool_call_cli(argv: list[str]) -> int:
@@ -629,6 +644,7 @@ async def run_tool_call_cli(argv: list[str]) -> int:
         args = parser.parse_args(argv)
     except ToolCallUsageError as exc:
         envelope, exit_code = _usage_error(str(exc))
+        _attach_feedback_url(envelope)
         print(envelope.model_dump_json())
         return exit_code
 

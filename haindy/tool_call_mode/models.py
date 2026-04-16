@@ -121,6 +121,7 @@ class ToolCallEnvelope(BaseModel):
     observations: list[str] | None = None
     sessions: list[SessionListEntry] | None = None
     vars: dict[str, str] | None = None
+    feedback_url: str | None = None
 
 
 class ToolCallRequest(BaseModel):

@@ -213,6 +213,14 @@ pytest                # tests
 | `haindy/orchestration/` | Multi-agent workflow coordination |
 | `haindy/monitoring/` | JSONL logging, HTML report generation |
 
+## Reporting issues
+
+Both batch and tool-call modes emit a pre-filled GitHub issue URL with run
+context (HAINDY version, platform, command, exit reason, truncated error).
+Batch mode prints it at the end of a run; tool-call mode adds a `feedback_url`
+field to the JSON envelope on failure. Set `HAINDY_NO_FEEDBACK_URL=1` to
+suppress it.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and how to submit changes.
