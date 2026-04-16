@@ -57,8 +57,12 @@ def _render_body(
     exit_reason: str | None,
     error: str | None,
 ) -> str:
-    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    error_block = _truncate(error.strip(), MAX_ERROR_SNIPPET_CHARS) if error else "_(none)_"
+    python_version = (
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
+    error_block = (
+        _truncate(error.strip(), MAX_ERROR_SNIPPET_CHARS) if error else "_(none)_"
+    )
 
     body = (
         "<!-- Pre-filled by HAINDY. Edit freely before submitting. -->\n"
