@@ -198,7 +198,7 @@ async def test_run_tool_call_cli_returns_json_usage_envelope_on_bad_args(
 
     assert exit_code == 2
     assert payload["status"] == "error"
-    assert payload["command"] == "session"
+    assert payload["command"] == "act"
     assert (
         "`--session` is required." in payload["response"]
         or "required" in payload["response"]
