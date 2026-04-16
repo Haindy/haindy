@@ -30,7 +30,7 @@ If one of those CLIs is installed, `haindy setup` copies the HAINDY skill into t
 
 ## Try it now
 
-Open your preferred coding agent and use the `haindy` skill with your desktop app, an Android device or emulator, an iOS simulator or physical device, or a combination of them in one workflow.
+Open your coding agent and use the `haindy` skill against a running desktop app, Android emulator or device, or iOS simulator or device.
 
 If you are running an app locally, try prompts like:
 
