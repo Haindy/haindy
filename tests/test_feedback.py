@@ -79,7 +79,9 @@ def test_error_snippet_truncation_threshold() -> None:
 
 
 @pytest.mark.parametrize("value", ["1", "true", "YES", "on"])
-def test_opt_out_env_var_disables_url(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+def test_opt_out_env_var_disables_url(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
     monkeypatch.setenv(OPT_OUT_ENV_VAR, value)
     assert feedback_enabled() is False
     assert build_issue_url(command="run") is None

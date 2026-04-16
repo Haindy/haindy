@@ -322,7 +322,9 @@ async def run_test(
             command="run",
             run_id=test_run_id,
             exit_reason=str(status_value),
-            error=None if status_value in success_statuses else f"Status: {status_value}",
+            error=None
+            if status_value in success_statuses
+            else f"Status: {status_value}",
         )
 
         return 0 if status_value in success_statuses else 1
