@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from haindy.feedback import OPT_OUT_ENV_VAR
-from haindy.tool_call_mode.cli import _attach_feedback_url
+from haindy.tool_call_mode.cli import _attach_feedback_url, run_tool_call_cli
 from haindy.tool_call_mode.models import (
     CommandStatus,
     ExitReason,
@@ -58,3 +60,25 @@ def test_opt_out_suppresses_feedback_url(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     _attach_feedback_url(env)
     assert env.feedback_url is None
+
+
+@pytest.mark.asyncio
+async def test_missing_session_envelope_reports_actual_command(capsys) -> None:
+    exit_code = await run_tool_call_cli(
+        ["--session", "does-not-exist-xyz", "act", "click submit"]
+    )
+    assert exit_code == 3
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "act"
+    assert payload["status"] == "error"
+    assert payload["feedback_url"] is not None
+
+
+@pytest.mark.asyncio
+async def test_usage_error_envelope_reports_actual_command(capsys) -> None:
+    exit_code = await run_tool_call_cli(["test"])
+    assert exit_code == 2
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "test"

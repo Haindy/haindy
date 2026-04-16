@@ -102,8 +102,15 @@ class ToolCallArgumentParser(argparse.ArgumentParser):
 def is_tool_call_command(argv: list[str] | None) -> bool:
     """Return True when argv targets the tool-call command surface."""
 
+    command = _extract_tool_call_command(argv)
+    return command is not None
+
+
+def _extract_tool_call_command(argv: list[str] | None) -> str | None:
+    """Return the tool-call subcommand in ``argv``, or ``None`` if absent."""
+
     if not argv:
-        return False
+        return None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -113,8 +120,8 @@ def is_tool_call_command(argv: list[str] | None) -> bool:
         if token == "--session":
             index += 2
             continue
-        return token in TOOL_CALL_COMMANDS
-    return False
+        return token if token in TOOL_CALL_COMMANDS else None
+    return None
 
 
 def _add_legacy_commands(
@@ -643,7 +650,8 @@ async def run_tool_call_cli(argv: list[str]) -> int:
     try:
         args = parser.parse_args(argv)
     except ToolCallUsageError as exc:
-        envelope, exit_code = _usage_error(str(exc))
+        command = _extract_tool_call_command(argv) or "session"
+        envelope, exit_code = _usage_error(str(exc), command=command)
         _attach_feedback_url(envelope)
         print(envelope.model_dump_json())
         return exit_code
@@ -917,17 +925,18 @@ async def _send_session_request(
     args: argparse.Namespace,
     request: ToolCallRequest,
 ) -> tuple[ToolCallEnvelope, int]:
+    public_command = public_command_name(request.command)
     session_id = getattr(args, "session", None)
     if not session_id:
-        return _usage_error("`--session` is required.")
+        return _usage_error("`--session` is required.", command=public_command)
 
     metadata = load_session_metadata(session_id)
     if metadata is None or not is_process_alive(metadata.pid):
-        return _missing_session(session_id)
+        return _missing_session(session_id, command=public_command)
 
     socket_path = get_socket_path(session_id)
     if not socket_path.exists():
-        return _missing_session(session_id)
+        return _missing_session(session_id, command=public_command)
 
     try:
         envelope = await send_request(socket_path, request)
@@ -978,10 +987,13 @@ def _startup_response_from_metadata(metadata: object) -> str:
     return "Session started with desktop backend."
 
 
-def _missing_session(session_id: str) -> tuple[ToolCallEnvelope, int]:
+def _missing_session(
+    session_id: str,
+    command: str = "session",
+) -> tuple[ToolCallEnvelope, int]:
     envelope = make_envelope(
         session_id=session_id,
-        command="session",
+        command=command,
         status=CommandStatus.ERROR,
         response=f"No active session found for {session_id}.",
         screenshot_path=None,
@@ -992,10 +1004,13 @@ def _missing_session(session_id: str) -> tuple[ToolCallEnvelope, int]:
     return envelope, 3
 
 
-def _usage_error(message: str) -> tuple[ToolCallEnvelope, int]:
+def _usage_error(
+    message: str,
+    command: str = "session",
+) -> tuple[ToolCallEnvelope, int]:
     envelope = make_envelope(
         session_id=None,
-        command="session",
+        command=command,
         status=CommandStatus.ERROR,
         response=message,
         screenshot_path=None,
