@@ -5,16 +5,47 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
-Computer-use for coding agents. HAINDY gives AI coding tools (Claude Code, Codex CLI, OpenCode, and others) the ability to see the screen, click, type, and test real applications across desktop, Android, and iOS.
+Give coding agents computer use.
+
+HAINDY lets coding tools like Claude Code, Codex CLI, and OpenCode interact with real desktop and mobile apps by seeing the screen, clicking, typing, scrolling, and validating flows. Use it when your agent needs to work with a real UI instead of a DOM or selector tree.
 
 ```bash
 pip install haindy
 haindy setup
 ```
 
-## Quickstart
+After setup, open your coding agent and use the `haindy` skill against a live app.
 
-Start a session, read the returned `session_id`, and pass it explicitly to the next commands:
+## Agent integration
+
+HAINDY ships with bundled skills that `haindy setup` installs automatically for detected AI CLIs.
+
+Supported CLIs:
+
+- Claude Code
+- Codex CLI
+- OpenCode
+
+If one of those CLIs is installed, `haindy setup` copies the HAINDY skill into the agent's skill directory and points the agent at the setup flow. For other coding agents, you can still use HAINDY by prompting them directly with the examples below.
+
+## Try it now
+
+Open your coding agent and use the `haindy` skill against a running desktop app, Android emulator or device, or iOS simulator or device.
+
+If you are running an app locally, try prompts like:
+
+- "Use HAINDY to do exploratory testing on my app."
+- "Use HAINDY to test creating a new account."
+- "Use HAINDY to check whether the login flow works end to end."
+- "Use HAINDY to explore the settings screen and report whether notifications can be toggled."
+
+Your agent will start the session, interact with the UI, and return screenshots and structured results.
+
+## CLI usage
+
+HAINDY can also be driven directly from the command line when you want explicit command-by-command control.
+
+Start a session, read the returned `session_id`, and pass it explicitly to later commands:
 
 ```bash
 haindy session new --desktop
@@ -23,23 +54,20 @@ haindy act "click the Login button" --session <SESSION_ID>
 haindy session close --session <SESSION_ID>
 ```
 
-## What it does
-
-Your coding agent calls HAINDY to interact with a live UI. Every command returns structured JSON.
+For mobile:
 
 ```bash
-haindy session new --desktop                                       # start a session
-haindy act "click the Login button" --session <ID>                 # execute an action
-haindy test "sign in and verify the dashboard loads" --session <ID> # dispatch a multi-step test
-haindy test-status --session <ID>                                  # poll test progress / result
-haindy explore "find the notification settings screen" --session <ID> # dispatch exploration
-haindy explore-status --session <ID>                               # poll explore progress / result
-haindy screenshot --session <ID>                                   # capture current state
-haindy session close --session <ID>                                # clean up
-haindy session prune --older-than 7                                # remove old dead sessions
+haindy session new --android --android-serial emulator-5554
+haindy session new --ios --ios-udid <UDID>
 ```
 
-A typical response looks like this:
+For session hygiene:
+
+```bash
+haindy session prune --older-than 7
+```
+
+Every command returns structured JSON. A typical response looks like this:
 
 ```json
 {
@@ -68,19 +96,7 @@ Under the hood, each action goes through a computer-use AI provider (OpenAI, Goo
 | Android | ADB |
 | iOS | idb |
 
-```bash
-haindy session new --desktop
-haindy session new --android --android-serial emulator-5554
-haindy session new --ios --ios-udid <UDID>
-```
-
-## Agent integration
-
-HAINDY ships with bundled skills that `haindy setup` installs automatically for detected AI CLIs. Once installed, your coding agent can discover and use HAINDY directly.
-
-Supported CLIs: Claude Code, Codex CLI, OpenCode.
-
-### act vs test vs explore
+## act vs test vs explore
 
 - **`act`** -- execute a single action ("click the submit button", "type hello into the search field")
 - **`test`** -- dispatch a multi-step scenario with outcome validation, then poll `test-status`
@@ -98,12 +114,12 @@ haindy session set PASSWORD --value-file credentials.txt --secret --session <ID>
 haindy session vars --session <ID>
 ```
 
-## Batch mode
+## Run tests from requirements
 
-HAINDY also includes a pipeline of specialized AI agents that can plan and execute tests autonomously from a requirements file -- no coding agent required:
+HAINDY also includes a pipeline of specialized AI agents that can plan and execute tests autonomously from a requirements file.
 
-```
-Requirements ──> Scope Triage ──> Test Planner ──> Situational Agent ──> Test Runner ──> Report
+```text
+Requirements -> Scope Triage -> Test Planner -> Situational Agent -> Test Runner -> Report
 ```
 
 ```bash
@@ -119,10 +135,11 @@ This produces an HTML report with screenshots, pass/fail results, and a JSONL ex
 ### Credentials
 
 ```bash
-haindy auth login openai      # stored in system keychain
+haindy auth login openai        # stored in system keychain
+haindy auth login openai-codex  # OAuth-based login
 haindy auth login google
 haindy auth login anthropic
-haindy auth status             # verify
+haindy auth status              # verify
 ```
 
 ### Providers
