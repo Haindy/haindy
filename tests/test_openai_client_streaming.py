@@ -10,8 +10,8 @@ import pytest
 
 from haindy.auth import CODEX_SYSTEM_INSTRUCTIONS
 from haindy.auth.manager import ResolvedOpenAIAuth
-from haindy.models.structured_output import build_json_schema_response_format
 from haindy.models.openai_client import OpenAIClient, ResponseStreamObserver
+from haindy.models.structured_output import build_json_schema_response_format
 
 
 class RecordingObserver(ResponseStreamObserver):
