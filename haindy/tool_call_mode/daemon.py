@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import sys
 import time
 from contextlib import suppress
 from typing import Any
@@ -18,6 +19,7 @@ from .paths import (
     cleanup_session_artifacts,
     ensure_session_layout,
     get_daemon_log_path,
+    get_port_file_path,
     get_socket_path,
     save_session_metadata,
     write_pid_file,
@@ -69,12 +71,21 @@ class ToolCallDaemon:
         await self.runtime.start()
         save_session_metadata(self.runtime.metadata)
 
-        if self.socket_path.exists():
-            self.socket_path.unlink()
-        self._server = await asyncio.start_unix_server(
-            self._handle_client,
-            path=str(self.socket_path),
-        )
+        if sys.platform == "win32":
+            self._server = await asyncio.start_server(
+                self._handle_client,
+                host="127.0.0.1",
+                port=0,
+            )
+            port = self._server.sockets[0].getsockname()[1]
+            get_port_file_path(self.session_id).write_text(str(port), encoding="utf-8")
+        else:
+            if self.socket_path.exists():
+                self.socket_path.unlink()
+            self._server = await asyncio.start_unix_server(
+                self._handle_client,
+                path=str(self.socket_path),
+            )
         self._signal_ready()
         logger.info(
             "Tool-call daemon ready",

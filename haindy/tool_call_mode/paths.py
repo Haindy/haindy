@@ -42,6 +42,24 @@ def get_socket_path(session_id: str) -> Path:
     return get_session_dir(session_id) / "daemon.sock"
 
 
+def get_port_file_path(session_id: str) -> Path:
+    """Return the TCP port file path used by the Windows daemon."""
+
+    return get_session_dir(session_id) / "daemon.port"
+
+
+def read_port(session_id: str) -> int | None:
+    """Read the TCP port written by the Windows daemon, or None if absent."""
+
+    path = get_port_file_path(session_id)
+    if not path.exists():
+        return None
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return None
+
+
 def get_pid_path(session_id: str) -> Path:
     """Return the daemon pid file path for one session."""
 
@@ -150,10 +168,13 @@ def cleanup_session_artifacts(session_id: str, *, remove_dir: bool = False) -> N
 
     socket_path = get_socket_path(session_id)
     pid_path = get_pid_path(session_id)
+    port_file_path = get_port_file_path(session_id)
     with contextlib_suppress(FileNotFoundError):
         socket_path.unlink()
     with contextlib_suppress(FileNotFoundError):
         pid_path.unlink()
+    with contextlib_suppress(FileNotFoundError):
+        port_file_path.unlink()
     if remove_dir:
         shutil.rmtree(get_session_dir(session_id), ignore_errors=True)
 
