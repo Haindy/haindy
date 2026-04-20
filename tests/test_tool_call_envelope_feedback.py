@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -63,6 +64,9 @@ def test_opt_out_suppresses_feedback_url(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="tool-call mode not supported on Windows"
+)
 async def test_missing_session_envelope_reports_actual_command(capsys) -> None:
     exit_code = await run_tool_call_cli(
         ["--session", "does-not-exist-xyz", "act", "click submit"]
@@ -76,6 +80,9 @@ async def test_missing_session_envelope_reports_actual_command(capsys) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="tool-call mode not supported on Windows"
+)
 async def test_usage_error_envelope_reports_actual_command(capsys) -> None:
     exit_code = await run_tool_call_cli(["test"])
     assert exit_code == 2

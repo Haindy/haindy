@@ -645,6 +645,20 @@ def _attach_feedback_url(envelope: ToolCallEnvelope) -> None:
 
 async def run_tool_call_cli(argv: list[str]) -> int:
     """Run the public tool-call CLI and print exactly one JSON object."""
+    import sys
+
+    if sys.platform == "win32":
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "message": "tool-call mode is not supported on Windows",
+                }
+            )
+        )
+        return 1
 
     parser = create_tool_call_parser()
     try:

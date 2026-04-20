@@ -272,3 +272,55 @@ and permissions, and prints a clear pass/fail summary for each item.
 - If desktop input fails, verify `xdotool` or `/dev/uinput` access
 - If Android startup fails, run `adb devices` and confirm the package name or serial
 - If iOS startup fails, run `idb list-targets` and confirm the UDID and state is `Booted`
+
+## Windows setup
+
+### Prerequisites
+
+- Python 3.11+ (install from python.org or `winget install Python.Python.3.11`)
+- ADB (optional, for Android targets): `winget install Google.PlatformTools`
+- Windows Terminal recommended for Rich/ANSI rendering; legacy `cmd.exe` also works
+
+### Long paths
+
+HAINDY stores session data under paths like `~/.haindy/sessions/<uuid>/screenshots/`.
+Enable long path support to avoid `ERROR_FILENAME_EXCED_RANGE`:
+
+```powershell
+# requires an elevated PowerShell prompt
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+    -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+```
+
+Or open `gpedit.msc` > Computer Configuration > Administrative Templates >
+System > Filesystem > Enable Win32 long paths.
+
+### Virtual environment activation
+
+Windows uses `.venv\Scripts\` instead of `.venv/bin/`:
+
+```bat
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.lock
+.venv\Scripts\pip install -e ".[dev]"
+.venv\Scripts\haindy setup
+```
+
+### Credentials (Windows Credential Manager)
+
+`haindy auth login openai` stores the API key in Windows Credential Manager via
+the `keyring` library. Verify with `haindy auth status` and `haindy doctor`.
+
+### UAC elevation caveat
+
+pynput uses `SendInput` to inject keyboard and mouse events. On Windows, `SendInput`
+cannot deliver events to windows running under a higher integrity level (elevated
+UAC). If HAINDY is run from a normal shell, input injection into UAC-elevated
+target windows will silently fail. Work around this by running HAINDY itself
+elevated, or by keeping the target application at the same integrity level.
+
+### Tool-call mode
+
+Tool-call mode (Unix domain sockets) is not available on Windows. The `session`,
+`act`, `test`, `explore`, and `screenshot` sub-commands will return an error. Use
+`haindy run` for test execution on Windows.

@@ -103,6 +103,11 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "macos_keyboard_key_delay_ms": "HAINDY_MACOS_KEY_DELAY_MS",
     "macos_clipboard_timeout_seconds": "HAINDY_MACOS_CLIPBOARD_TIMEOUT_SECONDS",
     "macos_clipboard_hold_seconds": "HAINDY_MACOS_CLIPBOARD_HOLD_SECONDS",
+    "windows_screenshot_dir": "HAINDY_WINDOWS_SCREENSHOT_DIR",
+    "windows_keyboard_layout": "HAINDY_WINDOWS_KEYBOARD_LAYOUT",
+    "windows_keyboard_key_delay_ms": "HAINDY_WINDOWS_KEY_DELAY_MS",
+    "windows_clipboard_timeout_seconds": "HAINDY_WINDOWS_CLIPBOARD_TIMEOUT_SECONDS",
+    "windows_clipboard_hold_seconds": "HAINDY_WINDOWS_CLIPBOARD_HOLD_SECONDS",
     "enable_screen_recording": "HAINDY_ENABLE_SCREEN_RECORDING",
     "screen_recording_output_dir": "HAINDY_SCREEN_RECORDING_OUTPUT_DIR",
     "screen_recording_framerate": "HAINDY_SCREEN_RECORDING_FRAMERATE",
@@ -567,6 +572,29 @@ class Settings(BaseModel):
         ge=0.5,
         description="Max time to hold macOS clipboard owner process",
     )
+    windows_screenshot_dir: Path = Field(
+        default=Path("data/screenshots/windows"),
+        description="Directory for Windows desktop screenshots",
+    )
+    windows_keyboard_layout: str = Field(
+        default="us",
+        description="Keyboard layout for Windows automation",
+    )
+    windows_keyboard_key_delay_ms: int = Field(
+        default=12,
+        ge=0,
+        description="Delay between key events for Windows automation",
+    )
+    windows_clipboard_timeout_seconds: float = Field(
+        default=3.0,
+        ge=0.5,
+        description="Timeout for Windows clipboard operations",
+    )
+    windows_clipboard_hold_seconds: float = Field(
+        default=15.0,
+        ge=0.5,
+        description="Max time to hold Windows clipboard owner process",
+    )
     enable_screen_recording: bool = Field(
         default=False,
         description="Enable GNOME desktop screen recording during test execution",
@@ -954,6 +982,7 @@ class Settings(BaseModel):
             self.desktop_screenshot_dir,
             self.mobile_screenshot_dir,
             self.ios_screenshot_dir,
+            self.windows_screenshot_dir,
             self.cache_dir,
             self.haindy_home,
             self.linux_coordinate_cache_path.parent,

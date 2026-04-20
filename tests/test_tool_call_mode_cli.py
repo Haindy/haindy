@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -189,6 +190,9 @@ def test_handle_session_prune_reports_pruned_count(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="tool-call mode not supported on Windows"
+)
 async def test_run_tool_call_cli_returns_json_usage_envelope_on_bad_args(
     capsys,
 ) -> None:

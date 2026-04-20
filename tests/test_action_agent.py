@@ -152,6 +152,9 @@ def test_new_computer_use_session_skips_openai_client_for_google(
         "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
             linux_coordinate_cache_path=Path("data/linux_cache/test_coordinates.json"),
+            windows_coordinate_cache_path=Path(
+                "data/windows_cache/test_coordinates.json"
+            ),
             macos_coordinate_cache_path=Path("data/macos_cache/test_coordinates.json"),
             mobile_coordinate_cache_path=Path(
                 "data/mobile_cache/test_coordinates.json"

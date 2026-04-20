@@ -213,7 +213,7 @@ def terminate_session_process(session_id: str, *, force: bool = False) -> bool:
     if not is_process_alive(pid):
         return False
     assert pid is not None
-    sig = signal.SIGKILL if force else signal.SIGTERM
+    sig = getattr(signal, "SIGKILL", signal.SIGTERM) if force else signal.SIGTERM
     os.kill(pid, sig)
     return True
 
