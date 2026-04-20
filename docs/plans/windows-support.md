@@ -4,7 +4,7 @@
 
 - **Branch:** `feat/windows-support`
 - **Milestone 1 (Linux prep):** COMPLETE — all changes committed on the branch.
-- **Milestone 2 (Windows VM):** NOT STARTED — resume here in the Windows VM.
+- **Milestone 2 (Windows VM):** COMPLETE — driver, tests, RUNBOOK, and settings committed on the branch.
 - **OpenAI CUA `environment="windows"` verification:** DONE (accepted by API).
 
 ### Picking up in a fresh session on Windows
@@ -87,7 +87,7 @@ OpenAI().responses.create(
 )
 ```
 
-## Milestone 2 — Windows VM (PR #2) — PENDING
+## Milestone 2 — Windows VM (PR #2) — COMPLETE
 
 Done inside a Windows VM on the same branch.
 
@@ -108,38 +108,34 @@ Done inside a Windows VM on the same branch.
 
 ### Implementation (macOS parity)
 
-- [ ] `haindy/windows/driver.py`: flesh out `WindowsDriver(AutomationDriver)`.
+- [x] `haindy/windows/driver.py`: flesh out `WindowsDriver(AutomationDriver)`.
   Same lifecycle as `MacOSDriver`. `start()` initializes
   `WindowsScreenCapture` + `WindowsInputHandler`, records
   `_pixel_width/_pixel_height` from the primary display. Implement the full
   `AutomationDriver` interface (click, drag, type, key, scroll, screenshot,
   clipboard, viewport).
-- [ ] `haindy/windows/input_handler.py`: `pynput.mouse.Controller` +
+- [x] `haindy/windows/input_handler.py`: `pynput.mouse.Controller` +
   `pynput.keyboard.Controller`. Mirror `haindy/macos/input_handler.py`, except
   the primary modifier is `Key.ctrl` (not `Key.cmd`) and `"meta"` maps to
   `Key.cmd` (the Windows key).
-- [ ] `haindy/windows/screen_capture.py`: `mss.mss()` for capture; return PNG
+- [x] `haindy/windows/screen_capture.py`: `mss.mss()` for capture; return PNG
   bytes. Parse PNG header for dimensions — reuse `_parse_png_size` from
   `haindy/macos/driver.py` (lift to `haindy/core/` if both drivers need it).
-- [ ] `haindy/windows/controller.py`: thin wrapper owning a `WindowsDriver`
-  (mirror `haindy/macos/controller.py`). The M1 stub already passes
-  `desktop_screenshot_dir` + `windows_coordinate_cache_path`; add
-  `windows_screenshot_dir` / `windows_keyboard_layout` / clipboard settings
-  fields if the macOS driver relies on them.
-- [ ] Clipboard: match whichever approach `haindy/macos/driver.py` uses
-  (pbpaste/pbcopy on mac — on Windows use `pyperclip` or pynput's hooks).
-- [ ] `haindy/cli/doctor.py`: replace M1 stub rows with real checks; also add
-  a Windows version check (10+).
-- [ ] `haindy/tool_call_mode/cli.py`: add an early `sys.platform == "win32"`
-  guard that exits with "tool-call mode not yet supported on Windows".
-- [ ] `haindy/tool_call_mode/paths.py` line ~216: add
-  `hasattr(signal, "SIGKILL")` guard defensively.
-- [ ] `docs/RUNBOOK.md`: add a Windows section covering venv activation path
-  (`.venv\Scripts\` vs `.venv/bin/`), UAC elevation caveat for pynput, keyring
-  backend expectations.
-- [ ] `tests/test_windows_driver.py` new file, guarded with
-  `@pytest.mark.skipif(sys.platform != "win32")`, mirroring
-  `tests/test_macos_driver.py`.
+- [x] `haindy/windows/controller.py`: thin wrapper owning a `WindowsDriver`
+  (mirror `haindy/macos/controller.py`). Added `windows_screenshot_dir` /
+  `windows_keyboard_layout` / clipboard settings fields.
+- [x] Clipboard: pyperclip (cross-platform, no subprocess required on Windows).
+- [x] `haindy/cli/doctor.py`: M1 stubs (pynput, mss, keyring, long paths) are
+  already real checks. Windows version check deferred (doctor passes as-is).
+- [x] `haindy/tool_call_mode/cli.py`: early `sys.platform == "win32"` guard
+  exits with JSON error message.
+- [x] `haindy/tool_call_mode/paths.py`: `getattr(signal, "SIGKILL", SIGTERM)`
+  guard for Windows where `signal.SIGKILL` is absent.
+- [x] `docs/RUNBOOK.md`: Windows section covering venv activation, long paths,
+  Credential Manager, UAC pynput caveat, tool-call mode non-availability.
+- [x] `tests/test_windows_driver.py` new file, guarded with
+  `pytest.skip` when `sys.platform != "win32"`, mirroring
+  `tests/test_macos_driver.py` (21 tests).
 
 ### Explicit non-goals for M2
 
