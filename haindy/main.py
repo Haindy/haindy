@@ -720,7 +720,7 @@ async def async_main(args: list[str] | None = None) -> int:
     if command == "setup":
         from haindy.cli.setup_wizard import run_setup_wizard
 
-        return run_setup_wizard(non_interactive=parsed_args.non_interactive)
+        return await run_setup_wizard(non_interactive=parsed_args.non_interactive)
 
     if command == "doctor":
         from haindy.cli.doctor import run_doctor

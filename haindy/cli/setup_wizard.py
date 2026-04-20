@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.resources
 import shutil
 import sys
@@ -55,19 +54,19 @@ def _install_skills(cli_name: str, setup_target: str, main_target: str) -> None:
         )
 
 
-def run_setup_wizard(non_interactive: bool = False) -> int:
+async def run_setup_wizard(non_interactive: bool = False) -> int:
     """Run the interactive (or non-interactive) first-time setup wizard.
 
     Returns 0 on success, 1 if setup is incomplete.
     """
     try:
-        return _wizard(non_interactive=non_interactive)
+        return await _wizard(non_interactive=non_interactive)
     except KeyboardInterrupt:
         _console.print("\nSetup interrupted. Run 'haindy setup' to resume.")
         return 0
 
 
-def _wizard(non_interactive: bool) -> int:
+async def _wizard(non_interactive: bool) -> int:
     _console.rule("[bold cyan]Haindy Setup Wizard[/bold cyan]")
     _console.print(
         "\nThis wizard will help you configure Haindy. You will need:\n"
@@ -140,7 +139,7 @@ def _wizard(non_interactive: bool) -> int:
                 continue
 
             if Confirm.ask(f"Set up {provider} credentials now?", default=True):
-                asyncio.run(handle_auth_login(provider))
+                await handle_auth_login(provider)
 
     _console.rule("Step 5: Provider Selection")
     try:
