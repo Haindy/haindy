@@ -266,7 +266,10 @@ def test_installed_haindy_help_smoke() -> None:
 
 
 def _haindy_cli_path() -> Path:
-    cli_path = Path(sys.executable).with_name(public_cli_program_name())
+    name = public_cli_program_name()
+    cli_path = Path(sys.executable).with_name(name)
+    if not cli_path.exists() and sys.platform == "win32":
+        cli_path = cli_path.with_suffix(".exe")
     assert cli_path.exists(), (
         f"Expected installed console script at {cli_path}. "
         'Run `.venv/bin/pip install -e ".[dev]"` before tests.'
