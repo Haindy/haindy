@@ -59,7 +59,8 @@ _JSON_TO_FIELD: dict[str, str] = {
     "desktop.keyboard_key_delay_ms": "desktop_keyboard_key_delay_ms",
     "desktop.enable_resolution_switch": "desktop_enable_resolution_switch",
     "desktop.screenshot_dir": "desktop_screenshot_dir",
-    "desktop.coordinate_cache_path": "desktop_coordinate_cache_path",
+    "linux.coordinate_cache_path": "linux_coordinate_cache_path",
+    "windows.coordinate_cache_path": "windows_coordinate_cache_path",
     "desktop.display": "desktop_display",
     "desktop.clipboard_timeout_seconds": "desktop_clipboard_timeout_seconds",
     "desktop.clipboard_hold_seconds": "desktop_clipboard_hold_seconds",
@@ -136,6 +137,7 @@ _LEGACY_JSON_TO_FIELD: dict[str, str] = {
     "agent.anthropic_model": "anthropic_model",
     "agent.google_model": "google_model",
     "computer_use.model": "computer_use_model",
+    "desktop.coordinate_cache_path": "linux_coordinate_cache_path",
 }
 
 # Reverse mapping: Settings field name -> "section.json_key"

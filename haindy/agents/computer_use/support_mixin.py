@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sys
 from collections import deque
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
@@ -1086,15 +1087,39 @@ class ComputerUseSupportMixin:
             )
             return ios_context + goal
 
+        if sys.platform == "darwin":
+            host_context = (
+                "IMPORTANT: You are controlling a macOS desktop with the standard Dock and menu bar. "
+                "The screenshot shows native applications (Safari, Chrome, terminals, Slack, etc.). "
+                "Do NOT use built-in browser navigation commands like open_web_browser/navigate/search/go_back/go_forward; "
+                "interact by clicking, typing, scrolling, or key combinations within the existing windows.\n\n"
+                "SWITCHING APPLICATIONS: The Dock (bottom of the screen by default) has application icons. "
+                "To switch apps, PREFER clicking the app icon in the Dock over using cmd+tab. "
+                "The primary modifier on macOS is cmd (not ctrl).\n\n"
+            )
+        elif sys.platform == "win32":
+            host_context = (
+                "IMPORTANT: You are controlling a Windows 11 desktop with the taskbar and Start menu. "
+                "The screenshot shows native applications (Edge, Chrome, File Explorer, terminals, etc.). "
+                "Do NOT use built-in browser navigation commands like open_web_browser/navigate/search/go_back/go_forward; "
+                "interact by clicking, typing, scrolling, or key combinations within the existing windows.\n\n"
+                "SWITCHING APPLICATIONS: The taskbar (bottom of the screen by default) has pinned and running application icons. "
+                "To switch apps, PREFER clicking the app icon in the taskbar over using alt+tab. "
+                "The primary modifier on Windows is ctrl; the Windows key opens the Start menu.\n\n"
+            )
+        else:
+            host_context = (
+                "IMPORTANT: You are controlling an UBUNTU LINUX desktop with GNOME shell. "
+                "The screenshot shows native applications (Slack, Firefox, terminals, etc.). "
+                "Do NOT use built-in browser navigation commands like open_web_browser/navigate/search/go_back/go_forward; "
+                "interact by clicking, typing, scrolling, or key combinations within the existing windows.\n\n"
+                "SWITCHING APPLICATIONS: The left edge of the screen has the Ubuntu dock/sidebar with application icons. "
+                "To switch apps, PREFER clicking the app icon in the sidebar over using alt+tab. "
+                "Look for Slack (purple icon) or Firefox (orange/red icon) in the sidebar.\n\n"
+            )
+
         desktop_context = (
-            "IMPORTANT: You are controlling an UBUNTU LINUX desktop with GNOME shell. "
-            "The screenshot shows native applications (Slack, Firefox, terminals, etc.). "
-            "Do NOT use built-in browser navigation commands like open_web_browser/navigate/search/go_back/go_forward; "
-            "interact by clicking, typing, scrolling, or key combinations within the existing windows.\n\n"
-            "SWITCHING APPLICATIONS: The left edge of the screen has the Ubuntu dock/sidebar with application icons. "
-            "To switch apps, PREFER clicking the app icon in the sidebar over using alt+tab. "
-            "Look for Slack (purple icon) or Firefox (orange/red icon) in the sidebar.\n\n"
-            "AVAILABLE ACTIONS:\n"
+            host_context + "AVAILABLE ACTIONS:\n"
             "- click_at: Click at screen coordinates (button='right' for context clicks, click_count=2 for double clicks)\n"
             "- type_text_at: Clear the field and type fresh text (press Enter only if instructed)\n"
             "- append_text_at: Add text to an already-populated field without clearing it\n"

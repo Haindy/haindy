@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from haindy.desktop.resolution_manager import ResolutionManager
+from haindy.linux.resolution_manager import ResolutionManager
 from haindy.runtime.evidence import EvidenceManager
 
 logger = logging.getLogger(__name__)

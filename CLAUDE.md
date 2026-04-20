@@ -123,7 +123,9 @@ Report Generation         HTML report + JSONL execution log
 | `haindy/agents/` | All agent implementations |
 | `haindy/agents/computer_use/session.py` | Multi-provider computer-use orchestrator |
 | `haindy/orchestration/coordinator.py` | Multi-agent workflow coordinator |
-| `haindy/desktop/` | Linux/X11 automation (uinput, ffmpeg, xrandr) |
+| `haindy/linux/` | Linux/X11 automation (uinput, ffmpeg, xrandr) |
+| `haindy/macos/` | macOS automation (pynput + mss) |
+| `haindy/windows/` | Windows automation (pynput + mss; stub in M1, real impl in M2) |
 | `haindy/mobile/` | Android ADB automation |
 | `haindy/runtime/` | Execution context, caches, replay |
 | `haindy/config/settings.py` | Pydantic settings, all env vars |

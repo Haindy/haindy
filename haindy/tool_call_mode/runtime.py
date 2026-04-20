@@ -23,7 +23,7 @@ from haindy.agents.test_runner import TestRunner
 from haindy.config.settings import Settings, get_settings
 from haindy.core.enhanced_types import EnhancedActionResult
 from haindy.core.types import StepResult, TestCaseResult, TestState, TestStatus
-from haindy.desktop.controller import DesktopController
+from haindy.linux.controller import DesktopController
 from haindy.mobile.controller import MobileController
 from haindy.mobile.ios_controller import IOSController
 from haindy.monitoring.debug_logger import initialize_debug_logger
@@ -1227,6 +1227,10 @@ class ToolCallSessionRuntime:
             from haindy.macos.controller import MacOSController
 
             return MacOSController()  # type: ignore[return-value]
+        if sys.platform == "win32":
+            from haindy.windows.controller import WindowsController
+
+            return WindowsController()  # type: ignore[return-value]
         return DesktopController()
 
     def _tool_context(self, command_name: str) -> dict[str, Any]:

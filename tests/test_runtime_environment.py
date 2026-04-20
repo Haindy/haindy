@@ -94,12 +94,12 @@ def test_resolve_runtime_environment_from_context_uses_target_type_for_browser()
 
 def test_coordinate_cache_path_for_environment_uses_mobile_path_for_mobile() -> None:
     settings = SimpleNamespace(
-        desktop_coordinate_cache_path=Path("data/desktop_cache/coordinates.json"),
+        linux_coordinate_cache_path=Path("data/linux_cache/coordinates.json"),
         mobile_coordinate_cache_path=Path("data/mobile_cache/coordinates.json"),
     )
 
     assert coordinate_cache_path_for_environment(settings, "browser") == Path(
-        "data/desktop_cache/coordinates.json"
+        "data/linux_cache/coordinates.json"
     )
     assert coordinate_cache_path_for_environment(settings, "android") == Path(
         "data/mobile_cache/coordinates.json"

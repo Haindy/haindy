@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from haindy.desktop.driver import DesktopDriver
+from haindy.linux.driver import DesktopDriver
 
 
 class DummyVirtualInput:
@@ -40,7 +40,7 @@ async def test_desktop_driver_smoke(monkeypatch, tmp_path: Path) -> None:
     def _virtual_input_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
         return dummy_input
 
-    monkeypatch.setattr("haindy.desktop.driver.VirtualInput", _virtual_input_factory)
+    monkeypatch.setattr("haindy.linux.driver.VirtualInput", _virtual_input_factory)
 
     driver = DesktopDriver(
         screenshot_dir=tmp_path / "shots",
@@ -74,7 +74,7 @@ async def test_desktop_driver_start_is_idempotent(monkeypatch, tmp_path: Path) -
         created["count"] += 1
         return dummy_input
 
-    monkeypatch.setattr("haindy.desktop.driver.VirtualInput", _virtual_input_factory)
+    monkeypatch.setattr("haindy.linux.driver.VirtualInput", _virtual_input_factory)
 
     driver = DesktopDriver(
         screenshot_dir=tmp_path / "shots",
@@ -103,7 +103,7 @@ async def test_desktop_driver_scroll_rejects_invalid_direction(
     def _virtual_input_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
         return dummy_input
 
-    monkeypatch.setattr("haindy.desktop.driver.VirtualInput", _virtual_input_factory)
+    monkeypatch.setattr("haindy.linux.driver.VirtualInput", _virtual_input_factory)
     driver = DesktopDriver(
         screenshot_dir=tmp_path / "shots",
         cache_path=tmp_path / "coords.json",
@@ -147,7 +147,7 @@ async def test_desktop_driver_restores_resolution_when_start_fails(
     def _raise_virtual_input(*args, **kwargs):  # type: ignore[no-untyped-def]
         raise RuntimeError("virtual input failed")
 
-    monkeypatch.setattr("haindy.desktop.driver.VirtualInput", _raise_virtual_input)
+    monkeypatch.setattr("haindy.linux.driver.VirtualInput", _raise_virtual_input)
 
     with pytest.raises(RuntimeError, match="virtual input failed"):
         await driver.start()

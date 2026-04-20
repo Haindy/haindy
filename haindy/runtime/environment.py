@@ -17,6 +17,9 @@ _RUNTIME_ENV_ALIASES: dict[str, RuntimeEnvironmentName] = {
     "linux": "desktop",
     "macos": "desktop",
     "mac": "desktop",
+    "windows": "desktop",
+    "win": "desktop",
+    "win32": "desktop",
     "os": "desktop",
     "system": "desktop",
     "browser": "browser",
@@ -96,7 +99,9 @@ class RuntimeEnvironmentSpec:
             return "mobile_coordinate_cache_path"
         if self.name == "desktop" and sys.platform == "darwin":
             return "macos_coordinate_cache_path"
-        return "desktop_coordinate_cache_path"
+        if self.name == "desktop" and sys.platform == "win32":
+            return "windows_coordinate_cache_path"
+        return "linux_coordinate_cache_path"
 
     @property
     def openai_computer_environment(self) -> str:
@@ -106,6 +111,10 @@ class RuntimeEnvironmentSpec:
             return "mac"
         if self.name == "desktop" and sys.platform == "darwin":
             return "mac"
+        if self.name == "desktop" and sys.platform == "win32":
+            # TODO(windows-support): verify OpenAI CUA accepts environment="windows"
+            # before merging M1; if rejected, fall back to "linux".
+            return "windows"
         return "linux"
 
     @property

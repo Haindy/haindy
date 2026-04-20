@@ -14,6 +14,8 @@ from openai import AsyncOpenAI
 
 from haindy.agents.computer_use import ComputerUseExecutionError, ComputerUseSession
 from haindy.config.settings import get_settings
+from haindy.core.coordinate_cache import CoordinateCache
+from haindy.core.driver_actions import DriverActionError, normalize_driver_action
 from haindy.core.enhanced_types import (
     AIAnalysis,
     ComputerToolTurn,
@@ -30,8 +32,6 @@ from haindy.core.types import (
     TestStatus,
     TestStep,
 )
-from haindy.desktop.cache import CoordinateCache
-from haindy.desktop.execution_replay import DriverActionError, normalize_driver_action
 from haindy.monitoring.debug_logger import get_debug_logger
 from haindy.monitoring.logger import get_logger
 from haindy.runtime.environment import (
@@ -84,7 +84,7 @@ class ActionAgent:
 
         settings = get_settings()
         self.settings = settings
-        self._coordinate_cache = CoordinateCache(settings.desktop_coordinate_cache_path)
+        self._coordinate_cache = CoordinateCache(settings.linux_coordinate_cache_path)
         self._computer_use_model = getattr(settings, "computer_use_model", None)
         self._openai_client: AsyncOpenAI | None = None
         self._execution_lock: Lock | None = None

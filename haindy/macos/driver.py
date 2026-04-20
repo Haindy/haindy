@@ -8,8 +8,8 @@ import struct
 from asyncio import subprocess as aio_subprocess
 from pathlib import Path
 
+from haindy.core.coordinate_cache import CoordinateCache
 from haindy.core.interfaces import AutomationDriver
-from haindy.desktop.cache import CoordinateCache
 from haindy.macos.input_handler import MacOSInputHandler
 from haindy.macos.screen_capture import MacOSScreenCapture
 

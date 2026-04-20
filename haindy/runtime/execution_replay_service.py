@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from haindy.core.coordinate_cache import CoordinateCache
+from haindy.core.driver_actions import replay_driver_actions
 from haindy.core.types import StepResult, TestCase, TestStatus, TestStep
-from haindy.desktop.cache import CoordinateCache
-from haindy.desktop.execution_replay import replay_driver_actions
 from haindy.monitoring.logger import get_logger
 from haindy.runtime.environment import (
     coordinate_cache_path_for_environment,

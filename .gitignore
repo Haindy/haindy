@@ -181,5 +181,6 @@ secrets/
 
 # Internal docs (kept locally, not published)
 docs/prompt.md
-docs/plans/
+docs/plans/*
+!docs/plans/windows-support.md
 docs/issues/

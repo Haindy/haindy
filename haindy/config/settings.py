@@ -77,7 +77,8 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "desktop_keyboard_key_delay_ms": "HAINDY_DESKTOP_KEY_DELAY_MS",
     "desktop_enable_resolution_switch": "HAINDY_DESKTOP_ENABLE_RESOLUTION_SWITCH",
     "desktop_screenshot_dir": "HAINDY_DESKTOP_SCREENSHOT_DIR",
-    "desktop_coordinate_cache_path": "HAINDY_DESKTOP_COORDINATE_CACHE_PATH",
+    "linux_coordinate_cache_path": "HAINDY_LINUX_COORDINATE_CACHE_PATH",
+    "windows_coordinate_cache_path": "HAINDY_WINDOWS_COORDINATE_CACHE_PATH",
     "task_plan_cache_path": "HAINDY_TASK_PLAN_CACHE_PATH",
     "enable_planning_cache": "HAINDY_ENABLE_PLANNING_CACHE",
     "planning_cache_path": "HAINDY_PLANNING_CACHE_PATH",
@@ -455,9 +456,13 @@ class Settings(BaseModel):
         default=Path("data/screenshots/desktop"),
         description="Directory for desktop screenshots",
     )
-    desktop_coordinate_cache_path: Path = Field(
-        default=Path("data/desktop_cache/coordinates.json"),
-        description="Coordinate cache path for desktop actions",
+    linux_coordinate_cache_path: Path = Field(
+        default=Path("data/linux_cache/coordinates.json"),
+        description="Coordinate cache path for Linux desktop actions",
+    )
+    windows_coordinate_cache_path: Path = Field(
+        default=Path("data/windows_cache/coordinates.json"),
+        description="Coordinate cache path for Windows desktop actions",
     )
     task_plan_cache_path: Path = Field(
         default=Path("data/task_plan_cache.json"),
@@ -951,7 +956,9 @@ class Settings(BaseModel):
             self.ios_screenshot_dir,
             self.cache_dir,
             self.haindy_home,
-            self.desktop_coordinate_cache_path.parent,
+            self.linux_coordinate_cache_path.parent,
+            self.windows_coordinate_cache_path.parent,
+            self.macos_coordinate_cache_path.parent,
             self.mobile_coordinate_cache_path.parent,
             self.ios_coordinate_cache_path.parent,
             self.task_plan_cache_path.parent,

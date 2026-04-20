@@ -1,4 +1,4 @@
-"""Append-only coordinate cache for desktop automation."""
+"""Append-only coordinate cache shared by all desktop automation drivers."""
 
 from __future__ import annotations
 

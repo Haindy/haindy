@@ -206,8 +206,9 @@ pytest                # tests
 | `haindy/tool_call_mode/` | Tool-call CLI, daemon, IPC, session state |
 | `haindy/agents/computer_use/` | Multi-provider computer-use session orchestrator |
 | `haindy/agents/` | Scope triage, test planner, situational, action, and test runner agents |
-| `haindy/desktop/` | Linux/X11 automation (uinput, xdotool, ffmpeg) |
+| `haindy/linux/` | Linux/X11 automation (uinput, xdotool, ffmpeg) |
 | `haindy/macos/` | macOS automation (pynput, mss) |
+| `haindy/windows/` | Windows automation (pynput, mss; in progress) |
 | `haindy/mobile/` | Android (ADB) and iOS (idb) automation |
 | `haindy/config/` | Settings, env vars, settings file loader |
 | `haindy/orchestration/` | Multi-agent workflow coordination |

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from haindy.config.settings import get_settings
-from haindy.desktop.driver import DesktopDriver
+from haindy.linux.driver import DesktopDriver
 from haindy.monitoring.logger import get_logger
 
 
@@ -17,7 +17,7 @@ class DesktopController:
         self.logger = get_logger("desktop.controller")
         self.driver = DesktopDriver(
             screenshot_dir=self.settings.desktop_screenshot_dir,
-            cache_path=self.settings.desktop_coordinate_cache_path,
+            cache_path=self.settings.linux_coordinate_cache_path,
             prefer_resolution=self.settings.desktop_prefer_resolution,
             enable_resolution_switch=self.settings.desktop_enable_resolution_switch,
             display=self.settings.desktop_display,

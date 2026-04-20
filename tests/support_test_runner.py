@@ -145,7 +145,7 @@ def _patch_runner_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         model_log_path=tmp_path / "model_calls.jsonl",
         actions_computer_tool_stabilization_wait_ms=500,
         actions_computer_tool_action_timeout_seconds=7.0,
-        desktop_coordinate_cache_path=tmp_path / "desktop_coordinates.json",
+        linux_coordinate_cache_path=tmp_path / "linux_coordinates.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coordinates.json",
         desktop_keyboard_layout="us",
         mobile_keyboard_layout="us",
