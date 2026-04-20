@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -130,11 +131,30 @@ def is_process_alive(pid: int | None) -> bool:
 
     if pid is None or pid <= 0:
         return False
+    if sys.platform == "win32":
+        return _is_process_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except OSError:
         return False
     return True
+
+
+def _is_process_alive_windows(pid: int) -> bool:
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        return bool(ok) and exit_code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def load_session_metadata(session_id: str) -> SessionMetadata | None:
