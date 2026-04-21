@@ -319,13 +319,13 @@ class TestMainFlow:
         self,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        with patch("haindy.main.package_version", return_value="0.4.0"):
+        with patch("haindy.main.package_version", return_value="9.9.9"):
             result = await async_main(["version"])
 
         captured = capsys.readouterr()
         assert result == 0
         assert "Version: " in captured.out
-        assert "0.4.0" in captured.out
+        assert "9.9.9" in captured.out
 
     @pytest.mark.asyncio
     async def test_tool_call_cli_commands_dispatch_through_unified_parser(
