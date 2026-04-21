@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from haindy.desktop.screen_capture import ScreenCapture
+from haindy.linux.screen_capture import ScreenCapture
 
 
 class _CompletedProcess:
@@ -16,7 +16,7 @@ class _CompletedProcess:
 def test_screen_capture_unique_filenames(monkeypatch, tmp_path: Path) -> None:
     resolution_manager = SimpleNamespace(viewport_size=lambda: (800, 600))
     monkeypatch.setattr(
-        "haindy.desktop.screen_capture.shutil.which",
+        "haindy.linux.screen_capture.shutil.which",
         lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None,
     )
     capture = ScreenCapture(
@@ -27,7 +27,7 @@ def test_screen_capture_unique_filenames(monkeypatch, tmp_path: Path) -> None:
     )
 
     monkeypatch.setattr(
-        "haindy.desktop.screen_capture.subprocess.run",
+        "haindy.linux.screen_capture.subprocess.run",
         lambda *args, **kwargs: _CompletedProcess(stdout=b"png"),
     )
 
@@ -42,7 +42,7 @@ def test_screen_capture_unique_filenames(monkeypatch, tmp_path: Path) -> None:
 def test_screen_capture_applies_retention(monkeypatch, tmp_path: Path) -> None:
     resolution_manager = SimpleNamespace(viewport_size=lambda: (800, 600))
     monkeypatch.setattr(
-        "haindy.desktop.screen_capture.shutil.which",
+        "haindy.linux.screen_capture.shutil.which",
         lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None,
     )
     capture = ScreenCapture(
@@ -53,7 +53,7 @@ def test_screen_capture_applies_retention(monkeypatch, tmp_path: Path) -> None:
     )
 
     monkeypatch.setattr(
-        "haindy.desktop.screen_capture.subprocess.run",
+        "haindy.linux.screen_capture.subprocess.run",
         lambda *args, **kwargs: _CompletedProcess(stdout=b"png"),
     )
 
@@ -66,7 +66,7 @@ def test_screen_capture_applies_retention(monkeypatch, tmp_path: Path) -> None:
 def test_screen_capture_falls_back_to_import(monkeypatch, tmp_path: Path) -> None:
     resolution_manager = SimpleNamespace(viewport_size=lambda: (800, 600))
     monkeypatch.setattr(
-        "haindy.desktop.screen_capture.shutil.which",
+        "haindy.linux.screen_capture.shutil.which",
         lambda name: (
             "/usr/bin/ffmpeg"
             if name == "ffmpeg"
@@ -84,7 +84,7 @@ def test_screen_capture_falls_back_to_import(monkeypatch, tmp_path: Path) -> Non
             )
         return _CompletedProcess(stdout=b"png-data")
 
-    monkeypatch.setattr("haindy.desktop.screen_capture.subprocess.run", _fake_run)
+    monkeypatch.setattr("haindy.linux.screen_capture.subprocess.run", _fake_run)
 
     capture = ScreenCapture(
         resolution_manager=resolution_manager,
@@ -102,7 +102,7 @@ def test_screen_capture_falls_back_to_import(monkeypatch, tmp_path: Path) -> Non
 
 def test_screen_capture_raises_when_no_backend(monkeypatch, tmp_path: Path) -> None:
     resolution_manager = SimpleNamespace(viewport_size=lambda: (800, 600))
-    monkeypatch.setattr("haindy.desktop.screen_capture.shutil.which", lambda name: None)
+    monkeypatch.setattr("haindy.linux.screen_capture.shutil.which", lambda name: None)
     capture = ScreenCapture(
         resolution_manager=resolution_manager,
         screenshot_dir=tmp_path / "shots",

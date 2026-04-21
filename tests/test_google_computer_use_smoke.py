@@ -72,7 +72,7 @@ async def test_google_computer_use_provider_smoke(tmp_path: Path) -> None:
         vertex_location="us-central1",
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
@@ -131,7 +131,7 @@ async def test_google_observe_only_policy_violation_fails_immediately(
         vertex_location="us-central1",
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
@@ -197,7 +197,7 @@ async def test_google_computer_use_reports_max_turn_failure(tmp_path: Path) -> N
         vertex_location="us-central1",
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
@@ -262,7 +262,7 @@ async def test_google_executes_duplicate_name_batch_with_ids(tmp_path: Path) -> 
         vertex_location="us-central1",
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
@@ -355,7 +355,7 @@ async def test_google_duplicate_name_batch_without_ids_reasks_then_executes_sing
         vertex_location="us-central1",
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )
@@ -456,7 +456,7 @@ async def test_google_duplicate_name_batch_without_ids_fails_after_single_retry(
         vertex_location="us-central1",
         cu_safety_policy="auto_approve",
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )

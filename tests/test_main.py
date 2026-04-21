@@ -192,13 +192,42 @@ class TestFirstRunGate:
     @pytest.mark.asyncio
     async def test_gate_bypassed_for_setup(self, tmp_path: Path) -> None:
         mock_module = MagicMock()
-        mock_module.run_setup_wizard = lambda non_interactive=False: 0
+        mock_module.run_setup_wizard = AsyncMock(return_value=0)
         with (
             patch("haindy.main._SETUP_MARKER", tmp_path / "does_not_exist"),
             patch.dict("sys.modules", {"haindy.cli.setup_wizard": mock_module}),
         ):
             result = await async_main(["setup"])
         assert result == 0
+        mock_module.run_setup_wizard.assert_awaited_once_with(non_interactive=False)
+
+
+@pytest.mark.asyncio
+async def test_setup_wizard_awaits_auth_login_instead_of_nesting_event_loop() -> None:
+    from haindy.cli import setup_wizard
+
+    prompts = iter([True, False, False])
+
+    with (
+        patch.object(setup_wizard, "_install_skills"),
+        patch.object(setup_wizard, "run_doctor", side_effect=[1, 1]),
+        patch.object(
+            setup_wizard.Confirm,
+            "ask",
+            side_effect=lambda *args, **kwargs: next(prompts),
+        ),
+        patch("haindy.auth.credentials.get_api_key", return_value=""),
+        patch(
+            "haindy.cli.auth_commands.handle_auth_login", new=AsyncMock(return_value=0)
+        ) as mock_login,
+        patch("haindy.cli.setup_wizard.shutil.which", return_value=None),
+        patch("haindy.cli.setup_wizard.write_settings_file"),
+        patch("haindy.cli.setup_wizard.Path.touch"),
+    ):
+        result = await setup_wizard.run_setup_wizard()
+
+    assert result == 1
+    mock_login.assert_awaited_once_with("openai")
 
 
 class TestMainFlow:

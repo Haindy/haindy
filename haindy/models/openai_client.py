@@ -325,7 +325,7 @@ class OpenAIClient:
 
         text_config = self._map_response_format_to_text_config(response_format)
         if text_config:
-            kwargs["text"] = text_config
+            kwargs["text"] = {"format": text_config}
 
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
@@ -418,7 +418,7 @@ class OpenAIClient:
 
         text_config = self._map_response_format_to_text_config(response_format)
         if text_config:
-            kwargs["text"] = text_config
+            kwargs["text"] = {"format": text_config}
 
         if reasoning_level:
             kwargs["reasoning"] = {"effort": reasoning_level}
@@ -755,24 +755,20 @@ class OpenAIClient:
 
         format_type = response_format.get("type")
         if format_type == "json_object":
-            return {"format": {"type": "json_object"}}
+            return {"type": "json_object"}
 
         if format_type == "json_schema":
             schema_payload = extract_json_schema_definition(response_format)
             if schema_payload:
                 return {
-                    "format": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": schema_payload["name"],
-                            "schema": schema_payload["schema"],
-                            "strict": schema_payload["strict"],
-                        },
-                    }
+                    "type": "json_schema",
+                    "name": schema_payload["name"],
+                    "schema": schema_payload["schema"],
+                    "strict": schema_payload["strict"],
                 }
 
         if format_type == "text":
-            return {"format": {"type": "text"}}
+            return {"type": "text"}
 
         return None
 

@@ -30,7 +30,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "openai>=2.23.0",
+    "openai>=2.32.0",
     "google-genai>=1.64.0",
     "anthropic>=0.84.0",
     "cryptography>=46.0.5",
@@ -46,8 +46,8 @@ dependencies = [
     "tiktoken>=0.12.0",
     "evdev>=1.9.3; sys_platform == 'linux'",
     "fb-idb>=1.1.7; sys_platform == 'darwin'",
-    "pynput>=1.7.7; sys_platform == 'darwin'",
-    "mss>=9.0.2; sys_platform == 'darwin'",
+    "pynput>=1.7.7; sys_platform == 'darwin' or sys_platform == 'win32'",
+    "mss>=9.0.2; sys_platform == 'darwin' or sys_platform == 'win32'",
     "keyring>=25.0.0",
 ]
 

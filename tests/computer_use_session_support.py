@@ -53,7 +53,7 @@ def session_settings(tmp_path):
         cu_patch_max_area_ratio=0.35,
         cu_patch_margin_ratio=0.12,
         model_log_path=tmp_path / "model_logs" / "model_calls.jsonl",
-        desktop_coordinate_cache_path=tmp_path / "coords.json",
+        linux_coordinate_cache_path=tmp_path / "coords.json",
         mobile_coordinate_cache_path=tmp_path / "mobile_coords.json",
         max_screenshots=12,
     )

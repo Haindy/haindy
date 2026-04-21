@@ -11,6 +11,7 @@ import pytest
 from haindy.auth import CODEX_SYSTEM_INSTRUCTIONS
 from haindy.auth.manager import ResolvedOpenAIAuth
 from haindy.models.openai_client import OpenAIClient, ResponseStreamObserver
+from haindy.models.structured_output import build_json_schema_response_format
 
 
 class RecordingObserver(ResponseStreamObserver):
@@ -319,6 +320,123 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
         if isinstance(content, dict) and isinstance(content.get("text"), str)
     ]
     assert any("json" in text.lower() for text in input_texts)
+    assert fake_responses.last_kwargs["text"] == {"format": {"type": "json_object"}}
+
+
+@pytest.mark.asyncio
+async def test_call_responses_api_uses_json_schema_text_format(monkeypatch) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text='{"decision":"continue"}',
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    fake_responses = FakeCreateResponses(final_response=final_response)
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(responses=fake_responses)
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="dummy",
+        openai_request_timeout_seconds=30,
+    )
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+
+    response_format = build_json_schema_response_format(
+        "haindy_awareness_assessment_v1",
+        {
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+            "required": ["decision"],
+            "additionalProperties": False,
+        },
+    )
+
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
+    result = await client._call_responses_api(
+        final_messages=[{"role": "user", "content": "Assess context."}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=response_format,
+        reasoning_level="none",
+        system_prompt="You are a strict evaluator.",
+    )
+
+    assert result["content"] == {"decision": "continue"}
+    assert fake_responses.last_kwargs is not None
+    assert fake_responses.last_kwargs["text"] == {
+        "format": {
+            "type": "json_schema",
+            "name": "haindy_awareness_assessment_v1",
+            "schema": response_format["json_schema"]["schema"],
+            "strict": True,
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_call_responses_api_streaming_uses_json_schema_text_format(
+    monkeypatch,
+) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text='{"decision":"continue"}',
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    events = [SimpleNamespace(type="response.completed", response=final_response)]
+    fake_responses = FakeResponses(events=events, final_response=final_response)
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="dummy",
+        openai_request_timeout_seconds=30,
+    )
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+
+    response_format = build_json_schema_response_format(
+        "haindy_awareness_assessment_v1",
+        {
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+            "required": ["decision"],
+            "additionalProperties": False,
+        },
+    )
+
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
+    result = await client._call_responses_api_streaming(
+        final_messages=[{"role": "user", "content": "Assess context."}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=response_format,
+        reasoning_level="none",
+        system_prompt="You are a strict evaluator.",
+        observer=None,
+    )
+
+    assert result["content"] == {"decision": "continue"}
+    assert fake_responses.last_kwargs is not None
+    assert fake_responses.last_kwargs["text"] == {
+        "format": {
+            "type": "json_schema",
+            "name": "haindy_awareness_assessment_v1",
+            "schema": response_format["json_schema"]["schema"],
+            "strict": True,
+        }
+    }
 
 
 @pytest.mark.asyncio

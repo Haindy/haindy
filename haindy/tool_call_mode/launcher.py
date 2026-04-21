@@ -19,10 +19,15 @@ class ToolCallDaemonLaunchError(RuntimeError):
 
 @dataclass(frozen=True)
 class ToolCallDaemonLaunch:
-    """Startup handle returned to the caller after daemon launch."""
+    """Startup handle returned to the caller after daemon launch.
+
+    On POSIX, ``readiness_fd`` is a pipe read-end that the daemon writes
+    a single byte to when it is accepting connections.  On Windows it is
+    ``None``; the caller polls the ``daemon.port`` file instead.
+    """
 
     command: tuple[str, ...]
-    readiness_fd: int
+    readiness_fd: int | None
 
 
 def public_cli_program_name() -> str:
@@ -90,13 +95,6 @@ def launch_tool_call_daemon(
 ) -> ToolCallDaemonLaunch:
     """Launch the hidden tool-call daemon as a detached grandchild process."""
 
-    if not hasattr(os, "fork"):
-        raise ToolCallDaemonLaunchError(
-            "Tool-call daemonization requires POSIX fork support."
-        )
-
-    read_fd, write_fd = os.pipe()
-    os.set_inheritable(write_fd, True)
     command = tuple(
         build_tool_call_daemon_command(
             session_id=session_id,
@@ -110,6 +108,12 @@ def launch_tool_call_daemon(
         )
     )
     child_env = dict(env or os.environ)
+
+    if sys.platform == "win32":
+        return _launch_windows(command=command, env=child_env)
+
+    read_fd, write_fd = os.pipe()
+    os.set_inheritable(write_fd, True)
     child_env["HAINDY_READINESS_FD"] = str(write_fd)
 
     try:
@@ -121,6 +125,43 @@ def launch_tool_call_daemon(
 
     os.close(write_fd)
     return ToolCallDaemonLaunch(command=command, readiness_fd=read_fd)
+
+
+def _launch_windows(
+    command: Sequence[str],
+    *,
+    env: Mapping[str, str],
+) -> ToolCallDaemonLaunch:
+    """Launch a detached daemon on Windows using subprocess creationflags.
+
+    ``DETACHED_PROCESS`` disconnects the child from the parent console.
+    ``CREATE_NEW_PROCESS_GROUP`` gives it its own signal domain so that
+    Ctrl-C in the parent does not propagate to the daemon.
+    The daemon signals readiness by writing its TCP port to ``daemon.port``;
+    the caller polls for that file instead of reading a readiness fd.
+    """
+
+    import subprocess
+
+    try:
+        subprocess.Popen(
+            list(command),
+            env=dict(env),
+            creationflags=(
+                subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+                | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            ),
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        raise ToolCallDaemonLaunchError(
+            f"Unable to launch the tool-call daemon on Windows: {exc}."
+        ) from exc
+
+    return ToolCallDaemonLaunch(command=tuple(command), readiness_fd=None)
 
 
 def _spawn_detached_process(

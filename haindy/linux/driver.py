@@ -10,11 +10,11 @@ from asyncio import subprocess as aio_subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
+from haindy.core.coordinate_cache import CoordinateCache
 from haindy.core.interfaces import AutomationDriver
-from haindy.desktop.cache import CoordinateCache
-from haindy.desktop.resolution_manager import ResolutionManager
-from haindy.desktop.screen_capture import ScreenCapture
-from haindy.desktop.virtual_input import VirtualInput
+from haindy.linux.resolution_manager import ResolutionManager
+from haindy.linux.screen_capture import ScreenCapture
+from haindy.linux.virtual_input import VirtualInput
 
 logger = logging.getLogger(__name__)
 

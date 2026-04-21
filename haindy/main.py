@@ -31,10 +31,10 @@ from haindy.cli.provider_commands import (
 from haindy.config.settings import Settings, get_settings
 from haindy.config.settings_file import ensure_settings_skeleton
 from haindy.core.types import ScopeTriageResult, TestPlan, TestState
-from haindy.desktop.controller import DesktopController
-from haindy.desktop.screen_recorder import ScreenRecorder, ScreenRecorderError
 from haindy.error_handling import ScopeTriageBlockedError
 from haindy.feedback import build_issue_url, console_feedback_hint
+from haindy.linux.controller import DesktopController
+from haindy.linux.screen_recorder import ScreenRecorder, ScreenRecorderError
 from haindy.mobile.controller import MobileController
 from haindy.mobile.ios_controller import IOSController
 from haindy.monitoring.debug_logger import initialize_debug_logger
@@ -215,7 +215,11 @@ async def run_test(
         should_record = bool(settings.enable_screen_recording)
         if record_override is not None:
             should_record = bool(record_override)
-        if should_record and automation_backend == "desktop":
+        if (
+            should_record
+            and automation_backend == "desktop"
+            and sys.platform == "linux"
+        ):
             screen_recorder = ScreenRecorder(
                 output_dir=settings.screen_recording_output_dir,
                 framerate=settings.screen_recording_framerate,
@@ -400,6 +404,10 @@ async def _create_coordinator_stack(
         from haindy.macos.controller import MacOSController
 
         automation_controller = MacOSController()  # type: ignore[assignment]
+    elif sys.platform == "win32":
+        from haindy.windows.controller import WindowsController
+
+        automation_controller = WindowsController()  # type: ignore[assignment]
     else:
         automation_controller = DesktopController()
     try:
@@ -712,7 +720,7 @@ async def async_main(args: list[str] | None = None) -> int:
     if command == "setup":
         from haindy.cli.setup_wizard import run_setup_wizard
 
-        return run_setup_wizard(non_interactive=parsed_args.non_interactive)
+        return await run_setup_wizard(non_interactive=parsed_args.non_interactive)
 
     if command == "doctor":
         from haindy.cli.doctor import run_doctor

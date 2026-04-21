@@ -127,6 +127,48 @@ def _check_macos_screen_recording() -> tuple[Text, str]:
         )
 
 
+def _check_windows_pynput() -> tuple[Text, str]:
+    if importlib.util.find_spec("pynput") is not None:
+        return _ok("")
+    return _missing("pip install pynput")
+
+
+def _check_windows_mss() -> tuple[Text, str]:
+    if importlib.util.find_spec("mss") is not None:
+        return _ok("")
+    return _missing("pip install mss")
+
+
+def _check_windows_keyring() -> tuple[Text, str]:
+    try:
+        import keyring
+
+        backend = keyring.get_keyring()
+        name = type(backend).__name__
+        if name == "WinVaultKeyring":
+            return _ok(name)
+        return _missing(f"unexpected backend: {name} (expected WinVaultKeyring)")
+    except Exception as exc:
+        return _missing(f"keyring import failed: {exc}")
+
+
+def _check_windows_long_paths() -> tuple[Text, str]:
+    try:
+        import winreg  # type: ignore[import-not-found,unused-ignore]
+
+        key = winreg.OpenKey(  # type: ignore[attr-defined,unused-ignore]
+            winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined,unused-ignore]
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        )
+        value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")  # type: ignore[attr-defined,unused-ignore]
+        winreg.CloseKey(key)  # type: ignore[attr-defined,unused-ignore]
+        if int(value) == 1:
+            return _ok("enabled")
+        return _missing("set LongPathsEnabled=1 via regedit or gpedit")
+    except Exception as exc:
+        return _missing(f"unable to read registry: {exc}")
+
+
 def _check_linux_which(tool: str, install_hint: str = "") -> tuple[Text, str]:
     if shutil.which(tool):
         return _ok("")
@@ -260,6 +302,24 @@ def run_doctor() -> int:
         _add("DISPLAY", status, notes, required=False)
         if status.plain == "MISSING":
             desktop_ok = False
+
+    # Windows desktop deps — stub rows; real checks land in Milestone 2
+    if sys.platform == "win32":
+        status, notes = _check_windows_pynput()
+        _add("pynput", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
+
+        status, notes = _check_windows_mss()
+        _add("mss", status, notes, required=False)
+        if status.plain == "MISSING":
+            desktop_ok = False
+
+        status, notes = _check_windows_keyring()
+        _add("Credential Manager (keyring)", status, notes, required=False)
+
+        status, notes = _check_windows_long_paths()
+        _add("LongPathsEnabled", status, notes, required=False)
 
     # Mobile deps — optional
     if shutil.which("adb"):

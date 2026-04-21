@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -40,6 +41,24 @@ def get_socket_path(session_id: str) -> Path:
     """Return the daemon socket path for one session."""
 
     return get_session_dir(session_id) / "daemon.sock"
+
+
+def get_port_file_path(session_id: str) -> Path:
+    """Return the TCP port file path used by the Windows daemon."""
+
+    return get_session_dir(session_id) / "daemon.port"
+
+
+def read_port(session_id: str) -> int | None:
+    """Read the TCP port written by the Windows daemon, or None if absent."""
+
+    path = get_port_file_path(session_id)
+    if not path.exists():
+        return None
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return None
 
 
 def get_pid_path(session_id: str) -> Path:
@@ -112,11 +131,30 @@ def is_process_alive(pid: int | None) -> bool:
 
     if pid is None or pid <= 0:
         return False
+    if sys.platform == "win32":
+        return _is_process_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except OSError:
         return False
     return True
+
+
+def _is_process_alive_windows(pid: int) -> bool:
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        return bool(ok) and exit_code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def load_session_metadata(session_id: str) -> SessionMetadata | None:
@@ -150,10 +188,13 @@ def cleanup_session_artifacts(session_id: str, *, remove_dir: bool = False) -> N
 
     socket_path = get_socket_path(session_id)
     pid_path = get_pid_path(session_id)
+    port_file_path = get_port_file_path(session_id)
     with contextlib_suppress(FileNotFoundError):
         socket_path.unlink()
     with contextlib_suppress(FileNotFoundError):
         pid_path.unlink()
+    with contextlib_suppress(FileNotFoundError):
+        port_file_path.unlink()
     if remove_dir:
         shutil.rmtree(get_session_dir(session_id), ignore_errors=True)
 
@@ -213,7 +254,7 @@ def terminate_session_process(session_id: str, *, force: bool = False) -> bool:
     if not is_process_alive(pid):
         return False
     assert pid is not None
-    sig = signal.SIGKILL if force else signal.SIGTERM
+    sig = getattr(signal, "SIGKILL", signal.SIGTERM) if force else signal.SIGTERM
     os.kill(pid, sig)
     return True
 

@@ -43,7 +43,7 @@ mypy==1.19.1
 mypy_extensions==1.1.0
 nodeenv==1.10.0
 numpy==2.4.2
-openai==2.23.0
+openai==2.32.0
 packaging==26.0
 pathspec==1.0.4
 pillow==12.1.1

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 import time
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -38,12 +39,14 @@ from .paths import (
     cleanup_stale_sessions,
     ensure_session_layout,
     get_daemon_log_path,
+    get_port_file_path,
     get_sessions_root,
     get_socket_path,
     is_process_alive,
     load_session_metadata,
     prune_dead_sessions,
     read_pid,
+    read_port,
     save_session_metadata,
     terminate_session_process,
 )
@@ -711,18 +714,35 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
         )
         return envelope, 1
 
-    try:
-        ready_byte = await asyncio.wait_for(
-            asyncio.to_thread(os.read, launch.readiness_fd, 1),
-            timeout=30.0,
-        )
-        if ready_byte != b"1":
+    if launch.readiness_fd is not None:
+        # POSIX: read a single readiness byte from the pipe the daemon writes.
+        try:
+            ready_byte = await asyncio.wait_for(
+                asyncio.to_thread(os.read, launch.readiness_fd, 1),
+                timeout=30.0,
+            )
+            if ready_byte != b"1":
+                envelope = make_envelope(
+                    session_id=session_id,
+                    command="session",
+                    status=CommandStatus.ERROR,
+                    response=(
+                        "Session daemon exited during startup. "
+                        f"Check {get_daemon_log_path(session_id)}."
+                    ),
+                    screenshot_path=None,
+                    exit_reason=ExitReason.AGENT_ERROR,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    actions_taken=0,
+                )
+                return envelope, 1
+        except asyncio.TimeoutError:
             envelope = make_envelope(
                 session_id=session_id,
                 command="session",
                 status=CommandStatus.ERROR,
                 response=(
-                    "Session daemon exited during startup. "
+                    "Timed out waiting for the session daemon to become ready. "
                     f"Check {get_daemon_log_path(session_id)}."
                 ),
                 screenshot_path=None,
@@ -731,23 +751,34 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
                 actions_taken=0,
             )
             return envelope, 1
-    except asyncio.TimeoutError:
-        envelope = make_envelope(
-            session_id=session_id,
-            command="session",
-            status=CommandStatus.ERROR,
-            response=(
-                "Timed out waiting for the session daemon to become ready. "
-                f"Check {get_daemon_log_path(session_id)}."
-            ),
-            screenshot_path=None,
-            exit_reason=ExitReason.AGENT_ERROR,
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            actions_taken=0,
-        )
-        return envelope, 1
-    finally:
-        os.close(launch.readiness_fd)
+        finally:
+            os.close(launch.readiness_fd)
+    else:
+        # Windows: poll for daemon.port file which the daemon writes after binding.
+        port_file = get_port_file_path(session_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 30.0
+        ready = False
+        while loop.time() < deadline:
+            if port_file.exists() and read_port(session_id) is not None:
+                ready = True
+                break
+            await asyncio.sleep(0.1)
+        if not ready:
+            envelope = make_envelope(
+                session_id=session_id,
+                command="session",
+                status=CommandStatus.ERROR,
+                response=(
+                    "Timed out waiting for the session daemon to become ready. "
+                    f"Check {get_daemon_log_path(session_id)}."
+                ),
+                screenshot_path=None,
+                exit_reason=ExitReason.AGENT_ERROR,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                actions_taken=0,
+            )
+            return envelope, 1
 
     metadata = load_session_metadata(session_id)
     if metadata is None or not is_process_alive(metadata.pid):
@@ -935,7 +966,10 @@ async def _send_session_request(
         return _missing_session(session_id, command=public_command)
 
     socket_path = get_socket_path(session_id)
-    if not socket_path.exists():
+    if sys.platform == "win32":
+        if read_port(session_id) is None:
+            return _missing_session(session_id, command=public_command)
+    elif not socket_path.exists():
         return _missing_session(session_id, command=public_command)
 
     try:

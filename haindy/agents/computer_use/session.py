@@ -10,8 +10,8 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from haindy.config.settings import Settings
+from haindy.core.coordinate_cache import CoordinateCache
 from haindy.core.interfaces import AutomationDriver
-from haindy.desktop.cache import CoordinateCache
 from haindy.monitoring.debug_logger import DebugLogger
 from haindy.runtime.environment import coordinate_cache_path_for_environment
 from haindy.utils.model_logging import ModelCallLogger, get_model_logger

@@ -26,6 +26,7 @@ from haindy.agents.test_runner_summary import TestRunnerSummary
 from haindy.agents.test_runner_verifier import TestRunnerVerifier
 from haindy.config.agent_prompts import TEST_RUNNER_SYSTEM_PROMPT
 from haindy.config.settings import get_settings
+from haindy.core.coordinate_cache import CoordinateCache
 from haindy.core.interfaces import AutomationDriver
 from haindy.core.types import (
     StepResult,
@@ -38,7 +39,6 @@ from haindy.core.types import (
     TestStep,
     TestSummary,
 )
-from haindy.desktop.cache import CoordinateCache
 from haindy.monitoring.logger import get_logger, get_run_id
 from haindy.runtime.environment import (
     coordinate_cache_path_for_environment,
@@ -142,7 +142,7 @@ class TestRunner(BaseAgent):
             self._coordinate_cache = self.automation_driver.coordinate_cache
         else:
             self._coordinate_cache = CoordinateCache(
-                self._settings.desktop_coordinate_cache_path
+                self._settings.linux_coordinate_cache_path
             )
         self._artifacts = TestRunnerArtifacts(self._settings, self.automation_driver)
         self._replay_service = ExecutionReplayService(

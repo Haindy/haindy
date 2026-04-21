@@ -1,17 +1,16 @@
-"""macOS desktop driver implementing the AutomationDriver interface."""
+"""Windows desktop driver implementing the AutomationDriver interface."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import struct
-from asyncio import subprocess as aio_subprocess
 from pathlib import Path
 
 from haindy.core.coordinate_cache import CoordinateCache
 from haindy.core.interfaces import AutomationDriver
-from haindy.macos.input_handler import MacOSInputHandler
-from haindy.macos.screen_capture import MacOSScreenCapture
+from haindy.windows.input_handler import WindowsInputHandler
+from haindy.windows.screen_capture import WindowsScreenCapture
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +30,8 @@ def _parse_png_size(data: bytes) -> tuple[int, int]:
     return int(width), int(height)
 
 
-class MacOSDriver(AutomationDriver):
-    """macOS desktop automation driver using mss (screenshots) and pynput (input)."""
+class WindowsDriver(AutomationDriver):
+    """Windows desktop automation driver using mss (screenshots) and pynput (input)."""
 
     def __init__(
         self,
@@ -49,14 +48,13 @@ class MacOSDriver(AutomationDriver):
         self.keyboard_layout = keyboard_layout
         self.keyboard_key_delay_ms = keyboard_key_delay_ms
         self.coordinate_cache = CoordinateCache(cache_path)
-        self.screen_capture: MacOSScreenCapture | None = None
-        self.input_handler: MacOSInputHandler | None = None
+        self.screen_capture: WindowsScreenCapture | None = None
+        self.input_handler: WindowsInputHandler | None = None
         self._started = False
         self._clipboard_timeout_seconds = max(float(clipboard_timeout_seconds), 0.5)
         self._clipboard_hold_seconds = max(float(clipboard_hold_seconds), 0.5)
         self._capturing = False
         self._captured_calls: list[dict[str, object]] = []
-        # Pixel dimensions of the primary display (set during start)
         self._pixel_width: int = 0
         self._pixel_height: int = 0
 
@@ -65,7 +63,7 @@ class MacOSDriver(AutomationDriver):
         if self._started and self.input_handler is not None:
             return
 
-        self.screen_capture = MacOSScreenCapture(
+        self.screen_capture = WindowsScreenCapture(
             screenshot_dir=self.screenshot_dir,
             max_screenshots=self.max_screenshots,
         )
@@ -81,7 +79,7 @@ class MacOSDriver(AutomationDriver):
         scale_y = pixel_h / logical_h if logical_h > 0 else 1.0
 
         try:
-            self.input_handler = MacOSInputHandler(
+            self.input_handler = WindowsInputHandler(
                 logical_size=(logical_w, logical_h),
                 scale_x=scale_x,
                 scale_y=scale_y,
@@ -96,7 +94,7 @@ class MacOSDriver(AutomationDriver):
 
         self._started = True
         logger.info(
-            "MacOSDriver started",
+            "WindowsDriver started",
             extra={
                 "logical": f"{logical_w}x{logical_h}",
                 "pixels": f"{pixel_w}x{pixel_h}",
@@ -112,7 +110,7 @@ class MacOSDriver(AutomationDriver):
         self.screen_capture = None
         self._started = False
 
-    async def __aenter__(self) -> MacOSDriver:
+    async def __aenter__(self) -> WindowsDriver:
         await self.start()
         return self
 
@@ -125,9 +123,10 @@ class MacOSDriver(AutomationDriver):
         await self.stop()
 
     async def navigate(self, url: str) -> None:
-        """Best-effort navigation by opening Spotlight/URL bar with Cmd+L."""
+        """Best-effort navigation by opening the Run dialog with Win+R."""
         await self._ensure_ready()
-        await self.press_key("cmd+l")
+        await self.press_key("win+r")
+        await asyncio.sleep(0.3)
         await self.type_text(url)
         await self.press_key("enter")
 
@@ -232,8 +231,8 @@ class MacOSDriver(AutomationDriver):
         self._capture_call("scroll_by_pixels", {"x": x, "y": y, "smooth": smooth})
 
     async def screenshot(self) -> bytes:
-        bytes_, _ = await self._capture("macos")
-        self._capture_call("screenshot", {"label": "macos"})
+        bytes_, _ = await self._capture("windows")
+        self._capture_call("screenshot", {"label": "windows"})
         return bytes_
 
     async def wait(self, milliseconds: int) -> None:
@@ -244,9 +243,8 @@ class MacOSDriver(AutomationDriver):
         """Return the native pixel dimensions of the primary display."""
         if self._pixel_width > 0 and self._pixel_height > 0:
             return self._pixel_width, self._pixel_height
-        # Fallback: take a screenshot to detect size
         if self.screen_capture is None:
-            self.screen_capture = MacOSScreenCapture(
+            self.screen_capture = WindowsScreenCapture(
                 screenshot_dir=self.screenshot_dir,
                 max_screenshots=self.max_screenshots,
             )
@@ -288,50 +286,22 @@ class MacOSDriver(AutomationDriver):
         return calls
 
     async def read_clipboard(self) -> str:
-        """Return the current clipboard contents via pbpaste."""
-        proc = await asyncio.create_subprocess_exec(
-            "pbpaste",
-            stdout=aio_subprocess.PIPE,
-            stderr=aio_subprocess.PIPE,
-        )
+        """Return the current clipboard contents via pyperclip."""
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=self._clipboard_timeout_seconds
-            )
-        except asyncio.TimeoutError as exc:
-            proc.kill()
-            await proc.communicate()
-            raise RuntimeError("Clipboard read timed out.") from exc
-        if proc.returncode != 0:
-            stderr_text = (stderr or b"").decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Clipboard read failed: {stderr_text.strip()}")
-        return (stdout or b"").decode("utf-8", errors="ignore").strip()
+            import pyperclip  # type: ignore[import-untyped]
+
+            return str(pyperclip.paste())
+        except Exception as exc:
+            raise RuntimeError(f"Clipboard read failed: {exc}") from exc
 
     async def write_clipboard(self, text: str) -> None:
-        """Set clipboard contents via pbcopy."""
-        proc = await asyncio.create_subprocess_exec(
-            "pbcopy",
-            stdin=aio_subprocess.PIPE,
-            stdout=aio_subprocess.DEVNULL,
-            stderr=aio_subprocess.PIPE,
-        )
-        if not proc.stdin:
-            proc.kill()
-            await proc.communicate()
-            raise RuntimeError("Clipboard write failed: unable to open stdin.")
-        proc.stdin.write(text.encode("utf-8"))
-        await proc.stdin.drain()
-        proc.stdin.close()
+        """Set clipboard contents via pyperclip."""
         try:
-            await asyncio.wait_for(proc.wait(), timeout=self._clipboard_timeout_seconds)
-        except asyncio.TimeoutError as exc:
-            proc.kill()
-            await proc.communicate()
-            raise RuntimeError("Clipboard write timed out.") from exc
-        if proc.returncode != 0:
-            _, stderr = await proc.communicate()
-            stderr_text = (stderr or b"").decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Clipboard write failed: {stderr_text.strip()}")
+            import pyperclip  # type: ignore[import-untyped]
+
+            pyperclip.copy(text)
+        except Exception as exc:
+            raise RuntimeError(f"Clipboard write failed: {exc}") from exc
 
     async def _capture(self, label: str) -> tuple[bytes, str]:
         await self._ensure_ready()
