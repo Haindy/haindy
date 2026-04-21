@@ -315,6 +315,19 @@ class TestMainFlow:
         mock_auth_status.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_version_command_reports_installed_package_version(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with patch("haindy.main.package_version", return_value="0.4.0"):
+            result = await async_main(["version"])
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Version: " in captured.out
+        assert "0.4.0" in captured.out
+
+    @pytest.mark.asyncio
     async def test_tool_call_cli_commands_dispatch_through_unified_parser(
         self,
         capsys: pytest.CaptureFixture[str],
