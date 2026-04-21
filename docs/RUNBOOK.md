@@ -321,6 +321,11 @@ elevated, or by keeping the target application at the same integrity level.
 
 ### Tool-call mode
 
-Tool-call mode (Unix domain sockets) is not available on Windows. The `session`,
-`act`, `test`, `explore`, and `screenshot` sub-commands will return an error. Use
-`haindy run` for test execution on Windows.
+Tool-call mode is available on Windows. HAINDY uses the same public commands
+(`session`, `act`, `test`, `explore`, and `screenshot`) as on Linux and macOS,
+but the daemon transport is different under the hood: Windows uses a localhost
+TCP port recorded in `daemon.port` instead of a Unix domain socket.
+
+If a Windows tool-call session fails to start, inspect
+`~/.haindy/sessions/<id>/logs/daemon.log` first and confirm the sibling
+`daemon.port` file was created.

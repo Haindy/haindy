@@ -93,6 +93,7 @@ Under the hood, each action goes through a computer-use AI provider (OpenAI, Goo
 |----------|------------------|
 | Linux/X11 | uinput + xdotool + ffmpeg |
 | macOS | pynput + mss |
+| Windows | pynput + mss |
 | Android | ADB |
 | iOS | idb |
 
@@ -178,6 +179,7 @@ Environment variables override all other sources. Timeout settings use seconds. 
 |----------|-------------|
 | Linux/X11 | `ffmpeg`, `xdotool`, `xclip`, `/dev/uinput` access |
 | macOS | Grant Accessibility + Screen Recording to your terminal (System Settings > Privacy & Security) |
+| Windows | Python 3.11+, optional `adb`, long paths enabled, and run unelevated targets unless HAINDY is also elevated |
 | Android | `adb` installed, device/emulator reachable |
 | iOS (macOS) | `brew install idb-companion`, device paired |
 
@@ -208,7 +210,7 @@ pytest                # tests
 | `haindy/agents/` | Scope triage, test planner, situational, action, and test runner agents |
 | `haindy/linux/` | Linux/X11 automation (uinput, xdotool, ffmpeg) |
 | `haindy/macos/` | macOS automation (pynput, mss) |
-| `haindy/windows/` | Windows automation (pynput, mss; in progress) |
+| `haindy/windows/` | Windows automation (pynput, mss) |
 | `haindy/mobile/` | Android (ADB) and iOS (idb) automation |
 | `haindy/config/` | Settings, env vars, settings file loader |
 | `haindy/orchestration/` | Multi-agent workflow coordination |
