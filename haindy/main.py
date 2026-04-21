@@ -7,6 +7,8 @@ import asyncio
 import contextlib
 import sys
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
@@ -589,8 +591,13 @@ async def test_api_connection() -> int:
 
 def show_version() -> int:
     """Show version information."""
+    try:
+        installed_version = package_version("haindy")
+    except PackageNotFoundError:
+        installed_version = "unknown"
+
     console.print("\n[bold cyan]HAINDY - Autonomous AI Testing Agent[/bold cyan]")
-    console.print("Version: [green]0.2.0[/green]")
+    console.print(f"Version: [green]{installed_version}[/green]")
     console.print("Python: [dim]3.11+[/dim]")
     return 0
 

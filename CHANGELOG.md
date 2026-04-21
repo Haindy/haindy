@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-21
+
+### Added
+
+- Repo-local `haindy-release` Codex skill documenting HAINDY release prep, validation, publish steps, and version guardrails
+
+### Fixed
+
+- `haindy version` now reports the installed package version from package metadata instead of a stale hardcoded string
+- Regression coverage for CLI version reporting so future releases do not silently drift from package metadata
+
 ## [0.4.0] - 2026-04-21
 
 ### Added
