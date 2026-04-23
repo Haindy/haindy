@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-23
+
+### Added
+
+- Regression coverage for the repo-local `haindy-test-forensics` artifact locator helper across configured data roots, reports directories, and tool-call session lookups
+
+### Fixed
+
+- Repo-local `haindy-test-forensics` guidance now covers tool-call sessions and distinguishes durable run artifacts from session-local evidence
+- The repo-local forensics helper now resolves effective `HAINDY_HOME`, `data_dir`, and `reports_dir` settings instead of assuming legacy repo-local artifact paths
+
 ## [0.4.1] - 2026-04-21
 
 ### Added
