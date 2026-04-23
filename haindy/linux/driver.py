@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import logging
 import shutil
+import subprocess
 from asyncio import subprocess as aio_subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -18,6 +20,147 @@ from haindy.linux.virtual_input import VirtualInput
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_KEYBOARD_LAYOUTS = frozenset({"us", "es"})
+DEFAULT_KEYBOARD_LAYOUT = "us"
+AUTO_KEYBOARD_LAYOUT = "auto"
+
+
+def _first_xkb_layout(layouts: str) -> str | None:
+    """Return the first layout from an XKB layout list such as ``es,us``."""
+    for layout in layouts.split(","):
+        normalized = layout.strip().lower()
+        if normalized:
+            return normalized
+    return None
+
+
+def _layout_from_setxkbmap_output(output: str) -> str | None:
+    for line in output.splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip().lower() == "layout":
+            return _first_xkb_layout(value)
+    return None
+
+
+def _layout_from_localectl_output(output: str) -> str | None:
+    for line in output.splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip().lower() == "x11 layout":
+            return _first_xkb_layout(value)
+    return None
+
+
+def _gsettings_current_index(output: str) -> int | None:
+    stripped = output.strip()
+    if not stripped:
+        return None
+    token = stripped.rsplit(maxsplit=1)[-1]
+    if token.isdigit():
+        return int(token)
+    return None
+
+
+def _layout_from_gsettings_outputs(
+    current_output: str, sources_output: str
+) -> str | None:
+    current_index = _gsettings_current_index(current_output)
+    if current_index is None:
+        return None
+
+    try:
+        sources = ast.literal_eval(sources_output.strip())
+    except (SyntaxError, ValueError):
+        return None
+
+    if not isinstance(sources, list) or not 0 <= current_index < len(sources):
+        return None
+
+    source = sources[current_index]
+    if (
+        not isinstance(source, tuple)
+        or len(source) < 2
+        or str(source[0]).lower() != "xkb"
+    ):
+        return None
+    return _first_xkb_layout(str(source[1]))
+
+
+def _run_layout_command(command: list[str]) -> str | None:
+    if shutil.which(command[0]) is None:
+        return None
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _detect_desktop_keyboard_layout() -> str | None:
+    """Best-effort XKB layout detection for Linux desktop sessions."""
+    gsettings_current = _run_layout_command(
+        ["gsettings", "get", "org.gnome.desktop.input-sources", "current"]
+    )
+    gsettings_sources = _run_layout_command(
+        ["gsettings", "get", "org.gnome.desktop.input-sources", "sources"]
+    )
+    if gsettings_current and gsettings_sources:
+        layout = _layout_from_gsettings_outputs(gsettings_current, gsettings_sources)
+        if layout:
+            return layout
+
+    setxkbmap_output = _run_layout_command(["setxkbmap", "-query"])
+    if setxkbmap_output:
+        layout = _layout_from_setxkbmap_output(setxkbmap_output)
+        if layout:
+            return layout
+
+    localectl_output = _run_layout_command(["localectl", "status"])
+    if localectl_output:
+        return _layout_from_localectl_output(localectl_output)
+
+    return None
+
+
+def _resolve_keyboard_layout(layout: str) -> str:
+    """Resolve configured keyboard layout to a concrete VirtualInput layout."""
+    normalized = (layout or AUTO_KEYBOARD_LAYOUT).strip().lower()
+    if normalized in SUPPORTED_KEYBOARD_LAYOUTS:
+        return normalized
+    if normalized and normalized != AUTO_KEYBOARD_LAYOUT:
+        logger.warning(
+            "Unsupported desktop keyboard layout configured; falling back to US",
+            extra={"keyboard_layout": layout},
+        )
+        return DEFAULT_KEYBOARD_LAYOUT
+
+    detected = _detect_desktop_keyboard_layout()
+    if detected in SUPPORTED_KEYBOARD_LAYOUTS:
+        logger.info(
+            "Auto-detected desktop keyboard layout",
+            extra={"keyboard_layout": detected},
+        )
+        return detected
+
+    if detected:
+        logger.warning(
+            "Unsupported desktop keyboard layout detected; falling back to US",
+            extra={"keyboard_layout": detected},
+        )
+    else:
+        logger.warning(
+            "Could not auto-detect desktop keyboard layout; falling back to US"
+        )
+    return DEFAULT_KEYBOARD_LAYOUT
+
 
 class DesktopDriver(AutomationDriver):
     """OS-level driver that controls an existing desktop session."""
@@ -29,7 +172,7 @@ class DesktopDriver(AutomationDriver):
         prefer_resolution: tuple[int, int] = (1920, 1080),
         enable_resolution_switch: bool = False,
         display: str | None = None,
-        keyboard_layout: str = "us",
+        keyboard_layout: str = AUTO_KEYBOARD_LAYOUT,
         keyboard_emit_scancodes: bool = True,
         keyboard_key_delay_ms: int = 12,
         clipboard_timeout_seconds: float = 3.0,
@@ -68,9 +211,10 @@ class DesktopDriver(AutomationDriver):
         try:
             if self.virtual_input is None:
                 viewport = self.resolution_manager.viewport_size()
+                keyboard_layout = _resolve_keyboard_layout(self.keyboard_layout)
                 self.virtual_input = VirtualInput(
                     viewport=viewport,
-                    keyboard_layout=self.keyboard_layout,
+                    keyboard_layout=keyboard_layout,
                     emit_scancodes=self.keyboard_emit_scancodes,
                     key_delay_ms=self.keyboard_key_delay_ms,
                 )

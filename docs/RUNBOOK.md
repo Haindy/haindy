@@ -170,7 +170,8 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
   },
   "execution": {
     "actions_action_timeout_seconds": 600
-  }
+  },
+  "desktop": { "keyboard_layout": "auto" }
 }
 ```
 
@@ -194,6 +195,8 @@ Important env vars (still supported, override all other sources):
 - `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
 
 Timeout settings use seconds across the runtime and configuration surface. Use `execution.actions_action_timeout_seconds` in `settings.json`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias for older configs.
+
+Linux desktop keyboard layout defaults to `auto`, which detects the active XKB layout and currently supports `us` and `es`. Set `desktop.keyboard_layout` explicitly when a session should force one of those layouts.
 
 Tool-call mode does not introduce a separate backend env var. Use `HAINDY_AUTOMATION_BACKEND` or explicit `--desktop` / `--android`.
 
