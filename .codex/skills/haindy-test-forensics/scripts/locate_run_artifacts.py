@@ -9,32 +9,50 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    return _REPO_ROOT
 
 
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _trace_files(repo_root: Path) -> list[Path]:
-    trace_dir = repo_root / "data" / "traces"
+def _data_root() -> Path:
+    from haindy.config.settings import load_settings
+
+    return load_settings().data_dir
+
+
+def _display_path(path: Path, repo_root: Path) -> str:
+    try:
+        return str(path.relative_to(repo_root))
+    except ValueError:
+        return str(path)
+
+
+def _trace_files(data_root: Path) -> list[Path]:
+    trace_dir = data_root / "traces"
     return sorted(trace_dir.glob("*.json"))
 
 
 def _select_trace(
-    repo_root: Path,
+    data_root: Path,
     run_id: str | None,
     latest: bool,
     latest_failed: bool,
 ) -> Path:
-    traces = _trace_files(repo_root)
+    trace_dir = data_root / "traces"
+    traces = _trace_files(data_root)
     if not traces:
-        raise FileNotFoundError("No trace files found under data/traces")
+        raise FileNotFoundError(f"No trace files found under {trace_dir}")
 
     if run_id:
-        candidate = repo_root / "data" / "traces" / f"{run_id}.json"
+        candidate = trace_dir / f"{run_id}.json"
         if not candidate.exists():
             raise FileNotFoundError(f"Trace for run_id {run_id!r} not found")
         return candidate
@@ -47,7 +65,7 @@ def _select_trace(
         if latest_failed and not bool(trace.get("success")):
             return trace_path
 
-    raise FileNotFoundError("No failed trace files found under data/traces")
+    raise FileNotFoundError(f"No failed trace files found under {trace_dir}")
 
 
 def _failed_steps(trace: dict[str, Any]) -> list[dict[str, Any]]:
@@ -71,7 +89,7 @@ def _failed_steps(trace: dict[str, Any]) -> list[dict[str, Any]]:
     return failed
 
 
-def _summarize(trace_path: Path, repo_root: Path) -> dict[str, Any]:
+def _summarize(trace_path: Path, repo_root: Path, data_root: Path) -> dict[str, Any]:
     trace = _load_json(trace_path)
     run_id = str(trace.get("run_id") or trace_path.stem)
     report_dir = repo_root / "reports" / run_id
@@ -92,13 +110,14 @@ def _summarize(trace_path: Path, repo_root: Path) -> dict[str, Any]:
     passed_steps = sum(1 for status in statuses if status == "passed")
     failed_steps = _failed_steps(trace)
 
-    model_log_path = (
-        (trace.get("run_metadata") or {}).get("model_log_path")
-    ) or "data/model_logs/model_calls.jsonl"
+    model_log_path = ((trace.get("run_metadata") or {}).get("model_log_path")) or str(
+        data_root / "model_logs" / "model_calls.jsonl"
+    )
 
     return {
         "run_id": run_id,
-        "trace_path": str(trace_path.relative_to(repo_root)),
+        "data_root": str(data_root),
+        "trace_path": _display_path(trace_path, repo_root),
         "success": bool(trace.get("success")),
         "started_at": trace.get("started_at"),
         "ended_at": trace.get("ended_at"),
@@ -141,11 +160,12 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = _repo_root()
+    data_root = _data_root()
     latest_failed = args.latest_failed or (not args.run_id and not args.latest)
 
     try:
         trace_path = _select_trace(
-            repo_root=repo_root,
+            data_root=data_root,
             run_id=args.run_id,
             latest=args.latest,
             latest_failed=latest_failed,
@@ -154,7 +174,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    summary = _summarize(trace_path, repo_root)
+    summary = _summarize(trace_path, repo_root, data_root)
     print(json.dumps(summary, indent=2))
     return 0
 

@@ -29,6 +29,12 @@ from haindy.monitoring.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _default_journal_dir() -> Path:
+    from haindy.config.settings import get_settings
+
+    return get_settings().data_dir / "journals"
+
+
 class JournalManager:
     """
     Manages execution journals for test runs.
@@ -44,7 +50,7 @@ class JournalManager:
         Args:
             journal_dir: Directory to store journal files
         """
-        self.journal_dir = journal_dir or Path("data/journals")
+        self.journal_dir = journal_dir or _default_journal_dir()
         self.journal_dir.mkdir(parents=True, exist_ok=True)
 
         # Active journals

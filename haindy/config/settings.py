@@ -2,8 +2,10 @@
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,7 @@ DEFAULT_CU_PROVIDER_MODELS: dict[str, str] = {
     "google": "gemini-3-flash-preview",
     "anthropic": "claude-sonnet-4-6",
 }
+PROJECT_ID_HASH_LENGTH = 12
 
 ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
@@ -184,6 +187,57 @@ _CU_PROVIDER_MODEL_FIELDS: dict[str, str] = {
     "google": "google_cu_model",
     "anthropic": "anthropic_cu_model",
 }
+
+
+def build_project_data_id(cwd: Path | None = None) -> str:
+    """Return the stable storage id for a working directory."""
+    resolved = (cwd or Path.cwd()).resolve()
+    raw_name = resolved.name or "project"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_name).strip("._-").lower()
+    digest = sha256(str(resolved).encode("utf-8")).hexdigest()[:PROJECT_ID_HASH_LENGTH]
+    return f"{safe_name or 'project'}-{digest}"
+
+
+def build_project_data_dir(haindy_home: Path, cwd: Path | None = None) -> Path:
+    """Return the default data root for the current project."""
+    return (
+        Path(haindy_home).expanduser()
+        / "data"
+        / "projects"
+        / build_project_data_id(cwd)
+    )
+
+
+def _default_data_dir() -> Path:
+    return build_project_data_dir(Path("~/.haindy").expanduser())
+
+
+def _data_path_defaults(data_dir: Path) -> dict[str, Path]:
+    """Build data-family defaults from the effective data root."""
+    return {
+        "screenshots_dir": data_dir / "screenshots",
+        "desktop_screenshot_dir": data_dir / "screenshots" / "desktop",
+        "mobile_screenshot_dir": data_dir / "screenshots" / "mobile",
+        "ios_screenshot_dir": data_dir / "screenshots" / "ios",
+        "macos_screenshot_dir": data_dir / "screenshots" / "macos",
+        "windows_screenshot_dir": data_dir / "screenshots" / "windows",
+        "linux_coordinate_cache_path": data_dir / "linux_cache" / "coordinates.json",
+        "mobile_coordinate_cache_path": data_dir / "mobile_cache" / "coordinates.json",
+        "ios_coordinate_cache_path": data_dir / "ios_cache" / "coordinates.json",
+        "macos_coordinate_cache_path": data_dir / "macos_cache" / "coordinates.json",
+        "windows_coordinate_cache_path": data_dir
+        / "windows_cache"
+        / "coordinates.json",
+        "task_plan_cache_path": data_dir / "task_plan_cache.json",
+        "planning_cache_path": data_dir / "planning_cache.json",
+        "situational_cache_path": data_dir / "situational_cache.json",
+        "execution_replay_cache_path": data_dir / "execution_replay_cache.json",
+        "model_log_path": data_dir / "model_logs" / "model_calls.jsonl",
+    }
+
+
+def _default_data_path(field_name: str) -> Path:
+    return _data_path_defaults(_default_data_dir())[field_name]
 
 
 def get_default_provider_model(provider: str, *, computer_use: bool = False) -> str:
@@ -458,19 +512,19 @@ class Settings(BaseModel):
         description="Allow resolution downshift for desktop runs",
     )
     desktop_screenshot_dir: Path = Field(
-        default=Path("data/screenshots/desktop"),
+        default_factory=lambda: _default_data_path("desktop_screenshot_dir"),
         description="Directory for desktop screenshots",
     )
     linux_coordinate_cache_path: Path = Field(
-        default=Path("data/linux_cache/coordinates.json"),
+        default_factory=lambda: _default_data_path("linux_coordinate_cache_path"),
         description="Coordinate cache path for Linux desktop actions",
     )
     windows_coordinate_cache_path: Path = Field(
-        default=Path("data/windows_cache/coordinates.json"),
+        default_factory=lambda: _default_data_path("windows_coordinate_cache_path"),
         description="Coordinate cache path for Windows desktop actions",
     )
     task_plan_cache_path: Path = Field(
-        default=Path("data/task_plan_cache.json"),
+        default_factory=lambda: _default_data_path("task_plan_cache_path"),
         description="Task planning cache path",
     )
     enable_planning_cache: bool = Field(
@@ -478,7 +532,7 @@ class Settings(BaseModel):
         description="Enable caching for scope triage and test plan generation",
     )
     planning_cache_path: Path = Field(
-        default=Path("data/planning_cache.json"),
+        default_factory=lambda: _default_data_path("planning_cache_path"),
         description="Scope triage and test planning cache path",
     )
     enable_situational_cache: bool = Field(
@@ -486,7 +540,7 @@ class Settings(BaseModel):
         description="Enable caching for situational execution-context validation",
     )
     situational_cache_path: Path = Field(
-        default=Path("data/situational_cache.json"),
+        default_factory=lambda: _default_data_path("situational_cache_path"),
         description="Situational execution-context cache path",
     )
     enable_execution_replay_cache: bool = Field(
@@ -494,7 +548,7 @@ class Settings(BaseModel):
         description="Enable execution replay cache (record/replay driver actions per step)",
     )
     execution_replay_cache_path: Path = Field(
-        default=Path("data/execution_replay_cache.json"),
+        default_factory=lambda: _default_data_path("execution_replay_cache_path"),
         description="Execution replay cache path",
     )
     desktop_display: str | None = Field(
@@ -512,11 +566,11 @@ class Settings(BaseModel):
         description="Max time to hold clipboard owner process",
     )
     mobile_screenshot_dir: Path = Field(
-        default=Path("data/screenshots/mobile"),
+        default_factory=lambda: _default_data_path("mobile_screenshot_dir"),
         description="Directory for mobile screenshots",
     )
     mobile_coordinate_cache_path: Path = Field(
-        default=Path("data/mobile_cache/coordinates.json"),
+        default_factory=lambda: _default_data_path("mobile_coordinate_cache_path"),
         description="Coordinate cache path for mobile actions",
     )
     mobile_default_adb_serial: str = Field(
@@ -529,11 +583,11 @@ class Settings(BaseModel):
         description="Timeout in seconds for individual ADB commands",
     )
     ios_screenshot_dir: Path = Field(
-        default=Path("data/screenshots/ios"),
+        default_factory=lambda: _default_data_path("ios_screenshot_dir"),
         description="Directory for iOS screenshots",
     )
     ios_coordinate_cache_path: Path = Field(
-        default=Path("data/ios_cache/coordinates.json"),
+        default_factory=lambda: _default_data_path("ios_coordinate_cache_path"),
         description="Coordinate cache path for iOS actions",
     )
     ios_default_device_udid: str = Field(
@@ -546,11 +600,11 @@ class Settings(BaseModel):
         description="Timeout in seconds for individual idb commands",
     )
     macos_screenshot_dir: Path = Field(
-        default=Path("data/screenshots/macos"),
+        default_factory=lambda: _default_data_path("macos_screenshot_dir"),
         description="Directory for macOS desktop screenshots",
     )
     macos_coordinate_cache_path: Path = Field(
-        default=Path("data/macos_cache/coordinates.json"),
+        default_factory=lambda: _default_data_path("macos_coordinate_cache_path"),
         description="Coordinate cache path for macOS desktop actions",
     )
     macos_keyboard_layout: str = Field(
@@ -573,7 +627,7 @@ class Settings(BaseModel):
         description="Max time to hold macOS clipboard owner process",
     )
     windows_screenshot_dir: Path = Field(
-        default=Path("data/screenshots/windows"),
+        default_factory=lambda: _default_data_path("windows_screenshot_dir"),
         description="Directory for Windows desktop screenshots",
     )
     windows_keyboard_layout: str = Field(
@@ -786,7 +840,7 @@ class Settings(BaseModel):
     )
     log_file: str | None = Field(default=None, description="Log file path")
     model_log_path: Path = Field(
-        default=Path("data/model_logs/model_calls.jsonl"),
+        default_factory=lambda: _default_data_path("model_log_path"),
         description="Log file for raw model prompts/responses",
     )
     max_screenshots: int | None = Field(
@@ -796,12 +850,15 @@ class Settings(BaseModel):
     )
 
     # Storage Configuration
-    data_dir: Path = Field(default=Path("data"), description="Data storage directory")
+    data_dir: Path = Field(
+        default_factory=_default_data_dir, description="Data storage directory"
+    )
     reports_dir: Path = Field(
         default=Path("reports"), description="Reports output directory"
     )
     screenshots_dir: Path = Field(
-        default=Path("data/screenshots"), description="Screenshots directory"
+        default_factory=lambda: _default_data_path("screenshots_dir"),
+        description="Screenshots directory",
     )
     cache_dir: Path = Field(default=Path(".cache"), description="Cache directory")
 
@@ -932,6 +989,19 @@ class Settings(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def apply_data_path_defaults(self) -> "Settings":
+        """Derive unset data-family paths from the effective data root."""
+        explicit_fields = set(self.model_fields_set)
+        if "data_dir" not in explicit_fields:
+            self.data_dir = build_project_data_dir(self.haindy_home)
+
+        defaults = _data_path_defaults(self.data_dir)
+        for field_name, path in defaults.items():
+            if field_name not in explicit_fields:
+                setattr(self, field_name, path)
+        return self
+
+    @model_validator(mode="after")
     def apply_computer_use_defaults(self) -> "Settings":
         """Apply provider-specific defaults for computer-use sessions."""
         if self.cu_provider == "google":
@@ -982,6 +1052,7 @@ class Settings(BaseModel):
             self.desktop_screenshot_dir,
             self.mobile_screenshot_dir,
             self.ios_screenshot_dir,
+            self.macos_screenshot_dir,
             self.windows_screenshot_dir,
             self.cache_dir,
             self.haindy_home,
@@ -995,6 +1066,7 @@ class Settings(BaseModel):
             self.situational_cache_path.parent,
             self.execution_replay_cache_path.parent,
             self.model_log_path.parent,
+            self.data_dir / "journals",
             self.screen_recording_output_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)

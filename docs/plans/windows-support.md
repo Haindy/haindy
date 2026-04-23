@@ -53,7 +53,7 @@ step; Windows driver stubs raise `NotImplementedError`.
   they live).
 - [x] Settings: rename `desktop_coordinate_cache_path` →
   `linux_coordinate_cache_path`; add `windows_coordinate_cache_path` with
-  default `data/windows_cache/coordinates.json`. Legacy JSON key
+  a data-root-derived default. Legacy JSON key
   `desktop.coordinate_cache_path` mapped for back-compat.
 - [x] `haindy/runtime/environment.py`: `sys.platform == "win32"` branches in
   `coordinate_cache_attribute` and `openai_computer_environment`; added
@@ -157,8 +157,7 @@ Done inside a Windows VM on the same branch.
   connectivity.
 - [ ] `.venv\Scripts\haindy run --plan <fixture> --context <fixture>` — full
   scenario against Notepad or Calculator (built-in apps, no third-party
-  prerequisites). Screenshots land in `data/screenshots/`, coordinate cache
-  lands at `data/windows_cache/coordinates.json`.
+  prerequisites). Screenshots and coordinate caches use the effective data root.
 - [ ] Android path: `.venv\Scripts\haindy run --mobile --plan ... --context ...`
   with a USB-connected (or Hyper-V WSA) device — verify ADB dispatch works on
   Windows.

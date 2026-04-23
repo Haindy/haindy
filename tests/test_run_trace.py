@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from haindy.config.settings import build_project_data_dir, get_settings
 from haindy.core.types import StepResult, TestStatus, TestStep
 from haindy.runtime.trace import RunTraceWriter, load_model_calls_for_run
 
@@ -27,8 +28,8 @@ def test_run_trace_writer_writes_trace(tmp_path: Path) -> None:
         action=step.action,
         expected_result=step.expected_result,
         actual_result="ok",
-        screenshot_before="data/screenshots/step_before.png",
-        screenshot_after="data/screenshots/step_after.png",
+        screenshot_before="screenshots/step_before.png",
+        screenshot_after="screenshots/step_after.png",
         actions_performed=[{"action_type": "click", "x": 10, "y": 20}],
     )
     trace.record_step(
@@ -54,14 +55,36 @@ def test_run_trace_writer_writes_trace(tmp_path: Path) -> None:
     assert stored_step["scenario"] == "test_scenario"
     assert stored_step["plan_cache_hit"] is True
     assert (
-        stored_step["step_result"]["screenshot_before"]
-        == "data/screenshots/step_before.png"
+        stored_step["step_result"]["screenshot_before"] == "screenshots/step_before.png"
     )
     assert (
-        stored_step["step_result"]["screenshot_after"]
-        == "data/screenshots/step_after.png"
+        stored_step["step_result"]["screenshot_after"] == "screenshots/step_after.png"
     )
     assert stored_step["step_result"]["actions_performed"][0]["action_type"] == "click"
+
+
+def test_run_trace_writer_default_path_follows_settings_data_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cwd = tmp_path / "repo"
+    home = tmp_path / "haindy-home"
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(
+        "haindy.config.settings._merge_runtime_env",
+        lambda: {"HAINDY_HOME": str(home)},
+    )
+    get_settings.cache_clear()
+
+    try:
+        trace = RunTraceWriter("default_run")
+
+        assert trace.path == (
+            build_project_data_dir(home, cwd) / "traces" / "default_run.json"
+        )
+    finally:
+        get_settings.cache_clear()
 
 
 def test_load_model_calls_for_run_filters_by_run_id(tmp_path: Path) -> None:

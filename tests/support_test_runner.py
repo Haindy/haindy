@@ -115,7 +115,7 @@ class _StubActionAgent:
 class _StubTraceWriter:
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
-        self.path = Path("data/traces/test_trace.json")
+        self.path = Path("traces/test_trace.json")
 
     def set_run_metadata(self, metadata: dict[str, object]) -> None:
         del metadata

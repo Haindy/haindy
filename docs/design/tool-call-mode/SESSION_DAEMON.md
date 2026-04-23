@@ -363,7 +363,7 @@ This is an operational fallback, not the primary launch path.
 
 Session directories are not automatically deleted after close. They serve as an audit trail. Use `haindy session prune --older-than <days>` to clean up old sessions (see CLI_SPEC.md).
 
-For background-test triage, `session.json` exposes the latest `run_id`, phase, and action-artifact path so investigators can jump directly into the session-local forensic trail. The session directory is designed to be self-sufficient when combined with `data/traces/<run_id>.json` and `data/model_logs/model_calls.jsonl`.
+For background-test triage, `session.json` exposes the latest `run_id`, phase, and action-artifact path so investigators can jump directly into the session-local forensic trail. The session directory is designed to be self-sufficient when combined with `<data-root>/traces/<run_id>.json` and `<data-root>/model_logs/model_calls.jsonl`, where `<data-root>` defaults to `~/.haindy/data/projects/<project-id>` unless `HAINDY_DATA_DIR` or `storage.data_dir` overrides it.
 
 ---
 

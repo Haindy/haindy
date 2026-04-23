@@ -71,6 +71,12 @@ Key sections:
 | `storage` | `data_dir`, `reports_dir`, `cache_dir` |
 | `cache` | `enable_planning`, `enable_situational`, `enable_execution_replay` |
 
+Storage note: if `storage.data_dir` is unset, data artifacts go under
+`~/.haindy/data/projects/<project-id>/`, where the project id is derived from
+the resolved current working directory. Setting `storage.data_dir` or
+`HAINDY_DATA_DIR` uses that exact root. Old `.env` path overrides like
+`HAINDY_DATA_DIR=data` keep writing to `./data` until removed.
+
 ## Step 4 — Verify the effective configuration
 
 ```bash

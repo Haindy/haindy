@@ -96,7 +96,7 @@ class RunTraceWriter:
 
     def __init__(self, run_id: str, *, trace_dir: Path | None = None) -> None:
         self.run_id = run_id
-        self._path = (trace_dir or Path("data/traces")) / f"{run_id}.json"
+        self._path = (trace_dir or _default_trace_dir()) / f"{run_id}.json"
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._data: dict[str, Any] = {
             "trace_version": TRACE_VERSION,
@@ -186,3 +186,9 @@ class RunTraceWriter:
             self._path.write_text(serialized, encoding="utf-8")
         except Exception:
             logger.debug("RunTraceWriter: failed to write trace file", exc_info=True)
+
+
+def _default_trace_dir() -> Path:
+    from haindy.config.settings import get_settings
+
+    return get_settings().data_dir / "traces"

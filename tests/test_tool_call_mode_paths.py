@@ -5,8 +5,14 @@ from pathlib import Path
 
 from haindy.tool_call_mode.models import SessionMetadata
 from haindy.tool_call_mode.paths import (
+    ensure_session_layout,
+    get_action_artifacts_dir,
+    get_daemon_log_path,
     get_haindy_home,
+    get_logs_dir,
+    get_screenshots_dir,
     get_session_dir,
+    get_sessions_root,
     load_session_metadata,
     prune_dead_sessions,
     save_session_metadata,
@@ -18,6 +24,24 @@ def test_get_haindy_home_prefers_env_override(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setenv("HAINDY_HOME", str(tmp_path / "custom-home"))
 
     assert get_haindy_home() == (tmp_path / "custom-home")
+
+
+def test_session_layout_stays_under_home_sessions(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "haindy-home"
+    session_id = "session-123"
+    monkeypatch.setenv("HAINDY_HOME", str(home))
+
+    session_dir = ensure_session_layout(session_id)
+
+    assert get_sessions_root() == home / "sessions"
+    assert session_dir == home / "sessions" / session_id
+    assert get_screenshots_dir(session_id) == session_dir / "screenshots"
+    assert get_logs_dir(session_id) == session_dir / "logs"
+    assert get_daemon_log_path(session_id) == session_dir / "logs" / "daemon.log"
+    assert get_action_artifacts_dir(session_id) == session_dir / "action_artifacts"
+    assert get_screenshots_dir(session_id).is_dir()
+    assert get_logs_dir(session_id).is_dir()
+    assert get_action_artifacts_dir(session_id).is_dir()
 
 
 def test_save_and_load_session_metadata_round_trip(monkeypatch, tmp_path: Path) -> None:

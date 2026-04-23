@@ -174,6 +174,12 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
 
 Environment variables override all other sources. Timeout settings use seconds. In `settings.json`, use `execution.actions_action_timeout_seconds`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias. Linux desktop keyboard layout defaults to `auto`, which detects the active XKB layout and currently supports `us` and `es`; set `desktop.keyboard_layout` explicitly to override detection. See [`.env.example`](.env.example) for the full legacy env-var list.
 
+### Artifact storage
+
+Runtime data artifacts default to `~/.haindy/data/projects/<project-id>/`, where `<project-id>` is derived from the resolved current working directory. This includes traces, model-call logs, screenshots, and replay/coordinate/planning caches. Tool-call session state stays separate under `~/.haindy/sessions/<session-id>/`.
+
+Set `HAINDY_DATA_DIR` or `storage.data_dir` to use an exact custom data root without project scoping. Specific path overrides such as `HAINDY_MODEL_LOG_PATH`, `HAINDY_DESKTOP_SCREENSHOT_DIR`, and `storage.planning_cache_path` still win. If you copied old env vars that point at `data/...`, HAINDY will keep writing to `./data` until those overrides are removed.
+
 ## Platform prerequisites
 
 | Platform | Requirements |
