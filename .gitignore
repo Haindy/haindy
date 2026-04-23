@@ -186,6 +186,7 @@ secrets/
 docs/prompt.md
 docs/plans/*
 !docs/plans/windows-support.md
+!docs/plans/haindy-test-forensics-tool-call.md
 !docs/plans/storage/
 !docs/plans/storage/unify-data-home.md
 docs/issues/
