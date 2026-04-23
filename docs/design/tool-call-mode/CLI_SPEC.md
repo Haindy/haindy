@@ -745,7 +745,8 @@ haindy session prune --older-than <days>
 
 | Variable | Description |
 |---|---|
-| `HAINDY_HOME` | Override the base directory (default: `~/.haindy`). Useful in CI. |
+| `HAINDY_HOME` | Override the base directory (default: `~/.haindy`). Session state stays under `HAINDY_HOME/sessions`. |
+| `HAINDY_DATA_DIR` | Override the data artifact root exactly. If unset, traces, model logs, screenshots, and caches use `HAINDY_HOME/data/projects/<project-id>`. |
 | `HAINDY_AUTOMATION_BACKEND` | Default backend for new sessions: `desktop`, `mobile_adb`, or `mobile_ios`. Overridden by `--android`/`--ios`/`--desktop`. |
 
 ---

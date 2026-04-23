@@ -1,7 +1,10 @@
 """JournalManager tests for provider-neutral action journaling."""
 
+from pathlib import Path
+
 import pytest
 
+from haindy.config.settings import build_project_data_dir, get_settings
 from haindy.core.types import TestPlan, TestStep
 from haindy.journal.manager import JournalManager
 from haindy.journal.models import ExecutionMode, JournalActionResult
@@ -21,6 +24,28 @@ def _plan() -> TestPlan:
         test_cases=[],
         steps=[step],
     )
+
+
+def test_default_journal_dir_uses_settings_data_root(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cwd = tmp_path / "repo"
+    home = tmp_path / "haindy-home"
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(
+        "haindy.config.settings._merge_runtime_env",
+        lambda: {"HAINDY_HOME": str(home)},
+    )
+    get_settings.cache_clear()
+
+    try:
+        manager = JournalManager()
+
+        assert manager.journal_dir == build_project_data_dir(home, cwd) / "journals"
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

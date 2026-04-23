@@ -21,7 +21,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
-            linux_coordinate_cache_path=Path("data/linux_cache/test_coordinates.json"),
+            linux_coordinate_cache_path=Path("tmp/linux_cache/test_coordinates.json"),
             computer_use_model="gpt-5.4",
             cu_provider="openai",
         ),
@@ -151,15 +151,13 @@ def test_new_computer_use_session_skips_openai_client_for_google(
     monkeypatch.setattr(
         "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
-            linux_coordinate_cache_path=Path("data/linux_cache/test_coordinates.json"),
+            linux_coordinate_cache_path=Path("tmp/linux_cache/test_coordinates.json"),
             windows_coordinate_cache_path=Path(
-                "data/windows_cache/test_coordinates.json"
+                "tmp/windows_cache/test_coordinates.json"
             ),
-            macos_coordinate_cache_path=Path("data/macos_cache/test_coordinates.json"),
-            mobile_coordinate_cache_path=Path(
-                "data/mobile_cache/test_coordinates.json"
-            ),
-            ios_coordinate_cache_path=Path("data/ios_cache/test_coordinates.json"),
+            macos_coordinate_cache_path=Path("tmp/macos_cache/test_coordinates.json"),
+            mobile_coordinate_cache_path=Path("tmp/mobile_cache/test_coordinates.json"),
+            ios_coordinate_cache_path=Path("tmp/ios_cache/test_coordinates.json"),
             computer_use_model="gpt-5.4",
             cu_provider="google",
         ),

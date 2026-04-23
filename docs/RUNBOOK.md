@@ -189,7 +189,8 @@ haindy provider set-model google gemini-3-flash-preview --computer-use
 Important env vars (still supported, override all other sources):
 
 - `HAINDY_AUTOMATION_BACKEND=desktop|mobile_adb|mobile_ios`
-- `HAINDY_HOME` for tool-call session state root
+- `HAINDY_HOME` for HAINDY home storage, defaulting to `~/.haindy`
+- `HAINDY_DATA_DIR` for an exact data-artifact root override
 - `HAINDY_CU_PROVIDER=openai|google|anthropic`
 - `HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_SECONDS` for the per-action computer-use timeout budget
 - `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
@@ -197,6 +198,8 @@ Important env vars (still supported, override all other sources):
 Timeout settings use seconds across the runtime and configuration surface. Use `execution.actions_action_timeout_seconds` in `settings.json`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias for older configs.
 
 Linux desktop keyboard layout defaults to `auto`, which detects the active XKB layout and currently supports `us` and `es`. Set `desktop.keyboard_layout` explicitly when a session should force one of those layouts.
+
+Data artifacts default to `HAINDY_HOME/data/projects/<project-id>/`, where `<project-id>` is derived from the resolved current working directory. Traces, model-call logs, screenshots, replay caches, planning caches, and coordinate caches all derive from that effective data root unless a specific path override is set. If `HAINDY_DATA_DIR` or `storage.data_dir` is set, HAINDY uses that path as the exact data root and does not add project scoping. Users with old copied env vars such as `HAINDY_DATA_DIR=data` or `HAINDY_MODEL_LOG_PATH=data/model_logs/model_calls.jsonl` will keep writing to `./data` until those overrides are removed.
 
 Tool-call mode does not introduce a separate backend env var. Use `HAINDY_AUTOMATION_BACKEND` or explicit `--desktop` / `--android`.
 
@@ -247,12 +250,12 @@ When a background `test` stalls or times out, inspect the session-local forensic
 
 - `~/.haindy/sessions/<SESSION_ID>/session.json` for `latest_background_run_id`, `latest_test_phase`, and `latest_test_action_artifact_path`
 - `~/.haindy/sessions/<SESSION_ID>/action_artifacts/*.json` for per-step action, verification, and status-transition details
-- `data/traces/<RUN_ID>.json` for the run trace tied to the stable background `run_id`
-- `data/model_logs/model_calls.jsonl` for model-call history correlated by that same `run_id`
+- `~/.haindy/data/projects/<project-id>/traces/<RUN_ID>.json` for the run trace tied to the stable background `run_id`
+- `~/.haindy/data/projects/<project-id>/model_logs/model_calls.jsonl` for model-call history correlated by that same `run_id`
 
 ## Model-call artifacts
 
-Durable model-call logs are written to `data/model_logs/model_calls.jsonl`.
+Durable model-call logs are written to `<data-root>/model_logs/model_calls.jsonl`.
 Entries include both successful calls and non-rate-limit failed attempts across
 standard mode and computer-use flows.
 
@@ -261,7 +264,7 @@ entries. This includes HTTP `429`, `resource_exhausted`, and equivalent provider
 signals. Related runtime logger output and retry handling still occur normally.
 
 When a logged call includes attached screenshots, the image files are stored
-under `data/model_logs/screenshots/`.
+under `<data-root>/model_logs/screenshots/`.
 
 ## Troubleshooting
 

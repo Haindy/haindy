@@ -1,5 +1,6 @@
 """Tests for application settings."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from haindy.config.settings import (
     AgentModelConfig,
     ConfigManager,
     Settings,
+    build_project_data_dir,
     load_settings,
 )
 
@@ -19,8 +21,12 @@ class TestSettings:
         settings = Settings()
         assert settings.desktop_prefer_resolution[0] >= 800
         assert settings.desktop_prefer_resolution[1] >= 600
-        assert settings.desktop_screenshot_dir == Path("data/screenshots/desktop")
-        assert settings.mobile_screenshot_dir == Path("data/screenshots/mobile")
+        assert settings.desktop_screenshot_dir == (
+            settings.data_dir / "screenshots" / "desktop"
+        )
+        assert settings.mobile_screenshot_dir == (
+            settings.data_dir / "screenshots" / "mobile"
+        )
         assert settings.desktop_keyboard_layout == "auto"
         assert settings.automation_backend == "desktop"
 
@@ -118,9 +124,9 @@ class TestSettings:
         assert settings.actions_computer_tool_action_timeout_seconds == 600.0
 
     def test_planning_cache_defaults(self):
-        settings = load_settings({})
+        settings = Settings()
         assert settings.enable_planning_cache is True
-        assert settings.planning_cache_path == Path("data/planning_cache.json")
+        assert settings.planning_cache_path == settings.data_dir / "planning_cache.json"
 
     def test_planning_cache_env_loader(self):
         settings = load_settings(
@@ -133,9 +139,150 @@ class TestSettings:
         assert settings.planning_cache_path == Path("tmp/planning_cache_override.json")
 
     def test_situational_cache_defaults(self):
-        settings = load_settings({})
+        settings = Settings()
         assert settings.enable_situational_cache is True
-        assert settings.situational_cache_path == Path("data/situational_cache.json")
+        assert settings.situational_cache_path == (
+            settings.data_dir / "situational_cache.json"
+        )
+
+    def test_default_data_paths_use_project_scoped_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        cwd = tmp_path / "My Project!"
+        home = tmp_path / "haindy-home"
+        cwd.mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+        monkeypatch.chdir(cwd)
+
+        settings = load_settings({"HAINDY_HOME": str(home)})
+        expected_data_dir = build_project_data_dir(home, cwd)
+
+        assert settings.data_dir == expected_data_dir
+        assert settings.data_dir.parent == home / "data" / "projects"
+        assert settings.data_dir.name.startswith("my-project-")
+        assert len(settings.data_dir.name.rsplit("-", 1)[-1]) == 12
+        assert settings.screenshots_dir == expected_data_dir / "screenshots"
+        assert settings.desktop_screenshot_dir == (
+            expected_data_dir / "screenshots" / "desktop"
+        )
+        assert settings.windows_screenshot_dir == (
+            expected_data_dir / "screenshots" / "windows"
+        )
+        assert settings.mobile_screenshot_dir == (
+            expected_data_dir / "screenshots" / "mobile"
+        )
+        assert settings.ios_screenshot_dir == (
+            expected_data_dir / "screenshots" / "ios"
+        )
+        assert settings.macos_screenshot_dir == (
+            expected_data_dir / "screenshots" / "macos"
+        )
+        assert settings.model_log_path == (
+            expected_data_dir / "model_logs" / "model_calls.jsonl"
+        )
+        assert settings.planning_cache_path == (
+            expected_data_dir / "planning_cache.json"
+        )
+        assert settings.situational_cache_path == (
+            expected_data_dir / "situational_cache.json"
+        )
+        assert settings.task_plan_cache_path == (
+            expected_data_dir / "task_plan_cache.json"
+        )
+        assert settings.execution_replay_cache_path == (
+            expected_data_dir / "execution_replay_cache.json"
+        )
+        assert settings.linux_coordinate_cache_path == (
+            expected_data_dir / "linux_cache" / "coordinates.json"
+        )
+        assert settings.macos_coordinate_cache_path == (
+            expected_data_dir / "macos_cache" / "coordinates.json"
+        )
+
+    def test_data_dir_override_is_exact_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+        data_dir = tmp_path / "explicit-data"
+
+        settings = load_settings(
+            {
+                "HAINDY_HOME": str(tmp_path / "haindy-home"),
+                "HAINDY_DATA_DIR": str(data_dir),
+            }
+        )
+
+        assert settings.data_dir == data_dir
+        assert settings.screenshots_dir == data_dir / "screenshots"
+        assert settings.model_log_path == (
+            data_dir / "model_logs" / "model_calls.jsonl"
+        )
+        assert settings.desktop_screenshot_dir == (data_dir / "screenshots" / "desktop")
+        assert settings.planning_cache_path == data_dir / "planning_cache.json"
+
+    def test_settings_file_data_dir_override_is_exact_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        user_home = tmp_path / "user-home"
+        data_dir = tmp_path / "settings-data"
+        settings_path = user_home / ".haindy" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(
+            json.dumps({"storage": {"data_dir": str(data_dir)}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HOME", str(user_home))
+
+        settings = load_settings({})
+
+        assert settings.data_dir == data_dir
+        assert settings.screenshots_dir == data_dir / "screenshots"
+        assert settings.model_log_path == (
+            data_dir / "model_logs" / "model_calls.jsonl"
+        )
+
+    def test_specific_path_overrides_win_over_data_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+        data_dir = tmp_path / "explicit-data"
+
+        settings = load_settings(
+            {
+                "HAINDY_HOME": str(tmp_path / "haindy-home"),
+                "HAINDY_DATA_DIR": str(data_dir),
+                "HAINDY_MODEL_LOG_PATH": "legacy/model_calls.jsonl",
+                "HAINDY_DESKTOP_SCREENSHOT_DIR": "legacy/screenshots/desktop",
+                "HAINDY_PLANNING_CACHE_PATH": "legacy/planning_cache.json",
+            }
+        )
+
+        assert settings.data_dir == data_dir
+        assert settings.model_log_path == Path("legacy/model_calls.jsonl")
+        assert settings.desktop_screenshot_dir == Path("legacy/screenshots/desktop")
+        assert settings.planning_cache_path == Path("legacy/planning_cache.json")
+        assert settings.mobile_screenshot_dir == data_dir / "screenshots" / "mobile"
+
+    def test_create_directories_includes_all_data_dirs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        monkeypatch.chdir(tmp_path)
+        data_dir = tmp_path / "data-root"
+        settings = Settings(
+            data_dir=data_dir,
+            haindy_home=tmp_path / "haindy-home",
+            cache_dir=tmp_path / "cache",
+        )
+
+        settings.create_directories()
+
+        assert (data_dir / "screenshots" / "desktop").is_dir()
+        assert (data_dir / "screenshots" / "mobile").is_dir()
+        assert (data_dir / "screenshots" / "ios").is_dir()
+        assert (data_dir / "screenshots" / "macos").is_dir()
+        assert (data_dir / "screenshots" / "windows").is_dir()
+        assert (data_dir / "model_logs").is_dir()
+        assert (data_dir / "journals").is_dir()
 
     def test_situational_cache_env_loader(self):
         settings = load_settings(

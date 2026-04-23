@@ -1,6 +1,6 @@
 ---
 name: haindy-test-forensics
-description: Investigate failed HAINDY runtime test executions by reconstructing the sequence of events from `data/traces/*.json`, `data/model_logs/model_calls.jsonl`, screenshots, and `reports/run-id/` artifacts, then explain what happened and suggest fixes. Use when a user asks for forensics on the last or a specific HAINDY run, wants a high-level failure timeline, issue analysis, or candidate fixes from repo-local artifacts in `data/`. Do not use this skill for ordinary `pytest` stack-trace debugging.
+description: Investigate failed HAINDY runtime test executions by reconstructing the sequence of events from `<data-root>/traces/*.json`, `<data-root>/model_logs/model_calls.jsonl`, screenshots, and `reports/run-id/` artifacts, then explain what happened and suggest fixes. Use when a user asks for forensics on the last or a specific HAINDY run, wants a high-level failure timeline, issue analysis, or candidate fixes from local HAINDY data artifacts. Do not use this skill for ordinary `pytest` stack-trace debugging.
 ---
 
 # Haindy Test Forensics
@@ -8,7 +8,9 @@ description: Investigate failed HAINDY runtime test executions by reconstructing
 ## Overview
 
 Analyze a failed HAINDY execution run from local artifacts and explain it in plain English.
-Prioritize `data/` artifacts, reconstruct the run sequence, identify the most likely failure category, and propose fixes without inventing non-visual root causes.
+Prioritize artifacts under the effective HAINDY data root, reconstruct the run sequence, identify the most likely failure category, and propose fixes without inventing non-visual root causes.
+
+By default, the data root is `~/.haindy/data/projects/<project-id>` for the resolved current working directory. `HAINDY_DATA_DIR` or `storage.data_dir` overrides it exactly. If a user has old copied env vars pointing at `data/...`, artifacts may still be under `./data` until those overrides are removed.
 
 ## Guardrails
 
@@ -26,20 +28,20 @@ Prioritize `data/` artifacts, reconstruct the run sequence, identify the most li
 
 Read artifacts in this order unless the user points you somewhere else:
 
-1. `data/traces/<run_id>.json`
+1. `<data-root>/traces/<run_id>.json`
 This is the authoritative run timeline: backend, start/end times, step ordering, pass/fail status, expected vs actual results, and before/after screenshot paths.
 
 2. `reports/<run_id>/*-actions.json`
 Use this for per-action detail: interpreted action type, prompts, automation calls, verification summaries, and bug-report payloads.
 
-3. `data/model_logs/model_calls.jsonl`
+3. `<data-root>/model_logs/model_calls.jsonl`
 Filter by `run_id` to inspect planner/interpreter/executor/verifier reasoning, prompt text, and screenshot attachments.
 
-4. `data/model_logs/screenshots/`
+4. `<data-root>/model_logs/screenshots/`
 Use these as visual evidence referenced by model logs. They are often the best way to confirm what the CU model actually saw.
 
 5. `debug_screenshots/<run_id>/`
-Use these when the trace or action JSON points to step-level before/after screenshots outside `data/`.
+Use these when the trace or action JSON points to step-level before/after screenshots outside the data root.
 
 6. `reports/<run_id>/*.html`
 Treat the HTML report as a convenience view, not the source of truth.
@@ -81,7 +83,7 @@ Look for:
 Typical command:
 
 ```bash
-rg -n "\"run_id\": \"<run_id>\"" data/model_logs/model_calls.jsonl
+rg -n "\"run_id\": \"<run_id>\"" <data-root>/model_logs/model_calls.jsonl
 ```
 
 5. Check the screenshots tied to the failing step.
@@ -130,6 +132,6 @@ Do not overstate confidence.
 ## Example Trigger Phrases
 
 - `The last test run failed. I need you to do forensics and tell me what happened.`
-- `Analyze the latest failed HAINDY run from data/.`
+- `Analyze the latest failed HAINDY run from the data root.`
 - `Do forensics on run 20260313T144056Z_447777a8 and suggest fixes.`
 - `Explain the sequence of events and root cause for the last mobile_adb failure.`

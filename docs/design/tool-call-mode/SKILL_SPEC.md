@@ -212,7 +212,7 @@ Note: `explore` is driven by an Awareness Agent that maintains the TODO list and
 
 **Screenshots:** The dispatch response for `test` and `explore` includes a `screenshot_path` capturing the device state at the moment the command was accepted. Status poll responses include the latest screenshot from the background task. Haindy's screenshot timing may not match the exact moment you need. Use `haindy screenshot --session <SESSION_ID>` to take your own screenshot at a time you choose.
 
-**Forensics:** When a background `test` stalls or times out, inspect `test-status.phase`, `test-status.last_model_agent`, and `test-status.latest_action_artifact_path` first. Then jump to `~/.haindy/sessions/<SESSION_ID>/session.json`, `~/.haindy/sessions/<SESSION_ID>/action_artifacts/*.json`, `data/traces/<RUN_ID>.json`, and `data/model_logs/model_calls.jsonl`.
+**Forensics:** When a background `test` stalls or times out, inspect `test-status.phase`, `test-status.last_model_agent`, and `test-status.latest_action_artifact_path` first. Then jump to `~/.haindy/sessions/<SESSION_ID>/session.json`, `~/.haindy/sessions/<SESSION_ID>/action_artifacts/*.json`, `<data-root>/traces/<RUN_ID>.json`, and `<data-root>/model_logs/model_calls.jsonl`. By default, `<data-root>` is `~/.haindy/data/projects/<project-id>` for the current working directory; `HAINDY_DATA_DIR` or `storage.data_dir` can override it exactly.
 
 ### 7. Session Variables
 
