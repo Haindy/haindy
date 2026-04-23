@@ -21,6 +21,7 @@ class TestSettings:
         assert settings.desktop_prefer_resolution[1] >= 600
         assert settings.desktop_screenshot_dir == Path("data/screenshots/desktop")
         assert settings.mobile_screenshot_dir == Path("data/screenshots/mobile")
+        assert settings.desktop_keyboard_layout == "auto"
         assert settings.automation_backend == "desktop"
 
     def test_agent_models_include_situational_agent(self):
@@ -71,6 +72,20 @@ class TestSettings:
     def test_automation_backend_loader(self, backend: str, expected: str):
         settings = load_settings({"HAINDY_AUTOMATION_BACKEND": backend})
         assert settings.automation_backend == expected
+
+    @pytest.mark.parametrize(
+        ("layout", "expected"),
+        [
+            ("auto", "auto"),
+            ("us", "us"),
+            ("es", "es"),
+            ("ES", "es"),
+            ("unknown", "us"),
+        ],
+    )
+    def test_desktop_keyboard_layout_loader(self, layout: str, expected: str):
+        settings = load_settings({"HAINDY_DESKTOP_KEYBOARD_LAYOUT": layout})
+        assert settings.desktop_keyboard_layout == expected
 
     def test_cu_provider_accepts_exact_env_name(self):
         settings = load_settings({"HAINDY_CU_PROVIDER": "anthropic"})

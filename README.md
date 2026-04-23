@@ -167,11 +167,12 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
     "automation_backend": "desktop",
     "actions_action_timeout_seconds": 600
   },
+  "desktop": { "keyboard_layout": "auto" },
   "logging": { "level": "INFO" }
 }
 ```
 
-Environment variables override all other sources. Timeout settings use seconds. In `settings.json`, use `execution.actions_action_timeout_seconds`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias. See [`.env.example`](.env.example) for the full list.
+Environment variables override all other sources. Timeout settings use seconds. In `settings.json`, use `execution.actions_action_timeout_seconds`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias. Linux desktop keyboard layout defaults to `auto`, which detects the active XKB layout and currently supports `us` and `es`; set `desktop.keyboard_layout` explicitly to override detection. See [`.env.example`](.env.example) for the full legacy env-var list.
 
 ## Platform prerequisites
 

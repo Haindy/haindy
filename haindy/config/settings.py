@@ -441,8 +441,8 @@ class Settings(BaseModel):
         description="Preferred resolution for desktop sessions",
     )
     desktop_keyboard_layout: str = Field(
-        default="us",
-        description="Keyboard layout for desktop automation (us, es)",
+        default="auto",
+        description="Keyboard layout for desktop automation (auto, us, es)",
     )
     desktop_enable_keyboard_scancodes: bool = Field(
         default=True,
@@ -855,8 +855,8 @@ class Settings(BaseModel):
     @field_validator("desktop_keyboard_layout")
     @classmethod
     def normalize_keyboard_layout(cls, value: str) -> str:
-        normalized = (value or "us").strip().lower()
-        if normalized in {"us", "es"}:
+        normalized = (value or "auto").strip().lower()
+        if normalized in {"auto", "us", "es"}:
             return normalized
         return "us"
 

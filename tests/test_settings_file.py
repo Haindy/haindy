@@ -196,6 +196,9 @@ class TestSettingsSkeleton:
             == "gemini-3-flash-preview"
         )
 
+    def test_skeleton_defaults_desktop_keyboard_layout_to_auto(self) -> None:
+        assert _SETTINGS_SKELETON["desktop"]["keyboard_layout"] == "auto"
+
 
 class TestWriteSettingsFile:
     def test_creates_file_and_parent_dirs(self, tmp_path: Path) -> None:

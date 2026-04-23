@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from haindy.linux.driver import DesktopDriver
+from haindy.linux.driver import (
+    DesktopDriver,
+    _layout_from_gsettings_outputs,
+    _layout_from_localectl_output,
+    _layout_from_setxkbmap_output,
+)
 
 
 class DummyVirtualInput:
@@ -33,6 +38,25 @@ class DummyVirtualInput:
         self.scrolls.append((x, y))
 
 
+def test_setxkbmap_layout_parser_uses_first_configured_layout() -> None:
+    output = "rules: evdev\nmodel: pc105+inet\nlayout: es,us\nvariant: ,\n"
+
+    assert _layout_from_setxkbmap_output(output) == "es"
+
+
+def test_localectl_layout_parser_uses_x11_layout() -> None:
+    output = "    VC Keymap: (unset)\n   X11 Layout: es\n"
+
+    assert _layout_from_localectl_output(output) == "es"
+
+
+def test_gsettings_layout_parser_uses_current_input_source() -> None:
+    current_output = "uint32 1\n"
+    sources_output = "[('xkb', 'us'), ('xkb', 'es')]\n"
+
+    assert _layout_from_gsettings_outputs(current_output, sources_output) == "es"
+
+
 @pytest.mark.asyncio
 async def test_desktop_driver_smoke(monkeypatch, tmp_path: Path) -> None:
     dummy_input = DummyVirtualInput()
@@ -47,6 +71,7 @@ async def test_desktop_driver_smoke(monkeypatch, tmp_path: Path) -> None:
         cache_path=tmp_path / "coords.json",
         prefer_resolution=(800, 600),
         enable_resolution_switch=False,
+        keyboard_layout="us",
     )
     monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
     monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
@@ -66,6 +91,75 @@ async def test_desktop_driver_smoke(monkeypatch, tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_desktop_driver_auto_detects_keyboard_layout(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured: dict[str, str] = {}
+    dummy_input = DummyVirtualInput()
+
+    def _virtual_input_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured["keyboard_layout"] = kwargs["keyboard_layout"]
+        return dummy_input
+
+    monkeypatch.setattr("haindy.linux.driver.VirtualInput", _virtual_input_factory)
+    monkeypatch.setattr(
+        "haindy.linux.driver._detect_desktop_keyboard_layout", lambda: "es"
+    )
+
+    driver = DesktopDriver(
+        screenshot_dir=tmp_path / "shots",
+        cache_path=tmp_path / "coords.json",
+        prefer_resolution=(800, 600),
+        enable_resolution_switch=False,
+        keyboard_layout="auto",
+    )
+    monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
+    monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
+    monkeypatch.setattr(driver.resolution_manager, "restore", lambda: None)
+
+    await driver.start()
+    await driver.stop()
+
+    assert captured["keyboard_layout"] == "es"
+
+
+@pytest.mark.asyncio
+async def test_desktop_driver_explicit_keyboard_layout_skips_detection(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured: dict[str, str] = {}
+    dummy_input = DummyVirtualInput()
+
+    def _virtual_input_factory(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured["keyboard_layout"] = kwargs["keyboard_layout"]
+        return dummy_input
+
+    def _unexpected_detect() -> str:
+        raise AssertionError("explicit keyboard layout should not run auto detection")
+
+    monkeypatch.setattr("haindy.linux.driver.VirtualInput", _virtual_input_factory)
+    monkeypatch.setattr(
+        "haindy.linux.driver._detect_desktop_keyboard_layout", _unexpected_detect
+    )
+
+    driver = DesktopDriver(
+        screenshot_dir=tmp_path / "shots",
+        cache_path=tmp_path / "coords.json",
+        prefer_resolution=(800, 600),
+        enable_resolution_switch=False,
+        keyboard_layout="us",
+    )
+    monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
+    monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
+    monkeypatch.setattr(driver.resolution_manager, "restore", lambda: None)
+
+    await driver.start()
+    await driver.stop()
+
+    assert captured["keyboard_layout"] == "us"
+
+
+@pytest.mark.asyncio
 async def test_desktop_driver_start_is_idempotent(monkeypatch, tmp_path: Path) -> None:
     created = {"count": 0}
     dummy_input = DummyVirtualInput()
@@ -81,6 +175,7 @@ async def test_desktop_driver_start_is_idempotent(monkeypatch, tmp_path: Path) -
         cache_path=tmp_path / "coords.json",
         prefer_resolution=(800, 600),
         enable_resolution_switch=False,
+        keyboard_layout="us",
     )
     monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
     monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
@@ -109,6 +204,7 @@ async def test_desktop_driver_scroll_rejects_invalid_direction(
         cache_path=tmp_path / "coords.json",
         prefer_resolution=(800, 600),
         enable_resolution_switch=False,
+        keyboard_layout="us",
     )
     monkeypatch.setattr(driver.resolution_manager, "maybe_downshift", lambda: None)
     monkeypatch.setattr(driver.resolution_manager, "viewport_size", lambda: (800, 600))
@@ -129,6 +225,7 @@ async def test_desktop_driver_restores_resolution_when_start_fails(
         cache_path=tmp_path / "coords.json",
         prefer_resolution=(800, 600),
         enable_resolution_switch=True,
+        keyboard_layout="us",
     )
 
     calls: list[str] = []

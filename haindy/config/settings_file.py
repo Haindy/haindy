@@ -174,6 +174,9 @@ _SETTINGS_SKELETON: dict[str, Any] = {
     "execution": {
         "automation_backend": "desktop",
     },
+    "desktop": {
+        "keyboard_layout": "auto",
+    },
     "logging": {
         "level": "INFO",
     },
