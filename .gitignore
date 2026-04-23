@@ -142,6 +142,9 @@ cython_debug/
 # VS Code
 .vscode/
 
+# Local Codex settings
+.codex/config.toml
+
 # macOS
 .DS_Store
 
