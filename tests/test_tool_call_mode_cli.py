@@ -146,9 +146,7 @@ def test_handle_session_list_filters_dead_sessions(monkeypatch, tmp_path: Path) 
         backend="desktop",
         idle_timeout_seconds=1800,
     )
-    live_metadata.pid = 4321
     save_session_metadata(live_metadata)
-    write_pid_file(live_session, 4321)
 
     get_session_dir(dead_session).mkdir(parents=True, exist_ok=True)
     dead_metadata = SessionMetadata.new(
@@ -161,7 +159,8 @@ def test_handle_session_list_filters_dead_sessions(monkeypatch, tmp_path: Path) 
     write_pid_file(dead_session, 999999)
 
     monkeypatch.setattr(
-        "haindy.tool_call_mode.cli.is_process_alive", lambda pid: pid == 4321
+        "haindy.tool_call_mode.cli.is_session_daemon_live",
+        lambda metadata: metadata is not None and metadata.session_id == live_session,
     )
 
     envelope, exit_code = _handle_session_list()
@@ -170,6 +169,72 @@ def test_handle_session_list_filters_dead_sessions(monkeypatch, tmp_path: Path) 
     assert envelope.status.value == "success"
     assert envelope.sessions is not None
     assert [entry.session_id for entry in envelope.sessions] == [live_session]
+
+
+def test_handle_session_list_ignores_closed_session_with_reused_pid(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HAINDY_HOME", str(tmp_path / "haindy-home"))
+    session_id = "closed-reused-pid"
+    get_session_dir(session_id).mkdir(parents=True, exist_ok=True)
+    metadata = SessionMetadata.new(
+        session_id=session_id,
+        backend="mobile_ios",
+        idle_timeout_seconds=1800,
+    ).model_copy(
+        update={
+            "pid": os.getpid(),
+            "status": "closed",
+            "closed_at": "2026-04-21T10:36:34+00:00",
+        }
+    )
+    save_session_metadata(metadata)
+    write_pid_file(session_id, os.getpid())
+    (get_session_dir(session_id) / "daemon.sock").touch()
+
+    monkeypatch.setattr(
+        "haindy.tool_call_mode.paths.is_process_alive",
+        lambda pid: pid == os.getpid(),
+    )
+
+    envelope, exit_code = _handle_session_list()
+
+    assert exit_code == 0
+    assert envelope.sessions == []
+
+
+@pytest.mark.asyncio
+async def test_session_close_rejects_closed_session_with_reused_pid(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    monkeypatch.setenv("HAINDY_HOME", str(tmp_path / "haindy-home"))
+    session_id = "closed-reused-pid"
+    get_session_dir(session_id).mkdir(parents=True, exist_ok=True)
+    metadata = SessionMetadata.new(
+        session_id=session_id,
+        backend="mobile_ios",
+        idle_timeout_seconds=1800,
+    ).model_copy(
+        update={
+            "pid": os.getpid(),
+            "status": "closed",
+            "closed_at": "2026-04-21T10:36:34+00:00",
+        }
+    )
+    save_session_metadata(metadata)
+    write_pid_file(session_id, os.getpid())
+    (get_session_dir(session_id) / "daemon.sock").touch()
+
+    monkeypatch.setattr(
+        "haindy.tool_call_mode.paths.is_process_alive",
+        lambda pid: pid == os.getpid(),
+    )
+
+    exit_code = await run_tool_call_cli(["session", "close", "--session", session_id])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 3
+    assert payload["response"] == f"No active session found for {session_id}."
 
 
 def test_handle_session_prune_reports_pruned_count(monkeypatch) -> None:
@@ -251,7 +316,9 @@ async def test_handle_session_new_launches_daemon_with_expected_settings(
             android_app="co.playerup.flutterApp",
         ).model_copy(update={"pid": 1234}),
     )
-    monkeypatch.setattr("haindy.tool_call_mode.cli.is_process_alive", lambda pid: True)
+    monkeypatch.setattr(
+        "haindy.tool_call_mode.cli.is_session_daemon_live", lambda metadata: True
+    )
 
     envelope, exit_code = await _handle_session_new(
         create_tool_call_parser().parse_args(

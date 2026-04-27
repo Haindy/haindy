@@ -140,6 +140,26 @@ def is_process_alive(pid: int | None) -> bool:
     return True
 
 
+def is_session_daemon_live(metadata: SessionMetadata | None) -> bool:
+    """Return True only when metadata points to this session's live daemon."""
+
+    if metadata is None:
+        return False
+    if metadata.status in {"closed", "error"} or metadata.closed_at is not None:
+        return False
+
+    metadata_pid = metadata.pid
+    pid_file_pid = read_pid(metadata.session_id)
+    if metadata_pid is None or pid_file_pid != metadata_pid:
+        return False
+    if not is_process_alive(metadata_pid):
+        return False
+
+    if sys.platform == "win32":
+        return read_port(metadata.session_id) is not None
+    return get_socket_path(metadata.session_id).is_socket()
+
+
 def _is_process_alive_windows(pid: int) -> bool:
     import ctypes
 
@@ -209,8 +229,8 @@ def cleanup_stale_sessions() -> None:
         if not session_dir.is_dir():
             continue
         session_id = session_dir.name
-        pid = read_pid(session_id)
-        if is_process_alive(pid):
+        metadata = load_session_metadata(session_id)
+        if is_session_daemon_live(metadata):
             continue
         cleanup_session_artifacts(session_id)
 
@@ -231,16 +251,16 @@ def prune_dead_sessions(*, older_than_days: int) -> list[str]:
             continue
         session_id = session_dir.name
         metadata = load_session_metadata(session_id)
-        pid = read_pid(session_id)
-        if is_process_alive(pid):
+        if is_session_daemon_live(metadata):
             continue
         if metadata is None:
             continue
+        reference_text = metadata.closed_at or metadata.created_at
         try:
-            created_at = datetime.fromisoformat(metadata.created_at)
+            reference_at = datetime.fromisoformat(reference_text)
         except ValueError:
             continue
-        if created_at > threshold:
+        if reference_at > threshold:
             continue
         cleanup_session_artifacts(session_id, remove_dir=True)
         pruned.append(session_id)

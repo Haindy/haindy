@@ -270,6 +270,7 @@ class ToolCallSessionRuntime:
         await self.cancel_background_task()
         self.metadata.status = "closed"
         self.metadata.closed_at = _utc_now().isoformat()
+        self.metadata.pid = None
         save_session_metadata(self.metadata)
         if self.controller is not None:
             await self.controller.stop()
