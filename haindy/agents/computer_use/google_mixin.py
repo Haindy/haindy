@@ -849,6 +849,16 @@ class GoogleComputerUseMixin:
             tools.extend(self._google_modifier_click_function_tools())
         return tools
 
+    @staticmethod
+    def _google_interactions_needs_raw_tools(tools: Any) -> bool:
+        """Return whether tools must bypass SDK field alias conversion."""
+        if not isinstance(tools, list):
+            return False
+        return any(
+            isinstance(tool, dict) and "excluded_predefined_functions" in tool
+            for tool in tools
+        )
+
     def _build_google_follow_up_item(
         self: _ComputerUseSession,
         call_result: Any,
@@ -1239,6 +1249,16 @@ class GoogleComputerUseMixin:
             key: value for key, value in payload.items() if key != "api_surface"
         }
 
+        def _interaction_create_kwargs() -> dict[str, Any]:
+            kwargs = dict(request_payload)
+            tools = kwargs.get("tools")
+            if not self._google_interactions_needs_raw_tools(tools):
+                return kwargs
+
+            kwargs.pop("tools", None)
+            kwargs["extra_body"] = {"tools": tools}
+            return kwargs
+
         def _call_generate_content() -> Any:
             if hasattr(client, "models") and hasattr(client.models, "generate_content"):
                 contents = request_payload.get("contents") or request_payload.get(
@@ -1268,12 +1288,16 @@ class GoogleComputerUseMixin:
                     )
 
                 if hasattr(client, "aio") and hasattr(client.aio, "interactions"):
-                    return await client.aio.interactions.create(**request_payload)
+                    return await client.aio.interactions.create(
+                        **_interaction_create_kwargs()
+                    )
                 if hasattr(client, "interactions") and hasattr(
                     client.interactions, "create"
                 ):
                     return await self._invoke_google_request(
-                        lambda: client.interactions.create(**request_payload)
+                        lambda: client.interactions.create(
+                            **_interaction_create_kwargs()
+                        )
                     )
             raise ComputerUseExecutionError(
                 "Google GenAI client does not support interactions.create calls."
