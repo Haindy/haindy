@@ -6,6 +6,7 @@ import socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import haindy.tool_call_mode.paths as paths
 from haindy.tool_call_mode.models import SessionMetadata
 from haindy.tool_call_mode.paths import (
     ensure_session_layout,
@@ -47,6 +48,22 @@ def test_session_layout_stays_under_home_sessions(monkeypatch, tmp_path: Path) -
     assert get_screenshots_dir(session_id).is_dir()
     assert get_logs_dir(session_id).is_dir()
     assert get_action_artifacts_dir(session_id).is_dir()
+
+
+def test_socket_path_uses_short_temp_path_when_session_path_is_too_long(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / ("long-home-" + ("x" * 120))
+    session_id = "session-123"
+    monkeypatch.setenv("HAINDY_HOME", str(home))
+    monkeypatch.setattr(paths.sys, "platform", "darwin")
+
+    socket_path = get_socket_path(session_id)
+
+    assert socket_path.parent == Path("/tmp")
+    assert socket_path.name.startswith("haindy-")
+    assert socket_path.name.endswith(".sock")
+    assert len(str(socket_path)) <= 100
 
 
 def test_save_and_load_session_metadata_round_trip(monkeypatch, tmp_path: Path) -> None:
@@ -137,7 +154,7 @@ def test_prune_dead_sessions_removes_only_old_dead_sessions(
         "haindy.tool_call_mode.paths.is_process_alive",
         lambda pid: pid == 4321,
     )
-    monkeypatch.setattr(Path, "is_socket", lambda path: path.name == "daemon.sock")
+    monkeypatch.setattr(Path, "is_socket", lambda path: path.suffix == ".sock")
 
     pruned = prune_dead_sessions(older_than_days=7)
 

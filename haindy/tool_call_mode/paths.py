@@ -8,6 +8,7 @@ import shutil
 import signal
 import sys
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 
 from haindy.config.settings import get_settings
@@ -40,7 +41,11 @@ def get_session_dir(session_id: str) -> Path:
 def get_socket_path(session_id: str) -> Path:
     """Return the daemon socket path for one session."""
 
-    return get_session_dir(session_id) / "daemon.sock"
+    session_socket_path = get_session_dir(session_id) / "daemon.sock"
+    if sys.platform == "win32" or len(str(session_socket_path)) <= 100:
+        return session_socket_path
+    digest = sha256(str(get_session_dir(session_id)).encode("utf-8")).hexdigest()[:24]
+    return Path("/tmp") / f"haindy-{digest}.sock"
 
 
 def get_port_file_path(session_id: str) -> Path:

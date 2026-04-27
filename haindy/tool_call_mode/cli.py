@@ -780,7 +780,7 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
             return envelope, 1
 
     metadata = load_session_metadata(session_id)
-    if metadata is None or not is_session_daemon_live(metadata):
+    if metadata is None or metadata.pid is None:
         envelope = make_envelope(
             session_id=session_id,
             command="session",
