@@ -440,6 +440,63 @@ async def test_call_responses_api_streaming_uses_json_schema_text_format(
 
 
 @pytest.mark.asyncio
+async def test_call_responses_api_streaming_uses_delta_text_when_final_is_empty(
+    monkeypatch,
+) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=5, total_tokens=6)
+    final_response = SimpleNamespace(
+        output_text="",
+        output=[],
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta='{"decision":'),
+        SimpleNamespace(type="response.output_text.delta", delta='"continue"}'),
+        SimpleNamespace(type="response.completed", response=final_response),
+    ]
+    fake_responses = FakeResponses(events=events, final_response=final_response)
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="dummy",
+        openai_request_timeout_seconds=30,
+    )
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+
+    response_format = build_json_schema_response_format(
+        "haindy_awareness_assessment_v1",
+        {
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+            "required": ["decision"],
+            "additionalProperties": False,
+        },
+    )
+
+    client = OpenAIClient(model="gpt-5.4", api_key="test-key")
+    result = await client._call_responses_api_streaming(
+        final_messages=[{"role": "user", "content": "Assess context."}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=response_format,
+        reasoning_level="none",
+        system_prompt="You are a strict evaluator.",
+        observer=None,
+    )
+
+    assert result["content"] == {"decision": "continue"}
+
+
+@pytest.mark.asyncio
 async def test_codex_mode_uses_codex_base_url_headers_and_store_false(
     monkeypatch,
 ) -> None:

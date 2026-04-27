@@ -430,6 +430,7 @@ class OpenAIClient:
         last_reported_usage = dict(usage_totals)
         token_encoder = self._get_token_encoder(self.model)
         estimated_output_tokens = 0
+        streamed_text_parts: list[str] = []
 
         await self._dispatch_observer(observer, "on_stream_start")
 
@@ -449,6 +450,7 @@ class OpenAIClient:
                             getattr(event, "delta", None)
                         )
                         if delta_text:
+                            streamed_text_parts.append(delta_text)
                             await self._dispatch_observer(
                                 observer, "on_text_delta", delta_text
                             )
@@ -492,6 +494,8 @@ class OpenAIClient:
             raise RuntimeError("Streaming response did not return a final result")
 
         content_text = self._extract_output_text(final_response)
+        if not content_text and streamed_text_parts:
+            content_text = "".join(streamed_text_parts)
         content_value: Any = content_text
         usage = getattr(final_response, "usage", None)
 
@@ -521,7 +525,14 @@ class OpenAIClient:
         format_type = response_format.get("type") if response_format else None
         if format_type in {"json_object", "json_schema"}:
             if not content_text:
-                content_value = {}
+                raise ModelCallError(
+                    "OpenAI returned an empty streaming JSON response.",
+                    failure_kind="empty_response",
+                    response_payload={
+                        "provider_response": final_response,
+                        "usage": combined_usage,
+                    },
+                )
             else:
                 try:
                     content_value = json.loads(content_text)

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from haindy.agents.awareness_agent import AwarenessAgent, AwarenessTodoItem
 
 
@@ -47,3 +49,13 @@ def test_awareness_agent_parse_response_accepts_dict_payload() -> None:
     assert assessment.current_focus == "Open the notifications screen"
     assert assessment.todo[0].action == "Tap Notifications"
     assert assessment.todo[0].status == "in_progress"
+
+
+def test_awareness_agent_parse_response_rejects_empty_payload() -> None:
+    with pytest.raises(ValueError, match="response was empty"):
+        AwarenessAgent._parse_response({"content": {}})
+
+
+def test_awareness_agent_parse_response_rejects_missing_required_fields() -> None:
+    with pytest.raises(ValueError, match="missing required fields"):
+        AwarenessAgent._parse_response({"content": {"decision": "continue"}})
