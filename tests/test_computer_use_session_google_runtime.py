@@ -446,6 +446,37 @@ async def test_google_interactions_failure_logs_payload_summary(
 
 
 @pytest.mark.asyncio
+async def test_google_mobile_interactions_tools_bypass_sdk_alias_transform(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "google"
+    interactions_create = AsyncMock(return_value={"id": "ok"})
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=make_google_client(interactions_create_mock=interactions_create),
+    )
+    tools = session._build_google_interaction_tools("mobile_adb")
+
+    response = await session._create_google_response(
+        {
+            "api_surface": "interactions",
+            "model": "gemini-3-flash-preview",
+            "input": [{"type": "text", "text": "status"}],
+            "tools": tools,
+        }
+    )
+
+    assert response == {"id": "ok"}
+    kwargs = interactions_create.await_args.kwargs
+    assert "tools" not in kwargs
+    assert kwargs["extra_body"]["tools"] == tools
+    assert "excluded_predefined_functions" in kwargs["extra_body"]["tools"][0]
+
+
+@pytest.mark.asyncio
 async def test_google_computer_use_logs_non_retryable_failed_attempt(
     mock_client, mock_browser, session_settings
 ):
