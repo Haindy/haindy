@@ -194,6 +194,22 @@ Decision rules:
             payload = content
         else:
             raise ValueError("Awareness assessment response missing JSON payload.")
+        if not payload:
+            raise ValueError("Awareness assessment response was empty.")
+
+        required_fields = {
+            "decision",
+            "response",
+            "current_focus",
+            "todo",
+            "observations",
+        }
+        missing_fields = sorted(required_fields.difference(payload))
+        if missing_fields:
+            raise ValueError(
+                "Awareness assessment response missing required fields: "
+                + ", ".join(missing_fields)
+            )
 
         todo: list[AwarenessTodoItem] = []
         for item in payload.get("todo", []):
@@ -205,9 +221,15 @@ Decision rules:
                 continue
             todo.append(AwarenessTodoItem(action=action, status=status))
 
+        decision = str(payload.get("decision") or "").strip()
+        if decision not in {"continue", "goal_reached", "stuck", "aborted"}:
+            raise ValueError(
+                f"Awareness assessment response had invalid decision: {decision!r}"
+            )
+
         return AwarenessAssessment(
-            decision=str(payload.get("decision") or "stuck").strip(),
-            response=str(payload.get("response") or "Exploration ended.").strip(),
+            decision=decision,
+            response=str(payload.get("response") or "").strip(),
             current_focus=(
                 str(payload.get("current_focus")).strip()
                 if payload.get("current_focus") is not None
