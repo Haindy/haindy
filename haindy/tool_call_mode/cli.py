@@ -42,10 +42,9 @@ from .paths import (
     get_port_file_path,
     get_sessions_root,
     get_socket_path,
-    is_process_alive,
+    is_session_daemon_live,
     load_session_metadata,
     prune_dead_sessions,
-    read_pid,
     read_port,
     save_session_metadata,
     terminate_session_process,
@@ -781,7 +780,7 @@ async def _handle_session_new(args: argparse.Namespace) -> tuple[ToolCallEnvelop
             return envelope, 1
 
     metadata = load_session_metadata(session_id)
-    if metadata is None or not is_process_alive(metadata.pid):
+    if metadata is None or metadata.pid is None:
         envelope = make_envelope(
             session_id=session_id,
             command="session",
@@ -820,7 +819,7 @@ def _handle_session_list() -> tuple[ToolCallEnvelope, int]:
             if not session_dir.is_dir():
                 continue
             metadata = load_session_metadata(session_dir.name)
-            if metadata is None or not is_process_alive(metadata.pid):
+            if metadata is None or not is_session_daemon_live(metadata):
                 cleanup_session_artifacts(session_dir.name)
                 continue
             last_command_text = metadata.last_command_at or metadata.created_at
@@ -904,17 +903,17 @@ async def _handle_session_close(
         return _usage_error("`--session` is required.")
 
     metadata = load_session_metadata(session_id)
-    if metadata is None or not is_process_alive(metadata.pid):
+    if metadata is None or not is_session_daemon_live(metadata):
         return _missing_session(session_id)
 
     if args.force:
         terminated = terminate_session_process(session_id, force=False)
         if terminated:
             await asyncio.sleep(0.5)
-        if is_process_alive(read_pid(session_id)):
+        if is_session_daemon_live(load_session_metadata(session_id)):
             terminate_session_process(session_id, force=True)
             await asyncio.sleep(0.1)
-        if is_process_alive(read_pid(session_id)):
+        if is_session_daemon_live(load_session_metadata(session_id)):
             envelope = make_envelope(
                 session_id=session_id,
                 command="session",
@@ -928,6 +927,7 @@ async def _handle_session_close(
             return envelope, 1
         metadata.status = "closed"
         metadata.closed_at = datetime.now(timezone.utc).isoformat()
+        metadata.pid = None
         metadata.notes = "Force-closed by CLI."
         save_session_metadata(metadata)
         cleanup_session_artifacts(session_id)
@@ -962,7 +962,7 @@ async def _send_session_request(
         return _usage_error("`--session` is required.", command=public_command)
 
     metadata = load_session_metadata(session_id)
-    if metadata is None or not is_process_alive(metadata.pid):
+    if metadata is None or not is_session_daemon_live(metadata):
         return _missing_session(session_id, command=public_command)
 
     socket_path = get_socket_path(session_id)

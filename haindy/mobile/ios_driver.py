@@ -354,7 +354,7 @@ class IOSDriver(AutomationDriver):
                 return None
             with open(tmp_path, "rb") as fh:
                 data = fh.read()
-            return data if data.startswith(_PNG_SIGNATURE) else None
+            return data or None
         except Exception:
             return None
         finally:

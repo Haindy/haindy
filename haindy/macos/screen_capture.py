@@ -49,6 +49,8 @@ class MacOSScreenCapture:
             screenshot = sct.grab(mon)
             png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
 
+        if png_bytes is None:
+            raise RuntimeError("Screen capture produced empty image data.")
         return self._persist(png_bytes, label)
 
     def _persist(self, image_bytes: bytes, label: str) -> tuple[bytes, str]:
