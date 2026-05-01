@@ -40,6 +40,7 @@ This file is intentionally minimal.
   - if you change backend names, aliases, defaults, or target-type behavior, update `src/runtime/environment.py`, `src/config/settings.py`, `.env.example`, `README.md`, and relevant tests together
 - Treat runtime/config surface as shared contract:
   - if you add or rename env vars, defaults, cache paths, or provider settings, update `src/config/settings.py`, `.env.example`, `README.md`, `docs/RUNBOOK.md`, and tests together
+- Before release-facing, provider, runtime, or surface changes, manually run the repo-local `.agents/skills/haindy-self-regression` skill after installing the branch build. This is not required for every small edit or docs-only commit.
 - Before finishing a change, run:
   - `.venv/bin/ruff check .`
   - `.venv/bin/ruff format .`

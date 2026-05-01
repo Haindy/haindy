@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-01
+
+### Added
+
+- Repo-local `haindy-self-regression` skill for manually exercising HAINDY through its own public commands across configured providers and available desktop/mobile surfaces before release-facing provider/runtime changes
+- Regression coverage that keeps the self-regression skill local-only and verifies its HAINDY-only boundaries, provider order, cleanup, and reporting requirements
+
+### Changed
+
+- Refreshed the provider-focused lockfile set to `openai==2.33.0`, `google-genai==1.74.0`, `anthropic==0.97.0`, `pydantic==2.13.3`, and `websockets==16.0`
+
 ## [0.4.2] - 2026-04-23
 
 ### Added
