@@ -190,3 +190,7 @@ docs/plans/*
 !docs/plans/storage/
 !docs/plans/storage/unify-data-home.md
 docs/issues/
+
+# OSWorld local research artifacts
+cache/
+docker_vm_data/

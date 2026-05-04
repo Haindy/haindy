@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# vm-haindy — transparent proxy from host to HAINDY running inside an OSWorld VM.
+#
+# Drop-in replacement for `haindy`: same args, same stdout/stderr/exit code.
+# Encodes the call as a shell command sent to the VM's /execute endpoint,
+# unwraps the JSON response, and re-emits HAINDY's actual output.
+#
+# VM port discovery (in priority order):
+#   1. $VM_HAINDY_PORT environment variable
+#   2. /tmp/vm-haindy-port file (written by the harness when it boots a VM)
+#
+# OSWorld /execute has a hardcoded 120s subprocess timeout. Long-running
+# haindy commands (notably `explore`) may exceed this.
+
+set -euo pipefail
+
+port="${VM_HAINDY_PORT:-}"
+if [[ -z "$port" && -f /tmp/vm-haindy-port ]]; then
+    port="$(cat /tmp/vm-haindy-port)"
+fi
+if [[ -z "$port" ]]; then
+    echo "vm-haindy: no VM port. Set VM_HAINDY_PORT or write /tmp/vm-haindy-port" >&2
+    exit 2
+fi
+
+# Build the remote command. Source the per-VM keys file (written by the
+# install/harness step) and export the non-secret config inline.
+remote_cmd='if [ -f "$HOME/.osworld-secrets/keys.sh" ]; then . "$HOME/.osworld-secrets/keys.sh"; fi; '
+remote_cmd+='export PATH=$HOME/.local/bin:$PATH; '
+remote_cmd+='export DISPLAY=:0; '
+remote_cmd+='export HAINDY_CU_PROVIDER="${HAINDY_CU_PROVIDER:-google}"; '
+remote_cmd+='export HAINDY_AUTOMATION_BACKEND="${HAINDY_AUTOMATION_BACKEND:-desktop}"; '
+remote_cmd+='haindy'
+for arg in "$@"; do
+    remote_cmd+=" $(printf %q "$arg")"
+done
+
+payload=$(python3 -c '
+import json, sys
+print(json.dumps({"shell": True, "command": sys.argv[1]}))
+' "$remote_cmd")
+
+response=$(curl -sS -X POST "http://localhost:${port}/execute" \
+    -H 'Content-Type: application/json' \
+    --data "$payload")
+
+python3 - "$response" <<'PY'
+import json, sys
+resp = json.loads(sys.argv[1])
+sys.stdout.write(resp.get("output", "") or "")
+err = resp.get("error", "") or ""
+if err:
+    sys.stderr.write(err)
+sys.exit(int(resp.get("returncode", 1)))
+PY
