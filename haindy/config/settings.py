@@ -73,6 +73,8 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "google_model": "HAINDY_GOOGLE_MODEL",
     "openai_max_retries": "HAINDY_OPENAI_MAX_RETRIES",
     "openai_request_timeout_seconds": "HAINDY_OPENAI_REQUEST_TIMEOUT_SECONDS",
+    "openai_base_url": "HAINDY_OPENAI_BASE_URL",
+    "openai_cu_base_url": "HAINDY_OPENAI_CU_BASE_URL",
     "automation_backend": "HAINDY_AUTOMATION_BACKEND",
     "desktop_prefer_resolution": "HAINDY_DESKTOP_RESOLUTION",
     "desktop_keyboard_layout": "HAINDY_DESKTOP_KEYBOARD_LAYOUT",
@@ -467,6 +469,27 @@ class Settings(BaseModel):
         default=900,
         ge=60,
         description="Request timeout for OpenAI API calls in seconds",
+    )
+    openai_base_url: str = Field(
+        default="",
+        description=(
+            "Custom base URL for non-CU OpenAI API-key calls (proxy, gateway, or "
+            "OpenAI-compatible endpoint). Empty uses the OpenAI default. Ignored "
+            "when using openai-codex OAuth. The endpoint must implement the "
+            "OpenAI Responses API (POST /v1/responses); Chat-Completions-only "
+            "providers do not work directly. Use LiteLLM Proxy or similar to "
+            "bridge to Chat-Completions backends."
+        ),
+    )
+    openai_cu_base_url: str = Field(
+        default="",
+        description=(
+            "Custom base URL for the OpenAI Computer Use client. Empty uses the "
+            "OpenAI default. Computer Use additionally requires the "
+            "computer_use_preview tool on top of the Responses API; almost no "
+            "relay implements this, so this override is for endpoints that "
+            "explicitly support OpenAI Computer Use."
+        ),
     )
     agent_provider: str = Field(
         default="openai",

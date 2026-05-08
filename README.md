@@ -174,6 +174,25 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
 
 Environment variables override all other sources. Timeout settings use seconds. In `settings.json`, use `execution.actions_action_timeout_seconds`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias. Linux desktop keyboard layout defaults to `auto`, which detects the active XKB layout and currently supports `us` and `es`; set `desktop.keyboard_layout` explicitly to override detection. See [`.env.example`](.env.example) for the full legacy env-var list.
 
+#### Custom OpenAI endpoints
+
+To point HAINDY at a proxy, gateway, or alternate OpenAI-compatible endpoint, set `openai.base_url` (or `HAINDY_OPENAI_BASE_URL`). It applies only to non-Computer-Use API-key calls and is ignored under `openai-codex` OAuth.
+
+```json
+{ "openai": { "base_url": "https://your-relay.example.com/v1" } }
+```
+
+**Compatibility:** HAINDY uses the OpenAI Responses API (`POST /v1/responses`), not Chat Completions. The endpoint must implement the Responses API. Known compatible options:
+
+- OpenAI itself behind a transparent proxy or regional gateway (Cloudflare AI Gateway, Helicone, Portkey passthrough, internal corporate proxies).
+- Azure OpenAI Service.
+- vLLM started with `--enable-responses-api` (experimental, for self-hosted OSS models).
+- [LiteLLM Proxy](https://github.com/BerriAI/litellm) — runs locally and translates Responses API to any Chat-Completions backend (Mistral, z.ai, Together, Groq, OpenRouter, Ollama, etc.). For Chat-Completions-only providers, this is the recommended bridge.
+
+Chat-Completions-only providers will not work if pointed to directly.
+
+A separate `openai.cu_base_url` (`HAINDY_OPENAI_CU_BASE_URL`) overrides the OpenAI Computer Use client's base URL. **Warning:** Computer Use additionally requires the `computer_use_preview` tool on top of the Responses API. Almost no relay implements this. Only set it if your endpoint explicitly supports OpenAI Computer Use.
+
 ### Artifact storage
 
 Runtime data artifacts default to `~/.haindy/data/projects/<project-id>/`, where `<project-id>` is derived from the resolved current working directory. This includes traces, model-call logs, screenshots, and replay/coordinate/planning caches. Tool-call session state stays separate under `~/.haindy/sessions/<session-id>/`.

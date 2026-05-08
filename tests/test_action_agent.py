@@ -305,3 +305,114 @@ async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
     assert result.environment_state_after.screenshot == b"artifact_full_png"
     assert result.environment_state_after.frame_kind == "keyframe"
     assert result.environment_state_after.patch_bounds is None
+
+
+def _patch_settings_for_cu_client(
+    monkeypatch: pytest.MonkeyPatch, *, openai_cu_base_url: str
+) -> None:
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.get_settings",
+        lambda: SimpleNamespace(
+            linux_coordinate_cache_path=Path("tmp/linux_cache/test_coordinates.json"),
+            computer_use_model="gpt-5.4",
+            cu_provider="openai",
+            openai_api_key="test-key",
+            openai_max_retries=3,
+            openai_cu_base_url=openai_cu_base_url,
+        ),
+    )
+
+
+def test_get_openai_client_passes_cu_base_url_when_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings_for_cu_client(
+        monkeypatch, openai_cu_base_url="https://relay.example.com/cu"
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_async_openai(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    warnings: list[tuple[str, tuple[object, ...]]] = []
+
+    def _record_warning(msg: str, *args: object, **_kwargs: object) -> None:
+        warnings.append((msg, args))
+
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai
+    )
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.logger.warning", _record_warning
+    )
+
+    agent = ActionAgent()
+    agent._get_openai_client()
+
+    assert captured["base_url"] == "https://relay.example.com/cu"
+    assert captured["api_key"] == "test-key"
+    assert len(warnings) == 1
+    assert "Computer Use" in warnings[0][0]
+
+
+def test_get_openai_client_omits_base_url_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings_for_cu_client(monkeypatch, openai_cu_base_url="")
+
+    captured: dict[str, object] = {}
+
+    def _fake_async_openai(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    warnings: list[tuple[str, tuple[object, ...]]] = []
+
+    def _record_warning(msg: str, *args: object, **_kwargs: object) -> None:
+        warnings.append((msg, args))
+
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai
+    )
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.logger.warning", _record_warning
+    )
+
+    agent = ActionAgent()
+    agent._get_openai_client()
+
+    assert "base_url" not in captured
+    assert warnings == []
+
+
+def test_get_openai_client_warns_only_once_per_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings_for_cu_client(
+        monkeypatch, openai_cu_base_url="https://relay.example.com/cu"
+    )
+
+    def _fake_async_openai(**_kwargs: object) -> object:
+        return object()
+
+    warning_count = 0
+
+    def _record_warning(*_args: object, **_kwargs: object) -> None:
+        nonlocal warning_count
+        warning_count += 1
+
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai
+    )
+    monkeypatch.setattr(
+        "haindy.agents.action_agent.logger.warning", _record_warning
+    )
+
+    agent = ActionAgent()
+    agent._get_openai_client()
+    agent._get_openai_client()
+    agent._get_openai_client()
+
+    assert warning_count == 1

@@ -659,3 +659,150 @@ async def test_codex_call_uses_streaming_path_even_when_stream_false(
     assert result["content"] == "streamed"
     streaming_mock.assert_awaited_once()
     standard_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_api_key_mode_uses_openai_base_url_override(monkeypatch) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text="hello",
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    fake_responses = FakeCreateResponses(final_response=final_response)
+    captured_client_kwargs: dict[str, Any] = {}
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        captured_client_kwargs.update(kwargs)
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="test-key",
+        openai_request_timeout_seconds=30,
+        openai_base_url="https://relay.example.com/v1",
+    )
+    auth = ResolvedOpenAIAuth(mode="api_key", token="test-key")
+
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+
+    client = OpenAIClient(
+        model="gpt-5.4",
+        auth_manager=StubAuthManager(auth),
+    )
+
+    await client._call_responses_api(
+        final_messages=[{"role": "user", "content": "Hello"}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=None,
+        reasoning_level=None,
+        system_prompt=None,
+    )
+
+    assert captured_client_kwargs["base_url"] == "https://relay.example.com/v1"
+    assert captured_client_kwargs["api_key"] == "test-key"
+
+
+@pytest.mark.asyncio
+async def test_api_key_mode_omits_base_url_when_setting_blank(monkeypatch) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text="hello",
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    fake_responses = FakeCreateResponses(final_response=final_response)
+    captured_client_kwargs: dict[str, Any] = {}
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        captured_client_kwargs.update(kwargs)
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="test-key",
+        openai_request_timeout_seconds=30,
+        openai_base_url="",
+    )
+    auth = ResolvedOpenAIAuth(mode="api_key", token="test-key")
+
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+
+    client = OpenAIClient(
+        model="gpt-5.4",
+        auth_manager=StubAuthManager(auth),
+    )
+
+    await client._call_responses_api(
+        final_messages=[{"role": "user", "content": "Hello"}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=None,
+        reasoning_level=None,
+        system_prompt=None,
+    )
+
+    assert "base_url" not in captured_client_kwargs
+
+
+@pytest.mark.asyncio
+async def test_codex_mode_ignores_openai_base_url_override(monkeypatch) -> None:
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
+    final_response = SimpleNamespace(
+        output_text="hello",
+        usage=usage,
+        status="completed",
+        model="gpt-5.4",
+    )
+    fake_responses = FakeCreateResponses(final_response=final_response)
+    captured_client_kwargs: dict[str, Any] = {}
+
+    def fake_make_client(*args: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        captured_client_kwargs.update(kwargs)
+        client = FakeAsyncOpenAI()
+        client.responses = fake_responses
+        return client
+
+    dummy_settings = SimpleNamespace(
+        openai_api_key="",
+        openai_request_timeout_seconds=30,
+        openai_base_url="https://relay.example.com/v1",
+    )
+    auth = ResolvedOpenAIAuth(
+        mode="codex_oauth",
+        token="oauth-token",
+        base_url="https://chatgpt.com/backend-api/codex",
+        default_headers={"OpenAI-Beta": "responses=experimental"},
+    )
+
+    monkeypatch.setattr("haindy.models.openai_client.AsyncOpenAI", fake_make_client)
+    monkeypatch.setattr(
+        "haindy.models.openai_client.get_settings", lambda: dummy_settings
+    )
+
+    client = OpenAIClient(
+        model="gpt-5.4",
+        auth_manager=StubAuthManager(auth),
+    )
+
+    await client._call_responses_api(
+        final_messages=[{"role": "user", "content": "Hello"}],
+        temperature=0.0,
+        max_tokens=None,
+        response_format=None,
+        reasoning_level=None,
+        system_prompt=None,
+    )
+
+    assert captured_client_kwargs["base_url"] == "https://chatgpt.com/backend-api/codex"
