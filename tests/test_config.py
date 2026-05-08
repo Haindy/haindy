@@ -64,6 +64,23 @@ class TestSettings:
         settings = load_settings({})
         assert settings.computer_use_model == "gpt-5.4"
 
+    def test_default_openai_base_urls_are_empty(self):
+        settings = Settings()
+        assert settings.openai_base_url == ""
+        assert settings.openai_cu_base_url == ""
+
+    def test_openai_base_url_loaded_from_env(self):
+        settings = load_settings(
+            {"HAINDY_OPENAI_BASE_URL": "https://relay.example.com/v1"}
+        )
+        assert settings.openai_base_url == "https://relay.example.com/v1"
+
+    def test_openai_cu_base_url_loaded_from_env(self):
+        settings = load_settings(
+            {"HAINDY_OPENAI_CU_BASE_URL": "https://relay.example.com/cu"}
+        )
+        assert settings.openai_cu_base_url == "https://relay.example.com/cu"
+
     @pytest.mark.parametrize(
         ("backend", "expected"),
         [

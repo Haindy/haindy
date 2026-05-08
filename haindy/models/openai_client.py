@@ -596,9 +596,15 @@ class OpenAIClient:
         return auth
 
     async def _get_client(self, auth: ResolvedOpenAIAuth) -> AsyncOpenAI:
+        api_key_base_url = ""
+        if auth.mode != "codex_oauth":
+            api_key_base_url = str(
+                getattr(self._settings, "openai_base_url", "") or ""
+            ).strip()
+
         signature = (
             auth.mode,
-            auth.base_url or "",
+            auth.base_url or api_key_base_url or "",
             tuple(sorted(auth.default_headers.items())),
         )
         if self._client is not None and self._client_signature == signature:
@@ -614,6 +620,8 @@ class OpenAIClient:
             kwargs["default_headers"] = auth.default_headers
         else:
             kwargs["api_key"] = auth.token
+            if api_key_base_url:
+                kwargs["base_url"] = api_key_base_url
 
         self._client = AsyncOpenAI(**kwargs)
         self._client_signature = signature

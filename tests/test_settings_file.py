@@ -81,6 +81,18 @@ class TestFlattenSettingsDict:
         result = flatten_settings_dict({"openai-codex": {"model": "gpt-5.4"}})
         assert result == {"openai_codex_model": "gpt-5.4"}
 
+    def test_openai_base_url(self) -> None:
+        result = flatten_settings_dict(
+            {"openai": {"base_url": "https://relay.example.com/v1"}}
+        )
+        assert result == {"openai_base_url": "https://relay.example.com/v1"}
+
+    def test_openai_cu_base_url(self) -> None:
+        result = flatten_settings_dict(
+            {"openai": {"cu_base_url": "https://relay.example.com/cu"}}
+        )
+        assert result == {"openai_cu_base_url": "https://relay.example.com/cu"}
+
     def test_provider_specific_google_cu_model(self) -> None:
         result = flatten_settings_dict(
             {"google": {"computer_use_model": "gemini-3-flash-preview"}}

@@ -39,6 +39,8 @@ _JSON_TO_FIELD: dict[str, str] = {
     # openai section
     "openai.max_retries": "openai_max_retries",
     "openai.request_timeout_seconds": "openai_request_timeout_seconds",
+    "openai.base_url": "openai_base_url",
+    "openai.cu_base_url": "openai_cu_base_url",
     # computer_use section
     "computer_use.provider": "cu_provider",
     "computer_use.anthropic_beta": "anthropic_cu_beta",
