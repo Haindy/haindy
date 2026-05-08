@@ -341,12 +341,8 @@ def test_get_openai_client_passes_cu_base_url_when_set(
     def _record_warning(msg: str, *args: object, **_kwargs: object) -> None:
         warnings.append((msg, args))
 
-    monkeypatch.setattr(
-        "haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai
-    )
-    monkeypatch.setattr(
-        "haindy.agents.action_agent.logger.warning", _record_warning
-    )
+    monkeypatch.setattr("haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai)
+    monkeypatch.setattr("haindy.agents.action_agent.logger.warning", _record_warning)
 
     agent = ActionAgent()
     agent._get_openai_client()
@@ -373,12 +369,8 @@ def test_get_openai_client_omits_base_url_when_unset(
     def _record_warning(msg: str, *args: object, **_kwargs: object) -> None:
         warnings.append((msg, args))
 
-    monkeypatch.setattr(
-        "haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai
-    )
-    monkeypatch.setattr(
-        "haindy.agents.action_agent.logger.warning", _record_warning
-    )
+    monkeypatch.setattr("haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai)
+    monkeypatch.setattr("haindy.agents.action_agent.logger.warning", _record_warning)
 
     agent = ActionAgent()
     agent._get_openai_client()
@@ -403,12 +395,8 @@ def test_get_openai_client_warns_only_once_per_agent(
         nonlocal warning_count
         warning_count += 1
 
-    monkeypatch.setattr(
-        "haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai
-    )
-    monkeypatch.setattr(
-        "haindy.agents.action_agent.logger.warning", _record_warning
-    )
+    monkeypatch.setattr("haindy.agents.action_agent.AsyncOpenAI", _fake_async_openai)
+    monkeypatch.setattr("haindy.agents.action_agent.logger.warning", _record_warning)
 
     agent = ActionAgent()
     agent._get_openai_client()

@@ -187,7 +187,7 @@ To point HAINDY at a proxy, gateway, or alternate OpenAI-compatible endpoint, se
 - OpenAI itself behind a transparent proxy or regional gateway (Cloudflare AI Gateway, Helicone, Portkey passthrough, internal corporate proxies).
 - Azure OpenAI Service.
 - vLLM started with `--enable-responses-api` (experimental, for self-hosted OSS models).
-- [LiteLLM Proxy](https://github.com/BerriAI/litellm) — runs locally and translates Responses API to any Chat-Completions backend (Mistral, z.ai, Together, Groq, OpenRouter, Ollama, etc.). For Chat-Completions-only providers, this is the recommended bridge.
+- [LiteLLM Proxy](https://github.com/BerriAI/litellm) — runs locally and translates Responses API to any Chat-Completions backend (Mistral, z.ai, Together, Groq, OpenRouter, Ollama, etc.). For Chat-Completions-only providers, this is the recommended bridge. When using LiteLLM as the bridge, set `litellm_settings: drop_params: true` so LiteLLM silently drops OpenAI-only fields (e.g. `reasoning_effort`) that the backend does not accept. Note that HAINDY's prompts are tuned for OpenAI's response style; reasoning models that emit analysis preambles may break HAINDY's structured-output parsing.
 
 Chat-Completions-only providers will not work if pointed to directly.
 

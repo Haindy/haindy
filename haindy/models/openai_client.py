@@ -598,9 +598,9 @@ class OpenAIClient:
     async def _get_client(self, auth: ResolvedOpenAIAuth) -> AsyncOpenAI:
         api_key_base_url = ""
         if auth.mode != "codex_oauth":
-            api_key_base_url = (
-                str(getattr(self._settings, "openai_base_url", "") or "").strip()
-            )
+            api_key_base_url = str(
+                getattr(self._settings, "openai_base_url", "") or ""
+            ).strip()
 
         signature = (
             auth.mode,

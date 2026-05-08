@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-08
+
+### Added
+
+- `HAINDY_OPENAI_BASE_URL` (settings: `openai.base_url`) overrides the base URL for non-Computer-Use OpenAI API-key calls so HAINDY can target proxies, gateways, or OpenAI-compatible endpoints that implement the OpenAI Responses API. Ignored under `openai-codex` OAuth, which keeps its dedicated backend.
+- `HAINDY_OPENAI_CU_BASE_URL` (settings: `openai.cu_base_url`) overrides the base URL for the OpenAI Computer Use client. The Action Agent emits a one-time runtime warning when this override is set, since Computer Use additionally requires the `computer_use_preview` tool that almost no OpenAI-compatible relay implements.
+- README, RUNBOOK, `.env.example`, and the `haindy-setup` skill document the Responses API requirement and recommend [LiteLLM Proxy](https://github.com/BerriAI/litellm) as the bridge to Chat-Completions-only providers (Mistral, z.ai, Together, Groq, OpenRouter, Ollama, etc.), including the `litellm_settings: drop_params: true` flag and the caveat that HAINDY's prompts are tuned for OpenAI's response style.
+
 ## [0.5.0] - 2026-05-01
 
 ### Added
