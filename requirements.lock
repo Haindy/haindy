@@ -1,6 +1,5 @@
 # Locked transitive dependency set for HAINDY development/runtime.
 # Refresh with: .venv/bin/python -m pip freeze | rg -v '^(haindy==|pip==|setuptools==|wheel==)$' | rg -v '(^-e git\\+.*#egg=haindy$)' > requirements.lock
-aiofiles==25.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.5
 aiosignal==1.4.0
@@ -38,7 +37,6 @@ jaraco.functools==4.4.0
 jeepney==0.9.0
 Jinja2==3.1.6
 jiter==0.14.0
-jsonlines==4.0.0
 keyring==25.7.0
 librt==0.10.0
 markdown-it-py==4.2.0
