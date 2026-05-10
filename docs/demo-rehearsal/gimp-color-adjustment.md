@@ -4,7 +4,7 @@ Image: `/home/fkeegan/Pictures/Samples/eduard-pretsi-mu9NgVgJeTM-unsplash.jpg` (
 
 Goal: Convert to B&W, then selectively bring back the gold of the tower using layers + mask.
 
-CU Provider: Google (OpenAI gpt-5.4 can't accurately target GIMP menu items at 1080p)
+CU Provider: Google (OpenAI CU targeting was less reliable for GIMP menu items at 1080p)
 
 ## Successful actions
 

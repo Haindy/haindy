@@ -158,15 +158,15 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
 {
   "agent": { "provider": "openai" },
   "computer_use": { "provider": "google" },
-  "openai": { "model": "gpt-5.4", "computer_use_model": "gpt-5.4" },
-  "openai-codex": { "model": "gpt-5.4" },
+  "openai": { "model": "gpt-5.5", "computer_use_model": "gpt-5.5" },
+  "openai-codex": { "model": "gpt-5.5" },
   "google": {
     "model": "gemini-3-flash-preview",
     "computer_use_model": "gemini-3-flash-preview"
   },
   "anthropic": {
-    "model": "claude-sonnet-4-6",
-    "computer_use_model": "claude-sonnet-4-6"
+    "model": "claude-opus-4-7",
+    "computer_use_model": "claude-opus-4-7"
   },
   "execution": {
     "actions_action_timeout_seconds": 600

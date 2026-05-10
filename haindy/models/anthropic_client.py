@@ -36,6 +36,7 @@ _EFFORT_LEVEL_MAP = {
 _EFFORT_MODEL_PREFIXES = (
     "claude-opus-4-5",
     "claude-opus-4-6",
+    "claude-opus-4-7",
     "claude-sonnet-4-6",
 )
 
@@ -86,7 +87,7 @@ class AnthropicClient:
     def __init__(self, model: str | None = None) -> None:
         settings = get_settings()
         self._api_key = settings.anthropic_api_key
-        self._model = model or settings.anthropic_model or "claude-sonnet-4-6"
+        self._model = model or settings.anthropic_model or "claude-opus-4-7"
         self.model = self._model
         self._client: Any | None = None
 

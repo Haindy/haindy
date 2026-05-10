@@ -21,7 +21,7 @@ from haindy.config.settings import get_settings
 from haindy.models.errors import ModelCallError
 from haindy.models.structured_output import extract_json_schema_definition
 
-SUPPORTED_OPENAI_MODEL = "gpt-5.4"
+SUPPORTED_OPENAI_MODEL = "gpt-5.5"
 
 
 class ResponseStreamObserver(Protocol):
@@ -49,7 +49,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "gpt-5.4",
+        model: str = "gpt-5.5",
         api_key: str | None = None,
         max_retries: int = 3,
         reasoning_level: str = "medium",

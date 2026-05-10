@@ -19,7 +19,7 @@ def _google_function_call(
     return {
         "id": call_id,
         "status": "requires_action",
-        "outputs": [
+        "steps": [
             {
                 "type": "function_call",
                 "id": call_id,
@@ -34,7 +34,12 @@ def _google_text_response(response_id: str, text: str) -> dict:
     return {
         "id": response_id,
         "status": "completed",
-        "outputs": [{"type": "text", "text": text}],
+        "steps": [
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": text}],
+            }
+        ],
     }
 
 
@@ -137,10 +142,10 @@ async def test_google_step_reflection_uses_json_output_without_tools(
     payload = interactions_create.await_args_list[2].kwargs
     assert payload["previous_interaction_id"] == "int_2"
     assert "tools" not in payload
-    assert payload["response_mime_type"] == "application/json"
     schema = payload["response_format"]
-    assert schema["type"] == "object"
-    assert set(schema["required"]) == {
+    assert schema["type"] == "text"
+    assert schema["mime_type"] == "application/json"
+    assert set(schema["schema"]["required"]) == {
         "verdict",
         "reasoning",
         "actual_result",
@@ -148,7 +153,7 @@ async def test_google_step_reflection_uses_json_output_without_tools(
         "is_blocker",
         "blocker_reasoning",
     }
-    assert schema["properties"]["verdict"]["enum"] == ["PASS", "FAIL"]
+    assert schema["schema"]["properties"]["verdict"]["enum"] == ["PASS", "FAIL"]
     assert payload["input"][0]["text"].startswith("Respond with valid JSON")
     assert reflection["response_ids"] == ["int_3"]
     assert '"verdict":"PASS"' in reflection["raw_text"]

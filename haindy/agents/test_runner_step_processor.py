@@ -344,6 +344,7 @@ class TestRunnerStepProcessor:
                             screenshot_after = after_capture.screenshot_bytes
                             step_result.screenshot_after = after_capture.screenshot_path
 
+                    verification: dict[str, Any]
                     try:
                         if forced_blocker_reason:
                             runner._set_tool_mode_phase(

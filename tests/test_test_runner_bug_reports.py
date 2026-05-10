@@ -116,7 +116,7 @@ async def test_build_bug_report_applies_plan_level_blocker_override() -> None:
     )
     model_logger = SimpleNamespace(log_call=AsyncMock())
     builder = TestRunnerBugReportBuilder(
-        model="gpt-5.4",
+        model="gpt-5.5",
         call_model=call_model,
         model_logger=model_logger,
     )
@@ -153,7 +153,7 @@ async def test_build_bug_report_returns_none_for_non_failed_steps() -> None:
         verification_result=request.verification_result,
     )
     builder = TestRunnerBugReportBuilder(
-        model="gpt-5.4",
+        model="gpt-5.5",
         call_model=AsyncMock(),
         model_logger=SimpleNamespace(log_call=AsyncMock()),
     )

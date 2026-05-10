@@ -74,12 +74,12 @@ class TestFlattenSettingsDict:
         assert result == {"cu_provider": "anthropic"}
 
     def test_provider_specific_openai_model(self) -> None:
-        result = flatten_settings_dict({"openai": {"model": "gpt-5.4"}})
-        assert result == {"openai_model": "gpt-5.4"}
+        result = flatten_settings_dict({"openai": {"model": "gpt-5.5"}})
+        assert result == {"openai_model": "gpt-5.5"}
 
     def test_provider_specific_openai_codex_model(self) -> None:
-        result = flatten_settings_dict({"openai-codex": {"model": "gpt-5.4"}})
-        assert result == {"openai_codex_model": "gpt-5.4"}
+        result = flatten_settings_dict({"openai-codex": {"model": "gpt-5.5"}})
+        assert result == {"openai_codex_model": "gpt-5.5"}
 
     def test_openai_base_url(self) -> None:
         result = flatten_settings_dict(
@@ -124,7 +124,7 @@ class TestFlattenSettingsDict:
         assert result == {"enable_planning_cache": False}
 
     def test_agent_models_pass_through(self) -> None:
-        agent_data = {"scope_triage": {"model": "gpt-5.4", "temperature": 0.1}}
+        agent_data = {"scope_triage": {"model": "gpt-5.5", "temperature": 0.1}}
         result = flatten_settings_dict({"agent_models": agent_data})
         assert result == {"agent_models": agent_data}
 
@@ -199,9 +199,9 @@ class TestSettingsSkeleton:
         assert _SETTINGS_SKELETON["agent"].get("provider") == "openai"
 
     def test_skeleton_includes_provider_specific_models(self) -> None:
-        assert _SETTINGS_SKELETON["openai"]["model"] == "gpt-5.4"
-        assert _SETTINGS_SKELETON["openai"]["computer_use_model"] == "gpt-5.4"
-        assert _SETTINGS_SKELETON["openai-codex"]["model"] == "gpt-5.4"
+        assert _SETTINGS_SKELETON["openai"]["model"] == "gpt-5.5"
+        assert _SETTINGS_SKELETON["openai"]["computer_use_model"] == "gpt-5.5"
+        assert _SETTINGS_SKELETON["openai-codex"]["model"] == "gpt-5.5"
         assert _SETTINGS_SKELETON["google"]["model"] == "gemini-3-flash-preview"
         assert (
             _SETTINGS_SKELETON["google"]["computer_use_model"]
@@ -274,19 +274,19 @@ class TestFlatToNested:
     def test_provider_models_convert_to_provider_sections(self) -> None:
         result = flat_to_nested(
             {
-                "openai_model": "gpt-5.4",
-                "openai_codex_model": "gpt-5.4",
+                "openai_model": "gpt-5.5",
+                "openai_codex_model": "gpt-5.5",
                 "google_model": "gemini-3-flash-preview",
                 "google_cu_model": "gemini-3-flash-preview",
-                "computer_use_model": "gpt-5.4",
+                "computer_use_model": "gpt-5.5",
             }
         )
         assert result == {
             "openai": {
-                "model": "gpt-5.4",
-                "computer_use_model": "gpt-5.4",
+                "model": "gpt-5.5",
+                "computer_use_model": "gpt-5.5",
             },
-            "openai-codex": {"model": "gpt-5.4"},
+            "openai-codex": {"model": "gpt-5.5"},
             "google": {
                 "model": "gemini-3-flash-preview",
                 "computer_use_model": "gemini-3-flash-preview",
@@ -298,7 +298,7 @@ class TestFlatToNested:
         assert result == {}
 
     def test_agent_models_pass_through(self) -> None:
-        agent_data = {"scope_triage": {"model": "gpt-5.4"}}
+        agent_data = {"scope_triage": {"model": "gpt-5.5"}}
         result = flat_to_nested({"agent_models": agent_data})
         assert result == {"agent_models": agent_data}
 

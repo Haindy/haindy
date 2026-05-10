@@ -47,6 +47,7 @@ def normalize_response(response: Any) -> dict[str, Any]:
             "status",
             "output",
             "outputs",
+            "steps",
             "content",
             "candidates",
             "prompt_feedback",
@@ -58,6 +59,53 @@ def normalize_response(response: Any) -> dict[str, Any]:
                 payload[key] = value
 
     return payload
+
+
+def _google_response_steps(response_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return Google Interactions API steps from the May 2026 response schema."""
+    raw_steps = response_dict.get("steps") or []
+    if not isinstance(raw_steps, list):
+        return []
+    return [step for step in raw_steps if isinstance(step, dict)]
+
+
+def _google_step_content_parts(step: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return content parts from a Google Interactions step."""
+    content = step.get("content") or []
+    if isinstance(content, dict):
+        return [content]
+    if not isinstance(content, list):
+        return []
+    return [part for part in content if isinstance(part, dict)]
+
+
+def _google_step_type(step: dict[str, Any]) -> str:
+    return str(step.get("type") or "").strip().lower()
+
+
+def _google_function_call_payload(step: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize a Google function-call step or content part."""
+    step_type = _google_step_type(step)
+    if step_type == "function_call":
+        return step
+    if step_type not in {"model_output", "output"}:
+        return None
+
+    for part in _google_step_content_parts(step):
+        part_type = str(part.get("type") or "").strip().lower()
+        if part_type == "function_call":
+            return part
+        function_call = part.get("function_call") or part.get("functionCall")
+        if isinstance(function_call, dict):
+            return function_call
+    return None
+
+
+def _google_function_call_arguments(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_arguments = payload.get("arguments") or payload.get("args") or {}
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    return {}
 
 
 def normalize_key_sequence(key: str) -> str:
@@ -139,7 +187,7 @@ def extract_computer_call_actions(call: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Extract executable actions from an OpenAI computer_call item.
 
-    GPT-5.4 emits batched `actions[]` per `computer_call`. A legacy singular
+    Current OpenAI CU models emit batched `actions[]` per `computer_call`. A legacy singular
     `action` payload is still accepted here so tests and fixtures can evolve
     without breaking the internal execution contract.
     """
@@ -178,6 +226,29 @@ def extract_google_function_call_envelopes(
         if isinstance(response_obj, dict)
         else normalize_response(response_obj)
     )
+
+    steps = _google_response_steps(response_dict)
+    if steps:
+        sequence = 0
+        for step_index, step in enumerate(steps):
+            payload = _google_function_call_payload(step)
+            if payload is None:
+                continue
+            sequence += 1
+            envelopes.append(
+                GoogleFunctionCallEnvelope(
+                    function_call=SimpleNamespace(
+                        name=payload.get("name"),
+                        args=_google_function_call_arguments(payload),
+                        id=payload.get("id") or payload.get("call_id"),
+                    ),
+                    sequence=sequence,
+                    candidate_index=0,
+                    part_index=step_index,
+                )
+            )
+        if envelopes:
+            return envelopes
 
     outputs = response_dict.get("outputs") or []
     if isinstance(outputs, list):
@@ -260,6 +331,28 @@ def extract_google_computer_calls(
 ) -> list[dict[str, Any]]:
     """Extract function/call items from a Google response."""
     calls: list[dict[str, Any]] = []
+    for step in _google_response_steps(response_dict):
+        payload = _google_function_call_payload(step)
+        if payload is None:
+            continue
+        arguments = _google_function_call_arguments(payload)
+        calls.append(
+            {
+                "id": payload.get("id")
+                or payload.get("call_id")
+                or payload.get("name"),
+                "call_id": payload.get("id")
+                or payload.get("call_id")
+                or payload.get("name"),
+                "action": {
+                    "type": payload.get("name"),
+                    **arguments,
+                },
+            }
+        )
+    if calls:
+        return calls
+
     outputs = response_dict.get("outputs") or []
     for output in outputs:
         if not isinstance(output, dict):
@@ -339,6 +432,21 @@ def extract_anthropic_computer_calls(
 def extract_assistant_text(response_dict: dict[str, Any]) -> str | None:
     """Extract assistant text output from a response."""
     texts: list[str] = []
+
+    for step in _google_response_steps(response_dict):
+        step_type = _google_step_type(step)
+        if step_type == "model_output":
+            for part in _google_step_content_parts(step):
+                part_type = str(part.get("type") or "").strip().lower()
+                if part_type not in {"text", "output_text"}:
+                    continue
+                text = part.get("text") or part.get("output_text")
+                if isinstance(text, str) and text:
+                    texts.append(text)
+        elif step_type in {"text", "output_text"}:
+            text = step.get("text") or step.get("output_text")
+            if isinstance(text, str) and text:
+                texts.append(text)
 
     for output in response_dict.get("outputs") or []:
         if not isinstance(output, dict):

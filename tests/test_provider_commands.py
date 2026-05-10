@@ -83,8 +83,8 @@ class TestHandleProviderSet:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         assert data.get("agent", {}).get("provider") == "openai"
         assert data.get("computer_use", {}).get("provider") == "openai"
-        assert data.get("openai", {}).get("model") == "gpt-5.4"
-        assert data.get("openai", {}).get("computer_use_model") == "gpt-5.4"
+        assert data.get("openai", {}).get("model") == "gpt-5.5"
+        assert data.get("openai", {}).get("computer_use_model") == "gpt-5.5"
 
     def test_set_anthropic_writes_both_agent_and_cu_provider_and_defaults(
         self, tmp_path
@@ -106,10 +106,8 @@ class TestHandleProviderSet:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         assert data.get("agent", {}).get("provider") == "anthropic"
         assert data.get("computer_use", {}).get("provider") == "anthropic"
-        assert data.get("anthropic", {}).get("model") == "claude-sonnet-4-6"
-        assert (
-            data.get("anthropic", {}).get("computer_use_model") == "claude-sonnet-4-6"
-        )
+        assert data.get("anthropic", {}).get("model") == "claude-opus-4-7"
+        assert data.get("anthropic", {}).get("computer_use_model") == "claude-opus-4-7"
 
     def test_set_openai_codex_only_writes_agent_provider(self, tmp_path):
         import haindy.cli.provider_commands as pcm
@@ -123,7 +121,7 @@ class TestHandleProviderSet:
         assert result == 0
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         assert data.get("agent", {}).get("provider") == "openai-codex"
-        assert data.get("openai-codex", {}).get("model") == "gpt-5.4"
+        assert data.get("openai-codex", {}).get("model") == "gpt-5.5"
         # computer_use.provider should NOT be set
         assert "computer_use" not in data or "provider" not in data.get(
             "computer_use", {}
@@ -200,7 +198,7 @@ class TestHandleProviderSetComputerUse:
         assert result == 0
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         assert data.get("computer_use", {}).get("provider") == "openai"
-        assert data.get("openai", {}).get("computer_use_model") == "gpt-5.4"
+        assert data.get("openai", {}).get("computer_use_model") == "gpt-5.5"
         # agent.provider should NOT be written
         assert "agent" not in data or "provider" not in data.get("agent", {})
 
@@ -274,15 +272,13 @@ class TestHandleProviderSetModel:
         with patch.object(pcm, "_SETTINGS_PATH", settings_path):
             result = pcm.handle_provider_set_model(
                 "anthropic",
-                "claude-sonnet-4-6",
+                "claude-opus-4-7",
                 computer_use=True,
             )
 
         assert result == 0
         data = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert (
-            data.get("anthropic", {}).get("computer_use_model") == "claude-sonnet-4-6"
-        )
+        assert data.get("anthropic", {}).get("computer_use_model") == "claude-opus-4-7"
 
     def test_set_openai_codex_cu_model_is_rejected(self, tmp_path):
         import haindy.cli.provider_commands as pcm
@@ -293,7 +289,7 @@ class TestHandleProviderSetModel:
         with patch.object(pcm, "_SETTINGS_PATH", settings_path):
             result = pcm.handle_provider_set_model(
                 "openai-codex",
-                "gpt-5.4",
+                "gpt-5.5",
                 computer_use=True,
             )
 

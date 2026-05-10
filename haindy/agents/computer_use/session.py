@@ -150,7 +150,7 @@ class ComputerUseSession(
         ):
             raise ValueError(
                 "OpenAI computer-use model 'computer-use-preview' is no longer "
-                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.4."
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.5."
             )
         self._google_model = (
             model
@@ -160,7 +160,7 @@ class ComputerUseSession(
         self._anthropic_model = (
             model
             if model and self._provider == "anthropic"
-            else getattr(settings, "anthropic_cu_model", "claude-sonnet-4-6")
+            else getattr(settings, "anthropic_cu_model", "claude-opus-4-7")
         )
         self._model = {
             "google": self._google_model,

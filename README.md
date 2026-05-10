@@ -160,9 +160,9 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
 {
   "agent": { "provider": "openai" },
   "computer_use": { "provider": "google" },
-  "openai": { "model": "gpt-5.4", "computer_use_model": "gpt-5.4" },
+  "openai": { "model": "gpt-5.5", "computer_use_model": "gpt-5.5" },
   "google": { "model": "gemini-3-flash-preview", "computer_use_model": "gemini-3-flash-preview" },
-  "anthropic": { "model": "claude-sonnet-4-6", "computer_use_model": "claude-sonnet-4-6" },
+  "anthropic": { "model": "claude-opus-4-7", "computer_use_model": "claude-opus-4-7" },
   "execution": {
     "automation_backend": "desktop",
     "actions_action_timeout_seconds": 600

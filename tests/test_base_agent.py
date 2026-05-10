@@ -18,9 +18,9 @@ from haindy.models.openai_client import OpenAIClient
 
 def _make_settings(
     provider: str = "openai",
-    openai_model: str = "gpt-5.4",
-    openai_codex_model: str = "gpt-5.4",
-    anthropic_model: str = "claude-sonnet-4-6",
+    openai_model: str = "gpt-5.5",
+    openai_codex_model: str = "gpt-5.5",
+    anthropic_model: str = "claude-opus-4-7",
     google_model: str = "gemini-3-flash-preview",
     model_log_path: Path | None = None,
 ) -> MagicMock:
@@ -71,7 +71,7 @@ class TestBaseAgent:
             agent = BaseAgent(name="TestAgent")
 
         assert agent.name == "TestAgent"
-        assert agent.model == "gpt-5.4"
+        assert agent.model == "gpt-5.5"
         assert "TestAgent" in agent.system_prompt
         assert "HAINDY" in agent.system_prompt
         assert agent.temperature == 0.7
