@@ -1117,8 +1117,11 @@ class GoogleComputerUseMixin:
             "model": model,
             "previous_interaction_id": self._google_previous_interaction_id,
             "input": [{"type": "text", "text": prompt}],
-            "response_mime_type": "application/json",
-            "response_format": STEP_REFLECTION_RESPONSE_SCHEMA,
+            "response_format": {
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": STEP_REFLECTION_RESPONSE_SCHEMA,
+            },
         }
 
         logger.info(

@@ -35,14 +35,14 @@ def _make_response(
         content=response_blocks,
         stop_reason=stop_reason,
         usage=usage,
-        model="claude-sonnet-4-6",
+        model="claude-opus-4-7",
     )
 
 
 class TestAnthropicClientInit:
     def test_default_model_falls_back_to_hardcoded(self, patched_settings: Any) -> None:
         client = AnthropicClient()
-        assert client.model == "claude-sonnet-4-6"
+        assert client.model == "claude-opus-4-7"
 
     def test_custom_model_is_stored(self, patched_settings: Any) -> None:
         client = AnthropicClient(model="claude-haiku-3-5")
@@ -433,7 +433,7 @@ class TestAnthropicClientCall:
             content=[block],
             stop_reason="end_turn",
             usage=usage,
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-7",
         )
         with patch("anthropic.AsyncAnthropic") as mock_cls:
             mock_instance = AsyncMock()
@@ -481,7 +481,7 @@ class TestAnthropicClientStreaming:
             content=[SimpleNamespace(text="hello world")],
             stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=4, output_tokens=2),
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-7",
         )
 
         async def _text_stream():
@@ -530,7 +530,7 @@ class TestAnthropicClientStreaming:
             content=[SimpleNamespace(text='{"key":"value"}')],
             stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=4, output_tokens=2),
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-7",
         )
 
         async def _text_stream():

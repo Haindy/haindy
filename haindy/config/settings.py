@@ -37,21 +37,38 @@ SUPPORTED_AGENT_PROVIDERS: tuple[str, ...] = (
     "anthropic",
 )
 SUPPORTED_CU_PROVIDERS: tuple[str, ...] = ("openai", "google", "anthropic")
-SUPPORTED_OPENAI_MODEL = "gpt-5.4"
-SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.4"
+SUPPORTED_OPENAI_MODEL = "gpt-5.5"
+SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.5"
 LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
+PREVIOUS_OPENAI_DEFAULT_MODEL = "gpt-5.4"
+PREVIOUS_ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_NON_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_MODEL,
     "openai-codex": SUPPORTED_OPENAI_MODEL,
     "google": "gemini-3-flash-preview",
-    "anthropic": "claude-sonnet-4-6",
+    "anthropic": "claude-opus-4-7",
 }
 DEFAULT_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
     "google": "gemini-3-flash-preview",
-    "anthropic": "claude-sonnet-4-6",
+    "anthropic": "claude-opus-4-7",
 }
 PROJECT_ID_HASH_LENGTH = 12
+
+
+def _migrate_previous_openai_default_model(value: str) -> str:
+    normalized = str(value or "").strip()
+    if normalized == PREVIOUS_OPENAI_DEFAULT_MODEL:
+        return SUPPORTED_OPENAI_MODEL
+    return normalized
+
+
+def _migrate_previous_anthropic_default_model(value: str) -> str:
+    normalized = str(value or "").strip()
+    if normalized == PREVIOUS_ANTHROPIC_DEFAULT_MODEL:
+        return DEFAULT_NON_CU_PROVIDER_MODELS["anthropic"]
+    return normalized
+
 
 ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
@@ -709,6 +726,7 @@ class Settings(BaseModel):
     @field_validator("openai_model")
     @classmethod
     def validate_openai_model(cls, value: str) -> str:
+        value = _migrate_previous_openai_default_model(value)
         if value != SUPPORTED_OPENAI_MODEL:
             raise ValueError(
                 f"Unsupported OpenAI model '{value}' for openai_model. "
@@ -719,12 +737,18 @@ class Settings(BaseModel):
     @field_validator("openai_codex_model")
     @classmethod
     def validate_openai_codex_model(cls, value: str) -> str:
+        value = _migrate_previous_openai_default_model(value)
         if value != SUPPORTED_OPENAI_MODEL:
             raise ValueError(
                 f"Unsupported OpenAI model '{value}' for openai_codex_model. "
                 f"Supported model is '{SUPPORTED_OPENAI_MODEL}'."
             )
         return value
+
+    @field_validator("anthropic_model")
+    @classmethod
+    def normalize_anthropic_model(cls, value: str) -> str:
+        return _migrate_previous_anthropic_default_model(value)
 
     # Computer Use Configuration
     computer_use_model: str = Field(
@@ -904,6 +928,16 @@ class Settings(BaseModel):
         description="Home directory for tool-call mode session state",
     )
 
+    @field_validator("computer_use_model")
+    @classmethod
+    def normalize_openai_computer_use_model(cls, value: str) -> str:
+        return _migrate_previous_openai_default_model(value)
+
+    @field_validator("anthropic_cu_model")
+    @classmethod
+    def normalize_anthropic_cu_model(cls, value: str) -> str:
+        return _migrate_previous_anthropic_default_model(value)
+
     @field_validator("log_level")
     def validate_log_level(cls, v: str) -> str:
         """Validate log level."""
@@ -1042,7 +1076,7 @@ class Settings(BaseModel):
         ):
             raise ValueError(
                 "OpenAI computer-use model 'computer-use-preview' is no longer "
-                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.4."
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.5."
             )
         return self
 

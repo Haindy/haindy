@@ -85,3 +85,32 @@ def test_extract_assistant_text_preserves_json_payloads() -> None:
         extract_assistant_text(response)
         == '{"verdict":"PASS","reasoning":"Step passed","confidence":0.9}'
     )
+
+
+def test_google_interactions_steps_schema_extracts_calls_and_text() -> None:
+    response = {
+        "id": "int_steps",
+        "steps": [
+            {
+                "type": "thought",
+                "summary": [{"type": "text", "text": "Need to click."}],
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "name": "click_at",
+                "arguments": {"x": 12, "y": 34},
+            },
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": "Clicked."}],
+            },
+        ],
+    }
+
+    envelopes = extract_google_function_call_envelopes(response)
+    assert len(envelopes) == 1
+    assert envelopes[0].function_call.name == "click_at"
+    assert envelopes[0].function_call.args == {"x": 12, "y": 34}
+    assert envelopes[0].function_call.id == "fc_1"
+    assert extract_assistant_text(response) == "Clicked."

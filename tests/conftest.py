@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
+
+from haindy.config.settings import get_settings
 
 
 @pytest.fixture(autouse=True)
-def _isolate_config_layers(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_config_layers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Prevent developer's local ~/.haindy/settings.json and keychain from leaking into tests.
 
     Without this fixture, tests could behave differently depending on the
@@ -17,6 +21,7 @@ def _isolate_config_layers(monkeypatch: pytest.MonkeyPatch) -> None:
     (test_settings_file.py, test_credentials.py, test_migrate.py) patch
     these themselves as needed.
     """
+    get_settings.cache_clear()
     monkeypatch.setattr(
         "haindy.config.settings.load_settings_file",
         lambda _path: {},
@@ -27,3 +32,5 @@ def _isolate_config_layers(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _provider: None,
         raising=False,
     )
+    yield
+    get_settings.cache_clear()

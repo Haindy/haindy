@@ -31,37 +31,35 @@ classifiers = [
 ]
 
 dependencies = [
-    "openai>=2.32.0",
-    "google-genai>=1.64.0",
-    "anthropic>=0.84.0",
-    "cryptography>=46.0.5",
-    "platformdirs>=4.9.2",
-    "rich>=14.3.3",
-    "pydantic>=2.12.5",
-    "python-dotenv>=1.2.1",
-    "pillow>=12.1.1",
-    "numpy>=2.1.0",
-    "aiofiles>=25.1.0",
-    "jsonlines>=4.0.0",
+    "openai>=2.36.0",
+    "google-genai>=2.0.1",
+    "anthropic>=0.100.0",
+    "cryptography>=48.0.0",
+    "platformdirs>=4.9.6",
+    "rich>=15.0.0",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "pillow>=12.2.0",
+    "numpy>=2.4.4",
     "jinja2>=3.1.6",
     "tiktoken>=0.12.0",
     "evdev>=1.9.3; sys_platform == 'linux'",
     "fb-idb>=1.1.7; sys_platform == 'darwin'",
-    "pynput>=1.7.7; sys_platform == 'darwin' or sys_platform == 'win32'",
-    "mss>=9.0.2; sys_platform == 'darwin' or sys_platform == 'win32'",
-    "keyring>=25.0.0",
+    "pynput>=1.8.1; sys_platform == 'darwin' or sys_platform == 'win32'",
+    "mss>=10.2.0; sys_platform == 'darwin' or sys_platform == 'win32'",
+    "keyring>=25.7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.0.2",
+    "pytest==9.0.3",
     "pytest-asyncio==1.3.0",
-    "pytest-cov==7.0.0",
-    "black==26.1.0",
-    "isort==8.0.0",
-    "mypy==1.19.1",
-    "ruff==0.15.2",
-    "pre-commit==4.5.1",
+    "pytest-cov==7.1.0",
+    "black==26.3.1",
+    "isort==8.0.1",
+    "mypy==2.0.0",
+    "ruff==0.15.12",
+    "pre-commit==4.6.0",
 ]
 
 [project.scripts]
@@ -82,7 +80,7 @@ include = ["haindy*"]
 
 [tool.black]
 line-length = 88
-target-version = ['py310']
+target-version = ['py311']
 include = '\.pyi?$'
 
 [tool.isort]
@@ -90,14 +88,14 @@ profile = "black"
 line_length = 88
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 88
 
 [tool.ruff.lint]
@@ -114,6 +112,9 @@ ignore = [
     "E501",  # line too long
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
+    "UP017",  # keep existing timezone.utc style until intentional modernization
+    "UP041",  # keep existing asyncio.TimeoutError style
+    "UP042",  # keep existing str/Enum style
 ]
 
 [tool.pytest.ini_options]
