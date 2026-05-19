@@ -196,6 +196,20 @@ def _make_action_result(
     )
 
 
+def test_runtime_maps_no_executable_action_to_agent_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime = _make_runtime(monkeypatch, tmp_path)
+    result = _make_action_result("click the button", screenshot=b"after", success=False)
+    result.terminal_failure_code = "no_executable_action"
+    result.terminal_failure_reason = (
+        "Computer Use provider returned no executable action."
+    )
+
+    assert runtime._action_failure_reason(result) == ExitReason.AGENT_ERROR
+
+
 async def _wait_for_test_status(
     runtime: ToolCallSessionRuntime,
     *,
