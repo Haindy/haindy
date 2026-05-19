@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-20
+
+### Changed
+
+- Updated default OpenAI models to `gpt-5.5` and Anthropic models to `claude-opus-4-7`, with migration support for previous default model names in existing settings.
+- Refreshed provider and development dependencies, including `openai>=2.36.0`, `google-genai>=2.0.1`, `anthropic>=0.100.0`, and `mypy==2.0.0`.
+
+### Fixed
+
+- Google Computer Use now extracts function calls and assistant text from the current Interactions API `steps[]` response schema, restoring execution for `click_at` and related tool calls returned by Gemini.
+- Execute-mode Computer Use actions now fail with `no_executable_action` when the provider returns no executable action, instead of reporting a successful no-op.
+
 ## [0.6.0] - 2026-05-08
 
 ### Added

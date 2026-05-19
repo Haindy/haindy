@@ -1187,6 +1187,18 @@ Respond with JSON only:
             visual_frame=artifact_frame,
         )
 
+        if (
+            interaction_mode == "execute"
+            and session_result.terminal_status != "failed"
+            and not session_result.actions
+        ):
+            session_result.terminal_status = "failed"
+            session_result.terminal_failure_code = "no_executable_action"
+            session_result.terminal_failure_reason = (
+                "Computer Use provider returned no executable action for an "
+                "execute-mode step; refusing to treat the step as successful."
+            )
+
         failing_action = next(
             (
                 action

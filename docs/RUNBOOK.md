@@ -228,6 +228,7 @@ Operational rules:
 - `session new` launches the daemon independently and returns only after the socket is ready
 - Desktop `session new --url ...` is still deferred
 - `test` and `explore` are async dispatch commands; poll `test-status` or `explore-status` for terminal results
+- Execute-mode actions fail with `no_executable_action` when the computer-use provider returns no executable action
 - While a background task is active, `act`, `session status`, `test`, and `explore` return `session_busy`
 - While a background task is active, `test-status`, `explore-status`, `screenshot`, `session set`, `session unset`, `session vars`, and `session close` remain available
 - `session close` cancels an active background task before shutting the daemon down

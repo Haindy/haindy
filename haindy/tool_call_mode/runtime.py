@@ -1429,6 +1429,7 @@ class ToolCallSessionRuntime:
             "observe_only_policy_violation",
             "google_prompt_blocked",
             "google_ambiguous_function_call_batch",
+            "no_executable_action",
             "safety_fail_fast",
             "safety_policy",
         }:

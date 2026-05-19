@@ -10,6 +10,7 @@ from haindy.agents.action_agent import ActionAgent
 from haindy.agents.computer_use.types import ComputerUseSessionResult
 from haindy.agents.computer_use.visual_state import VisualBounds, VisualFrame
 from haindy.core.enhanced_types import (
+    ComputerToolTurn,
     EnhancedActionResult,
     ExecutionResult,
     ValidationResult,
@@ -265,6 +266,13 @@ async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
     class _FakeSession:
         async def run(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
             return ComputerUseSessionResult(
+                actions=[
+                    ComputerToolTurn(
+                        call_id="call_1",
+                        action_type="type_text_at",
+                        status="executed",
+                    )
+                ],
                 final_output="Done",
                 final_visual_frame=visual_patch,
                 final_artifact_frame=artifact_frame,
@@ -305,6 +313,58 @@ async def test_execute_action_persists_artifact_frame_instead_of_model_patch(
     assert result.environment_state_after.screenshot == b"artifact_full_png"
     assert result.environment_state_after.frame_kind == "keyframe"
     assert result.environment_state_after.patch_bounds is None
+
+
+@pytest.mark.asyncio
+async def test_execute_action_fails_when_execute_mode_returns_no_computer_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_settings(monkeypatch)
+    monkeypatch.setattr("haindy.agents.action_agent.get_debug_logger", lambda: None)
+
+    class _FakeSession:
+        async def run(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+            return ComputerUseSessionResult(response_ids=["resp_no_action"])
+
+    agent = ActionAgent(
+        automation_driver=SimpleNamespace(  # type: ignore[arg-type]
+            screenshot=AsyncMock(return_value=b"after_png"),
+            get_page_url=AsyncMock(return_value="https://example.com"),
+            get_page_title=AsyncMock(return_value="Example"),
+            get_viewport_size=AsyncMock(return_value=(1280, 720)),
+        )
+    )
+    monkeypatch.setattr(
+        agent, "_new_computer_use_session", lambda *_args, **_kwargs: _FakeSession()
+    )
+
+    step = TestStep(
+        step_number=6,
+        description="Click submit",
+        action="click submit",
+        expected_result="Submitted",
+        action_instruction=ActionInstruction(
+            action_type=ActionType.CLICK,
+            description="Click submit",
+            expected_outcome="Submitted",
+        ),
+    )
+
+    result = await agent.execute_action(
+        step,
+        {"environment": "desktop"},
+        screenshot=b"initial_png",
+    )
+
+    assert result.overall_success is False
+    assert result.failure_phase == "execution"
+    assert result.validation.valid is False
+    assert result.execution is not None
+    assert result.execution.success is False
+    assert result.terminal_failure_code == "no_executable_action"
+    assert result.terminal_failure_reason is not None
+    assert "no executable action" in result.terminal_failure_reason
+    assert result.computer_actions == []
 
 
 def _patch_settings_for_cu_client(

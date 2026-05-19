@@ -105,6 +105,8 @@ Under the hood, each action goes through a computer-use AI provider (OpenAI, Goo
 
 Use `test` when the scenario is backed by written requirements, a test plan, wireframes, or other explicit documentation and you want structured execution plus validation. Use `explore` when the goal is clear but the path is not, or when you are working from product knowledge rather than supporting docs. Use `act` when you want tight step-by-step control and to inspect the screen after each command.
 
+For execute-mode commands such as `act`, HAINDY reports a failure if the computer-use provider returns no executable action for the requested step.
+
 ### Session variables
 
 Store values your agent can reference across commands:
