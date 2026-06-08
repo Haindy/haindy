@@ -20,7 +20,7 @@ def _make_settings(
     provider: str = "openai",
     openai_model: str = "gpt-5.5",
     openai_codex_model: str = "gpt-5.5",
-    anthropic_model: str = "claude-opus-4-7",
+    anthropic_model: str = "claude-opus-4-8",
     google_model: str = "gemini-3-flash-preview",
     model_log_path: Path | None = None,
 ) -> MagicMock:

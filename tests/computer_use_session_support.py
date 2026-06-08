@@ -39,7 +39,7 @@ def session_settings(tmp_path):
         computer_use_model="gpt-5.5",
         google_cu_model="gemini-3-flash-preview",
         anthropic_api_key="",
-        anthropic_cu_model="claude-opus-4-7",
+        anthropic_cu_model="claude-opus-4-8",
         anthropic_cu_beta="computer-use-2025-11-24",
         anthropic_cu_max_tokens=16384,
         vertex_api_key="",

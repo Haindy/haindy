@@ -106,8 +106,8 @@ class TestHandleProviderSet:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         assert data.get("agent", {}).get("provider") == "anthropic"
         assert data.get("computer_use", {}).get("provider") == "anthropic"
-        assert data.get("anthropic", {}).get("model") == "claude-opus-4-7"
-        assert data.get("anthropic", {}).get("computer_use_model") == "claude-opus-4-7"
+        assert data.get("anthropic", {}).get("model") == "claude-opus-4-8"
+        assert data.get("anthropic", {}).get("computer_use_model") == "claude-opus-4-8"
 
     def test_set_openai_codex_only_writes_agent_provider(self, tmp_path):
         import haindy.cli.provider_commands as pcm
@@ -272,13 +272,13 @@ class TestHandleProviderSetModel:
         with patch.object(pcm, "_SETTINGS_PATH", settings_path):
             result = pcm.handle_provider_set_model(
                 "anthropic",
-                "claude-opus-4-7",
+                "claude-opus-4-8",
                 computer_use=True,
             )
 
         assert result == 0
         data = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert data.get("anthropic", {}).get("computer_use_model") == "claude-opus-4-7"
+        assert data.get("anthropic", {}).get("computer_use_model") == "claude-opus-4-8"
 
     def test_set_openai_codex_cu_model_is_rejected(self, tmp_path):
         import haindy.cli.provider_commands as pcm

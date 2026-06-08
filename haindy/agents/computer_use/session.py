@@ -160,7 +160,7 @@ class ComputerUseSession(
         self._anthropic_model = (
             model
             if model and self._provider == "anthropic"
-            else getattr(settings, "anthropic_cu_model", "claude-opus-4-7")
+            else getattr(settings, "anthropic_cu_model", "claude-opus-4-8")
         )
         self._model = {
             "google": self._google_model,

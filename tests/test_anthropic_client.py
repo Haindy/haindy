@@ -35,14 +35,14 @@ def _make_response(
         content=response_blocks,
         stop_reason=stop_reason,
         usage=usage,
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
 
 class TestAnthropicClientInit:
     def test_default_model_falls_back_to_hardcoded(self, patched_settings: Any) -> None:
         client = AnthropicClient()
-        assert client.model == "claude-opus-4-7"
+        assert client.model == "claude-opus-4-8"
 
     def test_custom_model_is_stored(self, patched_settings: Any) -> None:
         client = AnthropicClient(model="claude-haiku-3-5")
@@ -276,7 +276,65 @@ class TestAnthropicClientCall:
             )
 
         call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert call_kwargs["output_config"] == {"effort": "xhigh"}
+        assert "temperature" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_xhigh_reasoning_falls_back_to_max_on_models_without_xhigh(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response("ok")
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient(model="claude-opus-4-6")
+            await client.call(
+                messages=[{"role": "user", "content": "hi"}],
+                reasoning_level="xhigh",
+            )
+
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
         assert call_kwargs["output_config"] == {"effort": "max"}
+
+    @pytest.mark.asyncio
+    async def test_temperature_is_omitted_for_opus_4_8(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response("ok")
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient(model="claude-opus-4-8")
+            await client.call(
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0.2,
+            )
+
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert "temperature" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_temperature_is_sent_for_models_that_support_sampling(
+        self, patched_settings: Any
+    ) -> None:
+        response = _make_response("ok")
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=response)
+            mock_cls.return_value = mock_instance
+
+            client = AnthropicClient(model="claude-opus-4-6")
+            await client.call(
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0.2,
+            )
+
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.2
 
     @pytest.mark.asyncio
     async def test_unsupported_modalities_raise_request_validation_error(
@@ -433,7 +491,7 @@ class TestAnthropicClientCall:
             content=[block],
             stop_reason="end_turn",
             usage=usage,
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
         )
         with patch("anthropic.AsyncAnthropic") as mock_cls:
             mock_instance = AsyncMock()
@@ -481,7 +539,7 @@ class TestAnthropicClientStreaming:
             content=[SimpleNamespace(text="hello world")],
             stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=4, output_tokens=2),
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
         )
 
         async def _text_stream():
@@ -530,7 +588,7 @@ class TestAnthropicClientStreaming:
             content=[SimpleNamespace(text='{"key":"value"}')],
             stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=4, output_tokens=2),
-            model="claude-opus-4-7",
+            model="claude-opus-4-8",
         )
 
         async def _text_stream():
