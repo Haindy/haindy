@@ -172,7 +172,7 @@ async def test_anthropic_error_tool_result_uses_text_only_content(
         previous_response={"content": []},
         turns=[failed_turn],
         metadata={},
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
     tool_result = payload["messages"][-1]["content"][0]
@@ -219,7 +219,7 @@ async def test_anthropic_follow_up_adds_shared_grounding_text_and_preserves_turn
         previous_response={"content": []},
         turns=[successful_turn],
         metadata={"interaction_mode": "observe_only"},
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
     content = payload["messages"][-1]["content"]
@@ -250,7 +250,7 @@ async def test_anthropic_computer_use_calls_do_not_pass_request_timeout(
         anthropic_client=make_anthropic_client(create),
     )
 
-    payload = {"model": "claude-opus-4-7", "messages": []}
+    payload = {"model": "claude-opus-4-8", "messages": []}
     await session._create_anthropic_response(payload)
 
     create.assert_awaited_once_with(**payload)
@@ -274,7 +274,7 @@ async def test_anthropic_computer_use_logs_failed_request_attempt(
 
     with pytest.raises(RuntimeError, match="anthropic request failed"):
         await session._create_anthropic_response(
-            {"model": "claude-opus-4-7", "messages": []},
+            {"model": "claude-opus-4-8", "messages": []},
             agent="computer_use.anthropic.initial",
             prompt="Open the app",
             request_payload_for_log={"request": "sanitized"},

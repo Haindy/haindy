@@ -18,6 +18,8 @@ from haindy.models.structured_output import (
     response_format_expects_json,
 )
 
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
+
 logger = logging.getLogger("anthropic_client")
 
 _DATA_URL_PATTERN = re.compile(
@@ -31,13 +33,22 @@ _EFFORT_LEVEL_MAP = {
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "xhigh": "max",
+    "xhigh": "xhigh",
 }
 _EFFORT_MODEL_PREFIXES = (
     "claude-opus-4-5",
     "claude-opus-4-6",
     "claude-opus-4-7",
+    "claude-opus-4-8",
     "claude-sonnet-4-6",
+)
+_SAMPLING_UNSUPPORTED_MODEL_PREFIXES = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+)
+_XHIGH_EFFORT_MODEL_PREFIXES = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
 )
 
 
@@ -87,7 +98,7 @@ class AnthropicClient:
     def __init__(self, model: str | None = None) -> None:
         settings = get_settings()
         self._api_key = settings.anthropic_api_key
-        self._model = model or settings.anthropic_model or "claude-opus-4-7"
+        self._model = model or settings.anthropic_model or DEFAULT_ANTHROPIC_MODEL
         self.model = self._model
         self._client: Any | None = None
 
@@ -112,11 +123,29 @@ class AnthropicClient:
         normalized = str(model or "").strip().lower()
         return any(normalized.startswith(prefix) for prefix in _EFFORT_MODEL_PREFIXES)
 
+    @staticmethod
+    def _supports_sampling_parameters(model: str) -> bool:
+        normalized = str(model or "").strip().lower()
+        return not any(
+            normalized.startswith(prefix)
+            for prefix in _SAMPLING_UNSUPPORTED_MODEL_PREFIXES
+        )
+
+    @staticmethod
+    def _supports_xhigh_effort(model: str) -> bool:
+        normalized = str(model or "").strip().lower()
+        return any(
+            normalized.startswith(prefix) for prefix in _XHIGH_EFFORT_MODEL_PREFIXES
+        )
+
     def _map_effort(self, reasoning_level: str | None) -> str | None:
         if not reasoning_level or not self._supports_effort(self._model):
             return None
         normalized = str(reasoning_level).strip().lower()
-        return _EFFORT_LEVEL_MAP.get(normalized)
+        effort = _EFFORT_LEVEL_MAP.get(normalized)
+        if effort == "xhigh" and not self._supports_xhigh_effort(self._model):
+            return "max"
+        return effort
 
     @staticmethod
     def _invalid_request_error(
@@ -430,8 +459,9 @@ class AnthropicClient:
             "model": self._model,
             "messages": anthropic_messages,
             "max_tokens": effective_max_tokens,
-            "temperature": temperature,
         }
+        if self._supports_sampling_parameters(self._model):
+            kwargs["temperature"] = temperature
         if extracted_system:
             kwargs["system"] = extracted_system
         if output_config:
@@ -479,8 +509,9 @@ class AnthropicClient:
             "model": self._model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+        if self._supports_sampling_parameters(self._model):
+            kwargs["temperature"] = temperature
         if system:
             kwargs["system"] = system
         if output_config:

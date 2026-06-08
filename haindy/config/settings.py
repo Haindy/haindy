@@ -41,17 +41,21 @@ SUPPORTED_OPENAI_MODEL = "gpt-5.5"
 SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.5"
 LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
 PREVIOUS_OPENAI_DEFAULT_MODEL = "gpt-5.4"
-PREVIOUS_ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
+PREVIOUS_ANTHROPIC_DEFAULT_MODELS = {
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+}
+SUPPORTED_ANTHROPIC_MODEL = "claude-opus-4-8"
 DEFAULT_NON_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_MODEL,
     "openai-codex": SUPPORTED_OPENAI_MODEL,
     "google": "gemini-3-flash-preview",
-    "anthropic": "claude-opus-4-7",
+    "anthropic": SUPPORTED_ANTHROPIC_MODEL,
 }
 DEFAULT_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
     "google": "gemini-3-flash-preview",
-    "anthropic": "claude-opus-4-7",
+    "anthropic": SUPPORTED_ANTHROPIC_MODEL,
 }
 PROJECT_ID_HASH_LENGTH = 12
 
@@ -65,7 +69,7 @@ def _migrate_previous_openai_default_model(value: str) -> str:
 
 def _migrate_previous_anthropic_default_model(value: str) -> str:
     normalized = str(value or "").strip()
-    if normalized == PREVIOUS_ANTHROPIC_DEFAULT_MODEL:
+    if normalized in PREVIOUS_ANTHROPIC_DEFAULT_MODELS:
         return DEFAULT_NON_CU_PROVIDER_MODELS["anthropic"]
     return normalized
 

@@ -165,8 +165,8 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
     "computer_use_model": "gemini-3-flash-preview"
   },
   "anthropic": {
-    "model": "claude-opus-4-7",
-    "computer_use_model": "claude-opus-4-7"
+    "model": "claude-opus-4-8",
+    "computer_use_model": "claude-opus-4-8"
   },
   "execution": {
     "actions_action_timeout_seconds": 600
