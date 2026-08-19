@@ -79,9 +79,17 @@ returning `"windows"` from `openai_computer_environment`:
 
 ```python
 from openai import OpenAI
+
 OpenAI().responses.create(
     model="computer-use-preview",
-    tools=[{"type":"computer_use_preview","display_width":1920,"display_height":1080,"environment":"windows"}],
+    tools=[
+        {
+            "type": "computer_use_preview",
+            "display_width": 1920,
+            "display_height": 1080,
+            "environment": "windows",
+        }
+    ],
     input="say hi",
     truncation="auto",
 )

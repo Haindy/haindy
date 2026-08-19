@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from haindy.config.settings import get_settings
+from haindy.config.settings_file import load_settings_file as _load_settings_file
 
 
 @pytest.fixture(autouse=True)
@@ -22,15 +24,20 @@ def _isolate_config_layers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     these themselves as needed.
     """
     get_settings.cache_clear()
+    developer_settings_path = Path("~/.haindy/settings.json").expanduser()
+
+    def load_isolated_settings(path: Path) -> dict[str, object]:
+        if path == developer_settings_path:
+            return {}
+        return _load_settings_file(path)
+
     monkeypatch.setattr(
-        "haindy.config.settings.load_settings_file",
-        lambda _path: {},
-        raising=False,
+        "haindy.config.settings_file.load_settings_file",
+        load_isolated_settings,
     )
     monkeypatch.setattr(
-        "haindy.config.settings.get_api_key",
+        "haindy.auth.credentials.get_api_key",
         lambda _provider: None,
-        raising=False,
     )
     yield
     get_settings.cache_clear()

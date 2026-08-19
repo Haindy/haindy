@@ -20,7 +20,7 @@ from haindy.core.types import (
 class Agent(ABC):
     """Abstract base class for all AI agents."""
 
-    def __init__(self, name: str, model: str = "gpt-5.5") -> None:
+    def __init__(self, name: str, model: str = "gpt-5.6-sol") -> None:
         """
         Initialize the agent.
 

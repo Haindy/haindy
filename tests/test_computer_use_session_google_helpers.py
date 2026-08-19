@@ -145,7 +145,7 @@ async def test_google_follow_up_adds_safety_acknowledgement_and_call_id(
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     function_result = payload["input"][0]
@@ -193,7 +193,7 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     function_result = payload["input"][0]
@@ -229,7 +229,7 @@ async def test_google_follow_up_uses_original_google_function_call_name(
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     function_result = payload["input"][0]
@@ -274,7 +274,7 @@ async def test_google_follow_up_preserves_rich_grounding_fields(
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     function_result = payload["input"][0]
@@ -325,7 +325,7 @@ async def test_google_follow_up_execute_mode_uses_minimal_payload(
         turns=[turn],
         metadata={"interaction_mode": "execute"},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
@@ -359,7 +359,7 @@ async def test_google_follow_up_preserves_observe_only_reminder_text(
         turns=[turn],
         metadata={"interaction_mode": "observe_only"},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
@@ -394,7 +394,7 @@ async def test_google_follow_up_requests_in_loop_localization_on_full_keyframe(
         turns=[turn],
         metadata={"target": "Email"},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     assert batch.request_localization is True
@@ -432,7 +432,7 @@ async def test_google_follow_up_execute_mode_ignores_state_only_reporting_remind
             "response_reporting_scope": "state_only",
         },
         environment="mobile_adb",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
@@ -475,7 +475,7 @@ async def test_google_follow_up_attaches_shared_context_only_to_first_result(
         turns=turns,
         metadata={"interaction_mode": "observe_only"},
         environment="desktop",
-        model="gemini-3-flash-preview",
+        model="gemini-3.7-flash",
     )
 
     function_results = [
@@ -538,7 +538,7 @@ def test_apply_interaction_mode_guidance_limits_execute_mode_reporting(
     assert "Do NOT quote or infer exact field values" in guided
 
 
-def test_google_mobile_interaction_tools_match_documented_shape(
+def test_google_3x_mobile_interaction_payload_uses_builtin_mobile_actions(
     mock_client, mock_browser, session_settings
 ) -> None:
     session_settings.cu_provider = "google"
@@ -550,9 +550,84 @@ def test_google_mobile_interaction_tools_match_documented_shape(
         google_client=object(),
     )
 
-    tools = session._build_google_interaction_tools("mobile_adb")
+    payload, _ = session._build_google_initial_request(
+        goal="Open Settings.",
+        screenshot_bytes=None,
+        viewport_width=1080,
+        viewport_height=1920,
+        environment="mobile_adb",
+        model="gemini-3.7-flash",
+    )
+    tools = payload["tools"]
 
     assert tools[0]["type"] == "computer_use"
+    assert tools[0]["environment"] == "mobile"
+    assert tools[0]["excluded_predefined_functions"] == ["list_apps"]
+    function_names = [tool["name"] for tool in tools[1:]]
+    assert function_names == ["go_home"]
+
+
+@pytest.mark.parametrize(
+    ("environment", "declared_environment"),
+    [("browser", "browser"), ("desktop", "desktop")],
+)
+def test_google_3x_interaction_payload_excludes_unsupported_hold_actions(
+    mock_client,
+    mock_browser,
+    session_settings,
+    environment: str,
+    declared_environment: str,
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+
+    payload, _ = session._build_google_initial_request(
+        goal="Open Settings.",
+        screenshot_bytes=None,
+        viewport_width=1024,
+        viewport_height=768,
+        environment=environment,
+        model="gemini-3.7-flash",
+    )
+    computer_use_tool = payload["tools"][0]
+
+    assert computer_use_tool["environment"] == declared_environment
+    assert computer_use_tool["excluded_predefined_functions"] == [
+        "mouse_down",
+        "mouse_up",
+        "key_down",
+        "key_up",
+    ]
+
+
+def test_google_legacy_mobile_interaction_payload_preserves_custom_actions(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+
+    payload, _ = session._build_google_initial_request(
+        goal="Open Settings.",
+        screenshot_bytes=None,
+        viewport_width=1080,
+        viewport_height=1920,
+        environment="mobile_adb",
+        model="gemini-2.5-computer-use-preview-10-2025",
+    )
+    tools = payload["tools"]
+
     assert tools[0]["environment"] == "browser"
     assert set(tools[0]["excluded_predefined_functions"]) == {
         "open_web_browser",
@@ -570,6 +645,105 @@ def test_google_mobile_interaction_tools_match_documented_shape(
         "long_press_at",
         "go_home",
     ]
+
+
+@pytest.mark.parametrize(
+    ("environment", "environment_name"),
+    [
+        ("browser", "ENVIRONMENT_BROWSER"),
+        ("desktop", "ENVIRONMENT_DESKTOP"),
+    ],
+)
+def test_google_3x_generate_content_payload_excludes_unsupported_hold_actions(
+    mock_client,
+    mock_browser,
+    session_settings,
+    environment: str,
+    environment_name: str,
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+
+    config = session._build_google_generate_config(
+        environment,
+        model="gemini-3.7-flash",
+    )
+    computer_use = config.tools[0].computer_use
+
+    assert computer_use.environment.value == environment_name
+    assert computer_use.excluded_predefined_functions == [
+        "mouse_down",
+        "mouse_up",
+        "key_down",
+        "key_up",
+    ]
+
+
+def test_google_3x_generate_content_mobile_payload_uses_builtin_actions(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+
+    config = session._build_google_generate_config(
+        "mobile_adb",
+        model="gemini-3.7-flash",
+    )
+    computer_use = config.tools[0].computer_use
+    function_names = [
+        declaration.name for declaration in config.tools[1].function_declarations
+    ]
+
+    assert computer_use.environment.value == "ENVIRONMENT_MOBILE"
+    assert computer_use.excluded_predefined_functions == ["list_apps"]
+    assert function_names == ["go_home"]
+
+
+def test_google_legacy_generate_content_mobile_payload_preserves_custom_actions(
+    mock_client, mock_browser, session_settings
+) -> None:
+    session_settings.cu_provider = "google"
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="google",
+        google_client=object(),
+    )
+
+    config = session._build_google_generate_config(
+        "mobile_adb",
+        model="gemini-2.5-computer-use-preview-10-2025",
+    )
+    computer_use = config.tools[0].computer_use
+    function_names = [
+        declaration.name for declaration in config.tools[1].function_declarations
+    ]
+
+    assert computer_use.environment.value == "ENVIRONMENT_BROWSER"
+    assert set(computer_use.excluded_predefined_functions) == {
+        "open_web_browser",
+        "search",
+        "navigate",
+        "hover_at",
+        "go_forward",
+        "key_combination",
+        "scroll_document",
+        "drag_and_drop",
+    }
+    assert function_names == ["open_app", "long_press_at", "go_home"]
 
 
 @pytest.mark.asyncio

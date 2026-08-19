@@ -27,8 +27,8 @@ through what is needed and warns about any missing complementary credentials.
 ```bash
 haindy auth login openai        # API key — covers both non-CU and CU calls
 haindy auth login openai-codex  # OAuth — covers non-CU calls only
-haindy auth login google        # Vertex API key — CU only; prompts for OpenAI too
-haindy auth login anthropic     # Anthropic API key — CU only; prompts for OpenAI too
+haindy auth login google        # Google API key — covers non-CU and CU calls
+haindy auth login anthropic     # Anthropic API key — covers non-CU and CU calls
 ```
 
 Re-run `haindy auth status` to confirm.
@@ -40,9 +40,26 @@ The most commonly changed fields:
 
 ```json
 {
+  "agent": {
+    "provider": "openai"
+  },
   "computer_use": {
-    "provider": "openai",
-    "model": "<model name for the chosen provider>"
+    "provider": "google"
+  },
+  "openai": {
+    "model": "gpt-5.6-sol",
+    "computer_use_model": "gpt-5.6-sol"
+  },
+  "openai-codex": {
+    "model": "gpt-5.6-sol"
+  },
+  "google": {
+    "model": "gemini-3.7-flash",
+    "computer_use_model": "gemini-3.7-flash"
+  },
+  "anthropic": {
+    "model": "claude-opus-5",
+    "computer_use_model": "claude-opus-5"
   },
   "execution": {
     "automation_backend": "desktop"
@@ -63,6 +80,7 @@ Key sections:
 |---------|--------|
 | `computer_use` | `provider` (openai\|google\|anthropic), `visual_mode`, `safety_policy` |
 | `openai` / `openai-codex` / `google` / `anthropic` | `model`, and `computer_use_model` for CU-capable providers |
+| `openai` (advanced) | `base_url` for non-CU calls; `cu_base_url` for the Computer Use client. The endpoint must implement the OpenAI Responses API (`POST /v1/responses`) — works with OpenAI proxies/gateways, Azure OpenAI, vLLM with `--enable-responses-api`, or LiteLLM Proxy as a bridge to Chat-Completions backends (Mistral, z.ai, Together, Groq, etc.). CU additionally requires the GA `computer` tool, which almost no relay supports. |
 | `execution` | `automation_backend` (desktop\|mobile_adb\|mobile_ios), `max_test_steps` |
 | `desktop` | `prefer_resolution`, `keyboard_layout` (auto\|us\|es) |
 | `macos` | `keyboard_layout` (us\|es), `key_delay_ms`, `clipboard_timeout_seconds` |

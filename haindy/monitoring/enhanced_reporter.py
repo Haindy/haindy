@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from jinja2 import Template
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def _load_template() -> Template:
     template_path = files("haindy.monitoring") / "templates" / "enhanced_report.html.j2"
-    return Template(template_path.read_text(encoding="utf-8"))
+    return cast(Template, Template(template_path.read_text(encoding="utf-8")))
 
 
 class EnhancedReporter:

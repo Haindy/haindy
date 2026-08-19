@@ -39,7 +39,7 @@ def _sample_test_plan(name: str = "Cached Plan") -> TestPlan:
 def _planner_stub(test_plan: TestPlan) -> SimpleNamespace:
     return SimpleNamespace(
         name="TestPlanner",
-        model="gpt-5.5",
+        model="gpt-5.6-sol",
         temperature=0.35,
         reasoning_level="high",
         modalities={"text"},
@@ -52,7 +52,7 @@ def _planner_stub(test_plan: TestPlan) -> SimpleNamespace:
 def _triage_stub(result: ScopeTriageResult) -> SimpleNamespace:
     return SimpleNamespace(
         name="ScopeTriage",
-        model="gpt-5.5",
+        model="gpt-5.6-sol",
         temperature=0.15,
         reasoning_level="high",
         modalities={"text"},

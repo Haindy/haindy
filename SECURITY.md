@@ -17,7 +17,8 @@ You should receive an acknowledgment within 48 hours. We will work with you to u
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| 0.7.x   | Yes       |
+| < 0.7   | No        |
 
 ## Scope
 

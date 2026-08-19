@@ -158,15 +158,15 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
 {
   "agent": { "provider": "openai" },
   "computer_use": { "provider": "google" },
-  "openai": { "model": "gpt-5.5", "computer_use_model": "gpt-5.5" },
-  "openai-codex": { "model": "gpt-5.5" },
+  "openai": { "model": "gpt-5.6-sol", "computer_use_model": "gpt-5.6-sol" },
+  "openai-codex": { "model": "gpt-5.6-sol" },
   "google": {
-    "model": "gemini-3-flash-preview",
-    "computer_use_model": "gemini-3-flash-preview"
+    "model": "gemini-3.7-flash",
+    "computer_use_model": "gemini-3.7-flash"
   },
   "anthropic": {
-    "model": "claude-opus-4-8",
-    "computer_use_model": "claude-opus-4-8"
+    "model": "claude-opus-5",
+    "computer_use_model": "claude-opus-5"
   },
   "execution": {
     "actions_action_timeout_seconds": 600
@@ -180,8 +180,8 @@ Useful commands:
 ```bash
 haindy provider set openai
 haindy provider set-computer-use google
-haindy provider set-model google gemini-3-flash-preview
-haindy provider set-model google gemini-3-flash-preview --computer-use
+haindy provider set-model google gemini-3.7-flash
+haindy provider set-model google gemini-3.7-flash --computer-use
 ```
 
 `openai-codex` is non-CU only and cannot be selected for computer-use or assigned a CU model.
@@ -195,7 +195,7 @@ Important env vars (still supported, override all other sources):
 - `HAINDY_ACTIONS_COMPUTER_TOOL_ACTION_TIMEOUT_SECONDS` for the per-action computer-use timeout budget
 - `HAINDY_OPENAI_API_KEY` for OpenAI API-key auth and OpenAI computer use
 - `HAINDY_OPENAI_BASE_URL` to point non-CU OpenAI API-key calls at a custom endpoint (proxy, gateway, or OpenAI-compatible API). Ignored under `openai-codex` OAuth, which uses its own backend. **HAINDY uses the OpenAI Responses API**, so the endpoint must implement `POST /v1/responses`. Known compatible: OpenAI behind a transparent proxy/gateway, Azure OpenAI Service, vLLM with `--enable-responses-api`, and [LiteLLM Proxy](https://github.com/BerriAI/litellm) (which translates Responses to Chat-Completions backends like Mistral, z.ai, Together, Groq, OpenRouter, Ollama). When bridging with LiteLLM, set `litellm_settings: drop_params: true` so it silently strips OpenAI-only fields (e.g. `reasoning_effort`) that the backend rejects. Chat-Completions-only providers will not work directly without such a bridge, and HAINDY's prompts are still tuned for OpenAI's response style — reasoning models with analysis preambles may break structured-output parsing.
-- `HAINDY_OPENAI_CU_BASE_URL` to point the OpenAI Computer Use client at a custom endpoint. **Warning:** Computer Use additionally requires the `computer_use_preview` tool on top of the Responses API. Almost no relay implements this; only set it if your endpoint explicitly supports OpenAI Computer Use. The same keys are available in `~/.haindy/settings.json` as `openai.base_url` and `openai.cu_base_url`.
+- `HAINDY_OPENAI_CU_BASE_URL` to point the OpenAI Computer Use client at a custom endpoint. **Warning:** Computer Use additionally requires the GA `computer` tool on top of the Responses API. Almost no relay implements this; only set it if your endpoint explicitly supports OpenAI Computer Use. The same keys are available in `~/.haindy/settings.json` as `openai.base_url` and `openai.cu_base_url`.
 
 Timeout settings use seconds across the runtime and configuration surface. Use `execution.actions_action_timeout_seconds` in `settings.json`; the older `execution.actions_action_timeout_ms` key is only accepted as a legacy read-time alias for older configs.
 

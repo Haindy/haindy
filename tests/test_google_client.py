@@ -54,7 +54,7 @@ class TestGoogleClientInit:
         from haindy.models.google_client import GoogleClient
 
         client = GoogleClient()
-        assert client.model == "gemini-3-flash-preview"
+        assert client.model == "gemini-3.7-flash"
 
     def test_custom_model_is_stored(self, patched_settings: Any) -> None:
         from haindy.models.google_client import GoogleClient
@@ -175,11 +175,22 @@ class TestGoogleClientCall:
             client = GoogleClient()
             result = await client.call(messages=[{"role": "user", "content": "Hello"}])
 
+        config_kwargs = mock_types.GenerateContentConfig.call_args.kwargs
+        assert "temperature" not in config_kwargs
         assert result["content"] == "world"
         assert result["usage"]["prompt_tokens"] == 10
         assert result["usage"]["completion_tokens"] == 5
         assert result["usage"]["total_tokens"] == 15
         assert result["finish_reason"] == "STOP"
+
+    def test_sampling_parameters_remain_available_for_older_models(
+        self, patched_settings: Any
+    ) -> None:
+        from haindy.models.google_client import GoogleClient
+
+        assert GoogleClient._supports_sampling_parameters("gemini-2.0-flash") is True
+        assert GoogleClient._supports_sampling_parameters("gemini-3.6-flash") is False
+        assert GoogleClient._supports_sampling_parameters("gemini-3.7-flash") is False
 
     @pytest.mark.asyncio
     async def test_json_mode_parses_response(self, patched_settings: Any) -> None:

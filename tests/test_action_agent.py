@@ -23,7 +23,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
             linux_coordinate_cache_path=Path("tmp/linux_cache/test_coordinates.json"),
-            computer_use_model="gpt-5.5",
+            computer_use_model="gpt-5.6-sol",
             cu_provider="openai",
         ),
     )
@@ -159,7 +159,7 @@ def test_new_computer_use_session_skips_openai_client_for_google(
             macos_coordinate_cache_path=Path("tmp/macos_cache/test_coordinates.json"),
             mobile_coordinate_cache_path=Path("tmp/mobile_cache/test_coordinates.json"),
             ios_coordinate_cache_path=Path("tmp/ios_cache/test_coordinates.json"),
-            computer_use_model="gpt-5.5",
+            computer_use_model="gpt-5.6-sol",
             cu_provider="google",
         ),
     )
@@ -374,7 +374,7 @@ def _patch_settings_for_cu_client(
         "haindy.agents.action_agent.get_settings",
         lambda: SimpleNamespace(
             linux_coordinate_cache_path=Path("tmp/linux_cache/test_coordinates.json"),
-            computer_use_model="gpt-5.5",
+            computer_use_model="gpt-5.6-sol",
             cu_provider="openai",
             openai_api_key="test-key",
             openai_max_retries=3,

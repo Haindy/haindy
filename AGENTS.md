@@ -6,18 +6,18 @@ This file is intentionally minimal.
 
 - `README.md`: setup + run quickstart.
 - `.env.example`: supported env vars and default runtime knobs.
-- `src/main.py`: CLI entrypoint.
-- `src/config/settings.py`: runtime configuration and env vars.
-- `src/runtime/environment.py`: canonical backend/environment normalization.
-- `src/agents/`: orchestration and action agents.
-- `src/agents/situational_agent.py`: entrypoint/setup assessment for desktop, web, and mobile contexts.
-- `src/agents/computer_use/session.py`: computer-use provider loop (OpenAI/Google).
-- `src/desktop/`: Linux/X11 desktop automation controller, driver, capture, replay, and input.
-- `src/mobile/`: Android ADB automation controller and driver.
-- `src/runtime/`: execution context building, caches, replay, and runtime helpers.
-- `src/core/`: shared types and interfaces.
-- `src/journal/`: execution journaling and pattern matching.
-- `src/monitoring/`: report generation and logs.
+- `haindy/main.py`: CLI entrypoint.
+- `haindy/config/settings.py`: runtime configuration and env vars.
+- `haindy/runtime/environment.py`: canonical backend/environment normalization.
+- `haindy/agents/`: orchestration and action agents.
+- `haindy/agents/situational_agent.py`: entrypoint/setup assessment for desktop, web, and mobile contexts.
+- `haindy/agents/computer_use/session.py`: computer-use provider loop (OpenAI/Google/Anthropic).
+- `haindy/linux/`, `haindy/macos/`, `haindy/windows/`: desktop automation controllers, drivers, capture, replay, and input.
+- `haindy/mobile/`: Android ADB and iOS idb automation controllers and drivers.
+- `haindy/runtime/`: execution context building, caches, replay, and runtime helpers.
+- `haindy/core/`: shared types and interfaces.
+- `haindy/journal/`: execution journaling and pattern matching.
+- `haindy/monitoring/`: report generation and logs.
 - `tests/`: automated tests.
 - `test_scenarios/`: sample requirement/context inputs.
 - `docs/RUNBOOK.md`: environment and operational notes.
@@ -32,14 +32,14 @@ This file is intentionally minimal.
 - Install dependencies before running tools:
   - `.venv/bin/pip install -r requirements.lock`
   - `.venv/bin/pip install -e ".[dev]"`
-- Desktop automation is Linux/X11-only today:
-  - install the OS dependencies from `docs/RUNBOOK.md` when working on `src/desktop/` or running desktop flows
-- Mobile automation uses ADB:
-  - ensure `adb` is available when working on `src/mobile/` or `--mobile` flows
+- Desktop automation is platform-specific:
+  - install the OS dependencies from `docs/RUNBOOK.md` when working on `haindy/linux/`, `haindy/macos/`, `haindy/windows/`, or running desktop flows
+- Mobile automation supports Android through ADB and iOS through idb:
+  - ensure the relevant tooling is available when working on `haindy/mobile/` or running mobile flows
 - Treat backend semantics as shared contract:
-  - if you change backend names, aliases, defaults, or target-type behavior, update `src/runtime/environment.py`, `src/config/settings.py`, `.env.example`, `README.md`, and relevant tests together
+  - if you change backend names, aliases, defaults, or target-type behavior, update `haindy/runtime/environment.py`, `haindy/config/settings.py`, `.env.example`, `README.md`, and relevant tests together
 - Treat runtime/config surface as shared contract:
-  - if you add or rename env vars, defaults, cache paths, or provider settings, update `src/config/settings.py`, `.env.example`, `README.md`, `docs/RUNBOOK.md`, and tests together
+  - if you add or rename env vars, defaults, cache paths, or provider settings, update `haindy/config/settings.py`, `.env.example`, `README.md`, `docs/RUNBOOK.md`, and tests together
 - Before release-facing, provider, runtime, or surface changes, manually run the repo-local `.agents/skills/haindy-self-regression` skill after installing the branch build. This is not required for every small edit or docs-only commit.
 - Before finishing a change, run:
   - `.venv/bin/ruff check .`

@@ -21,7 +21,7 @@ from haindy.config.settings import get_settings
 from haindy.models.errors import ModelCallError
 from haindy.models.structured_output import extract_json_schema_definition
 
-SUPPORTED_OPENAI_MODEL = "gpt-5.5"
+SUPPORTED_OPENAI_MODEL = "gpt-5.6-sol"
 
 
 class ResponseStreamObserver(Protocol):
@@ -49,7 +49,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model: str = "gpt-5.5",
+        model: str = "gpt-5.6-sol",
         api_key: str | None = None,
         max_retries: int = 3,
         reasoning_level: str = "medium",
@@ -272,8 +272,8 @@ class OpenAIClient:
             Estimated cost in USD
         """
         model_pricing = {
-            "prompt": 1.25 / 1_000_000,
-            "completion": 5.0 / 1_000_000,
+            "prompt": 5.0 / 1_000_000,
+            "completion": 30.0 / 1_000_000,
         }
 
         prompt_cost = usage.get("prompt_tokens", 0) * model_pricing["prompt"]

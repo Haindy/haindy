@@ -45,6 +45,13 @@ if TYPE_CHECKING:
 class ComputerUseSupportMixin:
     """Support helpers shared across provider implementations."""
 
+    _GOOGLE_3X_DESKTOP_EXCLUDED_PREDEFINED_FUNCTIONS: tuple[str, ...] = (
+        "mouse_down",
+        "mouse_up",
+        "key_down",
+        "key_up",
+    )
+    _GOOGLE_3X_MOBILE_EXCLUDED_PREDEFINED_FUNCTIONS: tuple[str, ...] = ("list_apps",)
     _GOOGLE_MOBILE_EXCLUDED_PREDEFINED_FUNCTIONS: tuple[str, ...] = (
         "open_web_browser",
         "search",
@@ -271,15 +278,17 @@ class ComputerUseSupportMixin:
         normalized = action_type.replace("-", "_").lower()
         alias_map = {
             "left_click": "click",
-            "middle_click": "click",
             "key_press": "keypress",
             "keypress": "keypress",
             "press_key": "keypress",
             "press": "keypress",
             "key": "keypress",
+            "hotkey": "key_combination",
             "type_text": "type",
             "input": "type",
             "doubleclick": "double_click",
+            "tripleclick": "triple_click",
+            "middleclick": "middle_click",
             "rightclick": "right_click",
             "scroll_to_element": "scroll",
             "scroll_vertical": "scroll",
@@ -292,6 +301,7 @@ class ComputerUseSupportMixin:
             "dragdrop": "drag",
             "mouse_drag": "drag",
             "long_press": "long_press_at",
+            "take_screenshot": "screenshot",
         }
         return alias_map.get(normalized, normalized)
 
@@ -1186,12 +1196,19 @@ class ComputerUseSupportMixin:
         )
 
     @staticmethod
-    def _map_google_environment(env_mode: str) -> Any:
+    def _map_google_environment(env_mode: str, model: str | None = None) -> Any:
         from google.genai import types  # type: ignore
 
-        environment_name = runtime_environment_spec(
-            normalize_runtime_environment_name(env_mode)
-        ).google_computer_environment_name
+        spec = runtime_environment_spec(normalize_runtime_environment_name(env_mode))
+        if ComputerUseSupportMixin._is_google_3x_model(model):
+            if spec.is_mobile:
+                environment_name = "ENVIRONMENT_MOBILE"
+            elif spec.is_browser:
+                environment_name = "ENVIRONMENT_BROWSER"
+            else:
+                environment_name = "ENVIRONMENT_DESKTOP"
+        else:
+            environment_name = spec.google_computer_environment_name
         return getattr(
             types.Environment,
             environment_name,
@@ -1199,9 +1216,27 @@ class ComputerUseSupportMixin:
         )
 
     @staticmethod
-    def _map_google_interaction_environment(env_mode: str) -> str | None:
+    def _map_google_interaction_environment(
+        env_mode: str, model: str | None = None
+    ) -> str | None:
         spec = runtime_environment_spec(normalize_runtime_environment_name(env_mode))
+        if ComputerUseSupportMixin._is_google_3x_model(model):
+            if spec.is_mobile:
+                return "mobile"
+            if spec.is_browser:
+                return "browser"
+            return "desktop"
         return "browser" if (spec.is_browser or spec.is_mobile) else None
+
+    @staticmethod
+    def _is_google_3x_model(model: str | None) -> bool:
+        """Return whether *model* uses the Gemini 3.x Computer Use schema."""
+        model_name = str(model or "").strip().lower().rstrip("/").rsplit("/", 1)[-1]
+        return (
+            model_name == "gemini-3"
+            or model_name.startswith("gemini-3-")
+            or model_name.startswith("gemini-3.")
+        )
 
     @staticmethod
     def _wrap_goal_for_mobile(
@@ -1278,80 +1313,84 @@ class ComputerUseSupportMixin:
         )
 
     @staticmethod
-    def _google_mobile_custom_tools() -> Any:
+    def _google_mobile_custom_tools(
+        *, include_open_app_and_long_press: bool = True
+    ) -> Any:
         """Return a Tool with the documented mobile helper functions."""
         from google.genai import types  # type: ignore
 
-        return types.Tool(
-            function_declarations=[
-                types.FunctionDeclaration(
-                    name="open_app",
-                    description=(
-                        "Open the configured Android app under test, or launch a "
-                        "deep link when one is provided. Use this when the task "
-                        "explicitly requires opening or foregrounding the app."
-                    ),
-                    parameters=types.Schema(
-                        type=types.Type.OBJECT,
-                        properties={
-                            "app_name": types.Schema(
-                                type=types.Type.STRING,
-                                description=(
-                                    "Name of the app to open. Prefer the app "
-                                    "currently under test."
-                                ),
-                            ),
-                            "intent": types.Schema(
-                                type=types.Type.STRING,
-                                description=(
-                                    "Optional deep link or Android intent URL to "
-                                    "launch."
-                                ),
-                            ),
-                        },
-                        required=["app_name"],
-                    ),
+        function_declarations = [
+            types.FunctionDeclaration(
+                name="open_app",
+                description=(
+                    "Open the configured Android app under test, or launch a "
+                    "deep link when one is provided. Use this when the task "
+                    "explicitly requires opening or foregrounding the app."
                 ),
-                types.FunctionDeclaration(
-                    name="long_press_at",
-                    description=(
-                        "Long-press at the given mobile screen coordinates. Use "
-                        "for context menus or press-and-hold interactions."
-                    ),
-                    parameters=types.Schema(
-                        type=types.Type.OBJECT,
-                        properties={
-                            "x": types.Schema(
-                                type=types.Type.NUMBER,
-                                description="X coordinate (0-999 scale)",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "app_name": types.Schema(
+                            type=types.Type.STRING,
+                            description=(
+                                "Name of the app to open. Prefer the app "
+                                "currently under test."
                             ),
-                            "y": types.Schema(
-                                type=types.Type.NUMBER,
-                                description="Y coordinate (0-999 scale)",
+                        ),
+                        "intent": types.Schema(
+                            type=types.Type.STRING,
+                            description=(
+                                "Optional deep link or Android intent URL to launch."
                             ),
-                            "duration_ms": types.Schema(
-                                type=types.Type.INTEGER,
-                                description="Optional hold duration in milliseconds.",
-                            ),
-                        },
-                        required=["x", "y"],
-                    ),
+                        ),
+                    },
+                    required=["app_name"],
                 ),
-                types.FunctionDeclaration(
-                    name="go_home",
-                    description="Navigate to the Android home screen.",
-                    parameters=types.Schema(
-                        type=types.Type.OBJECT,
-                        properties={},
-                    ),
+            ),
+            types.FunctionDeclaration(
+                name="long_press_at",
+                description=(
+                    "Long-press at the given mobile screen coordinates. Use "
+                    "for context menus or press-and-hold interactions."
                 ),
-            ]
-        )
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "x": types.Schema(
+                            type=types.Type.NUMBER,
+                            description="X coordinate (0-999 scale)",
+                        ),
+                        "y": types.Schema(
+                            type=types.Type.NUMBER,
+                            description="Y coordinate (0-999 scale)",
+                        ),
+                        "duration_ms": types.Schema(
+                            type=types.Type.INTEGER,
+                            description="Optional hold duration in milliseconds.",
+                        ),
+                    },
+                    required=["x", "y"],
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="go_home",
+                description="Navigate to the Android home screen.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={},
+                ),
+            ),
+        ]
+        if not include_open_app_and_long_press:
+            function_declarations = function_declarations[-1:]
+        return types.Tool(function_declarations=function_declarations)
 
     @staticmethod
-    def _google_mobile_function_tools() -> list[dict[str, Any]]:
+    def _google_mobile_function_tools(
+        *, include_open_app_and_long_press: bool = True
+    ) -> list[dict[str, Any]]:
         """Return Interactions API mobile-only function declarations."""
-        return [
+        function_tools = [
             {
                 "type": "function",
                 "name": "open_app",
@@ -1416,6 +1455,9 @@ class ComputerUseSupportMixin:
                 },
             },
         ]
+        if not include_open_app_and_long_press:
+            return function_tools[-1:]
+        return function_tools
 
     @staticmethod
     def _google_modifier_click_function_tools() -> list[dict[str, Any]]:

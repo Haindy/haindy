@@ -18,7 +18,7 @@ from haindy.models.structured_output import (
     response_format_expects_json,
 )
 
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-5"
 
 logger = logging.getLogger("anthropic_client")
 
@@ -34,21 +34,25 @@ _EFFORT_LEVEL_MAP = {
     "medium": "medium",
     "high": "high",
     "xhigh": "xhigh",
+    "max": "max",
 }
 _EFFORT_MODEL_PREFIXES = (
     "claude-opus-4-5",
     "claude-opus-4-6",
     "claude-opus-4-7",
     "claude-opus-4-8",
+    "claude-opus-5",
     "claude-sonnet-4-6",
 )
 _SAMPLING_UNSUPPORTED_MODEL_PREFIXES = (
     "claude-opus-4-7",
     "claude-opus-4-8",
+    "claude-opus-5",
 )
 _XHIGH_EFFORT_MODEL_PREFIXES = (
     "claude-opus-4-7",
     "claude-opus-4-8",
+    "claude-opus-5",
 )
 
 

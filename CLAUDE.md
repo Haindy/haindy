@@ -8,7 +8,7 @@
 
 ## Project Overview
 
-HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows. The system coordinates specialized AI agents to plan, execute, and report on tests against desktop (Linux/X11), web, and mobile (Android ADB) targets using computer-use AI APIs.
+HAINDY is an autonomous AI testing agent that uses a multi-agent architecture to accept high-level requirements and autonomously execute testing workflows. The system coordinates specialized AI agents to plan, execute, and report on tests against Linux, macOS, Windows, web, Android, and iOS targets using computer-use AI APIs.
 
 ## Development Runbook
 
@@ -109,7 +109,7 @@ ActionAgent               execute each step via computer-use session
 ComputerUseSession        OpenAI / Google / Anthropic provider loop
     |
     v
-Automation Driver         desktop (X11/uinput) | mobile (ADB) | browser (legacy)
+Automation Driver         Linux/macOS/Windows + web | Android (ADB) | iOS (idb)
     |
     v
 Report Generation         HTML report + JSONL execution log
@@ -125,8 +125,8 @@ Report Generation         HTML report + JSONL execution log
 | `haindy/orchestration/coordinator.py` | Multi-agent workflow coordinator |
 | `haindy/linux/` | Linux/X11 automation (uinput, ffmpeg, xrandr) |
 | `haindy/macos/` | macOS automation (pynput + mss) |
-| `haindy/windows/` | Windows automation (pynput + mss; stub in M1, real impl in M2) |
-| `haindy/mobile/` | Android ADB automation |
+| `haindy/windows/` | Windows automation (pynput + mss) |
+| `haindy/mobile/` | Android ADB and iOS idb automation |
 | `haindy/runtime/` | Execution context, caches, replay |
 | `haindy/config/settings.py` | Pydantic settings, all env vars |
 | `haindy/core/types.py` | Core types: TestPlan, TestCase, TestStep, ActionType |
@@ -135,23 +135,23 @@ Report Generation         HTML report + JSONL execution log
 ### Computer-Use Providers
 
 The system supports three AI providers for computer-use (configured via `HAINDY_CU_PROVIDER`):
-- `openai` - OpenAI computer-use (default)
-- `google` - Google Gemini via Vertex AI
-- `anthropic` - Anthropic Claude computer-use
+- `openai` - OpenAI computer-use (`gpt-5.6-sol`)
+- `google` - Google Gemini computer-use (`gemini-3.7-flash`, default)
+- `anthropic` - Anthropic Claude computer-use (`claude-opus-5`)
 
 ### Automation Backends
 
 Configured via `HAINDY_AUTOMATION_BACKEND`:
-- `desktop` - Linux/X11 via uinput; requires OS dependencies from `docs/RUNBOOK.md`
+- `desktop` - native Linux, macOS, or Windows automation; requires the platform dependencies from `docs/RUNBOOK.md`
 - `mobile_adb` - Android via ADB; requires `adb` in PATH
-- unset - browser/planning mode only
+- `mobile_ios` - iOS via idb; requires `idb` and `idb_companion`
 
 ### Technology Stack
 
-- **Python 3.10+**, asyncio throughout
+- **Python 3.11+**, asyncio throughout
 - **AI**: `openai`, `google-genai`, `anthropic` (computer-use APIs)
-- **Automation**: `evdev`/uinput (desktop), ADB (mobile)
-- **Data**: `pydantic` v2, `pillow`, `numpy`, `jinja2`, `jsonlines`
+- **Automation**: `evdev`/uinput, `pynput`, `mss`, ADB, idb
+- **Data**: `pydantic` v2, `pillow`, `numpy`, `jinja2`
 - **Dev**: `ruff`, `mypy`, `pytest`, `pytest-asyncio`
 
 ## Shared Contracts

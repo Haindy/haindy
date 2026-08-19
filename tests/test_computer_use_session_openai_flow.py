@@ -48,7 +48,7 @@ async def test_computer_use_session_uses_task_only_initial_request_before_screen
     assert result.actions[0].action_type == "screenshot"
     assert result.actions[0].status == "executed"
     initial_payload = mock_client.responses.create.await_args_list[0].kwargs
-    assert initial_payload["model"] == "gpt-5.5"
+    assert initial_payload["model"] == "gpt-5.6-sol"
     assert initial_payload["tools"] == [{"type": "computer"}]
     assert isinstance(initial_payload["input"], str)
     assert "Check whether the filters panel is open." in initial_payload["input"]
@@ -101,7 +101,7 @@ async def test_computer_use_session_executes_actions_successfully(
     assert result.terminal_status == "success"
     assert mock_client.responses.create.await_count == 2
     initial_payload = mock_client.responses.create.await_args_list[0].kwargs
-    assert initial_payload["model"] == "gpt-5.5"
+    assert initial_payload["model"] == "gpt-5.6-sol"
     assert initial_payload["tools"] == [{"type": "computer"}]
     assert isinstance(initial_payload["input"], str)
     assert "Click the primary action button." in initial_payload["input"]
@@ -386,7 +386,7 @@ async def test_openai_computer_use_calls_do_not_pass_request_timeout(
         provider="openai",
     )
 
-    payload = {"model": "gpt-5.5", "input": "hello"}
+    payload = {"model": "gpt-5.6-sol", "input": "hello"}
     await session._create_response(payload)
 
     mock_client.responses.create.assert_awaited_once_with(**payload)
@@ -433,7 +433,7 @@ async def test_openai_follow_up_uses_fresh_batch_capture_and_preserves_turn_snap
         previous_response_id="resp_prev",
         calls=[[turn]],
         metadata={},
-        model="gpt-5.5",
+        model="gpt-5.6-sol",
     )
 
     assert (
@@ -467,7 +467,7 @@ async def test_openai_follow_up_requests_in_loop_localization_on_full_keyframe(
         previous_response_id="resp_prev",
         calls=[[turn]],
         metadata={"target": "Email"},
-        model="gpt-5.5",
+        model="gpt-5.6-sol",
     )
 
     assert batch.request_localization is True
@@ -656,7 +656,7 @@ async def test_openai_computer_use_logs_failed_request_attempt(
 
     with pytest.raises(RuntimeError, match="openai transport failed"):
         await session._create_response(
-            {"model": "gpt-5.5", "input": "hello", "tools": [{"type": "computer"}]},
+            {"model": "gpt-5.6-sol", "input": "hello", "tools": [{"type": "computer"}]},
             agent="computer_use.openai.initial",
             prompt="Click the button",
             request_payload_for_log={"request": "sanitized"},

@@ -120,10 +120,9 @@ class ActionAgent:
                 kwargs["base_url"] = cu_base_url
                 logger.warning(
                     "OpenAI Computer Use is using a custom base URL (%s). "
-                    "Computer Use requires the OpenAI Responses API and the "
-                    "computer_use_preview tool. Most OpenAI-compatible relays do "
-                    "not implement these and will fail. Only use this if your "
-                    "endpoint explicitly supports OpenAI Computer Use.",
+                    "Computer Use requires the OpenAI Responses API and the GA "
+                    "computer tool. Only use this if your endpoint explicitly "
+                    "supports OpenAI Computer Use.",
                     cu_base_url,
                 )
             self._openai_client = AsyncOpenAI(**kwargs)

@@ -702,7 +702,9 @@ class GoogleComputerUseMixin:
             "api_surface": "interactions",
             "model": model or self._google_model,
             "input": [{"type": "text", "text": reask_text}],
-            "tools": self._build_google_interaction_tools(environment),
+            "tools": self._build_google_interaction_tools(
+                environment, model=model or self._google_model
+            ),
         }
         if previous_interaction_id:
             payload["previous_interaction_id"] = previous_interaction_id
@@ -774,7 +776,9 @@ class GoogleComputerUseMixin:
             "api_surface": "interactions",
             "model": model or self._google_model,
             "input": input_items,
-            "tools": self._build_google_interaction_tools(environment),
+            "tools": self._build_google_interaction_tools(
+                environment, model=model or self._google_model
+            ),
         }
         if previous_interaction_id:
             payload["previous_interaction_id"] = previous_interaction_id
@@ -823,26 +827,48 @@ class GoogleComputerUseMixin:
             "api_surface": "interactions",
             "model": model or self._google_model,
             "input": input_items,
-            "tools": self._build_google_interaction_tools(environment),
+            "tools": self._build_google_interaction_tools(
+                environment, model=model or self._google_model
+            ),
         }
         if previous_interaction_id:
             payload["previous_interaction_id"] = previous_interaction_id
         return payload, follow_up_batch, follow_up_batch.screenshot_bytes
 
     def _build_google_interaction_tools(
-        self: _ComputerUseSession, environment: str
+        self: _ComputerUseSession,
+        environment: str,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build Interactions API tool declarations for Google CU."""
         spec = runtime_environment_spec(self._normalize_environment_name(environment))
+        effective_model = model or self._google_model
+        uses_google_3x_schema = self._is_google_3x_model(effective_model)
         tool: dict[str, Any] = {"type": "computer_use"}
-        interaction_environment = self._map_google_interaction_environment(environment)
+        interaction_environment = self._map_google_interaction_environment(
+            environment, effective_model
+        )
         if interaction_environment:
             tool["environment"] = interaction_environment
-        if spec.is_mobile:
+        if uses_google_3x_schema:
+            excluded_functions = (
+                self._GOOGLE_3X_MOBILE_EXCLUDED_PREDEFINED_FUNCTIONS
+                if spec.is_mobile
+                else self._GOOGLE_3X_DESKTOP_EXCLUDED_PREDEFINED_FUNCTIONS
+            )
+            tool["excluded_predefined_functions"] = list(excluded_functions)
+        elif spec.is_mobile:
             tool["excluded_predefined_functions"] = (
                 self._google_mobile_excluded_predefined_functions()
             )
-            return [tool, *self._google_mobile_function_tools()]
+
+        if spec.is_mobile:
+            return [
+                tool,
+                *self._google_mobile_function_tools(
+                    include_open_app_and_long_press=not uses_google_3x_schema
+                ),
+            ]
 
         tools = [tool]
         if not spec.is_mobile:
@@ -1171,25 +1197,42 @@ class GoogleComputerUseMixin:
         }
 
     def _build_google_generate_config(
-        self: _ComputerUseSession, environment: str
+        self: _ComputerUseSession,
+        environment: str,
+        model: str | None = None,
     ) -> Any:
         from google.genai import types  # type: ignore
 
         return types.GenerateContentConfig(
-            tools=self._build_google_tools(environment),
+            tools=self._build_google_tools(environment, model=model),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(
                 disable=True
             ),
         )
 
-    def _build_google_tools(self: _ComputerUseSession, environment: str) -> list[Any]:
+    def _build_google_tools(
+        self: _ComputerUseSession,
+        environment: str,
+        model: str | None = None,
+    ) -> list[Any]:
         from google.genai import types  # type: ignore
 
         spec = runtime_environment_spec(self._normalize_environment_name(environment))
+        effective_model = model or self._google_model
+        uses_google_3x_schema = self._is_google_3x_model(effective_model)
         computer_use_kwargs: dict[str, Any] = {
-            "environment": self._map_google_environment(environment),
+            "environment": self._map_google_environment(environment, effective_model),
         }
-        if spec.is_mobile:
+        if uses_google_3x_schema:
+            excluded_functions = (
+                self._GOOGLE_3X_MOBILE_EXCLUDED_PREDEFINED_FUNCTIONS
+                if spec.is_mobile
+                else self._GOOGLE_3X_DESKTOP_EXCLUDED_PREDEFINED_FUNCTIONS
+            )
+            computer_use_kwargs["excluded_predefined_functions"] = list(
+                excluded_functions
+            )
+        elif spec.is_mobile:
             computer_use_kwargs["excluded_predefined_functions"] = (
                 self._google_mobile_excluded_predefined_functions()
             )
@@ -1198,7 +1241,11 @@ class GoogleComputerUseMixin:
             types.Tool(computer_use=types.ComputerUse(**computer_use_kwargs))
         ]
         if spec.is_mobile:
-            tools.append(self._google_mobile_custom_tools())
+            tools.append(
+                self._google_mobile_custom_tools(
+                    include_open_app_and_long_press=not uses_google_3x_schema
+                )
+            )
         else:
             tools.append(self._google_modifier_click_tools())
         return tools

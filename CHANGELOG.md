@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-19
+
+### Added
+
+- Added GPT-5.6 `max` reasoning effort support and direct runtime declarations for Haindy's HTTP and WebSocket clients.
+
+### Changed
+
+- Updated the default production models to OpenAI `gpt-5.6-sol`, Google `gemini-3.7-flash`, and Anthropic `claude-opus-5` for both planning and supported Computer Use paths.
+- Updated provider SDKs to `openai>=3.3.0`, `google-genai>=2.18.1`, and `anthropic>=0.123.0`, refreshed runtime and development dependencies, and regenerated the cross-platform lockfile.
+- Consolidated formatting and import sorting on Ruff by removing the unused Black and isort development configuration.
+
+### Fixed
+
+- Migrated saved defaults from every prior released model generation, including Google planning and Computer Use settings.
+- Omitted unsupported sampling parameters for Gemini 3.6+ and Claude Opus 5, and updated GPT-5.6 Sol cost estimation.
+- Updated Gemini Computer Use action normalization for the current 3.7 action schema, including mouse, keyboard, scroll, wait, screenshot, and mobile actions.
+- Bounded OpenAI Computer Use WebSocket handshakes so stalled connections fall back promptly to the Responses HTTP transport instead of locking a session for the full request timeout.
+- Excluded provider credentials from settings representations and isolated the test suite from real user settings and keychain values.
+- Replaced stale OpenAI Computer Use preview guidance with the GA `computer` tool contract and refreshed version, platform, and setup documentation.
+
 ## [0.6.1] - 2026-05-20
 
 ### Changed

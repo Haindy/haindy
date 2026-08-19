@@ -40,6 +40,7 @@ class OpenAIResponsesHTTPTransport:
 class OpenAIResponsesWebSocketTransport:
     """Persistent WebSocket transport for Responses API WebSocket mode."""
 
+    _MAX_OPEN_TIMEOUT_SECONDS = 10.0
     _RESPONSE_DONE_EVENTS = {"response.done", "response.completed"}
     _ERROR_EVENTS = {"error", "response.failed"}
 
@@ -65,6 +66,9 @@ class OpenAIResponsesWebSocketTransport:
                 {"type": "response.create", "response": normalized_payload},
                 {"type": "response.create", **normalized_payload},
             )
+            # Establish the initial socket once so a stalled handshake reaches the
+            # caller's HTTP fallback without repeating the same connection attempt.
+            await self._ensure_socket()
             last_error: Exception | None = None
             for event in attempts:
                 try:
@@ -95,12 +99,19 @@ class OpenAIResponsesWebSocketTransport:
         base_url = str(self._client.base_url)
         websocket_url = self._to_websocket_url(base_url)
         headers = {"Authorization": f"Bearer {self._client.api_key}"}
-        self._socket = await websockets.connect(
-            websocket_url,
-            additional_headers=headers,
-            open_timeout=self._timeout_seconds,
-            close_timeout=self._timeout_seconds,
-            max_size=None,
+        open_timeout = min(
+            self._timeout_seconds,
+            self._MAX_OPEN_TIMEOUT_SECONDS,
+        )
+        self._socket = await asyncio.wait_for(
+            websockets.connect(
+                websocket_url,
+                additional_headers=headers,
+                open_timeout=open_timeout,
+                close_timeout=open_timeout,
+                max_size=None,
+            ),
+            timeout=open_timeout,
         )
         return self._socket
 

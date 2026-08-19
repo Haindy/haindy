@@ -163,7 +163,12 @@ class ComputerUseActionMixin:
                         self._pending_context_menu_selection = False
                     else:
                         self._pending_context_menu_selection = False
-                elif action_type in {"double_click", "right_click"}:
+                elif action_type in {
+                    "double_click",
+                    "triple_click",
+                    "middle_click",
+                    "right_click",
+                }:
                     if cached:
                         x, y = int(cached.x), int(cached.y)
                     else:
@@ -174,8 +179,13 @@ class ComputerUseActionMixin:
                             normalized=normalized_coords,
                             turn=turn,
                         )
-                    button = "right" if action_type == "right_click" else "left"
-                    click_count = 2 if action_type == "double_click" else 1
+                    button = "middle" if action_type == "middle_click" else "left"
+                    if action_type == "right_click":
+                        button = "right"
+                    click_count = {
+                        "double_click": 2,
+                        "triple_click": 3,
+                    }.get(action_type, 1)
                     await asyncio.wait_for(
                         self._automation_driver.click(
                             x, y, button=button, click_count=click_count
@@ -186,6 +196,12 @@ class ComputerUseActionMixin:
                     turn.status = "executed"
                     if button == "right":
                         self._pending_context_menu_selection = True
+                elif action_type in {"mouse_down", "mouse_up"}:
+                    raise ComputerUseExecutionError(
+                        f"{action_type} cannot be executed safely because the "
+                        "automation driver does not expose independent mouse-button "
+                        "press and release operations."
+                    )
                 elif action_type in {"move", "hover_at"}:
                     if cached:
                         x, y = int(cached.x), int(cached.y)
@@ -341,22 +357,77 @@ class ComputerUseActionMixin:
                     )
                     turn.status = "executed"
                 elif action_type == "scroll":
-                    scroll_x = int(action.get("scroll_x", 0))
-                    scroll_y = int(action.get("scroll_y", 0))
-                    max_pixels = int(self._settings.scroll_max_magnitude)
-                    scroll_x = max(-max_pixels, min(scroll_x, max_pixels))
-                    scroll_y = max(-max_pixels, min(scroll_y, max_pixels))
-                    direction = self._extract_scroll_direction(action_type, action)
-                    if direction:
-                        turn.metadata["scroll_direction"] = direction
-                    turn.metadata["scroll_x"] = scroll_x
-                    turn.metadata["scroll_y"] = scroll_y
-                    await asyncio.wait_for(
-                        self._automation_driver.scroll_by_pixels(
-                            x=scroll_x, y=scroll_y, smooth=False
-                        ),
-                        timeout=self._action_timeout_seconds,
+                    direction = str(action.get("direction") or "").strip().lower()
+                    uses_direction_schema = bool(direction) or (
+                        "magnitude_in_pixels" in action
                     )
+                    if uses_direction_schema:
+                        if direction not in {"up", "down", "left", "right"}:
+                            raise ComputerUseExecutionError(
+                                "Scroll action requires direction to be one of up, "
+                                "down, left, or right."
+                            )
+                        magnitude_raw = action.get("magnitude_in_pixels")
+                        if magnitude_raw is None:
+                            magnitude_raw = action.get("magnitude")
+                        if magnitude_raw is None:
+                            magnitude_raw = self._settings.scroll_default_magnitude
+                        try:
+                            magnitude = abs(int(float(magnitude_raw)))
+                        except (TypeError, ValueError) as exc:
+                            raise ComputerUseExecutionError(
+                                "Scroll action has an invalid magnitude_in_pixels."
+                            ) from exc
+                        if magnitude <= 0:
+                            raise ComputerUseExecutionError(
+                                "Scroll action requires a positive magnitude_in_pixels."
+                            )
+                        magnitude = min(
+                            magnitude,
+                            int(self._settings.scroll_max_magnitude),
+                        )
+
+                        origin: tuple[int, int] | None = None
+                        has_x = action.get("x") is not None
+                        has_y = action.get("y") is not None
+                        if has_x != has_y:
+                            raise ComputerUseExecutionError(
+                                "Scroll action must provide both x and y coordinates."
+                            )
+                        if has_x and has_y:
+                            origin = self._resolve_coordinates(
+                                action,
+                                viewport_width,
+                                viewport_height,
+                                normalized=normalized_coords,
+                                turn=turn,
+                            )
+                            turn.metadata.update({"x": origin[0], "y": origin[1]})
+
+                        await asyncio.wait_for(
+                            self._automation_driver.scroll(
+                                direction,
+                                magnitude,
+                                origin=origin,
+                            ),
+                            timeout=self._action_timeout_seconds,
+                        )
+                        turn.metadata["scroll_direction"] = direction
+                        turn.metadata["scroll_magnitude"] = magnitude
+                    else:
+                        scroll_x = int(action.get("scroll_x", 0))
+                        scroll_y = int(action.get("scroll_y", 0))
+                        max_pixels = int(self._settings.scroll_max_magnitude)
+                        scroll_x = max(-max_pixels, min(scroll_x, max_pixels))
+                        scroll_y = max(-max_pixels, min(scroll_y, max_pixels))
+                        turn.metadata["scroll_x"] = scroll_x
+                        turn.metadata["scroll_y"] = scroll_y
+                        await asyncio.wait_for(
+                            self._automation_driver.scroll_by_pixels(
+                                x=scroll_x, y=scroll_y, smooth=False
+                            ),
+                            timeout=self._action_timeout_seconds,
+                        )
                     turn.status = "executed"
                 elif action_type == "scroll_document":
                     direction = (action.get("direction") or "").lower()
@@ -420,7 +491,11 @@ class ComputerUseActionMixin:
                         raise ComputerUseExecutionError(
                             "Type action missing text payload."
                         )
-                    await self._automation_driver.type_text(text_payload)
+                    await self._automation_driver.type_text(str(text_payload))
+                    press_enter = bool(action.get("press_enter", False))
+                    if press_enter:
+                        await self._automation_driver.press_key("enter")
+                    turn.metadata["press_enter"] = press_enter
                     turn.status = "executed"
                 elif action_type in {"type_text_at", "append_text_at"}:
                     clear_before = action_type == "type_text_at"
@@ -470,7 +545,32 @@ class ComputerUseActionMixin:
                     turn.metadata.update({"x": x, "y": y})
                     turn.status = "executed"
                 elif action_type == "long_press_at":
-                    duration_ms = int(action.get("duration_ms") or 500)
+                    seconds_raw = action.get("seconds")
+                    if seconds_raw is not None:
+                        try:
+                            duration_ms = int(round(float(seconds_raw) * 1000))
+                        except (TypeError, ValueError) as exc:
+                            raise ComputerUseExecutionError(
+                                "Long press action has an invalid seconds value."
+                            ) from exc
+                    else:
+                        default_duration_ms = (
+                            2000
+                            if str(raw_action_type).strip().lower() == "long_press"
+                            else 500
+                        )
+                        try:
+                            duration_ms = int(
+                                action.get("duration_ms") or default_duration_ms
+                            )
+                        except (TypeError, ValueError) as exc:
+                            raise ComputerUseExecutionError(
+                                "Long press action has an invalid duration_ms value."
+                            ) from exc
+                    if duration_ms <= 0:
+                        raise ComputerUseExecutionError(
+                            "Long press action requires a positive duration."
+                        )
                     if cached:
                         x, y = int(cached.x), int(cached.y)
                     else:
@@ -544,6 +644,11 @@ class ComputerUseActionMixin:
                     if app_activity_raw:
                         turn.metadata["app_activity"] = app_activity_raw
                     turn.status = "executed"
+                elif action_type == "list_apps":
+                    raise ComputerUseExecutionError(
+                        "list_apps is not supported because the automation driver "
+                        "does not expose an installed-application inventory."
+                    )
                 elif action_type in {"keypress", "key_combination"}:
                     if action_type == "keypress":
                         key_sequence = self._resolve_key_sequence(action, metadata)
@@ -567,31 +672,55 @@ class ComputerUseActionMixin:
                                 "Key combination action missing keys."
                             )
                         if isinstance(keys, (list, tuple)):
-                            for key in keys:
-                                normalized = normalize_key_sequence(str(key))
-                                await self._automation_driver.press_key(normalized)
-                                if self._should_capture_clipboard_after_key_combo(
-                                    normalized
-                                ):
-                                    capture_clipboard_after_action = True
+                            key_parts = [
+                                str(key).strip() for key in keys if str(key).strip()
+                            ]
+                            if not key_parts:
+                                raise ComputerUseExecutionError(
+                                    "Key combination action requires at least one key."
+                                )
+                            key_value = "+".join(key_parts)
                         else:
-                            normalized = normalize_key_sequence(str(keys))
-                            await self._automation_driver.press_key(normalized)
-                            if self._should_capture_clipboard_after_key_combo(
-                                normalized
-                            ):
-                                capture_clipboard_after_action = True
+                            key_value = str(keys)
+                        normalized = normalize_key_sequence(key_value)
+                        await self._automation_driver.press_key(normalized)
+                        if self._should_capture_clipboard_after_key_combo(normalized):
+                            capture_clipboard_after_action = True
                     turn.status = "executed"
+                elif action_type in {"key_down", "key_up"}:
+                    raise ComputerUseExecutionError(
+                        f"{action_type} cannot be executed safely because the "
+                        "automation driver does not expose independent key press "
+                        "and release operations."
+                    )
                 elif action_type == "read_clipboard":
                     clipboard_text = await self._maybe_read_clipboard(turn)
                     if clipboard_text is not None:
                         turn.metadata["clipboard_text"] = clipboard_text
                     turn.status = "executed"
                 elif action_type == "wait":
-                    duration = int(
-                        action.get("duration_ms")
-                        or self._settings.actions_computer_tool_stabilization_wait_ms
-                    )
+                    seconds_raw = action.get("seconds")
+                    if seconds_raw is not None:
+                        try:
+                            duration = int(round(float(seconds_raw) * 1000))
+                        except (TypeError, ValueError) as exc:
+                            raise ComputerUseExecutionError(
+                                "Wait action has an invalid seconds value."
+                            ) from exc
+                    else:
+                        duration_raw = action.get("duration_ms")
+                        if duration_raw is None:
+                            duration_raw = 1000
+                        try:
+                            duration = int(duration_raw)
+                        except (TypeError, ValueError) as exc:
+                            raise ComputerUseExecutionError(
+                                "Wait action has an invalid duration_ms value."
+                            ) from exc
+                    if duration <= 0:
+                        raise ComputerUseExecutionError(
+                            "Wait action requires a positive duration."
+                        )
                     await self._automation_driver.wait(duration)
                     turn.metadata["duration_ms"] = duration
                     turn.status = "executed"
