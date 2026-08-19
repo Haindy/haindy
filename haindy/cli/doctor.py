@@ -35,9 +35,9 @@ def _not_set(notes: str = "") -> tuple[Text, str]:
 def _check_python_version() -> tuple[Text, str]:
     vi = sys.version_info
     version_str = f"{vi.major}.{vi.minor}.{vi.micro}"
-    if vi >= (3, 10):
+    if vi >= (3, 11):
         return _ok(version_str)
-    return _missing(f"{version_str} (need >= 3.10)")
+    return _missing(f"{version_str} (need >= 3.11)")
 
 
 def _check_haindy_installed() -> tuple[Text, str]:
@@ -229,7 +229,7 @@ def run_doctor() -> int:
             any_missing = True
 
     status, notes = _check_python_version()
-    _add("Python >= 3.10", status, notes)
+    _add("Python >= 3.11", status, notes)
 
     status, notes = _check_haindy_installed()
     _add("haindy package", status, notes)

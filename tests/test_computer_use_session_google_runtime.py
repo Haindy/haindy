@@ -115,7 +115,7 @@ async def test_google_computer_use_retries_resource_exhausted_then_succeeds(
     session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     response = await session._create_google_response(
-        {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+        {"model": "gemini-3.7-flash", "contents": [], "config": {}}
     )
 
     assert response == {"id": "ok"}
@@ -164,7 +164,7 @@ async def test_google_computer_use_retries_prompt_safety_block_then_succeeds(
     session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     response = await session._create_google_response(
-        {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+        {"model": "gemini-3.7-flash", "contents": [], "config": {}}
     )
 
     assert response["id"] == "ok"
@@ -213,7 +213,7 @@ async def test_google_computer_use_returns_blocked_response_after_safety_retries
     session._sleep_google_retry = sleep_mock  # type: ignore[method-assign]
 
     response = await session._create_google_response(
-        {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+        {"model": "gemini-3.7-flash", "contents": [], "config": {}}
     )
 
     assert response["id"] == "blocked_3"
@@ -251,7 +251,7 @@ async def test_google_computer_use_raises_after_retry_budget_exhausted(
 
     with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
         await session._create_google_response(
-            {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+            {"model": "gemini-3.7-flash", "contents": [], "config": {}}
         )
 
     assert generate_content.call_count == 4
@@ -281,7 +281,7 @@ async def test_google_computer_use_non_retryable_error_does_not_retry(
 
     with pytest.raises(RuntimeError, match="google failed"):
         await session._create_google_response(
-            {"model": "gemini-3-flash-preview", "contents": [], "config": {}}
+            {"model": "gemini-3.7-flash", "contents": [], "config": {}}
         )
 
     assert generate_content.call_count == 1
@@ -326,7 +326,7 @@ async def test_google_interactions_suppresses_known_package_warnings(
         response = await session._create_google_response(
             {
                 "api_surface": "interactions",
-                "model": "gemini-3-flash-preview",
+                "model": "gemini-3.7-flash",
                 "input": [],
                 "tools": [],
             }
@@ -375,7 +375,7 @@ async def test_google_interactions_preserves_unrelated_warnings(
         response = await session._create_google_response(
             {
                 "api_surface": "interactions",
-                "model": "gemini-3-flash-preview",
+                "model": "gemini-3.7-flash",
                 "input": [],
                 "tools": [],
             }
@@ -408,7 +408,7 @@ async def test_google_interactions_failure_logs_payload_summary(
             await session._create_google_response(
                 {
                     "api_surface": "interactions",
-                    "model": "gemini-3-flash-preview",
+                    "model": "gemini-3.7-flash",
                     "previous_interaction_id": "int_prev",
                     "input": [
                         {
@@ -463,7 +463,7 @@ async def test_google_mobile_interactions_tools_bypass_sdk_alias_transform(
     response = await session._create_google_response(
         {
             "api_surface": "interactions",
-            "model": "gemini-3-flash-preview",
+            "model": "gemini-3.7-flash",
             "input": [{"type": "text", "text": "status"}],
             "tools": tools,
         }
@@ -494,7 +494,7 @@ async def test_google_computer_use_logs_non_retryable_failed_attempt(
 
     with pytest.raises(RuntimeError, match="google failed"):
         await session._create_google_response(
-            {"model": "gemini-3-flash-preview", "contents": [], "config": {}},
+            {"model": "gemini-3.7-flash", "contents": [], "config": {}},
             agent="computer_use.google.initial",
             prompt="Tap Login",
             request_payload_for_log={"request": "sanitized"},
@@ -537,7 +537,7 @@ async def test_google_computer_use_suppresses_rate_limit_failure_entries(
 
     with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
         await session._create_google_response(
-            {"model": "gemini-3-flash-preview", "contents": [], "config": {}},
+            {"model": "gemini-3.7-flash", "contents": [], "config": {}},
             agent="computer_use.google.initial",
             prompt="Tap Login",
             request_payload_for_log={"request": "sanitized"},

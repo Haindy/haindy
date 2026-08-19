@@ -7,10 +7,10 @@ import asyncio
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar, overload
 from uuid import uuid4
 
 from haindy.config.settings import get_settings
@@ -66,12 +66,32 @@ class ToolCallUsageError(ValueError):
     """Raised when tool-call CLI parsing should return a JSON usage envelope."""
 
 
+_NamespaceT = TypeVar("_NamespaceT")
+
+
 class ToolCallArgumentParser(argparse.ArgumentParser):
     """ArgumentParser variant that keeps usage failures in-band as JSON."""
 
+    @overload
     def parse_args(
         self,
-        args: Sequence[str] | None = None,
+        args: Iterable[str] | None = None,
+        namespace: None = None,
+    ) -> argparse.Namespace: ...
+
+    @overload
+    def parse_args(
+        self,
+        args: Iterable[str] | None,
+        namespace: _NamespaceT,
+    ) -> _NamespaceT: ...
+
+    @overload
+    def parse_args(self, *, namespace: _NamespaceT) -> _NamespaceT: ...
+
+    def parse_args(
+        self,
+        args: Iterable[str] | None = None,
         namespace: Any = None,
     ) -> Any:
         parsed = super().parse_args(args=args, namespace=namespace)

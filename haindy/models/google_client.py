@@ -22,6 +22,10 @@ _DATA_URL_PATTERN = re.compile(
     r"^data:(?P<mime>image/[A-Za-z0-9.+-]+);base64,(?P<data>[A-Za-z0-9+/=\n\r]+)$",
     re.DOTALL,
 )
+_SAMPLING_UNSUPPORTED_MODEL_PREFIXES = (
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+)
 
 genai: Any | None
 genai_types: Any | None
@@ -54,7 +58,7 @@ class GoogleClient:
     def __init__(self, model: str | None = None) -> None:
         settings = get_settings()
         self._api_key = settings.vertex_api_key
-        self._model = model or settings.google_model or "gemini-3-flash-preview"
+        self._model = model or settings.google_model or "gemini-3.7-flash"
         self.model = self._model
         self._vertex_project = getattr(settings, "vertex_project", "") or ""
         self._vertex_location = (
@@ -87,6 +91,14 @@ class GoogleClient:
                     )
                 self._client = genai.Client(api_key=self._api_key)
         return self._client
+
+    @staticmethod
+    def _supports_sampling_parameters(model: str) -> bool:
+        normalized = str(model or "").strip().lower()
+        return not any(
+            normalized.startswith(prefix)
+            for prefix in _SAMPLING_UNSUPPORTED_MODEL_PREFIXES
+        )
 
     def _append_distinct_instruction(
         self, current: str | None, text: str | None
@@ -407,9 +419,9 @@ class GoogleClient:
                 system_instruction, "Respond with valid JSON only."
             )
 
-        config_kwargs: dict[str, Any] = {
-            "temperature": temperature,
-        }
+        config_kwargs: dict[str, Any] = {}
+        if self._supports_sampling_parameters(self._model):
+            config_kwargs["temperature"] = temperature
         if max_tokens:
             config_kwargs["max_output_tokens"] = max_tokens
         if system_instruction:

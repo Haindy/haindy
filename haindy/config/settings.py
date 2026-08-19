@@ -37,24 +37,32 @@ SUPPORTED_AGENT_PROVIDERS: tuple[str, ...] = (
     "anthropic",
 )
 SUPPORTED_CU_PROVIDERS: tuple[str, ...] = ("openai", "google", "anthropic")
-SUPPORTED_OPENAI_MODEL = "gpt-5.5"
-SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.5"
+SUPPORTED_OPENAI_MODEL = "gpt-5.6-sol"
+SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.6-sol"
 LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
-PREVIOUS_OPENAI_DEFAULT_MODEL = "gpt-5.4"
+PREVIOUS_OPENAI_DEFAULT_MODELS = {
+    "gpt-5.4",
+    "gpt-5.5",
+}
 PREVIOUS_ANTHROPIC_DEFAULT_MODELS = {
     "claude-sonnet-4-6",
     "claude-opus-4-7",
+    "claude-opus-4-8",
 }
-SUPPORTED_ANTHROPIC_MODEL = "claude-opus-4-8"
+SUPPORTED_ANTHROPIC_MODEL = "claude-opus-5"
+SUPPORTED_GOOGLE_MODEL = "gemini-3.7-flash"
+PREVIOUS_GOOGLE_DEFAULT_MODELS = {
+    "gemini-3-flash-preview",
+}
 DEFAULT_NON_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_MODEL,
     "openai-codex": SUPPORTED_OPENAI_MODEL,
-    "google": "gemini-3-flash-preview",
+    "google": SUPPORTED_GOOGLE_MODEL,
     "anthropic": SUPPORTED_ANTHROPIC_MODEL,
 }
 DEFAULT_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_COMPUTER_USE_MODEL,
-    "google": "gemini-3-flash-preview",
+    "google": SUPPORTED_GOOGLE_MODEL,
     "anthropic": SUPPORTED_ANTHROPIC_MODEL,
 }
 PROJECT_ID_HASH_LENGTH = 12
@@ -62,7 +70,7 @@ PROJECT_ID_HASH_LENGTH = 12
 
 def _migrate_previous_openai_default_model(value: str) -> str:
     normalized = str(value or "").strip()
-    if normalized == PREVIOUS_OPENAI_DEFAULT_MODEL:
+    if normalized in PREVIOUS_OPENAI_DEFAULT_MODELS:
         return SUPPORTED_OPENAI_MODEL
     return normalized
 
@@ -74,13 +82,20 @@ def _migrate_previous_anthropic_default_model(value: str) -> str:
     return normalized
 
 
+def _migrate_previous_google_default_model(value: str) -> str:
+    normalized = str(value or "").strip()
+    if normalized in PREVIOUS_GOOGLE_DEFAULT_MODELS:
+        return SUPPORTED_GOOGLE_MODEL
+    return normalized
+
+
 ALLOWED_REASONING_LEVELS: set[str] = {
     "none",
-    "minimal",
     "low",
     "medium",
     "high",
     "xhigh",
+    "max",
 }
 ALLOWED_OPENAI_CU_TRANSPORTS: set[str] = {"responses_websocket", "responses_http"}
 ALLOWED_CU_VISUAL_MODES: set[str] = {"keyframe_patch", "legacy_full_frame"}
@@ -305,6 +320,8 @@ class AgentModelConfig(BaseModel):
     @classmethod
     def validate_reasoning_level(cls, value: str) -> str:
         """Ensure reasoning level is valid."""
+        if value == "minimal":
+            return "low"
         if value not in ALLOWED_REASONING_LEVELS:
             raise ValueError(
                 f"Invalid reasoning level: {value}. Allowed values: {sorted(ALLOWED_REASONING_LEVELS)}"
@@ -474,7 +491,11 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # Provider Configuration
-    openai_api_key: str = Field(default="", description="OpenAI API key")
+    openai_api_key: str = Field(
+        default="",
+        description="OpenAI API key",
+        repr=False,
+    )
     openai_model: str = Field(
         default=DEFAULT_NON_CU_PROVIDER_MODELS["openai"],
         description="Default OpenAI model for non-CU agent calls",
@@ -506,10 +527,9 @@ class Settings(BaseModel):
         default="",
         description=(
             "Custom base URL for the OpenAI Computer Use client. Empty uses the "
-            "OpenAI default. Computer Use additionally requires the "
-            "computer_use_preview tool on top of the Responses API; almost no "
-            "relay implements this, so this override is for endpoints that "
-            "explicitly support OpenAI Computer Use."
+            "OpenAI default. Computer Use additionally requires the GA computer "
+            "tool on top of the Responses API; this override is for endpoints "
+            "that explicitly support OpenAI Computer Use."
         ),
     )
     agent_provider: str = Field(
@@ -754,6 +774,11 @@ class Settings(BaseModel):
     def normalize_anthropic_model(cls, value: str) -> str:
         return _migrate_previous_anthropic_default_model(value)
 
+    @field_validator("google_model")
+    @classmethod
+    def normalize_google_model(cls, value: str) -> str:
+        return _migrate_previous_google_default_model(value)
+
     # Computer Use Configuration
     computer_use_model: str = Field(
         default=DEFAULT_CU_PROVIDER_MODELS["openai"],
@@ -770,6 +795,7 @@ class Settings(BaseModel):
     anthropic_api_key: str = Field(
         default="",
         description="Anthropic API key for Claude computer-use",
+        repr=False,
     )
     anthropic_cu_model: str = Field(
         default=DEFAULT_CU_PROVIDER_MODELS["anthropic"],
@@ -787,6 +813,7 @@ class Settings(BaseModel):
     vertex_api_key: str = Field(
         default="",
         description="API key for Google Vertex computer-use",
+        repr=False,
     )
     vertex_project: str = Field(
         default="",
@@ -942,6 +969,11 @@ class Settings(BaseModel):
     def normalize_anthropic_cu_model(cls, value: str) -> str:
         return _migrate_previous_anthropic_default_model(value)
 
+    @field_validator("google_cu_model")
+    @classmethod
+    def normalize_google_cu_model(cls, value: str) -> str:
+        return _migrate_previous_google_default_model(value)
+
     @field_validator("log_level")
     def validate_log_level(cls, v: str) -> str:
         """Validate log level."""
@@ -1080,7 +1112,7 @@ class Settings(BaseModel):
         ):
             raise ValueError(
                 "OpenAI computer-use model 'computer-use-preview' is no longer "
-                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.5."
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.6-sol."
             )
         return self
 

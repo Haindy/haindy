@@ -56,7 +56,7 @@ Additional behaviour:
 
 | Check | macOS | Linux | Required |
 |-------|-------|-------|----------|
-| Python >= 3.10 | yes | yes | yes |
+| Python >= 3.11 | yes | yes | yes |
 | haindy package | yes | yes | yes |
 | OpenAI credentials | yes | yes | yes |
 | Anthropic credentials | yes | yes | yes |

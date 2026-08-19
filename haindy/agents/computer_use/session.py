@@ -150,17 +150,17 @@ class ComputerUseSession(
         ):
             raise ValueError(
                 "OpenAI computer-use model 'computer-use-preview' is no longer "
-                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.5."
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.6-sol."
             )
         self._google_model = (
             model
             if model and self._provider == "google"
-            else getattr(settings, "google_cu_model", "gemini-3-flash-preview")
+            else getattr(settings, "google_cu_model", "gemini-3.7-flash")
         )
         self._anthropic_model = (
             model
             if model and self._provider == "anthropic"
-            else getattr(settings, "anthropic_cu_model", "claude-opus-4-8")
+            else getattr(settings, "anthropic_cu_model", "claude-opus-5")
         )
         self._model = {
             "google": self._google_model,
@@ -198,10 +198,16 @@ class ComputerUseSession(
         self._stateful_actions: set[str] = {
             "click",
             "double_click",
+            "triple_click",
+            "middle_click",
             "right_click",
+            "mouse_down",
+            "mouse_up",
             "move",
             "type",
             "keypress",
+            "key_down",
+            "key_up",
             "drag",
             "navigate",
             "click_at",

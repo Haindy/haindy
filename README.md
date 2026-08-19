@@ -162,9 +162,9 @@ Create `~/.haindy/settings.json` for persistent non-secret configuration:
 {
   "agent": { "provider": "openai" },
   "computer_use": { "provider": "google" },
-  "openai": { "model": "gpt-5.5", "computer_use_model": "gpt-5.5" },
-  "google": { "model": "gemini-3-flash-preview", "computer_use_model": "gemini-3-flash-preview" },
-  "anthropic": { "model": "claude-opus-4-8", "computer_use_model": "claude-opus-4-8" },
+  "openai": { "model": "gpt-5.6-sol", "computer_use_model": "gpt-5.6-sol" },
+  "google": { "model": "gemini-3.7-flash", "computer_use_model": "gemini-3.7-flash" },
+  "anthropic": { "model": "claude-opus-5", "computer_use_model": "claude-opus-5" },
   "execution": {
     "automation_backend": "desktop",
     "actions_action_timeout_seconds": 600
@@ -193,7 +193,7 @@ To point HAINDY at a proxy, gateway, or alternate OpenAI-compatible endpoint, se
 
 Chat-Completions-only providers will not work if pointed to directly.
 
-A separate `openai.cu_base_url` (`HAINDY_OPENAI_CU_BASE_URL`) overrides the OpenAI Computer Use client's base URL. **Warning:** Computer Use additionally requires the `computer_use_preview` tool on top of the Responses API. Almost no relay implements this. Only set it if your endpoint explicitly supports OpenAI Computer Use.
+A separate `openai.cu_base_url` (`HAINDY_OPENAI_CU_BASE_URL`) overrides the OpenAI Computer Use client's base URL. **Warning:** Computer Use additionally requires the GA `computer` tool on top of the Responses API. Almost no relay implements this. Only set it if your endpoint explicitly supports OpenAI Computer Use.
 
 ### Artifact storage
 

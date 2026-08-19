@@ -26,7 +26,7 @@ Run `ruff format .` to auto-format before committing.
 
 ## Style guidelines
 
-- Python 3.10+ -- use modern syntax (`X | Y` unions, `match` statements where appropriate)
+- Python 3.11+ -- use modern syntax (`X | Y` unions, `match` statements where appropriate)
 - `ruff` handles formatting and import sorting -- no need to run `black` or `isort` separately
 - Type annotations on all public functions
 - No emojis in code, comments, commit messages, or PR descriptions

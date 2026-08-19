@@ -271,8 +271,10 @@ def flatten_settings_dict(nested: dict[str, Any]) -> dict[str, Any]:
     if "computer_use_model" in flat:
         provider = str(flat.get("cu_provider", "openai")).strip().lower()
         target_field = _PROVIDER_MODEL_FIELD.get(provider, "computer_use_model")
-        if target_field != "computer_use_model" and target_field not in flat:
-            flat[target_field] = flat.pop("computer_use_model")
+        if target_field != "computer_use_model":
+            if target_field not in flat:
+                flat[target_field] = flat["computer_use_model"]
+            flat.pop("computer_use_model")
 
     execution_section = nested.get("execution")
     if isinstance(execution_section, dict):

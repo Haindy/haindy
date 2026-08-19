@@ -1,87 +1,102 @@
 # Locked transitive dependency set for HAINDY development/runtime.
-# Refresh with: .venv/bin/python -m pip freeze | rg -v '^(haindy==|pip==|setuptools==|wheel==)$' | rg -v '(^-e git\\+.*#egg=haindy$)' > requirements.lock
-aiohappyeyeballs==2.6.1
-aiohttp==3.13.5
-aiosignal==1.4.0
-annotated-types==0.7.0
-anthropic==0.100.0
-anyio==4.13.0
-ast_serialize==0.3.0
-attrs==26.1.0
-black==26.3.1
-certifi==2026.4.22
-cffi==2.0.0
+# Refresh with: uv pip compile pyproject.toml --extra dev --universal --python-version 3.11 --upgrade --no-annotate --no-header --output-file requirements.lock
+aiofiles==25.1.0 ; sys_platform == 'darwin'
+annotated-types==0.8.0
+anthropic==0.123.0
+anyio==4.14.2
+ast-serialize==0.8.0
+backports-tarfile==1.2.0 ; python_full_version < '3.12'
+certifi==2026.7.22
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
 cfgv==3.5.0
-charset-normalizer==3.4.7
-click==8.3.3
-coverage==7.13.5
-cryptography==48.0.0
-distlib==0.4.0
+charset-normalizer==3.5.1
+colorama==0.4.6 ; sys_platform == 'win32'
+coverage==7.15.4
+cryptography==50.0.0
+distlib==0.4.3
 distro==1.9.0
-docstring_parser==0.18.0
-evdev==1.9.3 ; sys_platform == "linux"
-filelock==3.29.0
-frozenlist==1.8.0
-google-auth==2.52.0
-google-genai==2.0.1
+docstring-parser==0.18.0
+evdev==1.9.3 ; sys_platform == 'linux' or (sys_platform == 'darwin' and 'linux' in sys_platform) or (sys_platform == 'win32' and 'linux' in sys_platform)
+fb-idb==1.1.7 ; sys_platform == 'darwin'
+filelock==3.32.3
+google-auth==2.56.3
+google-genai==2.18.1
+grpclib==0.4.9 ; sys_platform == 'darwin'
 h11==0.16.0
+h2==4.4.1 ; sys_platform == 'darwin'
+hpack==4.2.0 ; sys_platform == 'darwin'
 httpcore==1.0.9
+httpcore2==2.12.0 ; sys_platform != 'emscripten'
 httpx==0.28.1
+httpx2==2.12.0
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
+hyperframe==6.1.0 ; sys_platform == 'darwin'
 identify==2.6.19
-idna==3.13
+idna==3.19
+importlib-metadata==9.0.0 ; python_full_version < '3.12'
 iniconfig==2.3.0
-isort==8.0.1
-jaraco.classes==3.4.0
-jaraco.context==6.1.2
-jaraco.functools==4.4.0
-jeepney==0.9.0
-Jinja2==3.1.6
-jiter==0.14.0
+jaraco-classes==3.4.0
+jaraco-context==6.1.2
+jaraco-functools==4.6.0
+jeepney==0.9.0 ; sys_platform == 'linux'
+jinja2==3.1.6
+jiter==0.16.0
 keyring==25.7.0
-librt==0.10.0
+librt==0.15.0 ; platform_python_implementation != 'PyPy'
 markdown-it-py==4.2.0
-MarkupSafe==3.0.3
+markupsafe==3.0.3
 mdurl==0.1.2
-more-itertools==11.0.2
-multidict==6.7.1
-mypy==2.0.0
-mypy_extensions==1.1.0
+more-itertools==11.1.0
+mss==10.2.0 ; sys_platform == 'darwin' or sys_platform == 'win32'
+multidict==6.7.1 ; sys_platform == 'darwin'
+mypy==2.3.1
+mypy-extensions==1.1.0
 nodeenv==1.10.0
-numpy==2.4.4
-openai==2.36.0
-packaging==26.2
+numpy==2.4.6 ; python_full_version < '3.12'
+numpy==2.5.2 ; python_full_version >= '3.12'
+openai==3.3.0
+packaging==26.3
 pathspec==1.1.1
-pillow==12.2.0
-platformdirs==4.9.6
+pillow==12.3.0
+platformdirs==4.11.3
 pluggy==1.6.0
-pre_commit==4.6.0
-propcache==0.5.2
-pyasn1==0.6.3
-pyasn1_modules==0.4.2
-pycparser==3.0
+pre-commit==4.6.2
+protobuf==7.35.1 ; sys_platform == 'darwin'
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
 pydantic==2.13.4
-pydantic_core==2.46.4
-Pygments==2.20.0
-pytest==9.0.3
-pytest-asyncio==1.3.0
+pydantic-core==2.46.4
+pygments==2.21.0
+pynput==1.8.2 ; sys_platform == 'darwin' or sys_platform == 'win32'
+pyobjc-core==12.2.2 ; sys_platform == 'darwin'
+pyobjc-framework-applicationservices==12.2.2 ; sys_platform == 'darwin'
+pyobjc-framework-cocoa==12.2.2 ; sys_platform == 'darwin'
+pyobjc-framework-coretext==12.2.2 ; sys_platform == 'darwin'
+pyobjc-framework-quartz==12.2.2 ; sys_platform == 'darwin'
+pytest==9.1.1
+pytest-asyncio==1.4.0
 pytest-cov==7.1.0
-python-discovery==1.3.0
-python-dotenv==1.2.2
-pytokens==0.4.1
-PyYAML==6.0.3
-regex==2026.5.9
-requests==2.33.1
+python-discovery==1.5.2
+python-dotenv==1.2.3
+python-xlib==0.33 ; (sys_platform == 'darwin' and 'linux' in sys_platform) or (sys_platform == 'win32' and 'linux' in sys_platform)
+pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
+pyyaml==6.0.3
+regex==2026.7.19
+requests==2.34.2
 rich==15.0.0
-rsa==4.9.1
-ruff==0.15.12
-SecretStorage==3.5.0
+ruff==0.16.3
+secretstorage==3.5.0 ; sys_platform == 'linux'
+six==1.17.0 ; sys_platform == 'darwin' or sys_platform == 'win32'
 sniffio==1.3.1
 tenacity==9.1.4
-tiktoken==0.12.0
-tqdm==4.67.3
-typing-inspection==0.4.2
-typing_extensions==4.15.0
+tiktoken==0.14.0
+tomli==2.4.1 ; python_full_version <= '3.11'
+treelib==1.8.0 ; sys_platform == 'darwin'
+truststore==0.10.4 ; sys_platform != 'emscripten'
+typing-extensions==4.16.0
+typing-inspection==0.4.4
 urllib3==2.7.0
-virtualenv==21.3.1
-websockets==16.0
-yarl==1.23.0
+virtualenv==21.7.4
+websockets==16.1.1
+zipp==4.1.0 ; python_full_version < '3.12'

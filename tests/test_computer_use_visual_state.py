@@ -336,7 +336,7 @@ def test_consume_localization_response_updates_session_keyframe_and_strips_block
         text,
         metadata={"target": "Email"},
         provider="openai",
-        model="gpt-5.5",
+        model="gpt-5.6-sol",
     )
 
     assert cleaned == "Clicked."
