@@ -12,6 +12,7 @@ from haindy.agents.computer_use import ComputerUseExecutionError
 from haindy.core.enhanced_types import ComputerToolTurn
 from tests.computer_use_session_support import (
     DummyResponse,
+    anthropic_member_call,
     make_anthropic_client,
     make_session,
 )
@@ -30,12 +31,9 @@ async def test_computer_use_session_anthropic_provider_executes_action(
         {
             "id": "msg_1",
             "content": [
-                {
-                    "type": "tool_use",
-                    "id": "toolu_1",
-                    "name": "computer",
-                    "input": {"action": "left_click", "coordinate": [250, 180]},
-                }
+                anthropic_member_call(
+                    "toolu_1", "left_click", {"coordinate": [250, 180]}
+                )
             ],
         }
     )
@@ -65,6 +63,91 @@ async def test_computer_use_session_anthropic_provider_executes_action(
     assert result.final_output == "Action completed successfully."
     mock_browser.click.assert_awaited_once_with(250, 180, button="left", click_count=1)
     assert create.await_count == 2
+
+    expected_toolset = {
+        "type": "computer_toolset_20260801",
+        "configs": {
+            "zoom": {"enabled": False},
+            "cursor_position": {"enabled": False},
+        },
+    }
+    initial_payload = create.await_args_list[0].kwargs
+    follow_up_payload = create.await_args_list[1].kwargs
+    for payload in (initial_payload, follow_up_payload):
+        assert payload["tools"] == [expected_toolset]
+        assert "betas" not in payload
+    tool_result = follow_up_payload["messages"][-1]["content"][0]
+    assert tool_result["tool_use_id"] == "toolu_1"
+    assert tool_result["toolset_name"] == "computer"
+    assert tool_result["content"][0]["type"] == "image"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_batch_stops_at_first_failure_and_halts_remaining_calls(
+    mock_client, mock_browser, session_settings
+):
+    session_settings.cu_provider = "anthropic"
+    session_settings.anthropic_api_key = "test-key"
+
+    batch_response = DummyResponse(
+        {
+            "id": "msg_1",
+            "content": [
+                anthropic_member_call(
+                    "toolu_click", "left_click", {"coordinate": [10, 20]}
+                ),
+                anthropic_member_call(
+                    "toolu_move", "mouse_move", {"coordinate": [5, 5]}
+                ),
+                anthropic_member_call("toolu_zoom", "zoom", {"region": [0, 0, 5, 5]}),
+                anthropic_member_call("toolu_type", "type", {"text": "hello"}),
+            ],
+        }
+    )
+    final_response = DummyResponse(
+        {"id": "msg_2", "content": [{"type": "text", "text": "Done."}]}
+    )
+    create = AsyncMock(side_effect=[batch_response, final_response])
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=make_anthropic_client(create),
+    )
+
+    result = await session.run(
+        goal="Search for hello.",
+        initial_screenshot=b"initial_png_bytes",
+        metadata={"step_number": 1},
+    )
+
+    assert [turn.call_id for turn in result.actions] == [
+        "toolu_click",
+        "toolu_move",
+        "toolu_zoom",
+    ]
+    assert result.actions[2].status == "failed"
+    mock_browser.type_text.assert_not_awaited()
+
+    tool_results = create.await_args_list[1].kwargs["messages"][-1]["content"][:4]
+    assert [block["tool_use_id"] for block in tool_results] == [
+        "toolu_click",
+        "toolu_move",
+        "toolu_zoom",
+        "toolu_type",
+    ]
+    assert all(block["toolset_name"] == "computer" for block in tool_results)
+    assert tool_results[0]["content"] == [{"type": "text", "text": "OK"}]
+    assert tool_results[1]["content"][0]["type"] == "image"
+    assert tool_results[2]["is_error"] is True
+    assert tool_results[3]["is_error"] is True
+    assert tool_results[3]["content"] == [
+        {
+            "type": "text",
+            "text": "Not executed: an earlier computer action in this turn failed.",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -172,7 +255,7 @@ async def test_anthropic_error_tool_result_uses_text_only_content(
         previous_response={"content": []},
         turns=[failed_turn],
         metadata={},
-        model="claude-opus-5",
+        model="claude-opus-5-5",
     )
 
     tool_result = payload["messages"][-1]["content"][0]
@@ -219,7 +302,7 @@ async def test_anthropic_follow_up_adds_shared_grounding_text_and_preserves_turn
         previous_response={"content": []},
         turns=[successful_turn],
         metadata={"interaction_mode": "observe_only"},
-        model="claude-opus-5",
+        model="claude-opus-5-5",
     )
 
     content = payload["messages"][-1]["content"]
@@ -250,7 +333,7 @@ async def test_anthropic_computer_use_calls_do_not_pass_request_timeout(
         anthropic_client=make_anthropic_client(create),
     )
 
-    payload = {"model": "claude-opus-5", "messages": []}
+    payload = {"model": "claude-opus-5-5", "messages": []}
     await session._create_anthropic_response(payload)
 
     create.assert_awaited_once_with(**payload)
@@ -274,7 +357,7 @@ async def test_anthropic_computer_use_logs_failed_request_attempt(
 
     with pytest.raises(RuntimeError, match="anthropic request failed"):
         await session._create_anthropic_response(
-            {"model": "claude-opus-5", "messages": []},
+            {"model": "claude-opus-5-5", "messages": []},
             agent="computer_use.anthropic.initial",
             prompt="Open the app",
             request_payload_for_log={"request": "sanitized"},
@@ -364,6 +447,36 @@ def test_translate_anthropic_action_left_click_drag_falls_back_to_pointer(
     assert result["start_y"] == 200
     assert result["end_x"] == 300
     assert result["end_y"] == 200
+
+
+def test_translate_anthropic_action_key_honors_repeat(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    result = session._translate_anthropic_action(
+        {"action": "key", "text": "Down", "repeat": 3}
+    )
+    assert result == {"type": "keypress", "key": "Down", "keys": ["Down"] * 3}
+
+
+def test_translate_anthropic_action_wait_duration_is_seconds(
+    mock_client, mock_browser, session_settings
+):
+    session = make_session(
+        mock_client=mock_client,
+        mock_browser=mock_browser,
+        session_settings=session_settings,
+        provider="anthropic",
+        anthropic_client=object(),
+    )
+    result = session._translate_anthropic_action({"action": "wait", "duration": 2})
+    assert result == {"type": "wait", "seconds": 2}
 
 
 def test_translate_anthropic_action_hold_key(

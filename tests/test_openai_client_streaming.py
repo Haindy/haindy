@@ -124,14 +124,14 @@ class StubAuthManager:
         return self._auth
 
 
-def test_estimate_cost_uses_gpt_5_6_sol_pricing() -> None:
+def test_estimate_cost_uses_gpt_6_sol_pricing() -> None:
     client = object.__new__(OpenAIClient)
 
     cost = client.estimate_cost(
         {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}
     )
 
-    assert cost == pytest.approx(35.0)
+    assert cost == pytest.approx(12.0)
 
 
 @pytest.mark.asyncio
@@ -141,7 +141,7 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         output_text="hello world",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     delta_event = SimpleNamespace(type="response.output_text.delta", delta="hello")
     events = [
@@ -170,7 +170,7 @@ async def test_streaming_requests_usage_and_emits_final_delta(monkeypatch) -> No
         lambda self, text, encoder: len(text),
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
 
     observer = RecordingObserver()
     result = await client._call_responses_api_streaming(
@@ -217,7 +217,7 @@ def test_ensure_json_keyword_appends_input_message_when_missing(monkeypatch) -> 
         "haindy.models.openai_client.get_settings", lambda: dummy_settings
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     input_items = [
         {"role": "user", "content": [{"type": "input_text", "text": "Plan it"}]}
     ]
@@ -246,7 +246,7 @@ def test_ensure_json_keyword_appends_input_even_if_only_instructions_mention_jso
         "haindy.models.openai_client.get_settings", lambda: dummy_settings
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     input_items: list[dict[str, Any]] = []
     instructions = client._ensure_json_keyword_for_response_format(
         instructions="Return JSON only.",
@@ -269,7 +269,7 @@ def test_ensure_json_keyword_keeps_existing_input_json_reference(monkeypatch) ->
         "haindy.models.openai_client.get_settings", lambda: dummy_settings
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     input_items = [
         {
             "role": "user",
@@ -294,7 +294,7 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
         output_text="{}",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
 
@@ -310,7 +310,7 @@ async def test_call_responses_api_injects_json_keyword_into_input(monkeypatch) -
         "haindy.models.openai_client.get_settings", lambda: dummy_settings
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     result = await client._call_responses_api(
         final_messages=[{"role": "user", "content": "Assess context."}],
         temperature=0.0,
@@ -340,7 +340,7 @@ async def test_call_responses_api_uses_json_schema_text_format(monkeypatch) -> N
         output_text='{"decision":"continue"}',
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
 
@@ -366,7 +366,7 @@ async def test_call_responses_api_uses_json_schema_text_format(monkeypatch) -> N
         },
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     result = await client._call_responses_api(
         final_messages=[{"role": "user", "content": "Assess context."}],
         temperature=0.0,
@@ -397,7 +397,7 @@ async def test_call_responses_api_streaming_uses_json_schema_text_format(
         output_text='{"decision":"continue"}',
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     events = [SimpleNamespace(type="response.completed", response=final_response)]
     fake_responses = FakeResponses(events=events, final_response=final_response)
@@ -426,7 +426,7 @@ async def test_call_responses_api_streaming_uses_json_schema_text_format(
         },
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     result = await client._call_responses_api_streaming(
         final_messages=[{"role": "user", "content": "Assess context."}],
         temperature=0.0,
@@ -459,7 +459,7 @@ async def test_call_responses_api_streaming_uses_delta_text_when_final_is_empty(
         output=[],
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     events = [
         SimpleNamespace(type="response.output_text.delta", delta='{"decision":'),
@@ -492,7 +492,7 @@ async def test_call_responses_api_streaming_uses_delta_text_when_final_is_empty(
         },
     )
 
-    client = OpenAIClient(model="gpt-5.6-sol", api_key="test-key")
+    client = OpenAIClient(model="gpt-6-sol", api_key="test-key")
     result = await client._call_responses_api_streaming(
         final_messages=[{"role": "user", "content": "Assess context."}],
         temperature=0.0,
@@ -515,7 +515,7 @@ async def test_codex_mode_uses_codex_base_url_headers_and_store_false(
         output_text="hello",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
     captured_client_kwargs: dict[str, Any] = {}
@@ -547,7 +547,7 @@ async def test_codex_mode_uses_codex_base_url_headers_and_store_false(
     )
 
     client = OpenAIClient(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         auth_manager=StubAuthManager(auth),
     )
 
@@ -584,7 +584,7 @@ async def test_codex_mode_defaults_instructions_when_missing(monkeypatch) -> Non
         output_text="hello",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
 
@@ -610,7 +610,7 @@ async def test_codex_mode_defaults_instructions_when_missing(monkeypatch) -> Non
     )
 
     client = OpenAIClient(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         auth_manager=StubAuthManager(auth),
     )
 
@@ -646,7 +646,7 @@ async def test_codex_call_uses_streaming_path_even_when_stream_false(
         "haindy.models.openai_client.get_settings", lambda: dummy_settings
     )
     client = OpenAIClient(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         auth_manager=StubAuthManager(auth),
     )
 
@@ -654,7 +654,7 @@ async def test_codex_call_uses_streaming_path_even_when_stream_false(
         return_value={
             "content": "streamed",
             "usage": {},
-            "model": "gpt-5.6-sol",
+            "model": "gpt-6-sol",
             "finish_reason": "completed",
         }
     )
@@ -678,7 +678,7 @@ async def test_api_key_mode_uses_openai_base_url_override(monkeypatch) -> None:
         output_text="hello",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
     captured_client_kwargs: dict[str, Any] = {}
@@ -702,7 +702,7 @@ async def test_api_key_mode_uses_openai_base_url_override(monkeypatch) -> None:
     )
 
     client = OpenAIClient(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         auth_manager=StubAuthManager(auth),
     )
 
@@ -726,7 +726,7 @@ async def test_api_key_mode_omits_base_url_when_setting_blank(monkeypatch) -> No
         output_text="hello",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
     captured_client_kwargs: dict[str, Any] = {}
@@ -750,7 +750,7 @@ async def test_api_key_mode_omits_base_url_when_setting_blank(monkeypatch) -> No
     )
 
     client = OpenAIClient(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         auth_manager=StubAuthManager(auth),
     )
 
@@ -773,7 +773,7 @@ async def test_codex_mode_ignores_openai_base_url_override(monkeypatch) -> None:
         output_text="hello",
         usage=usage,
         status="completed",
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
     )
     fake_responses = FakeCreateResponses(final_response=final_response)
     captured_client_kwargs: dict[str, Any] = {}
@@ -802,7 +802,7 @@ async def test_codex_mode_ignores_openai_base_url_override(monkeypatch) -> None:
     )
 
     client = OpenAIClient(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         auth_manager=StubAuthManager(auth),
     )
 

@@ -36,11 +36,10 @@ def session_settings(tmp_path):
         scroll_default_magnitude=450,
         scroll_max_magnitude=600,
         cu_provider="openai",
-        computer_use_model="gpt-5.6-sol",
-        google_cu_model="gemini-3.7-flash",
+        computer_use_model="gpt-6-sol",
+        google_cu_model="gemini-3.8-flash",
         anthropic_api_key="",
-        anthropic_cu_model="claude-opus-5",
-        anthropic_cu_beta="computer-use-2025-11-24",
+        anthropic_cu_model="claude-opus-5-5",
         anthropic_cu_max_tokens=16384,
         vertex_api_key="",
         vertex_project="",
@@ -140,10 +139,20 @@ def openai_response(response_id: str, output: list[dict[str, object]]) -> DummyR
     return DummyResponse({"id": response_id, "output": output})
 
 
+def anthropic_member_call(
+    call_id: str, name: str, member_input: dict[str, object] | None = None
+) -> dict[str, object]:
+    return {
+        "type": "tool_use",
+        "id": call_id,
+        "name": name,
+        "toolset_name": "computer",
+        "input": member_input or {},
+    }
+
+
 def make_anthropic_client(create_mock: AsyncMock) -> SimpleNamespace:
-    return SimpleNamespace(
-        beta=SimpleNamespace(messages=SimpleNamespace(create=create_mock))
-    )
+    return SimpleNamespace(messages=SimpleNamespace(create=create_mock))
 
 
 def make_google_client(

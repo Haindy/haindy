@@ -25,6 +25,7 @@ _DATA_URL_PATTERN = re.compile(
 _SAMPLING_UNSUPPORTED_MODEL_PREFIXES = (
     "gemini-3.6-flash",
     "gemini-3.7-flash",
+    "gemini-3.8-flash",
 )
 
 genai: Any | None
@@ -58,7 +59,7 @@ class GoogleClient:
     def __init__(self, model: str | None = None) -> None:
         settings = get_settings()
         self._api_key = settings.vertex_api_key
-        self._model = model or settings.google_model or "gemini-3.7-flash"
+        self._model = model or settings.google_model or "gemini-3.8-flash"
         self.model = self._model
         self._vertex_project = getattr(settings, "vertex_project", "") or ""
         self._vertex_location = (

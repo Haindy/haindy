@@ -84,6 +84,25 @@ class TestDataSanitizer:
         result2 = sanitizer.sanitize_string(text2)
         assert "super_secret_key_12345" not in result2
 
+    def test_versioned_tool_types_are_not_treated_as_api_keys(self):
+        """Dated provider tool types stay readable in logs."""
+        sanitizer = DataSanitizer()
+
+        for tool_type in (
+            "computer_toolset_20260801",
+            "text_editor_20250728",
+            "code_execution_20260521",
+        ):
+            assert sanitizer.sanitize_string(tool_type) == tool_type
+
+        # Long tokens that only resemble the shape are still masked.
+        for token in (
+            "Abc_toolset_20260801xYz",
+            "computer_toolset_20260801_extra",
+            "ab12cd34ef56gh78ij90_20260801",
+        ):
+            assert token not in sanitizer.sanitize_string(token)
+
     def test_sanitize_credit_cards(self):
         """Test credit card sanitization."""
         sanitizer = DataSanitizer()

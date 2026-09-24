@@ -54,7 +54,7 @@ class TestGoogleClientInit:
         from haindy.models.google_client import GoogleClient
 
         client = GoogleClient()
-        assert client.model == "gemini-3.7-flash"
+        assert client.model == "gemini-3.8-flash"
 
     def test_custom_model_is_stored(self, patched_settings: Any) -> None:
         from haindy.models.google_client import GoogleClient
@@ -190,7 +190,7 @@ class TestGoogleClientCall:
 
         assert GoogleClient._supports_sampling_parameters("gemini-2.0-flash") is True
         assert GoogleClient._supports_sampling_parameters("gemini-3.6-flash") is False
-        assert GoogleClient._supports_sampling_parameters("gemini-3.7-flash") is False
+        assert GoogleClient._supports_sampling_parameters("gemini-3.8-flash") is False
 
     @pytest.mark.asyncio
     async def test_json_mode_parses_response(self, patched_settings: Any) -> None:

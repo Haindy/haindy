@@ -97,7 +97,7 @@ async def test_stalled_initial_websocket_handshake_falls_back_to_http_once(
         session_settings=session_settings,
         provider="openai",
     )
-    payload = {"model": "gpt-5.6-sol", "input": "Inspect the screen."}
+    payload = {"model": "gpt-6-sol", "input": "Inspect the screen."}
 
     response = await session._create_response(payload)
 

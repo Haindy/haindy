@@ -87,9 +87,6 @@ class ComputerUseSession(
     _model: str
     _google_client: Any | None
     _anthropic_client: Any | None
-    _anthropic_tool_type: str
-    _anthropic_tool_name: str
-    _anthropic_betas: list[str]
     _anthropic_max_tokens: int
     _coordinate_cache: CoordinateCache
     _model_logger: ModelCallLogger
@@ -150,17 +147,17 @@ class ComputerUseSession(
         ):
             raise ValueError(
                 "OpenAI computer-use model 'computer-use-preview' is no longer "
-                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.6-sol."
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-6-sol."
             )
         self._google_model = (
             model
             if model and self._provider == "google"
-            else getattr(settings, "google_cu_model", "gemini-3.7-flash")
+            else getattr(settings, "google_cu_model", "gemini-3.8-flash")
         )
         self._anthropic_model = (
             model
             if model and self._provider == "anthropic"
-            else getattr(settings, "anthropic_cu_model", "claude-opus-5")
+            else getattr(settings, "anthropic_cu_model", "claude-opus-5-5")
         )
         self._model = {
             "google": self._google_model,
@@ -168,11 +165,6 @@ class ComputerUseSession(
         }.get(self._provider, self._openai_model)
         self._google_client = google_client
         self._anthropic_client = anthropic_client
-        self._anthropic_tool_type = "computer_20251124"
-        self._anthropic_tool_name = "computer"
-        self._anthropic_betas = self._parse_betas(
-            str(getattr(self._settings, "anthropic_cu_beta", "") or "")
-        )
         self._anthropic_max_tokens = int(
             getattr(self._settings, "anthropic_cu_max_tokens", 16384)
         )

@@ -82,7 +82,12 @@ class DataSanitizer:
                 ),
                 SensitiveDataPattern(
                     name="api_key_generic",
-                    pattern=re.compile(r"\b[A-Za-z0-9_]{20,}\b"),
+                    # Skips versioned provider tool types such as
+                    # ``computer_toolset_20260801``: lowercase snake_case
+                    # ending in a YYYYMMDD date, which no API key resembles.
+                    pattern=re.compile(
+                        r"\b(?![a-z]+(?:_[a-z]+)*_20\d{6}\b)[A-Za-z0-9_]{20,}\b"
+                    ),
                     description="Generic API key pattern",
                 ),
                 SensitiveDataPattern(
