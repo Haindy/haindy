@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Anthropic Computer Use `wait` durations are now read as seconds, and `key` actions honor the `repeat` count.
 - Updated OpenAI cost estimation to GPT-6 Sol pricing.
+- Stopped the log sanitizer from masking versioned provider tool types such as `computer_toolset_20260801` as generic API keys.
 
 ## [0.7.0] - 2026-08-19
 
