@@ -43,7 +43,6 @@ _JSON_TO_FIELD: dict[str, str] = {
     "openai.cu_base_url": "openai_cu_base_url",
     # computer_use section
     "computer_use.provider": "cu_provider",
-    "computer_use.anthropic_beta": "anthropic_cu_beta",
     "computer_use.anthropic_max_tokens": "anthropic_cu_max_tokens",
     "computer_use.vertex_project": "vertex_project",
     "computer_use.vertex_location": "vertex_location",

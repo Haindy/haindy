@@ -47,19 +47,19 @@ The most commonly changed fields:
     "provider": "google"
   },
   "openai": {
-    "model": "gpt-5.6-sol",
-    "computer_use_model": "gpt-5.6-sol"
+    "model": "gpt-6-sol",
+    "computer_use_model": "gpt-6-sol"
   },
   "openai-codex": {
-    "model": "gpt-5.6-sol"
+    "model": "gpt-6-sol"
   },
   "google": {
-    "model": "gemini-3.7-flash",
-    "computer_use_model": "gemini-3.7-flash"
+    "model": "gemini-3.8-flash",
+    "computer_use_model": "gemini-3.8-flash"
   },
   "anthropic": {
-    "model": "claude-opus-5",
-    "computer_use_model": "claude-opus-5"
+    "model": "claude-opus-5-5",
+    "computer_use_model": "claude-opus-5-5"
   },
   "execution": {
     "automation_backend": "desktop"

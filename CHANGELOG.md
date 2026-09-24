@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Updated the default production models to OpenAI `gpt-6-sol`, Google `gemini-3.8-flash`, and Anthropic `claude-opus-5-5` for both planning and supported Computer Use paths, with saved `gpt-5.6-sol`, `gemini-3.7-flash`, and `claude-opus-5` settings migrated automatically.
+- Moved Anthropic Computer Use to the GA `computer_toolset_20260801` toolset, which Claude Opus 5.5 requires: requests use the standard Messages API with no beta header, member calls run as ordered batches that stop at the first failure, every result echoes `toolset_name`, and the `zoom` and `cursor_position` members are withheld because the automation drivers cannot serve them. Anthropic Computer Use now needs a model that supports the toolset.
+
+### Removed
+
+- Removed the `HAINDY_ANTHROPIC_CU_BETA` setting (`computer_use.anthropic_beta`); the computer toolset needs no beta header.
+
+### Fixed
+
+- Anthropic Computer Use `wait` durations are now read as seconds, and `key` actions honor the `repeat` count.
+- Updated OpenAI cost estimation to GPT-6 Sol pricing.
+
 ## [0.7.0] - 2026-08-19
 
 ### Added

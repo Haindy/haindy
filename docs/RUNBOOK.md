@@ -158,15 +158,15 @@ Alternatively, set `HAINDY_OPENAI_API_KEY`, `HAINDY_ANTHROPIC_API_KEY`, `HAINDY_
 {
   "agent": { "provider": "openai" },
   "computer_use": { "provider": "google" },
-  "openai": { "model": "gpt-5.6-sol", "computer_use_model": "gpt-5.6-sol" },
-  "openai-codex": { "model": "gpt-5.6-sol" },
+  "openai": { "model": "gpt-6-sol", "computer_use_model": "gpt-6-sol" },
+  "openai-codex": { "model": "gpt-6-sol" },
   "google": {
-    "model": "gemini-3.7-flash",
-    "computer_use_model": "gemini-3.7-flash"
+    "model": "gemini-3.8-flash",
+    "computer_use_model": "gemini-3.8-flash"
   },
   "anthropic": {
-    "model": "claude-opus-5",
-    "computer_use_model": "claude-opus-5"
+    "model": "claude-opus-5-5",
+    "computer_use_model": "claude-opus-5-5"
   },
   "execution": {
     "actions_action_timeout_seconds": 600
@@ -180,8 +180,8 @@ Useful commands:
 ```bash
 haindy provider set openai
 haindy provider set-computer-use google
-haindy provider set-model google gemini-3.7-flash
-haindy provider set-model google gemini-3.7-flash --computer-use
+haindy provider set-model google gemini-3.8-flash
+haindy provider set-model google gemini-3.8-flash --computer-use
 ```
 
 `openai-codex` is non-CU only and cannot be selected for computer-use or assigned a CU model.

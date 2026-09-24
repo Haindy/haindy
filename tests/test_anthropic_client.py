@@ -35,14 +35,14 @@ def _make_response(
         content=response_blocks,
         stop_reason=stop_reason,
         usage=usage,
-        model="claude-opus-5",
+        model="claude-opus-5-5",
     )
 
 
 class TestAnthropicClientInit:
     def test_default_model_falls_back_to_hardcoded(self, patched_settings: Any) -> None:
         client = AnthropicClient()
-        assert client.model == "claude-opus-5"
+        assert client.model == "claude-opus-5-5"
 
     def test_custom_model_is_stored(self, patched_settings: Any) -> None:
         client = AnthropicClient(model="claude-haiku-3-5")
@@ -308,7 +308,7 @@ class TestAnthropicClientCall:
             mock_instance.messages.create = AsyncMock(return_value=response)
             mock_cls.return_value = mock_instance
 
-            client = AnthropicClient(model="claude-opus-5")
+            client = AnthropicClient(model="claude-opus-5-5")
             await client.call(
                 messages=[{"role": "user", "content": "hi"}],
                 temperature=0.2,
@@ -491,7 +491,7 @@ class TestAnthropicClientCall:
             content=[block],
             stop_reason="end_turn",
             usage=usage,
-            model="claude-opus-5",
+            model="claude-opus-5-5",
         )
         with patch("anthropic.AsyncAnthropic") as mock_cls:
             mock_instance = AsyncMock()
@@ -539,7 +539,7 @@ class TestAnthropicClientStreaming:
             content=[SimpleNamespace(text="hello world")],
             stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=4, output_tokens=2),
-            model="claude-opus-5",
+            model="claude-opus-5-5",
         )
 
         async def _text_stream():
@@ -588,7 +588,7 @@ class TestAnthropicClientStreaming:
             content=[SimpleNamespace(text='{"key":"value"}')],
             stop_reason="end_turn",
             usage=SimpleNamespace(input_tokens=4, output_tokens=2),
-            model="claude-opus-5",
+            model="claude-opus-5-5",
         )
 
         async def _text_stream():

@@ -11,6 +11,9 @@ from haindy.core.enhanced_types import ComputerToolTurn
 
 from .types import ComputerUseExecutionError, GoogleFunctionCallEnvelope
 
+ANTHROPIC_COMPUTER_TOOLSET_TYPE = "computer_toolset_20260801"
+ANTHROPIC_COMPUTER_TOOLSET_NAME = "computer"
+
 
 def encode_png_base64(data: bytes) -> str:
     """Encode PNG bytes to base64 string."""
@@ -406,24 +409,29 @@ def extract_google_computer_calls(
 def extract_anthropic_computer_calls(
     response_dict: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Extract Anthropic computer tool-use calls from a response."""
+    """Extract Anthropic computer toolset member calls from a response.
+
+    Each member call is a ``tool_use`` block whose ``name`` is the action and
+    which carries ``toolset_name: "computer"``. The member name is folded into
+    the returned action payload as ``action``.
+    """
     calls: list[dict[str, Any]] = []
     for item in response_dict.get("content", []) or []:
         if not isinstance(item, dict):
             continue
         if item.get("type") != "tool_use":
             continue
-        tool_name = str(item.get("name") or "").strip().lower()
-        if tool_name and tool_name != "computer":
+        if item.get("toolset_name") != ANTHROPIC_COMPUTER_TOOLSET_NAME:
             continue
-        action_payload = item.get("input")
-        if not isinstance(action_payload, dict):
-            action_payload = {}
+        member_name = str(item.get("name") or "").strip()
+        member_input = item.get("input")
+        if not isinstance(member_input, dict):
+            member_input = {}
         calls.append(
             {
                 "id": item.get("id") or "",
-                "name": item.get("name") or "computer",
-                "action": action_payload,
+                "name": member_name,
+                "action": {**member_input, "action": member_name},
             }
         )
     return calls
@@ -589,6 +597,8 @@ def denormalize_coordinates(
 
 
 __all__ = [
+    "ANTHROPIC_COMPUTER_TOOLSET_NAME",
+    "ANTHROPIC_COMPUTER_TOOLSET_TYPE",
     "_inject_context_metadata",
     "denormalize_coordinates",
     "encode_png_base64",

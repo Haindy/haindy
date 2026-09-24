@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from haindy.agents.computer_use.common import (
+    extract_anthropic_computer_calls,
     extract_assistant_text,
     extract_google_function_call_envelopes,
     normalize_response,
@@ -114,3 +115,40 @@ def test_google_interactions_steps_schema_extracts_calls_and_text() -> None:
     assert envelopes[0].function_call.args == {"x": 12, "y": 34}
     assert envelopes[0].function_call.id == "fc_1"
     assert extract_assistant_text(response) == "Clicked."
+
+
+def test_extract_anthropic_computer_calls_reads_toolset_member_blocks() -> None:
+    response = {
+        "content": [
+            {"type": "thinking", "thinking": "", "signature": "sig"},
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "left_click",
+                "toolset_name": "computer",
+                "input": {"coordinate": [5, 6]},
+            },
+            {
+                "type": "tool_use",
+                "id": "toolu_2",
+                "name": "screenshot",
+                "toolset_name": "computer",
+                "input": {},
+            },
+            {
+                "type": "tool_use",
+                "id": "toolu_custom",
+                "name": "left_click",
+                "input": {"coordinate": [1, 1]},
+            },
+        ]
+    }
+
+    assert extract_anthropic_computer_calls(response) == [
+        {
+            "id": "toolu_1",
+            "name": "left_click",
+            "action": {"coordinate": [5, 6], "action": "left_click"},
+        },
+        {"id": "toolu_2", "name": "screenshot", "action": {"action": "screenshot"}},
+    ]

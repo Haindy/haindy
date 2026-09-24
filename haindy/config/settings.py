@@ -37,22 +37,25 @@ SUPPORTED_AGENT_PROVIDERS: tuple[str, ...] = (
     "anthropic",
 )
 SUPPORTED_CU_PROVIDERS: tuple[str, ...] = ("openai", "google", "anthropic")
-SUPPORTED_OPENAI_MODEL = "gpt-5.6-sol"
-SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-5.6-sol"
+SUPPORTED_OPENAI_MODEL = "gpt-6-sol"
+SUPPORTED_OPENAI_COMPUTER_USE_MODEL = "gpt-6-sol"
 LEGACY_OPENAI_COMPUTER_USE_MODEL = "computer-use-preview"
 PREVIOUS_OPENAI_DEFAULT_MODELS = {
     "gpt-5.4",
     "gpt-5.5",
+    "gpt-5.6-sol",
 }
 PREVIOUS_ANTHROPIC_DEFAULT_MODELS = {
     "claude-sonnet-4-6",
     "claude-opus-4-7",
     "claude-opus-4-8",
+    "claude-opus-5",
 }
-SUPPORTED_ANTHROPIC_MODEL = "claude-opus-5"
-SUPPORTED_GOOGLE_MODEL = "gemini-3.7-flash"
+SUPPORTED_ANTHROPIC_MODEL = "claude-opus-5-5"
+SUPPORTED_GOOGLE_MODEL = "gemini-3.8-flash"
 PREVIOUS_GOOGLE_DEFAULT_MODELS = {
     "gemini-3-flash-preview",
+    "gemini-3.7-flash",
 }
 DEFAULT_NON_CU_PROVIDER_MODELS: dict[str, str] = {
     "openai": SUPPORTED_OPENAI_MODEL,
@@ -163,7 +166,6 @@ SETTINGS_ENV_VARS: dict[str, str] = {
     "google_cu_model": "HAINDY_GOOGLE_CU_MODEL",
     "anthropic_api_key": "HAINDY_ANTHROPIC_API_KEY",
     "anthropic_cu_model": "HAINDY_ANTHROPIC_CU_MODEL",
-    "anthropic_cu_beta": "HAINDY_ANTHROPIC_CU_BETA",
     "anthropic_cu_max_tokens": "HAINDY_ANTHROPIC_CU_MAX_TOKENS",
     "vertex_api_key": "HAINDY_VERTEX_API_KEY",
     "vertex_project": "HAINDY_VERTEX_PROJECT",
@@ -801,10 +803,6 @@ class Settings(BaseModel):
         default=DEFAULT_CU_PROVIDER_MODELS["anthropic"],
         description="Anthropic Claude computer-use model name",
     )
-    anthropic_cu_beta: str = Field(
-        default="computer-use-2025-11-24",
-        description="Anthropic beta flag for computer-use tool availability",
-    )
     anthropic_cu_max_tokens: int = Field(
         default=16384,
         ge=256,
@@ -1112,7 +1110,7 @@ class Settings(BaseModel):
         ):
             raise ValueError(
                 "OpenAI computer-use model 'computer-use-preview' is no longer "
-                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-5.6-sol."
+                "supported. Set HAINDY_COMPUTER_USE_MODEL=gpt-6-sol."
             )
         return self
 

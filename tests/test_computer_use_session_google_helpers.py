@@ -145,7 +145,7 @@ async def test_google_follow_up_adds_safety_acknowledgement_and_call_id(
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     function_result = payload["input"][0]
@@ -193,7 +193,7 @@ async def test_google_follow_up_omits_function_response_id_without_google_call_i
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     function_result = payload["input"][0]
@@ -229,7 +229,7 @@ async def test_google_follow_up_uses_original_google_function_call_name(
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     function_result = payload["input"][0]
@@ -274,7 +274,7 @@ async def test_google_follow_up_preserves_rich_grounding_fields(
         turns=[turn],
         metadata={},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     function_result = payload["input"][0]
@@ -325,7 +325,7 @@ async def test_google_follow_up_execute_mode_uses_minimal_payload(
         turns=[turn],
         metadata={"interaction_mode": "execute"},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
@@ -359,7 +359,7 @@ async def test_google_follow_up_preserves_observe_only_reminder_text(
         turns=[turn],
         metadata={"interaction_mode": "observe_only"},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
@@ -394,7 +394,7 @@ async def test_google_follow_up_requests_in_loop_localization_on_full_keyframe(
         turns=[turn],
         metadata={"target": "Email"},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     assert batch.request_localization is True
@@ -432,7 +432,7 @@ async def test_google_follow_up_execute_mode_ignores_state_only_reporting_remind
             "response_reporting_scope": "state_only",
         },
         environment="mobile_adb",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     texts = [item["text"] for item in payload["input"] if item["type"] == "text"]
@@ -475,7 +475,7 @@ async def test_google_follow_up_attaches_shared_context_only_to_first_result(
         turns=turns,
         metadata={"interaction_mode": "observe_only"},
         environment="desktop",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
 
     function_results = [
@@ -556,7 +556,7 @@ def test_google_3x_mobile_interaction_payload_uses_builtin_mobile_actions(
         viewport_width=1080,
         viewport_height=1920,
         environment="mobile_adb",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
     tools = payload["tools"]
 
@@ -593,7 +593,7 @@ def test_google_3x_interaction_payload_excludes_unsupported_hold_actions(
         viewport_width=1024,
         viewport_height=768,
         environment=environment,
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
     computer_use_tool = payload["tools"][0]
 
@@ -672,7 +672,7 @@ def test_google_3x_generate_content_payload_excludes_unsupported_hold_actions(
 
     config = session._build_google_generate_config(
         environment,
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
     computer_use = config.tools[0].computer_use
 
@@ -699,7 +699,7 @@ def test_google_3x_generate_content_mobile_payload_uses_builtin_actions(
 
     config = session._build_google_generate_config(
         "mobile_adb",
-        model="gemini-3.7-flash",
+        model="gemini-3.8-flash",
     )
     computer_use = config.tools[0].computer_use
     function_names = [

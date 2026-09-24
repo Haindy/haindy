@@ -135,9 +135,9 @@ Report Generation         HTML report + JSONL execution log
 ### Computer-Use Providers
 
 The system supports three AI providers for computer-use (configured via `HAINDY_CU_PROVIDER`):
-- `openai` - OpenAI computer-use (`gpt-5.6-sol`)
-- `google` - Google Gemini computer-use (`gemini-3.7-flash`, default)
-- `anthropic` - Anthropic Claude computer-use (`claude-opus-5`)
+- `openai` - OpenAI computer-use (`gpt-6-sol`)
+- `google` - Google Gemini computer-use (`gemini-3.8-flash`, default)
+- `anthropic` - Anthropic Claude computer-use (`claude-opus-5-5`)
 
 ### Automation Backends
 

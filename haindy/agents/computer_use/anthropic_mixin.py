@@ -19,6 +19,8 @@ from haindy.core.enhanced_types import ComputerToolTurn
 from haindy.utils.model_logging import log_model_call_failure
 
 from .common import (
+    ANTHROPIC_COMPUTER_TOOLSET_NAME,
+    ANTHROPIC_COMPUTER_TOOLSET_TYPE,
     _inject_context_metadata,
     encode_png_base64,
     extract_anthropic_computer_calls,
@@ -42,6 +44,17 @@ class AnthropicComputerUseMixin:
     """Anthropic-specific request builders and execution loop."""
 
     _last_pointer_position: tuple[int, int] | None
+
+    # Toolset members the automation drivers cannot serve. ``zoom`` needs a
+    # region capture at full resolution and ``cursor_position`` needs a
+    # pointer readout, neither of which the drivers expose (and mobile
+    # targets have no pointer at all).
+    _ANTHROPIC_WITHHELD_MEMBERS: tuple[str, ...] = ("zoom", "cursor_position")
+    # Exact text the toolset expects for batch actions skipped after an
+    # earlier action in the same turn failed.
+    _ANTHROPIC_BATCH_HALT_TEXT = (
+        "Not executed: an earlier computer action in this turn failed."
+    )
 
     async def _run_anthropic(
         self: _ComputerUseSession,
@@ -92,15 +105,13 @@ class AnthropicComputerUseMixin:
             api_screenshot = screenshot
         api_width, api_height = api_size
         # Wrap the goal text AFTER determining the API dimensions so the
-        # resolution mentioned in the prompt matches the tool definition.
+        # resolution mentioned in the prompt matches the screenshot sent.
         goal = self._wrap_goal_for_mobile(goal, environment, api_width, api_height)
         goal = self._apply_interaction_mode_guidance(goal, metadata)
 
         request_payload = self._build_anthropic_initial_request(
             goal=goal,
             screenshot_bytes=api_screenshot,
-            viewport_width=api_width,
-            viewport_height=api_height,
             metadata=metadata,
             model=model,
         )
@@ -142,7 +153,8 @@ class AnthropicComputerUseMixin:
                 break
 
             executed_turns: list[ComputerToolTurn] = []
-            for call in calls:
+            halted_call_ids: list[str] = []
+            for call_index, call in enumerate(calls):
                 translated_action = self._translate_anthropic_action(
                     call.get("action") or {}
                 )
@@ -271,7 +283,10 @@ class AnthropicComputerUseMixin:
                         raise ComputerUseExecutionError(
                             "Repeated disallowed actions ignored; refusing to continue tool loop."
                         )
-                    continue
+                    halted_call_ids = self._anthropic_remaining_call_ids(
+                        calls, call_index
+                    )
+                    break
                 consecutive_ignored = 0
 
                 if self._is_scroll_action(turn.action_type):
@@ -310,6 +325,14 @@ class AnthropicComputerUseMixin:
                         max_turn_hit = True
                         break
 
+                # Batch actions run in order and stop at the first failure;
+                # the remaining calls are answered with the halt text.
+                if turn.status != "executed":
+                    halted_call_ids = self._anthropic_remaining_call_ids(
+                        calls, call_index
+                    )
+                    break
+
             if max_turn_hit:
                 break
 
@@ -324,6 +347,7 @@ class AnthropicComputerUseMixin:
                 turns=executed_turns,
                 metadata=metadata,
                 model=model,
+                halted_call_ids=halted_call_ids,
             )
             history_messages = list(follow_up_payload.get("messages", []))
             response = await self._create_anthropic_response(
@@ -371,12 +395,24 @@ class AnthropicComputerUseMixin:
 
         return result
 
+    def _build_anthropic_toolset(self: _ComputerUseSession) -> dict[str, Any]:
+        """Return the computer toolset entry, identical on every request.
+
+        The toolset takes no display size: coordinates are in the pixel space
+        of the screenshots returned to the model.
+        """
+        return {
+            "type": ANTHROPIC_COMPUTER_TOOLSET_TYPE,
+            "configs": {
+                member: {"enabled": False}
+                for member in self._ANTHROPIC_WITHHELD_MEMBERS
+            },
+        }
+
     def _build_anthropic_initial_request(
         self: _ComputerUseSession,
         goal: str,
         screenshot_bytes: bytes,
-        viewport_width: int,
-        viewport_height: int,
         metadata: dict[str, Any],
         model: str | None = None,
     ) -> dict[str, Any]:
@@ -406,15 +442,7 @@ class AnthropicComputerUseMixin:
         return {
             "model": model or self._anthropic_model,
             "max_tokens": self._anthropic_max_tokens,
-            "betas": list(self._anthropic_betas),
-            "tools": [
-                {
-                    "type": self._anthropic_tool_type,
-                    "name": self._anthropic_tool_name,
-                    "display_width_px": viewport_width,
-                    "display_height_px": viewport_height,
-                }
-            ],
+            "tools": [self._build_anthropic_toolset()],
             "messages": [
                 {
                     "role": "user",
@@ -440,6 +468,7 @@ class AnthropicComputerUseMixin:
         turns: list[ComputerToolTurn],
         metadata: dict[str, Any],
         model: str | None = None,
+        halted_call_ids: list[str] | None = None,
     ) -> tuple[dict[str, Any], bytes | None, tuple[int, int], tuple[int, int]]:
         """Build follow-up and return *(payload, screenshot, original_size, api_size)*."""
         follow_up_batch = await self._build_follow_up_batch(
@@ -459,8 +488,8 @@ class AnthropicComputerUseMixin:
             )
             else follow_up_batch.visual_frame
         )
-        # Use actual screenshot dimensions so display_width_px/height_px
-        # matches the coordinate space the model is seeing.
+        # Use actual screenshot dimensions so the model's coordinate space
+        # matches the image it is shown.
         if display_frame is not None and display_frame.screen_size[0] > 0:
             viewport_width, viewport_height = display_frame.screen_size
         else:
@@ -483,21 +512,37 @@ class AnthropicComputerUseMixin:
             fu_original_size = (viewport_width, viewport_height)
             fu_api_size = fu_original_size
             api_screenshot = display_bytes
-        api_width, api_height = fu_api_size
         display_b64 = encode_png_base64(api_screenshot)
+
+        action_results = [
+            (
+                call_result.call_id,
+                call_result.actions[0]
+                if call_result.actions
+                else ComputerUseActionResult(action_type="unknown", status="pending"),
+            )
+            for call_result in follow_up_batch.calls
+        ]
+        # Only screenshot calls need an image. The fresh screenshot also rides
+        # on the last executed call so the model always sees the current state
+        # without spending a round trip on a screenshot call.
+        last_executed_index = max(
+            (
+                index
+                for index, (_, action_result) in enumerate(action_results)
+                if action_result.status == "executed"
+            ),
+            default=None,
+        )
 
         tool_results: list[dict[str, Any]] = []
         extra_content: list[dict[str, Any]] = []
 
-        for call_result in follow_up_batch.calls:
-            action_result = (
-                call_result.actions[0]
-                if call_result.actions
-                else ComputerUseActionResult(action_type="unknown", status="pending")
-            )
+        for index, (call_id, action_result) in enumerate(action_results):
             tool_result_block: dict[str, Any] = {
                 "type": "tool_result",
-                "tool_use_id": call_result.call_id,
+                "tool_use_id": call_id,
+                "toolset_name": ANTHROPIC_COMPUTER_TOOLSET_NAME,
             }
 
             if action_result.status != "executed":
@@ -507,7 +552,10 @@ class AnthropicComputerUseMixin:
                     {"type": "text", "text": f"Execution error: {error_text}"}
                 ]
                 tool_result_block["is_error"] = True
-            else:
+            elif (
+                action_result.action_type == "screenshot"
+                or index == last_executed_index
+            ):
                 tool_result_block["content"] = [
                     {
                         "type": "image",
@@ -518,7 +566,22 @@ class AnthropicComputerUseMixin:
                         },
                     }
                 ]
+            else:
+                tool_result_block["content"] = [{"type": "text", "text": "OK"}]
             tool_results.append(tool_result_block)
+
+        for call_id in halted_call_ids or []:
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "toolset_name": ANTHROPIC_COMPUTER_TOOLSET_NAME,
+                    "is_error": True,
+                    "content": [
+                        {"type": "text", "text": self._ANTHROPIC_BATCH_HALT_TEXT}
+                    ],
+                }
+            )
 
         if follow_up_batch.grounding_text:
             extra_content.append(
@@ -539,18 +602,17 @@ class AnthropicComputerUseMixin:
         payload: dict[str, Any] = {
             "model": model or self._anthropic_model,
             "max_tokens": self._anthropic_max_tokens,
-            "betas": list(self._anthropic_betas),
-            "tools": [
-                {
-                    "type": self._anthropic_tool_type,
-                    "name": self._anthropic_tool_name,
-                    "display_width_px": api_width,
-                    "display_height_px": api_height,
-                }
-            ],
+            "tools": [self._build_anthropic_toolset()],
             "messages": messages,
         }
         return payload, display_bytes, fu_original_size, fu_api_size
+
+    @staticmethod
+    def _anthropic_remaining_call_ids(
+        calls: list[dict[str, Any]], call_index: int
+    ) -> list[str]:
+        """Return the ids of the batch calls after *call_index*."""
+        return [str(call.get("id") or "") for call in calls[call_index + 1 :]]
 
     async def _create_anthropic_response(
         self: _ComputerUseSession,
@@ -596,24 +658,11 @@ class AnthropicComputerUseMixin:
                 metadata={"provider": "anthropic", **(metadata or {})},
             )
 
-        if hasattr(client, "beta") and hasattr(client.beta, "messages"):
-            create_call = getattr(client.beta.messages, "create", None)
-            if callable(create_call):
-                try:
-                    response = await create_call(**payload)
-                except Exception as exc:
-                    await _log_failure(exc)
-                    raise
-                await _log_success(response)
-                return response
-
         if hasattr(client, "messages"):
             create_call = getattr(client.messages, "create", None)
             if callable(create_call):
-                fallback_payload = dict(payload)
-                fallback_payload.pop("betas", None)
                 try:
-                    response = await create_call(**fallback_payload)
+                    response = await create_call(**payload)
                 except Exception as exc:
                     await _log_failure(exc)
                     raise
@@ -704,13 +753,20 @@ class AnthropicComputerUseMixin:
             if coord_pair is not None:
                 translated["end_x"], translated["end_y"] = coord_pair
         elif normalized_name == "key":
-            key_value = (
+            key_value = str(
                 raw_action.get("text")
                 or raw_action.get("key")
                 or raw_action.get("keys")
                 or raw_action.get("value")
+                or ""
             )
-            translated = {"type": "keypress", "key": str(key_value or "")}
+            translated = {"type": "keypress", "key": key_value}
+            try:
+                repeat = min(max(int(float(raw_action.get("repeat") or 1)), 1), 100)
+            except (TypeError, ValueError):
+                repeat = 1
+            if repeat > 1:
+                translated["keys"] = [key_value] * repeat
         elif normalized_name == "type":
             translated = {
                 "type": "type",
@@ -742,12 +798,8 @@ class AnthropicComputerUseMixin:
                 "magnitude": magnitude,
             }
         elif normalized_name == "wait":
-            translated = {
-                "type": "wait",
-                "duration_ms": raw_action.get("duration_ms")
-                or raw_action.get("duration")
-                or 1000,
-            }
+            # The toolset's wait ``duration`` is in seconds.
+            translated = {"type": "wait", "seconds": raw_action.get("duration") or 1}
         elif normalized_name == "screenshot":
             translated = {"type": "screenshot"}
         elif normalized_name == "left_mouse_down":
@@ -757,8 +809,8 @@ class AnthropicComputerUseMixin:
         elif normalized_name == "left_mouse_up":
             translated = {"type": "screenshot"}
         elif normalized_name == "hold_key":
-            key_value = raw_action.get("text") or raw_action.get("key")
-            translated = {"type": "keypress", "key": str(key_value or "")}
+            key_value = str(raw_action.get("text") or raw_action.get("key") or "")
+            translated = {"type": "keypress", "key": key_value}
 
         return translated
 
@@ -781,13 +833,11 @@ class AnthropicComputerUseMixin:
                     return None
         return None
 
-    # Maximum long-edge pixels for screenshots sent to Anthropic.  The model
-    # internally downscales images to fit its context window and then must map
-    # coordinates back to the declared ``display_width_px x display_height_px``
-    # space.  On high-resolution mobile devices the internal rendering can
-    # differ significantly from the declared display size, causing systematic
-    # coordinate errors.  Sending a pre-scaled screenshot whose dimensions
-    # match what the model will actually render eliminates this bias.
+    # Maximum long-edge pixels for screenshots sent to Anthropic.  The computer
+    # toolset returns coordinates in the pixel space of the screenshots it is
+    # shown and rejects images above the model's size limits instead of
+    # downscaling them, so screenshots are pre-scaled here and the model's
+    # coordinates are scaled back to the device viewport before execution.
     _ANTHROPIC_MAX_SCREENSHOT_LONG_EDGE: int = 1280
 
     @staticmethod

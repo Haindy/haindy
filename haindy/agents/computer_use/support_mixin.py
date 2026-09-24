@@ -1500,11 +1500,6 @@ class ComputerUseSupportMixin:
         ]
 
     @staticmethod
-    def _parse_betas(raw: str) -> list[str]:
-        values = [part.strip() for part in str(raw or "").split(",")]
-        return [value for value in values if value]
-
-    @staticmethod
     def _is_scroll_action(action_type: str | None) -> bool:
         if not action_type:
             return False

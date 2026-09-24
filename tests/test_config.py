@@ -64,7 +64,7 @@ class TestSettings:
     def test_action_agent_model_overrides_are_ignored(self):
         settings = load_settings(
             {
-                "HAINDY_ACTION_AGENT_MODEL": "gpt-5.6-sol",
+                "HAINDY_ACTION_AGENT_MODEL": "gpt-6-sol",
                 "HAINDY_ACTION_AGENT_REASONING_LEVEL": "high",
                 "HAINDY_ACTION_AGENT_MODALITIES": "text,vision",
             }
@@ -81,40 +81,40 @@ class TestSettings:
 
     def test_default_openai_model(self):
         settings = Settings()
-        assert settings.openai_model == "gpt-5.6-sol"
+        assert settings.openai_model == "gpt-6-sol"
 
     def test_default_openai_codex_model(self):
         settings = Settings()
-        assert settings.openai_codex_model == "gpt-5.6-sol"
+        assert settings.openai_codex_model == "gpt-6-sol"
 
     def test_default_openai_computer_use_model(self):
         settings = load_settings({})
-        assert settings.computer_use_model == "gpt-5.6-sol"
+        assert settings.computer_use_model == "gpt-6-sol"
 
     def test_previous_default_models_migrate_to_current_defaults(self):
         settings = load_settings(
             {
-                "HAINDY_OPENAI_MODEL": "gpt-5.5",
-                "HAINDY_OPENAI_CODEX_MODEL": "gpt-5.5",
-                "HAINDY_COMPUTER_USE_MODEL": "gpt-5.5",
-                "HAINDY_ANTHROPIC_MODEL": "claude-opus-4-8",
-                "HAINDY_ANTHROPIC_CU_MODEL": "claude-opus-4-8",
-                "HAINDY_GOOGLE_MODEL": "gemini-3-flash-preview",
-                "HAINDY_GOOGLE_CU_MODEL": "gemini-3-flash-preview",
+                "HAINDY_OPENAI_MODEL": "gpt-5.6-sol",
+                "HAINDY_OPENAI_CODEX_MODEL": "gpt-5.6-sol",
+                "HAINDY_COMPUTER_USE_MODEL": "gpt-5.6-sol",
+                "HAINDY_ANTHROPIC_MODEL": "claude-opus-5",
+                "HAINDY_ANTHROPIC_CU_MODEL": "claude-opus-5",
+                "HAINDY_GOOGLE_MODEL": "gemini-3.7-flash",
+                "HAINDY_GOOGLE_CU_MODEL": "gemini-3.7-flash",
             }
         )
 
-        assert settings.openai_model == "gpt-5.6-sol"
-        assert settings.openai_codex_model == "gpt-5.6-sol"
-        assert settings.computer_use_model == "gpt-5.6-sol"
-        assert settings.anthropic_model == "claude-opus-5"
-        assert settings.anthropic_cu_model == "claude-opus-5"
-        assert settings.google_model == "gemini-3.7-flash"
-        assert settings.google_cu_model == "gemini-3.7-flash"
+        assert settings.openai_model == "gpt-6-sol"
+        assert settings.openai_codex_model == "gpt-6-sol"
+        assert settings.computer_use_model == "gpt-6-sol"
+        assert settings.anthropic_model == "claude-opus-5-5"
+        assert settings.anthropic_cu_model == "claude-opus-5-5"
+        assert settings.google_model == "gemini-3.8-flash"
+        assert settings.google_cu_model == "gemini-3.8-flash"
 
     @pytest.mark.parametrize(
         "previous_model",
-        ["claude-sonnet-4-6", "claude-opus-4-7"],
+        ["claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8"],
     )
     def test_older_anthropic_default_model_migrates_to_current_default(
         self, previous_model: str
@@ -126,21 +126,35 @@ class TestSettings:
             }
         )
 
-        assert settings.anthropic_model == "claude-opus-5"
-        assert settings.anthropic_cu_model == "claude-opus-5"
+        assert settings.anthropic_model == "claude-opus-5-5"
+        assert settings.anthropic_cu_model == "claude-opus-5-5"
 
-    def test_older_openai_default_model_migrates_to_current_default(self):
+    @pytest.mark.parametrize("previous_model", ["gpt-5.4", "gpt-5.5"])
+    def test_older_openai_default_model_migrates_to_current_default(
+        self, previous_model: str
+    ):
         settings = load_settings(
             {
-                "HAINDY_OPENAI_MODEL": "gpt-5.4",
-                "HAINDY_OPENAI_CODEX_MODEL": "gpt-5.4",
-                "HAINDY_COMPUTER_USE_MODEL": "gpt-5.4",
+                "HAINDY_OPENAI_MODEL": previous_model,
+                "HAINDY_OPENAI_CODEX_MODEL": previous_model,
+                "HAINDY_COMPUTER_USE_MODEL": previous_model,
             }
         )
 
-        assert settings.openai_model == "gpt-5.6-sol"
-        assert settings.openai_codex_model == "gpt-5.6-sol"
-        assert settings.computer_use_model == "gpt-5.6-sol"
+        assert settings.openai_model == "gpt-6-sol"
+        assert settings.openai_codex_model == "gpt-6-sol"
+        assert settings.computer_use_model == "gpt-6-sol"
+
+    def test_older_google_default_model_migrates_to_current_default(self):
+        settings = load_settings(
+            {
+                "HAINDY_GOOGLE_MODEL": "gemini-3-flash-preview",
+                "HAINDY_GOOGLE_CU_MODEL": "gemini-3-flash-preview",
+            }
+        )
+
+        assert settings.google_model == "gemini-3.8-flash"
+        assert settings.google_cu_model == "gemini-3.8-flash"
 
     def test_default_openai_base_urls_are_empty(self):
         settings = Settings()
@@ -199,7 +213,7 @@ class TestSettings:
 
     def test_default_anthropic_computer_use_model(self):
         settings = load_settings({})
-        assert settings.anthropic_cu_model == "claude-opus-5"
+        assert settings.anthropic_cu_model == "claude-opus-5-5"
 
     def test_default_anthropic_computer_use_max_tokens(self):
         settings = load_settings({})
@@ -396,12 +410,12 @@ class TestSettings:
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".env").write_text(
-            "HAINDY_CU_PROVIDER=anthropic\nHAINDY_OPENAI_MODEL=gpt-5.6-sol\n",
+            "HAINDY_CU_PROVIDER=anthropic\nHAINDY_OPENAI_MODEL=gpt-6-sol\n",
             encoding="utf-8",
         )
         settings = load_settings()
         assert settings.cu_provider == "anthropic"
-        assert settings.openai_model == "gpt-5.6-sol"
+        assert settings.openai_model == "gpt-6-sol"
 
     def test_openai_model_rejects_legacy_non_cu_value(self):
         with pytest.raises(ValueError, match="Unsupported OpenAI model 'gpt-5.2'"):
@@ -416,16 +430,16 @@ class TestSettings:
         ["none", "low", "medium", "high", "xhigh", "max"],
     )
     def test_reasoning_level_accepts_supported_values(self, level):
-        config = AgentModelConfig(model="gpt-5.6-sol", reasoning_level=level)
+        config = AgentModelConfig(model="gpt-6-sol", reasoning_level=level)
         assert config.reasoning_level == level
 
     def test_minimal_reasoning_level_migrates_to_low(self):
-        config = AgentModelConfig(model="gpt-5.6-sol", reasoning_level="minimal")
+        config = AgentModelConfig(model="gpt-6-sol", reasoning_level="minimal")
         assert config.reasoning_level == "low"
 
     def test_reasoning_level_rejects_unsupported_value(self):
         with pytest.raises(ValueError):
-            AgentModelConfig(model="gpt-5.6-sol", reasoning_level="ultra")
+            AgentModelConfig(model="gpt-6-sol", reasoning_level="ultra")
 
     def test_settings_has_agent_provider_defaulting_to_openai(self):
         settings = Settings()
@@ -437,11 +451,11 @@ class TestSettings:
 
     def test_settings_has_anthropic_model_default(self):
         settings = Settings()
-        assert settings.anthropic_model == "claude-opus-5"
+        assert settings.anthropic_model == "claude-opus-5-5"
 
     def test_settings_has_google_model_default(self):
         settings = Settings()
-        assert settings.google_model == "gemini-3.7-flash"
+        assert settings.google_model == "gemini-3.8-flash"
 
     def test_settings_env_vars_contains_agent_provider(self):
         assert "agent_provider" in SETTINGS_ENV_VARS
@@ -464,8 +478,8 @@ class TestSettings:
         assert config.model is None
 
     def test_agent_model_config_accepts_arbitrary_model_string(self):
-        config = AgentModelConfig(model="claude-opus-5")
-        assert config.model == "claude-opus-5"
+        config = AgentModelConfig(model="claude-opus-5-5")
+        assert config.model == "claude-opus-5-5"
 
     def test_default_agent_models_have_no_explicit_model(self):
         for agent_name, config in DEFAULT_AGENT_MODELS.items():

@@ -18,7 +18,7 @@ from haindy.models.structured_output import (
     response_format_expects_json,
 )
 
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-5"
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
 
 logger = logging.getLogger("anthropic_client")
 
