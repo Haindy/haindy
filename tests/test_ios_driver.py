@@ -111,6 +111,35 @@ async def test_idb_client_rejects_non_idb_command(
 
 
 @pytest.mark.asyncio
+async def test_idb_client_passes_udid_via_env_not_trailing_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Process:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"", b""
+
+    async def _fake_subprocess(*args: str, **kwargs: object) -> _Process:
+        captured["args"] = args
+        captured["env"] = kwargs.get("env")
+        return _Process()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_subprocess)
+    client = IDBClient(udid="TARGET-UDID")
+
+    await client.run_idb("launch", "com.example.app")
+
+    # A trailing --udid would be swallowed as an app argument by `idb launch`.
+    assert captured["args"] == ("idb", "launch", "com.example.app")
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["IDB_UDID"] == "TARGET-UDID"
+
+
+@pytest.mark.asyncio
 async def test_ios_driver_get_viewport_size_from_describe() -> None:
     stub = StubIDBClient(describe_output=_describe_json(390, 844))
     driver = IOSDriver(idb_client=stub)

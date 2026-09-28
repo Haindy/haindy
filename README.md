@@ -209,7 +209,7 @@ Set `HAINDY_DATA_DIR` or `storage.data_dir` to use an exact custom data root wit
 | macOS | Grant Accessibility + Screen Recording to your terminal (System Settings > Privacy & Security) |
 | Windows | Python 3.11+, optional `adb`, long paths enabled, and run unelevated targets unless HAINDY is also elevated |
 | Android | `adb` installed, device/emulator reachable |
-| iOS (macOS) | `brew install idb-companion`, device paired |
+| iOS (macOS) | `brew install facebook/fb/idb-companion` (1.6.2+ for Xcode 27), device paired |
 
 `haindy doctor` checks all of these for you. See [docs/RUNBOOK.md](docs/RUNBOOK.md) for detailed setup.
 
