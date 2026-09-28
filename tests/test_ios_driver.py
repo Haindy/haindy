@@ -137,6 +137,36 @@ async def test_ios_driver_scales_click_coordinates_from_screenshot_space() -> No
 
 
 @pytest.mark.asyncio
+async def test_ios_driver_launch_app_foregrounds_if_running() -> None:
+    stub = StubIDBClient()
+    driver = IOSDriver(idb_client=stub)
+    await driver.start()
+
+    await driver.launch_app("com.apple.Preferences")
+
+    launch_commands = [cmd for cmd in stub.commands if cmd[0] == "launch"]
+    assert launch_commands == [
+        ("launch", "--foreground-if-running", "com.apple.Preferences")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ios_driver_launch_app_uses_configured_bundle_id() -> None:
+    stub = StubIDBClient()
+    driver = IOSDriver(idb_client=stub)
+    await driver.start()
+    await driver.configure_target(bundle_id="com.example.app")
+
+    await driver.launch_app()
+
+    assert stub.commands[-1] == (
+        "launch",
+        "--foreground-if-running",
+        "com.example.app",
+    )
+
+
+@pytest.mark.asyncio
 async def test_ios_driver_type_text() -> None:
     stub = StubIDBClient()
     driver = IOSDriver(idb_client=stub)

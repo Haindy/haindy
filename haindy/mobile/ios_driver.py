@@ -117,12 +117,17 @@ class IOSDriver(AutomationDriver):
             self._bundle_id = normalized_bundle
 
     async def launch_app(self, bundle_id: str | None = None) -> None:
-        """Launch an iOS application by bundle ID."""
+        """Launch an iOS application, or foreground it if already running.
+
+        Mirrors the Android driver: an already-running app is brought to the
+        front instead of relaunched. Use force_stop_app first for a fresh start.
+        """
         await self._ensure_ready()
         bundle = (bundle_id or "").strip() or self._bundle_id
         if not bundle:
             raise RuntimeError("Cannot launch app: missing iOS bundle ID.")
-        await self.idb.run_idb("launch", bundle)
+        # Flags must precede the bundle ID; idb treats trailing args as app args.
+        await self.idb.run_idb("launch", "--foreground-if-running", bundle)
         self._capture_call("launch_app", {"bundle_id": bundle})
 
     async def force_stop_app(self, bundle_id: str | None = None) -> None:
