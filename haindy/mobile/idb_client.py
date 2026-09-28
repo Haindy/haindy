@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from asyncio import subprocess as aio_subprocess
 from collections.abc import Sequence
@@ -92,16 +93,21 @@ class IDBClient:
         self,
         command: Sequence[str],
         timeout_seconds: float | None = None,
+        udid: str | None = None,
     ) -> IDBCommandResult:
         """Run a fully-formed idb command with strict binary validation."""
         normalized = tuple(str(part) for part in command)
         self._validate_idb_command(normalized)
+        # idb reads IDB_UDID for every target command. A trailing --udid flag is
+        # not safe: `idb launch` passes everything after the bundle id to the app.
+        env = {**os.environ, "IDB_UDID": udid} if udid else None
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *normalized,
                 stdout=aio_subprocess.PIPE,
                 stderr=aio_subprocess.PIPE,
+                env=env,
             )
         except FileNotFoundError as exc:
             raise RuntimeError(f"idb executable not found: {normalized[0]!r}") from exc
@@ -138,13 +144,13 @@ class IDBClient:
         check: bool = True,
         udid: str | None = None,
     ) -> IDBCommandResult:
-        """Run an idb command, appending --udid if set."""
+        """Run an idb command against the given or configured UDID."""
         command: list[str] = [self.idb_path]
         command.extend(str(part) for part in args)
         effective_udid = self._normalize_udid(udid) or self.udid
-        if effective_udid:
-            command.extend(["--udid", effective_udid])
-        result = await self.run_command(command, timeout_seconds=timeout_seconds)
+        result = await self.run_command(
+            command, timeout_seconds=timeout_seconds, udid=effective_udid
+        )
         if check and result.returncode != 0:
             raise IDBCommandError(result)
         return result

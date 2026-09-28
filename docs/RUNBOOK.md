@@ -117,18 +117,20 @@ Host expectations:
 
 ## iOS / idb prerequisites
 
-macOS only. Required tools:
+macOS only. Requires Xcode 26+ and idb 1.6.2+. Required tools:
 
 ```bash
-brew install idb-companion
-pip install fb-idb
+brew install facebook/fb/idb-companion
+pip install "fb-idb>=1.6.2"
 ```
+
+Xcode 27 moved `SimulatorKit.framework` from `Contents/Developer/Library/PrivateFrameworks` to `Contents/SharedFrameworks`. idb-companion 1.1.x still takes screenshots there, but every tap, swipe, and text input fails with `SimulatorKit is required for HID interactions`. Upgrade an existing install with `brew update && brew upgrade facebook/fb/idb-companion`; `haindy doctor` reports the old companion as `OUTDATED`.
 
 Host expectations:
 
 - Real devices (iOS 16+): enable Developer Mode (Settings > Privacy & Security > Developer Mode)
 - Real devices: connect via USB and accept the trust prompt on the device
-- Simulators: boot via Xcode or `xcrun simctl boot <UDID>`
+- Simulators: boot from DeviceHub (Xcode 27+; Simulator on older Xcode) or `xcrun simctl boot <UDID>`
 - Run `idb list-targets` to verify the device or simulator appears as `Booted` or `Connected`
 - Set `HAINDY_IOS_DEFAULT_DEVICE_UDID` when multiple targets are connected
 
@@ -281,6 +283,7 @@ and permissions, and prints a clear pass/fail summary for each item.
 - If desktop input fails, verify `xdotool` or `/dev/uinput` access
 - If Android startup fails, run `adb devices` and confirm the package name or serial
 - If iOS startup fails, run `idb list-targets` and confirm the UDID and state is `Booted`
+- If iOS screenshots work but taps, swipes, or typing fail with `SimulatorKit is required for HID interactions`, upgrade idb-companion to 1.6.2+
 
 ## Windows setup
 

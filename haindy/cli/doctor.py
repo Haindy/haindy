@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -30,6 +31,10 @@ def _na(notes: str = "") -> tuple[Text, str]:
 
 def _not_set(notes: str = "") -> tuple[Text, str]:
     return Text("NOT SET", style="yellow dim"), notes
+
+
+def _outdated(notes: str = "") -> tuple[Text, str]:
+    return Text("OUTDATED", style="bold red"), notes
 
 
 def _check_python_version() -> tuple[Text, str]:
@@ -125,6 +130,44 @@ def _check_macos_screen_recording() -> tuple[Text, str]:
         return _missing(
             "Grant in System Settings > Privacy & Security > Screen Recording"
         )
+
+
+def _xcode_developer_dir() -> str | None:
+    developer_dir = os.environ.get("DEVELOPER_DIR")
+    if developer_dir:
+        return developer_dir
+    try:
+        result = subprocess.run(
+            ["xcode-select", "-p"], capture_output=True, text=True, timeout=5
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _check_idb_companion(
+    companion_path: str | None, developer_dir: str | None
+) -> tuple[Text, str]:
+    if not companion_path:
+        return _missing("brew install facebook/fb/idb-companion")
+    # idb-companion 1.1.x ships bin/ next to Frameworks/ and loads SimulatorKit
+    # from <developer dir>/Library/PrivateFrameworks. Xcode 27 moved it to
+    # Contents/SharedFrameworks, so the old companion can still take screenshots
+    # but every tap, swipe, and text input fails.
+    companion_root = Path(companion_path).resolve().parent.parent
+    legacy_companion = (companion_root / "Frameworks/FBControlCore.framework").is_dir()
+    if legacy_companion and developer_dir:
+        developer = Path(developer_dir)
+        legacy_kit = developer / "Library/PrivateFrameworks/SimulatorKit.framework"
+        shared_kit = developer.parent / "SharedFrameworks/SimulatorKit.framework"
+        if not legacy_kit.exists() and shared_kit.exists():
+            return _outdated(
+                "1.1.x cannot send input on Xcode 27+; "
+                "run: brew upgrade facebook/fb/idb-companion"
+            )
+    return _ok("")
 
 
 def _check_windows_pynput() -> tuple[Text, str]:
@@ -333,14 +376,10 @@ def run_doctor() -> int:
         )
 
     if sys.platform == "darwin":
-        if shutil.which("idb_companion"):
-            _add("idb-companion (iOS, optional)", *_ok(), required=False)
-        else:
-            _add(
-                "idb-companion (iOS, optional)",
-                *_missing("brew install facebook/fb/idb-companion"),
-                required=False,
-            )
+        status, notes = _check_idb_companion(
+            shutil.which("idb_companion"), _xcode_developer_dir()
+        )
+        _add("idb-companion (iOS, optional)", status, notes, required=False)
         if importlib.util.find_spec("idb") is not None:
             _add("fb-idb Python package (iOS, optional)", *_ok(), required=False)
         else:
