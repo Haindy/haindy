@@ -99,8 +99,9 @@ class IOSDriver(AutomationDriver):
         self._started = True
 
     async def stop(self) -> None:
+        # No `idb kill`: it kills every idb companion on the host, including
+        # ones other tools or agents are using.
         self._started = False
-        await self.idb.run_idb("kill", check=False)
 
     async def configure_target(
         self,
