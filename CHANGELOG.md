@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-29
+
+### Changed
+
+- Raised the macOS `fb-idb` requirement to `>=1.6.2` for Xcode 27 simulator support. Xcode 27 moved SimulatorKit, so idb-companion 1.1.x can still take screenshots but every tap, swipe, text input, and button press fails; upgrade with `brew upgrade facebook/fb/idb-companion`.
+
+### Fixed
+
+- `haindy doctor` reports an idb-companion 1.1.x install as OUTDATED on Xcode 27 instead of OK.
+- `haindy doctor` now lists iOS as a ready automation backend when idb-companion and the fb-idb package are both OK, so an iOS-only setup passes the required backend check.
+- iOS app launches pass the target UDID through `IDB_UDID`, fixing "multiple companions to run against" failures when more than one idb companion is registered.
+- Launching an iOS app that is already running now brings it to the foreground instead of failing, for tool-call sessions started with an iOS app and for situational setup with a bundle ID.
+
 ## [0.8.0] - 2026-09-24
 
 ### Changed

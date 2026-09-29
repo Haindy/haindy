@@ -170,6 +170,12 @@ def _check_idb_companion(
     return _ok("")
 
 
+def _check_fb_idb_package() -> tuple[Text, str]:
+    if importlib.util.find_spec("idb") is not None:
+        return _ok("")
+    return _missing("pip install fb-idb")
+
+
 def _check_windows_pynput() -> tuple[Text, str]:
     if importlib.util.find_spec("pynput") is not None:
         return _ok("")
@@ -254,7 +260,9 @@ def run_doctor() -> int:
 
     Backend-specific deps (uinput, xdotool, etc.) are informational — they do
     not individually block setup. A single required "Automation backend" row at
-    the bottom passes if at least one backend (desktop or Android) is ready.
+    the bottom passes if at least one backend (desktop, Android, or iOS) is
+    ready. iOS is ready on macOS when idb-companion reports OK (an OUTDATED
+    companion does not count) and the fb-idb Python package is installed.
     """
     table = Table(title="Haindy System Check", show_header=True)
     table.add_column("Component", style="bold")
@@ -264,6 +272,7 @@ def run_doctor() -> int:
     any_missing = False
     desktop_ok = True
     mobile_adb_ok = False
+    mobile_ios_ok = False
 
     def _add(label: str, status: Text, notes: str, required: bool = True) -> None:
         nonlocal any_missing
@@ -380,14 +389,11 @@ def run_doctor() -> int:
             shutil.which("idb_companion"), _xcode_developer_dir()
         )
         _add("idb-companion (iOS, optional)", status, notes, required=False)
-        if importlib.util.find_spec("idb") is not None:
-            _add("fb-idb Python package (iOS, optional)", *_ok(), required=False)
-        else:
-            _add(
-                "fb-idb Python package (iOS, optional)",
-                *_missing("pip install fb-idb"),
-                required=False,
-            )
+        companion_ok = status.plain == "OK"
+
+        status, notes = _check_fb_idb_package()
+        _add("fb-idb Python package (iOS, optional)", status, notes, required=False)
+        mobile_ios_ok = companion_ok and status.plain == "OK"
     else:
         _add("idb-companion (iOS, optional)", *_na("macOS only"), required=False)
         _add(
@@ -395,17 +401,19 @@ def run_doctor() -> int:
         )
 
     # Backend summary — this IS required: at least one backend must be usable
-    if desktop_ok or mobile_adb_ok:
-        ready = []
-        if desktop_ok:
-            ready.append("desktop")
-        if mobile_adb_ok:
-            ready.append("android")
+    ready = []
+    if desktop_ok:
+        ready.append("desktop")
+    if mobile_adb_ok:
+        ready.append("android")
+    if mobile_ios_ok:
+        ready.append("ios")
+    if ready:
         _add("Automation backend", *_ok(", ".join(ready)))
     else:
         _add(
             "Automation backend",
-            *_missing("Fix desktop deps above or install adb"),
+            *_missing("Fix desktop deps above, install adb, or install idb"),
         )
 
     _console.print(table)

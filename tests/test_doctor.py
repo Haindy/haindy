@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import io
 from collections import namedtuple
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+from rich.console import Console
+from rich.text import Text
+
+from haindy.cli import doctor
 from haindy.cli.doctor import _check_idb_companion, _check_python_version
 
 _VersionInfo = namedtuple(
@@ -92,3 +98,106 @@ def test_current_idb_companion_is_ok_on_xcode_27(tmp_path: Path) -> None:
     status, _ = _check_idb_companion(companion, developer_dir)
 
     assert status.plain == "OK"
+
+
+def _status(label: str) -> tuple[Text, str]:
+    return Text(label), ""
+
+
+def _run_doctor_on_macos(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    desktop: bool,
+    adb: bool,
+    companion: str,
+    fb_idb: bool,
+) -> tuple[int, list[str]]:
+    """Run doctor as a macOS host and return the exit code and backend row."""
+    monkeypatch.setattr(doctor.sys, "platform", "darwin")
+    monkeypatch.setattr(doctor, "_check_haindy_installed", lambda: _status("OK"))
+    monkeypatch.setattr(doctor, "_check_api_key", lambda _provider: _status("OK"))
+    monkeypatch.setattr(doctor, "_check_codex_oauth", lambda: _status("OK"))
+    desktop_status = "OK" if desktop else "MISSING"
+    monkeypatch.setattr(doctor, "_check_macos_pynput", lambda: _status(desktop_status))
+    monkeypatch.setattr(doctor, "_check_macos_mss", lambda: _status("OK"))
+    monkeypatch.setattr(doctor, "_check_macos_accessibility", lambda: _status("OK"))
+    monkeypatch.setattr(doctor, "_check_macos_screen_recording", lambda: _status("OK"))
+    monkeypatch.setattr(
+        doctor.shutil,
+        "which",
+        lambda tool: f"/usr/local/bin/{tool}" if tool == "adb" and adb else None,
+    )
+    monkeypatch.setattr(doctor, "_xcode_developer_dir", lambda: None)
+    monkeypatch.setattr(
+        doctor, "_check_idb_companion", lambda _path, _dev: _status(companion)
+    )
+    fb_idb_status = "OK" if fb_idb else "MISSING"
+    monkeypatch.setattr(doctor, "_check_fb_idb_package", lambda: _status(fb_idb_status))
+    output = io.StringIO()
+    monkeypatch.setattr(
+        doctor, "_console", Console(file=output, width=200, color_system=None)
+    )
+
+    exit_code = doctor.run_doctor()
+
+    row = next(
+        line for line in output.getvalue().splitlines() if "Automation backend" in line
+    )
+    return exit_code, [cell.strip() for cell in row.split("│")[1:-1]]
+
+
+def test_ready_idb_counts_as_ios_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    exit_code, row = _run_doctor_on_macos(
+        monkeypatch, desktop=True, adb=True, companion="OK", fb_idb=True
+    )
+
+    assert row == ["Automation backend", "OK", "desktop, android, ios"]
+    assert exit_code == 0
+
+
+def test_ios_only_satisfies_automation_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exit_code, row = _run_doctor_on_macos(
+        monkeypatch, desktop=False, adb=False, companion="OK", fb_idb=True
+    )
+
+    assert row == ["Automation backend", "OK", "ios"]
+    assert exit_code == 0
+
+
+def test_outdated_idb_companion_is_not_a_ready_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exit_code, row = _run_doctor_on_macos(
+        monkeypatch, desktop=False, adb=False, companion="OUTDATED", fb_idb=True
+    )
+
+    assert row == [
+        "Automation backend",
+        "MISSING",
+        "Fix desktop deps above, install adb, or install idb",
+    ]
+    assert exit_code == 1
+
+
+def test_missing_fb_idb_package_is_not_a_ready_ios_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exit_code, row = _run_doctor_on_macos(
+        monkeypatch, desktop=True, adb=False, companion="OK", fb_idb=False
+    )
+
+    assert row == ["Automation backend", "OK", "desktop"]
+    assert exit_code == 0
+
+
+def test_fb_idb_package_detected_via_find_spec() -> None:
+    with patch("haindy.cli.doctor.importlib.util.find_spec", return_value=object()):
+        status, _ = doctor._check_fb_idb_package()
+    assert status.plain == "OK"
+
+    with patch("haindy.cli.doctor.importlib.util.find_spec", return_value=None):
+        status, notes = doctor._check_fb_idb_package()
+    assert status.plain == "MISSING"
+    assert notes == "pip install fb-idb"
